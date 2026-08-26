@@ -15,6 +15,7 @@ from pathlib import Path
 
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
+    BeginAnswer,
     ConversationState,
     ModelResponse,
     ModelTextBlock,
@@ -60,6 +61,7 @@ def test_skill_reference_task_applies_guidance_and_resource(tmp_path: Path) -> N
     max_tool_result_chars = 8_000
     store = InMemoryCheckpointStore(ConversationState.new("conversation-1"))
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-skill-answer")),
         ModelResponse((ModelToolCall("call-1", "skill__release-notes", {}),)),
         ModelResponse(
             (
@@ -104,17 +106,17 @@ def test_skill_reference_task_applies_guidance_and_resource(tmp_path: Path) -> N
         store.load(),
     )
 
-    # 一次 logical run 经历 3 次 provider 调用：激活 -> 读资源 -> 终态回答。
+    # 一次 logical run 经历 4 次 provider 调用：分类 -> 激活 -> 读资源 -> 回答。
     assert result.status is RunStatus.COMPLETED
-    assert len(provider.calls) == 3
+    assert len(provider.calls) == 4
     assert result.message == FINAL_ANSWER
 
     # 完整未裁剪 guidance（skill body）进入第二次 provider 调用的上下文。
     assert "the summary MUST end with the literal token READY" in _context_blob(
-        provider.calls[1]
+        provider.calls[2]
     )
     # 资源内容进入第三次 provider 调用的上下文。
-    assert "version: 1.2.3" in _context_blob(provider.calls[2])
+    assert "version: 1.2.3" in _context_blob(provider.calls[3])
 
     # 可核对的规则应用：最终回答同时包含仅能从 resource 获得的版本号与 skill 规则要求的 READY 收尾。
     assert "1.2.3" in result.message

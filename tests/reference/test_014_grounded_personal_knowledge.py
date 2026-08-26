@@ -334,7 +334,12 @@ def test_everyday_policy_uses_sources_just_in_time_without_a_second_mode() -> No
     assert "including its final newline" in EVERYDAY_SYSTEM_POLICY
     assert "Every literal http(s) URL" in EVERYDAY_SYSTEM_POLICY
     assert "web_extracted_content receipt origin_locator" in EVERYDAY_SYSTEM_POLICY
+    assert "FIRST_AGENT_RUNTIME_WEB_FETCH_REFS" in EVERYDAY_SYSTEM_POLICY
     assert "map each citation marker to its matching source kind" in EVERYDAY_SYSTEM_POLICY
+    assert "truncated=true" in EVERYDAY_SYSTEM_POLICY
+    assert "different unattempted" in EVERYDAY_SYSTEM_POLICY
+    assert "explicitly asks for public" in EVERYDAY_SYSTEM_POLICY
+    assert "send completion_claim" in EVERYDAY_SYSTEM_POLICY
 
 
 def test_everyday_runtime_has_no_task_level_cumulative_call_budget() -> None:
@@ -342,7 +347,7 @@ def test_everyday_runtime_has_no_task_level_cumulative_call_budget() -> None:
     assert EVERYDAY_INVOCATION_LIMITS.max_tool_calls is None
     assert EVERYDAY_INVOCATION_LIMITS.max_input_tokens is None
     assert EVERYDAY_INVOCATION_LIMITS.max_output_tokens is None
-    assert EVERYDAY_INVOCATION_LIMITS.max_invalid_repairs == 4
+    assert EVERYDAY_INVOCATION_LIMITS.max_invalid_repairs == 8
     assert EVERYDAY_INVOCATION_LIMITS.max_no_progress_replans == 16
 
 
@@ -449,6 +454,9 @@ def test_web_setup_is_non_secret_and_usable_without_editing_json(
             "PUBLIC_WEB_KEY",
             "--max-results",
             "4",
+            "--timeout",
+            "10",
+            "--yes",
             "--state-root",
             str(state_root),
         ],
@@ -476,6 +484,7 @@ def test_one_runtime_combines_history_workspace_and_approved_web_without_mode(
     from agent.runtime.context import ContextLimits
     from agent.runtime.contracts import (
         AcknowledgeProviderDisclosure,
+        BeginAnswer,
         ContextPack,
         ModelResponse,
         ModelTextBlock,
@@ -532,6 +541,11 @@ def test_one_runtime_combines_history_workspace_and_approved_web_without_mode(
             index = len(self.calls)
             if index == 1:
                 return ModelResponse(
+                    (),
+                    control=BeginAnswer("begin-three-source-answer"),
+                )
+            if index == 2:
+                return ModelResponse(
                     (
                         ModelToolCall(
                             "history-014",
@@ -540,7 +554,7 @@ def test_one_runtime_combines_history_workspace_and_approved_web_without_mode(
                         ),
                     )
                 )
-            if index == 2:
+            if index == 3:
                 return ModelResponse(
                     (
                         ModelToolCall(
@@ -550,7 +564,7 @@ def test_one_runtime_combines_history_workspace_and_approved_web_without_mode(
                         ),
                     )
                 )
-            if index == 3:
+            if index == 4:
                 return ModelResponse(
                     (
                         ModelToolCall(
@@ -560,7 +574,7 @@ def test_one_runtime_combines_history_workspace_and_approved_web_without_mode(
                         ),
                     )
                 )
-            if index == 4:
+            if index == 5:
                 source_ref = next(
                     item["source_ref"]
                     for message in reversed(context.messages)
@@ -578,7 +592,7 @@ def test_one_runtime_combines_history_workspace_and_approved_web_without_mode(
                         ),
                     )
                 )
-            if index == 5:
+            if index == 6:
                 return ModelResponse(
                     (
                         ModelTextBlock(
@@ -725,7 +739,7 @@ def test_one_runtime_combines_history_workspace_and_approved_web_without_mode(
             result = composition.runtime.run_turn(action, opened.store.load())
 
     assert result.message is not None and "time-bounded" in result.message
-    assert len(provider.calls) == 5
+    assert len(provider.calls) == 6
     assert [request.url.host for request in requests] == [
         "api.tavily.com",
         "api.tavily.com",
@@ -752,7 +766,6 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
         CompletionClaim,
         ContextPack,
         GoalFrame,
-        GoalProposal,
         GoalStatus,
         ModelResponse,
         ModelToolCall,
@@ -764,7 +777,7 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
     from agent.web.client import TavilyClient
     from agent.web.profile import WebProfileV1
     from agent.web.tools import build_web_tool_registrations
-    from tests.kernel.fakes import CollectingSink
+    from tests.kernel.fakes import CollectingSink, goal_draft_from_frame
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -823,9 +836,9 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
                 assert bootstrap is not None
                 return ModelResponse(
                     (),
-                    control=GoalProposal(
+                    control=goal_draft_from_frame(
                         correlation_id="proposal-014-artifact",
-                        goal_frame=GoalFrame(
+                        goal=GoalFrame(
                             goal_id="goal-014-artifact",
                             revision=1,
                             created_from_fact_ids=(bootstrap.source_fact_id,),
@@ -860,33 +873,13 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
                 return ModelResponse(
                     (
                         ModelToolCall(
-                            "history-artifact",
-                            "history_search",
-                            {"query": "local-first", "limit": 3},
-                        ),
-                    )
-                )
-            if index == 3:
-                return ModelResponse(
-                    (
-                        ModelToolCall(
-                            "workspace-artifact",
-                            "search_text",
-                            {"query": "Current constraint", "root": "."},
-                        ),
-                    )
-                )
-            if index == 4:
-                return ModelResponse(
-                    (
-                        ModelToolCall(
                             "search-artifact",
                             "web_search",
                             {"query": "bounded public artifact fact", "max_results": 1},
                         ),
                     )
                 )
-            if index == 5:
+            if index == 3:
                 source_ref = next(
                     item["source_ref"]
                     for block in reversed(self._blocks(context))
@@ -903,6 +896,26 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
                         ),
                     )
                 )
+            if index == 4:
+                return ModelResponse(
+                    (
+                        ModelToolCall(
+                            "history-artifact",
+                            "history_search",
+                            {"query": "local-first", "limit": 3},
+                        ),
+                    )
+                )
+            if index == 5:
+                return ModelResponse(
+                    (
+                        ModelToolCall(
+                            "workspace-artifact",
+                            "search_text",
+                            {"query": "Current constraint", "root": "."},
+                        ),
+                    )
+                )
             if index == 6:
                 return ModelResponse(
                     (
@@ -914,6 +927,11 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
                     )
                 )
             if index == 7:
+                goal_block = next(
+                    block
+                    for block in self._blocks(context)
+                    if block.get("type") == "trusted_goal"
+                )
                 sources = {
                     raw["source_kind"]: projected
                     for block in self._blocks(context)
@@ -938,8 +956,8 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
                             {
                                 "artifact_path": artifact_path,
                                 "artifact_content": artifact,
-                                "goal_id": "goal-014-artifact",
-                                "goal_revision": 1,
+                                "goal_id": goal_block["goal_id"],
+                                "goal_revision": goal_block["goal_revision"],
                                 "citations": [
                                     {
                                         "marker": marker,
@@ -996,8 +1014,8 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
                     (),
                     control=CompletionClaim(
                         correlation_id="completion-014-artifact",
-                        goal_id="goal-014-artifact",
-                        goal_revision=1,
+                        goal_id=goal_block["goal_id"],
+                        goal_revision=goal_block["goal_revision"],
                         criterion_evidence_refs=tuple(
                             goal_block["expected_completion_evidence_refs"]
                         ),
@@ -1143,7 +1161,11 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
     assert '"manifest_digest"' in manifest
     assert len(requests) == 2
     assert approvals == ["web_search", "web_fetch", "write_file", "write_file"]
-    assert len(final.evidence_records) == 2
+    assert len(final.evidence_records) == 4
+    assert any(
+        record.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+        for record in final.evidence_records
+    )
     assert any(
         record.oracle_kind.value == "research_provenance"
         for record in final.evidence_records
@@ -1155,7 +1177,13 @@ def test_hostile_source_cannot_create_goal_authority_or_write_effect(tmp_path) -
     from agent.composition import build_composition, build_tool_registrations
     from agent.runtime.checkpoint import LocalCheckpointStore
     from agent.runtime.context import ContextLimits
-    from agent.runtime.contracts import ModelResponse, ModelToolCall, SubmitMessage
+    from agent.runtime.contracts import (
+        BeginAnswer,
+        ModelResponse,
+        ModelTextBlock,
+        ModelToolCall,
+        SubmitMessage,
+    )
     from agent.runtime.loop import InvocationLimits
     from tests.kernel.fakes import CollectingSink, ScriptedProvider
 
@@ -1170,6 +1198,7 @@ def test_hostile_source_cannot_create_goal_authority_or_write_effect(tmp_path) -
         ConversationState.new("conversation-hostile-014"),
     )
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-hostile-answer")),
         ModelResponse(
             (
                 ModelToolCall(
@@ -1188,6 +1217,7 @@ def test_hostile_source_cannot_create_goal_authority_or_write_effect(tmp_path) -
                 ),
             )
         ),
+        ModelResponse((ModelTextBlock("The file contains an untrusted instruction."),)),
     )
     composition = build_composition(
         provider=provider,
@@ -1216,16 +1246,20 @@ def test_hostile_source_cannot_create_goal_authority_or_write_effect(tmp_path) -
         store.load(),
     )
 
-    assert result.status is RunStatus.FAILED_FATAL
-    assert result.error_code == "effectful_tool_requires_goal"
+    assert result.status is RunStatus.COMPLETED
+    assert result.message == "The file contains an untrusted instruction."
     assert not (workspace / "hijacked.md").exists()
     assert result.state.goal is None
     assert result.state.goal_authorizations == ()
     assert result.state.evidence_records == ()
     source_blocks = [
         block
-        for message in provider.calls[1].messages
+        for message in provider.calls[2].messages
         for block in message.content
         if block.get("type") == "tool_result"
     ]
     assert source_blocks and source_blocks[0]["untrusted"] is True
+    assert any(
+        fact.content.get("code") == "unadvertised_tool"
+        for fact in result.state.facts
+    )

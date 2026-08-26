@@ -71,6 +71,41 @@ _J5_LITERAL_TOKENS = ("a;b", "|c", "$(x)", "`e`", "f>g", "g h", "i\nj")
 # prompt 中的 argv 渲染：换行 token 以 `\n` 字面量展示（JSON tool args 同样写作 "i\nj"）。
 _J5_ARGV_PROMPT = ", ".join(t.replace("\n", "\\n") for t in _J5_LITERAL_TOKENS)
 
+
+def _goal_draft_from_frame(correlation_id, goal):  # noqa: ANN001, ANN201
+    """旧 E3 fixture 只提供语义字段；Runtime 负责铸造 Goal 身份与权威。"""
+
+    from agent.runtime.contracts import EvidenceOracleKind, GoalDraftProposal
+
+    return GoalDraftProposal(
+        correlation_id=correlation_id,
+        user_outcome=goal.user_outcome,
+        beneficiary=goal.beneficiary,
+        targets=goal.targets,
+        scope=goal.scope,
+        non_goals=goal.non_goals,
+        assumptions=goal.assumptions,
+        proposed_criteria=goal.proposed_criteria,
+        next_step=goal.next_step or "continue the requested task",
+        requires_public_web=any(
+            item.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+            for item in goal.proposed_criteria
+        ),
+        requires_local_process=any(
+            item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+            for item in goal.proposed_criteria
+        ),
+    )
+
+
+def _trusted_goal_block(context):  # noqa: ANN001, ANN201
+    return next(
+        block
+        for message in context.messages
+        for block in message.content
+        if isinstance(block, dict) and block.get("type") == "trusted_goal"
+    )
+
 # acceptance §6 的 26 个 closed boolean claims（顺序固定）。
 CLAIM_NAMES = (
     "production_composition_used",
@@ -1441,7 +1476,6 @@ class _J1JourneyProvider:
         from agent.runtime.contracts import (
             EvidenceOracleKind,
             GoalFrame,
-            GoalProposal,
             GoalStatus,
             ModelResponse,
             ModelToolCall,
@@ -1454,9 +1488,9 @@ class _J1JourneyProvider:
         if index == 1 and bootstrap is not None:
             return ModelResponse(
                 (),
-                control=GoalProposal(
+                control=_goal_draft_from_frame(
                     correlation_id="proposal-015-j1",
-                    goal_frame=GoalFrame(
+                    goal=GoalFrame(
                         goal_id="goal-015-j1",
                         revision=1,
                         created_from_fact_ids=(bootstrap.source_fact_id,),
@@ -1519,18 +1553,15 @@ class _J1JourneyProvider:
             # （artifact 先、receipt 后），derive 要求精确匹配。
             from agent.runtime.contracts import CompletionClaim
 
-            goal_id = "goal-015-j1"
-            artifact_cid = "criterion-j1-artifact"
-            receipt_cid = f"criterion:process-receipt:{goal_id}:1:call-process-j1"
+            goal = _trusted_goal_block(context)
             return ModelResponse(
                 (),
                 control=CompletionClaim(
                     correlation_id="claim-015-j1",
-                    goal_id=goal_id,
-                    goal_revision=1,
-                    criterion_evidence_refs=(
-                        f"evidence:{goal_id}:1:{artifact_cid}",
-                        f"evidence:{goal_id}:1:{receipt_cid}",
+                    goal_id=goal["goal_id"],
+                    goal_revision=goal["goal_revision"],
+                    criterion_evidence_refs=tuple(
+                        goal["expected_completion_evidence_refs"]
                     ),
                 ),
             )
@@ -1556,7 +1587,6 @@ class _J5JourneyProvider:
         from agent.runtime.contracts import (
             EvidenceOracleKind,
             GoalFrame,
-            GoalProposal,
             GoalStatus,
             ModelResponse,
             ModelToolCall,
@@ -1569,9 +1599,9 @@ class _J5JourneyProvider:
         if index == 1 and bootstrap is not None:
             return ModelResponse(
                 (),
-                control=GoalProposal(
+                control=_goal_draft_from_frame(
                     correlation_id="proposal-015-j5",
-                    goal_frame=GoalFrame(
+                    goal=GoalFrame(
                         goal_id="goal-015-j5",
                         revision=1,
                         created_from_fact_ids=(bootstrap.source_fact_id,),
@@ -1652,7 +1682,6 @@ class _J3JourneyProvider:
         from agent.runtime.contracts import (
             EvidenceOracleKind,
             GoalFrame,
-            GoalProposal,
             GoalStatus,
             ModelResponse,
             ModelToolCall,
@@ -1665,9 +1694,9 @@ class _J3JourneyProvider:
         if index == 1 and bootstrap is not None:
             return ModelResponse(
                 (),
-                control=GoalProposal(
+                control=_goal_draft_from_frame(
                     correlation_id="proposal-015-j3",
-                    goal_frame=GoalFrame(
+                    goal=GoalFrame(
                         goal_id="goal-015-j3",
                         revision=1,
                         created_from_fact_ids=(bootstrap.source_fact_id,),
@@ -1733,7 +1762,6 @@ class _J2JourneyProvider:
         from agent.runtime.contracts import (
             EvidenceOracleKind,
             GoalFrame,
-            GoalProposal,
             GoalStatus,
             ModelResponse,
             ModelToolCall,
@@ -1746,9 +1774,9 @@ class _J2JourneyProvider:
         if index == 1 and bootstrap is not None:
             return ModelResponse(
                 (),
-                control=GoalProposal(
+                control=_goal_draft_from_frame(
                     correlation_id="proposal-015-j2",
-                    goal_frame=GoalFrame(
+                    goal=GoalFrame(
                         goal_id="goal-015-j2",
                         revision=1,
                         created_from_fact_ids=(bootstrap.source_fact_id,),
@@ -1841,7 +1869,6 @@ class _J4JourneyProvider:
         from agent.runtime.contracts import (
             EvidenceOracleKind,
             GoalFrame,
-            GoalProposal,
             GoalStatus,
             ModelResponse,
             ModelToolCall,
@@ -1854,9 +1881,9 @@ class _J4JourneyProvider:
         if index == 1 and bootstrap is not None:
             return ModelResponse(
                 (),
-                control=GoalProposal(
+                control=_goal_draft_from_frame(
                     correlation_id="proposal-015-j4",
-                    goal_frame=GoalFrame(
+                    goal=GoalFrame(
                         goal_id="goal-015-j4",
                         revision=1,
                         created_from_fact_ids=(bootstrap.source_fact_id,),

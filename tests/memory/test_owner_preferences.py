@@ -22,7 +22,6 @@ from agent.runtime.contracts import (
     ConversationState,
     FactKind,
     GoalFrame,
-    GoalProposal,
     GoalStatus,
     ModelResponse,
     ModelToolCall,
@@ -38,10 +37,12 @@ from agent.runtime.contracts import (
 from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.tools import KernelToolRuntime
 from tests.kernel.fakes import (
+    RUNTIME_GOAL_ID,
     CollectingSink,
     InMemoryCheckpointStore,
     ScriptedProvider,
     conversation_with_active_goal,
+    goal_draft_from_frame,
 )
 
 
@@ -308,7 +309,7 @@ def test_runtime_derives_preference_admission_from_exact_durable_user_fact(tmp_p
     provider = ScriptedProvider(
         ModelResponse(
             (),
-            control=GoalProposal("goal-proposal-preference", goal),
+            control=goal_draft_from_frame("goal-proposal-preference", goal),
         ),
         ModelResponse(
             (
@@ -323,7 +324,7 @@ def test_runtime_derives_preference_admission_from_exact_durable_user_fact(tmp_p
             (),
             control=BlockedClaim(
                 correlation_id="preference-stored-blocked",
-                goal_id="goal-preference-1",
+                goal_id=RUNTIME_GOAL_ID,
                 goal_revision=1,
                 blocker="preference stored; no closed completion oracle is configured",
                 safe_attempts=("stored the confirmed owner preference",),

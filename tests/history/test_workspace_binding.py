@@ -25,7 +25,7 @@ from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.state import create_goal
 from agent.runtime.tools import KernelToolRuntime
 from tests.continuity.test_contracts import _goal
-from tests.kernel.fakes import CollectingSink, ScriptedProvider
+from tests.kernel.fakes import CollectingSink, ScriptedProvider, goal_noop_response
 
 
 def _legacy_goal_state(identity: WorkspaceIdentityV1, conversation_id: str):
@@ -104,6 +104,7 @@ def test_goal_bound_v2_is_lazily_migrated_inside_runtime_lease(tmp_path) -> None
     assert opened.snapshot.state.workspace_binding is None
     assert legacy.goal is not None
     provider = ScriptedProvider(
+        goal_noop_response("workspace-migration-user-supplement"),
         ModelResponse(
             (),
             control=BlockedClaim(

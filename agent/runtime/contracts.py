@@ -241,6 +241,7 @@ class EvidenceOracleKind(StrEnum):
     TOOL_RECEIPT = "tool_receipt"
     USER_CONFIRMATION = "user_confirmation"
     RESEARCH_PROVENANCE = "research_provenance"
+    WEB_SOURCE_RECEIPT = "web_source_receipt"
 
 
 class AuthoritySourceKind(StrEnum):
@@ -260,7 +261,8 @@ class ProposedCriterion:
     criterion_id: str
     description: str
     # 模型只能结构化提出所需 oracle 与 artifact path；它不能提供期望 digest。
-    # ``None`` 仅用于加载 pre-v5 checkpoint / 旧测试合同，不能满足 artifact completion。
+    # filesystem 的 ``None`` 表示建 Goal 时尚未读取工作区，需在用户批准第一笔
+    # 具体文件写入时由 Runtime 绑定；绑定前不能满足 artifact completion。
     oracle_kind: EvidenceOracleKind | None = None
     artifact_path: str | None = None
 
@@ -273,13 +275,7 @@ class ProposedCriterion:
             raise TypeError("proposed criterion oracle_kind must be EvidenceOracleKind")
         if self.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST:
             path = self.artifact_path
-            if (
-                not isinstance(path, str)
-                or not path
-                or path.startswith("/")
-                or "\x00" in path
-                or ".." in path.split("/")
-            ):
+            if path is not None and not _is_safe_relative_artifact_path(path):
                 raise ValueError(
                     "filesystem proposed criterion requires a safe workspace-relative "
                     "artifact_path"
@@ -548,6 +544,14 @@ class GoalFrame:
             raise ValueError("goal must define at least one completion criterion")
         if any(not isinstance(item, ProposedCriterion) for item in self.proposed_criteria):
             raise TypeError("goal proposed_criteria must contain ProposedCriterion values")
+        deferred_filesystem_criteria = tuple(
+            item
+            for item in self.proposed_criteria
+            if item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
+            and item.artifact_path is None
+        )
+        if len(deferred_filesystem_criteria) > 1:
+            raise ValueError("goal allows at most one deferred filesystem criterion")
         if any(not isinstance(item, AdmittedCriterion) for item in self.admitted_criteria):
             raise TypeError("goal admitted_criteria must contain AdmittedCriterion values")
         criterion_ids = tuple(
@@ -1310,6 +1314,29 @@ def _require_control_identity(correlation_id: str) -> None:
 
 
 @dataclass(frozen=True, slots=True)
+class DirectResponse:
+    """无活动 Goal 时的最终回答；严格 control wire 不把问答伪装成澄清。"""
+
+    correlation_id: str
+    text: str
+
+    def __post_init__(self) -> None:
+        _require_control_identity(self.correlation_id)
+        if not self.text.strip():
+            raise ValueError("direct response text must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class BeginAnswer:
+    """进入本 run 的只读问答阶段；不创建 Goal，也不携带来源 authority。"""
+
+    correlation_id: str
+
+    def __post_init__(self) -> None:
+        _require_control_identity(self.correlation_id)
+
+
+@dataclass(frozen=True, slots=True)
 class ClarificationRequest:
     correlation_id: str
     question: str
@@ -1334,6 +1361,53 @@ class GoalProposal:
 
     def __post_init__(self) -> None:
         _require_control_identity(self.correlation_id)
+
+
+@dataclass(frozen=True, slots=True)
+class GoalDraftProposal:
+    """模型只提出 Goal 语义；身份、权威、状态与时间由 Runtime 铸造。"""
+
+    correlation_id: str
+    user_outcome: str
+    beneficiary: str
+    targets: tuple[str, ...]
+    scope: tuple[str, ...]
+    non_goals: tuple[str, ...]
+    assumptions: tuple[str, ...]
+    proposed_criteria: tuple[ProposedCriterion, ...]
+    next_step: str | None = None
+    # 模型只做语义提案；只有 authoritative user fact 明确要求时，Runtime 才会
+    # 铸造 closed Web receipt criterion。
+    requires_public_web: bool = False
+    # authoritative user fact 明确要求 run/test/build/validate 时，Runtime
+    # 铸造不可被文件证据替代的 process receipt 义务。
+    requires_local_process: bool = False
+
+    def __post_init__(self) -> None:
+        _require_control_identity(self.correlation_id)
+        if not self.user_outcome.strip() or not self.beneficiary.strip():
+            raise ValueError("goal draft outcome and beneficiary must not be empty")
+        if not self.targets or any(not item for item in self.targets):
+            raise ValueError("goal draft targets must not be empty")
+        if not self.scope or any(not item for item in self.scope):
+            raise ValueError("goal draft scope must not be empty")
+        if not self.proposed_criteria or any(
+            not isinstance(item, ProposedCriterion) for item in self.proposed_criteria
+        ):
+            raise ValueError("goal draft criteria must contain ProposedCriterion values")
+        if self.next_step is not None and (
+            not isinstance(self.next_step, str) or not self.next_step.strip()
+        ):
+            raise ValueError("goal draft next step must not be empty")
+        if not isinstance(self.requires_public_web, bool):
+            raise TypeError("goal draft public Web requirement must be boolean")
+        if not isinstance(self.requires_local_process, bool):
+            raise TypeError("goal draft local process requirement must be boolean")
+        object.__setattr__(self, "targets", tuple(self.targets))
+        object.__setattr__(self, "scope", tuple(self.scope))
+        object.__setattr__(self, "non_goals", tuple(self.non_goals))
+        object.__setattr__(self, "assumptions", tuple(self.assumptions))
+        object.__setattr__(self, "proposed_criteria", tuple(self.proposed_criteria))
 
 
 @dataclass(frozen=True, slots=True)
@@ -1382,8 +1456,10 @@ class BlockedClaim:
 
 
 ModelControlBlock: TypeAlias = (
-    ClarificationRequest
-    | GoalProposal
+    DirectResponse
+    | BeginAnswer
+    | ClarificationRequest
+    | GoalDraftProposal
     | GoalProgress
     | GoalDeltaProposal
     | CompletionClaim
@@ -1391,8 +1467,10 @@ ModelControlBlock: TypeAlias = (
 )
 
 _MODEL_CONTROL_TYPES = (
+    DirectResponse,
+    BeginAnswer,
     ClarificationRequest,
-    GoalProposal,
+    GoalDraftProposal,
     GoalProgress,
     GoalDeltaProposal,
     CompletionClaim,
@@ -1440,12 +1518,7 @@ class ArtifactConfirmationRequirementV1:
     def __post_init__(self) -> None:
         if not self.criterion_id:
             raise ValueError("artifact confirmation criterion_id must not be empty")
-        if (
-            not self.artifact_path
-            or self.artifact_path.startswith("/")
-            or "\x00" in self.artifact_path
-            or ".." in self.artifact_path.split("/")
-        ):
+        if not _is_safe_relative_artifact_path(self.artifact_path):
             raise ValueError(
                 "artifact confirmation path must be safe and workspace-relative"
             )
@@ -3372,6 +3445,22 @@ class ToolPrepareContext:
     # 当前 Goal 的结构化 proposed criteria；process prepare 只消费
     # FILESYSTEM_DIGEST artifact obligation，不从自由文本/argv 猜测。
     proposed_criteria: tuple[ProposedCriterion, ...] = ()
+    # 已 admitted 的 criterion id：process artifact 绑定只考虑尚未由用户确认
+    # digest 的 pending criterion。写批准后 criterion 同时保留在 proposed 与
+    # admitted，不过滤会把已确认项误判为第二个 pending 义务而 fail-closed
+    # 死锁（016 真实 E3 第 23/27/34 轮）。
+    admitted_criterion_ids: frozenset[str] = frozenset()
+    # 当前 active Goal revision 下可用于构造 citation manifest 的来源引用。
+    # 这是 Runtime 的 authority snapshot；模型看到的 JSON Schema 只负责引导。
+    citable_source_refs: tuple[str, ...] = ()
+    citable_citation_sources: tuple[tuple[str, str], ...] = ()
+    web_fetch_source_refs: tuple[str, ...] = ()
+    citation_manifest_allowed: bool = False
+    citation_sidecar_paths: tuple[str, ...] = ()
+    citation_artifact_paths: tuple[str, ...] = ()
+    citation_manifest_content_digests: tuple[str, ...] = ()
+    public_web_requirement_pending: bool = False
+    goal_correction_pending: bool = False
 
     def __post_init__(self) -> None:
         if self.approval_basis_revision is None:
@@ -3402,6 +3491,102 @@ class ToolPrepareContext:
             raise ValueError("tool context authorization is stale")
         if any(not isinstance(item, ProposedCriterion) for item in self.proposed_criteria):
             raise TypeError("tool context proposed_criteria must be ProposedCriterion values")
+        object.__setattr__(self, "citable_source_refs", tuple(self.citable_source_refs))
+        if len(set(self.citable_source_refs)) != len(self.citable_source_refs):
+            raise ValueError("tool context citable source refs must be unique")
+        source_ref_prefix = "source-ref:v1:"
+        for source_ref in self.citable_source_refs:
+            if not isinstance(source_ref, str):
+                raise TypeError("tool context citable source refs must be strings")
+            digest = source_ref.removeprefix(source_ref_prefix)
+            if (
+                not source_ref.startswith(source_ref_prefix)
+                or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
+            ):
+                raise ValueError("tool context citable source ref is malformed")
+        object.__setattr__(
+            self,
+            "citable_citation_sources",
+            tuple(tuple(pair) for pair in self.citable_citation_sources),
+        )
+        if len(set(self.citable_citation_sources)) != len(
+            self.citable_citation_sources
+        ):
+            raise ValueError("tool context citable citation pairs must be unique")
+        for pair in self.citable_citation_sources:
+            if len(pair) != 2:
+                raise ValueError("tool context citable citation pair is malformed")
+            source_ref, source_id = pair
+            if not isinstance(source_ref, str) or not isinstance(source_id, str):
+                raise TypeError("tool context citable citation pair must contain strings")
+            ref_digest = source_ref.removeprefix(source_ref_prefix)
+            id_prefix = "source:v1:"
+            id_digest = source_id.removeprefix(id_prefix)
+            if (
+                source_ref not in self.citable_source_refs
+                or not source_ref.startswith(source_ref_prefix)
+                or not _is_lower_hex(ref_digest, length=64)
+                or not source_id.startswith(id_prefix)
+                or not _is_lower_hex(id_digest, length=64)
+            ):
+                raise ValueError("tool context citable citation pair is invalid")
+        object.__setattr__(
+            self,
+            "web_fetch_source_refs",
+            tuple(self.web_fetch_source_refs),
+        )
+        if len(set(self.web_fetch_source_refs)) != len(self.web_fetch_source_refs):
+            raise ValueError("tool context Web fetch source refs must be unique")
+        for source_ref in self.web_fetch_source_refs:
+            if not isinstance(source_ref, str):
+                raise TypeError("tool context Web fetch source refs must be strings")
+            digest = source_ref.removeprefix(source_ref_prefix)
+            if (
+                not source_ref.startswith(source_ref_prefix)
+                or not _is_lower_hex(digest, length=64)
+            ):
+                raise ValueError("tool context Web fetch source ref is malformed")
+        if not isinstance(self.citation_manifest_allowed, bool):
+            raise TypeError("tool context citation manifest authority must be boolean")
+        object.__setattr__(self, "citation_sidecar_paths", tuple(self.citation_sidecar_paths))
+        if (
+            len(set(self.citation_sidecar_paths)) != len(self.citation_sidecar_paths)
+            or any(
+                not _is_safe_relative_artifact_path(path)
+                or not path.endswith(".citations.json")
+                for path in self.citation_sidecar_paths
+            )
+        ):
+            raise ValueError("tool context citation sidecar paths are invalid")
+        object.__setattr__(self, "citation_artifact_paths", tuple(self.citation_artifact_paths))
+        if (
+            len(set(self.citation_artifact_paths)) != len(self.citation_artifact_paths)
+            or any(
+                not _is_safe_relative_artifact_path(path)
+                or path.endswith(".citations.json")
+                for path in self.citation_artifact_paths
+            )
+        ):
+            raise ValueError("tool context citation artifact paths are invalid")
+        object.__setattr__(
+            self,
+            "citation_manifest_content_digests",
+            tuple(self.citation_manifest_content_digests),
+        )
+        if (
+            len(set(self.citation_manifest_content_digests))
+            != len(self.citation_manifest_content_digests)
+            or any(
+                not isinstance(digest, str) or not _is_lower_hex(digest, length=64)
+                for digest in self.citation_manifest_content_digests
+            )
+        ):
+            raise ValueError("tool context citation manifest content digests are invalid")
+        if not isinstance(self.public_web_requirement_pending, bool):
+            raise TypeError("tool context public Web requirement state must be boolean")
+        if not isinstance(self.goal_correction_pending, bool):
+            raise TypeError("tool context Goal correction state must be boolean")
         if self.fact_admission is not None and (
             self.goal_id is None
             or not self.fact_admission.matches(

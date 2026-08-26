@@ -15,6 +15,7 @@ from agent.provider.profile import (
     load_provider_profile,
     save_provider_profile,
 )
+from agent.runtime.contracts import BeginAnswer, ModelResponse
 
 
 def _profile(**overrides) -> ProviderProfileV1:
@@ -120,7 +121,7 @@ def test_no_profile_exits_before_checkpoint_or_provider_io(
     assert len(output) == 1
     assert output[0].startswith("First Agent is not configured.")
     assert "first-agent setup" in output[0]
-    assert "--provider" in output[0]
+    assert "--provider" not in output[0]
 
 
 def test_no_argument_start_uses_saved_profile_and_cwd(
@@ -164,7 +165,7 @@ def test_no_argument_start_uses_saved_profile_and_cwd(
     assert captured[0].request_path == "/v1/chat/completions"
     assert captured[0].strict_tools is False
     assert len(captured_limits) == 1
-    assert captured_limits[0].max_invalid_repairs == 4
+    assert captured_limits[0].max_invalid_repairs == 8
     assert tuple(state_root.glob("workspaces/*/*.json"))
     rendered = "\n".join(output)
     assert "First Agent is ready in: daily-workspace" in rendered
@@ -197,6 +198,8 @@ def test_main_composition_uses_memory_scope_without_weakening_workspace_identity
 
     def capture_generate(self, context):
         contexts.append(context)
+        if len(contexts) == 1:
+            return ModelResponse((), control=BeginAnswer("begin-memory-answer"))
         return original_generate(self, context)
 
     monkeypatch.setattr(FakeProvider, "generate", capture_generate)
@@ -218,8 +221,9 @@ def test_main_composition_uses_memory_scope_without_weakening_workspace_identity
     )
 
     assert exit_code == 0
-    assert len(contexts) == 1
-    assert "ORCHID-014" in repr(contexts[0].messages)
+    assert len(contexts) == 2
+    assert "ORCHID-014" not in repr(contexts[0].messages)
+    assert "ORCHID-014" in repr(contexts[1].messages)
     assert contexts[0].goal_bootstrap is not None
     assert contexts[0].goal_bootstrap.workspace_identity_digest.startswith("workspace:v1:")
 
@@ -254,7 +258,7 @@ def test_setup_rejects_malformed_base_url_without_traceback_or_profile(
     )
 
     assert exit_code == 2
-    assert output == ["Setup failed: ProviderProfileError: base URL is malformed"]
+    assert output == ["Setup failed: base URL is malformed"]
     assert not (state_root / "provider-profile.json").exists()
 
 
@@ -355,7 +359,7 @@ def test_partial_explicit_provider_group_never_merges_with_profile(
 
     assert exit_code == 2
     assert output == [
-        "Startup failed: ValueError: explicit provider configuration must include "
+        "Startup failed: explicit provider configuration must include "
         "--provider, --model, and --base-url together"
     ]
 
@@ -405,6 +409,9 @@ def test_missing_credential_reports_only_selected_environment_name(
 
     assert exit_code == 2
     assert output == [
-        "Startup failed: ValueError: credential environment variable is not set: "
-        "NOT_CONFIGURED_013_KEY"
+        "Startup failed: credential environment variable is not set: "
+        "NOT_CONFIGURED_013_KEY. Set it in this shell, then run first-agent again"
+    ]
+    assert sorted(path.name for path in state_root.iterdir()) == [
+        "provider-profile.json"
     ]

@@ -13,6 +13,7 @@ All tests: finally killpg cleanup for exact recorded PGID only.
 
 from __future__ import annotations
 
+import errno
 import os
 import signal
 import stat
@@ -219,6 +220,41 @@ sleep 30
                 proc.stderr.close()
 
 
+def test_015_post_kill_verification_uses_full_bounded_time_budget(monkeypatch) -> None:
+    """负载下 orphan zombie 可晚于旧的 30 次 probe 消失，但仍在 <10s 合同内。"""
+
+    import agent.process.runner as runner_module
+
+    clock = [0.0]
+    monkeypatch.setattr(runner_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        runner_module.time,
+        "sleep",
+        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+    monkeypatch.setattr(runner_module, "_signal_group", lambda _pgid, _sig: True)
+    probes = [0]
+
+    def delayed_group_reap(_pgid: int) -> bool:
+        probes[0] += 1
+        return probes[0] < 37
+
+    monkeypatch.setattr(runner_module, "_group_alive", delayed_group_reap)
+
+    class ReapedLeader:
+        def wait(self, timeout: float) -> int:  # noqa: ARG002
+            return 0
+
+    result = runner_module._terminate_group(  # noqa: SLF001
+        ReapedLeader(),
+        12345,
+        _fast_profile(deadline=1),
+    )
+
+    assert result == (True, True, True)
+    assert 3 < clock[0] < 6
+
+
 def test_015_pipe_eof_does_not_prove_process_group_cleanup(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -253,7 +289,7 @@ def test_015_pipe_eof_does_not_prove_process_group_cleanup(
 
 
 def test_015_trap_term_descendant_killed_and_no_orphan(tmp_path: Path) -> None:
-    """Normal KILL path: descendant ignores TERM -> KILL clears group -> TIMED_OUT_REAPED."""
+    """KILL 后能确认 group 消失则 REAPED；PGID 复用导致 EPERM 时诚实 unknown。"""
 
     fixture = b"""#!/bin/sh
 trap '' TERM
@@ -262,17 +298,33 @@ wait
 """
     exe = _make_executable(tmp_path, "trap-term", fixture)
     start = time.monotonic()
-    draft = run_local_process(
-        resolved_executable=exe,
-        argv=[],
-        cwd=str(tmp_path),
-        profile=_fast_profile(deadline=2),
-        environment={},
-    )
-    elapsed = time.monotonic() - start
+    draft = None
     try:
-        assert elapsed < 15
+        try:
+            draft = run_local_process(
+                resolved_executable=exe,
+                argv=[],
+                cwd=str(tmp_path),
+                profile=_fast_profile(deadline=2),
+                environment={},
+            )
+        except ProcessCleanupError as error:
+            # macOS 可能在原 group 被 KILL 后立即复用 PGID；signal-0 对 foreign
+            # group 返回 EPERM。Runtime 的正确合同是 bounded unknown，不得把
+            # 无法确认误报为 REAPED，所以真实 OS 测试必须接受这条 fail-closed 路径。
+            # 其他 cleanup failure 仍是回归，绝不能被这个平台 race 掩盖。
+            cause = error.__cause__
+            if not (
+                isinstance(cause, PermissionError)
+                and cause.errno == errno.EPERM
+                and str(error).startswith("cannot determine process group liveness:")
+            ):
+                raise
+            assert time.monotonic() - start < 15
+            return
+        assert time.monotonic() - start < 15
         assert draft.outcome is ProcessDraftOutcome.TIMED_OUT_REAPED
         assert draft.group_reaped is True
     finally:
-        _cleanup_exact_pgid(draft.process_group_id)
+        if draft is not None:
+            _cleanup_exact_pgid(draft.process_group_id)

@@ -15,16 +15,13 @@ from agent.runtime.contracts import (
     ExecutingIntentRecord,
     ExecutionAuthorityClass,
     FactKind,
+    InteractionState,
     RecoveryRequest,
     Resume,
     SubmitMessage,
     ToolCall,
     canonical_json_digest,
 )
-
-# 012 的 reserved control schema 是 mandatory pinned context。这里的测试仍然只测
-# history/group 淘汰边界，因此在旧的相对预算上显式加回这项固定成本。
-CONTROL_SCHEMA_BUDGET = 1_164
 
 
 def _fact(fact_id: str, kind: FactKind, **content):
@@ -41,6 +38,16 @@ def _submit() -> SubmitMessage:
     )
 
 
+def _full_context_cost(state: ConversationState, action) -> int:
+    """用当前动态 control surface 计算恰好容纳全部组的输入成本。"""
+
+    probe = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=100_000, output_reserve=1),
+    ).build(state, action, ())
+    return probe.budget.estimated_input_tokens
+
+
 def test_oldest_non_pinned_groups_are_evicted_deterministically() -> None:
     state = replace(
         ConversationState.new("conversation-1"),
@@ -50,10 +57,11 @@ def test_oldest_non_pinned_groups_are_evicted_deterministically() -> None:
             _fact("recent-user", FactKind.USER_MESSAGE, text="current"),
         ),
     )
+    recent_only = replace(state, facts=(state.facts[-1],))
     manager = KernelContextManager(
         system_policy="policy",
         limits=ContextLimits(
-            max_input_tokens=CONTROL_SCHEMA_BUDGET + 164,
+            max_input_tokens=_full_context_cost(recent_only, _submit()) + 20,
             output_reserve=20,
         ),
     )
@@ -69,6 +77,7 @@ def test_oldest_non_pinned_groups_are_evicted_deterministically() -> None:
 def test_pending_recovery_tool_group_is_pinned_under_pressure() -> None:
     state = replace(
         ConversationState.new("conversation-1"),
+        interaction_state=InteractionState.ANSWERING,
         active_run=ActiveRun(
             run_id="run-1",
             status=ActiveRunStatus.AWAITING_RECOVERY,
@@ -106,7 +115,7 @@ def test_pending_recovery_tool_group_is_pinned_under_pressure() -> None:
     manager = KernelContextManager(
         system_policy="policy",
         limits=ContextLimits(
-            max_input_tokens=CONTROL_SCHEMA_BUDGET + 194,
+            max_input_tokens=_full_context_cost(state, action),
             output_reserve=20,
         ),
     )
@@ -139,10 +148,11 @@ def test_context_module_has_no_semantic_compaction_or_provider_call(monkeypatch)
         ConversationState.new("conversation-1"),
         facts=(_fact("recent-user", FactKind.USER_MESSAGE, text="current"),),
     )
+    input_limit = _full_context_cost(state, _submit()) + 144
     manager = KernelContextManager(
         system_policy="policy",
         limits=ContextLimits(
-            max_input_tokens=CONTROL_SCHEMA_BUDGET + 144,
+            max_input_tokens=input_limit,
             output_reserve=10,
         ),
     )
@@ -152,7 +162,7 @@ def test_context_module_has_no_semantic_compaction_or_provider_call(monkeypatch)
 
     assert (
         pack.budget.estimated_input_tokens + pack.budget.output_reserve
-        <= CONTROL_SCHEMA_BUDGET + 144
+        <= input_limit
     )
 
 
@@ -164,10 +174,11 @@ def test_output_reserve_reduces_the_available_input_budget() -> None:
             _fact("recent-user", FactKind.USER_MESSAGE, text="current"),
         ),
     )
+    full_context_cost = _full_context_cost(state, _submit())
     manager = KernelContextManager(
         system_policy="policy",
         limits=ContextLimits(
-            max_input_tokens=CONTROL_SCHEMA_BUDGET + 154,
+            max_input_tokens=full_context_cost,
             output_reserve=30,
         ),
     )
@@ -176,7 +187,7 @@ def test_output_reserve_reduces_the_available_input_budget() -> None:
 
     assert (
         pack.budget.estimated_input_tokens + pack.budget.output_reserve
-        <= CONTROL_SCHEMA_BUDGET + 154
+        <= full_context_cost
     )
     assert "old-user" in pack.budget.excluded_ids
 

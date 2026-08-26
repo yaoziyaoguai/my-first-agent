@@ -65,9 +65,8 @@ class TerminalRenderer:
                 )
             )
             return
-        if (
-            active.status is ActiveRunStatus.AWAITING_APPROVAL
-            and isinstance(active.pending_request, ApprovalRequest)
+        if active.status is ActiveRunStatus.AWAITING_APPROVAL and isinstance(
+            active.pending_request, ApprovalRequest
         ):
             request = active.pending_request
             self._write(
@@ -79,9 +78,8 @@ class TerminalRenderer:
                 )
             )
             return
-        if (
-            active.status is ActiveRunStatus.AWAITING_RECOVERY
-            and isinstance(active.pending_request, RecoveryRequest)
+        if active.status is ActiveRunStatus.AWAITING_RECOVERY and isinstance(
+            active.pending_request, RecoveryRequest
         ):
             self._write(
                 self._recovery_message(
@@ -118,11 +116,7 @@ class TerminalRenderer:
                 f"[{index}] {lease.readable_command} · profile={lease.resource_profile} "
                 f"· uses left={lease.remaining_uses} "
                 f"· expires={lease.expires_at}"
-                + (
-                    f" · id={lease.lease_id} · digest={lease.lease_digest}"
-                    if advanced
-                    else ""
-                )
+                + (f" · id={lease.lease_id} · digest={lease.lease_digest}" if advanced else "")
             )
         lines.append("Revoke with /revoke <lease_id> or /revoke all (ids via --advanced).")
         self._write("\n".join(lines))
@@ -150,7 +144,8 @@ class TerminalRenderer:
                 data_classes=classes,
             )
         if event.kind is RuntimeEventKind.LIMIT_REACHED:
-            return TerminalRenderer._result_message_for_limit()
+            # RunResult 带 authoritative state，可投影准确 blocker/进展；事件本身不重复刷屏。
+            return None
         if event.kind is RuntimeEventKind.WARNING:
             return f"Warning: {terminal_text(payload.get('message', 'runtime warning'))}"
         if event.kind in {
@@ -174,13 +169,44 @@ class TerminalRenderer:
         if result.status is RunStatus.CANCELLED:
             return "Run cancelled."
         if result.status is RunStatus.LIMIT_REACHED:
+            if result.error_code == "no_progress":
+                view = project_goal_view(result.state)
+                lines = ["Task paused because the same next step repeated with no new evidence."]
+                if view.user_outcome:
+                    lines.append(f"Goal remains incomplete: {terminal_text(view.user_outcome)}")
+                if view.progress_summary:
+                    lines.append(f"Last verified progress: {view.progress_summary}")
+                lines.append(
+                    "No authority was granted implicitly; any required operation still "
+                    "needs its normal approval before it can run."
+                )
+                lines.append("Run /resume to try a new approach or /cancel.")
+                return "\n".join(lines)
             return TerminalRenderer._result_message_for_limit()
         if result.status is RunStatus.CONVERSATION_LIMIT_REACHED:
             return "Conversation capacity reached. Start a new conversation."
         if result.status is RunStatus.FAILED_RETRYABLE:
-            return TerminalRenderer._result_message_for_retryable()
+            return TerminalRenderer._result_message_for_retryable(result.error_code)
         if result.status is RunStatus.FAILED_FATAL:
-            return f"Run failed: {result.error_code or 'fatal_error'}"
+            if result.error_code == "provider_auth_error":
+                return (
+                    "Provider authentication failed. Check the configured credential "
+                    "and run first-agent again."
+                )
+            if result.error_code in {"invalid_provider_response", "provider_protocol_error"}:
+                return (
+                    "The provider response was incompatible. Check the configured model "
+                    "and endpoint, then run first-agent again."
+                )
+            base = f"Run failed: {result.error_code or 'fatal_error'}"
+            if result.message:
+                # 016 真实 E3(第 19/24 轮 J8):runtime_failure 的异常细节只在
+                # RunResult.message 里;只打 error_code 会丢失定诊证据(REPL 以
+                # 退出码 1 结束且无 traceback)。摘要压平空白并截断;凭据按设计
+                # 从不进入异常消息,E3 的 secret-free 扫描仍是兜底。
+                summary = " ".join(result.message.split())[:240]
+                return f"{base} ({summary})"
+            return base
         if result.status is RunStatus.CONFLICT:
             return "State conflict: restart or reload this CLI before continuing."
         return None
@@ -215,9 +241,7 @@ class TerminalRenderer:
         )
 
     @staticmethod
-    def _disclosure_message(
-        *, destination: object, model: object, data_classes: object
-    ) -> str:
+    def _disclosure_message(*, destination: object, model: object, data_classes: object) -> str:
         data_summary = (
             ", ".join(str(item) for item in data_classes)
             if isinstance(data_classes, (list, tuple))
@@ -236,13 +260,19 @@ class TerminalRenderer:
         return "Task paused at a safe execution limit. Run /resume to continue or /cancel."
 
     @staticmethod
-    def _result_message_for_retryable() -> str:
+    def _result_message_for_retryable(error_code: str | None = None) -> str:
+        if error_code == "provider_timeout":
+            return "The provider timed out. Run /resume to retry or /cancel."
+        if error_code == "provider_transport":
+            return "The provider could not be reached. Run /resume to retry or /cancel."
+        if error_code == "provider_rate_limit":
+            return "The provider rate limit was reached. Run /resume later or /cancel."
+        if error_code == "provider_unavailable":
+            return "The provider is temporarily unavailable. Run /resume later or /cancel."
         return "The provider failed transiently. Run /resume to retry or /cancel."
 
     @staticmethod
-    def _sources_message(
-        sources: tuple[SourceView, ...], *, advanced: bool = False
-    ) -> str:
+    def _sources_message(sources: tuple[SourceView, ...], *, advanced: bool = False) -> str:
         lines = ["Sources:"]
         for source in sources:
             detail = (

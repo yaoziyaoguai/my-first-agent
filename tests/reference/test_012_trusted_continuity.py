@@ -20,6 +20,7 @@ from agent.runtime.contracts import (
     AcknowledgeProviderDisclosure,
     ActiveRun,
     AdmittedCriterion,
+    BlockedClaim,
     CancelGoal,
     ClarificationRequest,
     CompletionClaim,
@@ -34,7 +35,6 @@ from agent.runtime.contracts import (
     GoalDelta,
     GoalDeltaProposal,
     GoalFrame,
-    GoalProposal,
     GoalStatus,
     ModelResponse,
     ModelTextBlock,
@@ -52,7 +52,13 @@ from agent.runtime.evidence import ClosedEvidenceRegistry, EvidenceVerificationE
 from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.tools import KernelToolRuntime
 from agent.tools.file_ops import build_file_tool_registrations
-from tests.kernel.fakes import CollectingSink, InMemoryCheckpointStore, ScriptedProvider
+from tests.kernel.fakes import (
+    RUNTIME_GOAL_ID,
+    CollectingSink,
+    InMemoryCheckpointStore,
+    ScriptedProvider,
+    goal_draft_from_frame,
+)
 
 CONTENT = "trusted continuity\n"
 CONTENT_DIGEST = hashlib.sha256(CONTENT.encode()).hexdigest()
@@ -157,9 +163,10 @@ def test_j2_task_restart_approval_effect_readback_and_verified_done(tmp_path) ->
         checkpoint_path,
         ConversationState.new("conversation-reference"),
     )
-    evidence_id = "evidence:goal-reference-1:1:criterion-reference-file"
     provider = ScriptedProvider(
-        ModelResponse((), control=GoalProposal("goal-proposal-reference", _goal())),
+        ModelResponse(
+            (), control=goal_draft_from_frame("goal-proposal-reference", _goal())
+        ),
         ModelResponse(
             (
                 ModelToolCall(
@@ -182,9 +189,9 @@ def test_j2_task_restart_approval_effect_readback_and_verified_done(tmp_path) ->
             (),
             control=CompletionClaim(
                 correlation_id="completion-reference",
-                goal_id="goal-reference-1",
+                goal_id=RUNTIME_GOAL_ID,
                 goal_revision=1,
-                criterion_evidence_refs=(evidence_id,),
+                criterion_evidence_refs=(),
             ),
         ),
     )
@@ -234,7 +241,8 @@ def test_j2_task_restart_approval_effect_readback_and_verified_done(tmp_path) ->
     final = restarted_store.load().state
     assert final.goal is not None
     assert final.goal.status is GoalStatus.VERIFIED_DONE
-    assert final.evidence_records[0].evidence_id == evidence_id
+    assert final.evidence_records[0].goal_id == final.goal.goal_id
+    assert final.evidence_records[0].criterion_id == "criterion-reference-file"
     assert "read-reference" in final.evidence_records[0].source_fact_ids[-1]
     restarted_after_completion = LocalCheckpointStore(checkpoint_path).load().state
     assert restarted_after_completion.goal == final.goal
@@ -381,10 +389,31 @@ def test_j3_correction_pause_resume_and_cancel_preserve_occurred_facts() -> None
                     goal_id="goal-reference-control",
                     expected_revision=1,
                     reason="user changed the target",
-                    updates={"targets": ["reports/brief.md"]},
+                    updates={
+                        "targets": ["reports/brief.md"],
+                        "proposed_criteria": [
+                            {
+                                "criterion_id": "criterion-reference-file",
+                                "description": "exact brief content reads back",
+                                "oracle_kind": "filesystem_digest",
+                                "artifact_path": "reports/brief.md",
+                            }
+                        ],
+                    },
                 ),
             ),
-        )
+        ),
+        ModelResponse(
+            (),
+            control=BlockedClaim(
+                correlation_id="delta-reference-blocked",
+                goal_id="goal-reference-control",
+                goal_revision=2,
+                blocker="the corrected target has no configured product tool",
+                safe_attempts=("accepted the user's target correction",),
+                resume_condition="configure a product tool for reports/brief.md",
+            ),
+        ),
     )
     store = InMemoryCheckpointStore(state)
     runtime = _runtime(provider, store)
@@ -396,7 +425,7 @@ def test_j3_correction_pause_resume_and_cancel_preserve_occurred_facts() -> None
     assert store.state.goal is not None
     assert store.state.goal.revision == 2
     assert store.state.goal.targets == ("reports/brief.md",)
-    assert store.state.goal.status is GoalStatus.NEEDS_AUTHORITY
+    assert store.state.goal.status is GoalStatus.BLOCKED
     assert store.state.evidence_records == ()
     original_fact = store.state.facts[0]
 
@@ -418,7 +447,7 @@ def test_j3_correction_pause_resume_and_cancel_preserve_occurred_facts() -> None
     runtime.run_turn(goal_action(CancelGoal), store.load())
     assert store.state.goal is not None and store.state.goal.status is GoalStatus.CANCELLED
     assert store.state.facts[0] == original_fact
-    assert len(provider.calls) == 1
+    assert len(provider.calls) == 2
 
 
 def test_j4_production_http_adapter_sends_zero_before_exact_disclosure_ack() -> None:
@@ -620,14 +649,26 @@ def test_j6_plain_done_and_model_supplied_admission_cannot_fake_completion() -> 
     )
     fresh = InMemoryCheckpointStore(ConversationState.new("forged-admission"))
     forged_provider = ScriptedProvider(
-        ModelResponse((), control=GoalProposal("forged-goal", forged_goal))
+        ModelResponse((), control=goal_draft_from_frame("forged-goal", forged_goal)),
+        ModelResponse(
+            (),
+            control=BlockedClaim(
+                correlation_id="forged-goal-blocked",
+                goal_id=RUNTIME_GOAL_ID,
+                goal_revision=1,
+                blocker="no product action was requested in this contract check",
+                safe_attempts=(),
+                resume_condition="provide a concrete product action",
+            ),
+        ),
     )
     forged_result = _runtime(forged_provider, fresh).run_turn(
         _submit(fresh.state, "write a report", run_id="forged-run"),
         fresh.load(),
     )
-    assert forged_result.status is RunStatus.FAILED_FATAL
-    assert fresh.state.goal is None
+    assert forged_result.status is RunStatus.COMPLETED
+    assert fresh.state.goal is not None
+    assert fresh.state.goal.admitted_criteria == ()
 
     criterion = AdmittedCriterion(
         criterion_id="criterion-stale-reference",

@@ -25,6 +25,7 @@ from agent.runtime.state import (
     pause_for_recovery,
     start_tool_batch,
 )
+from tests.kernel.fakes import conversation_with_active_goal
 
 
 def _submit(*, seq: int = 1, revision: int = 0, message: str = "hello") -> SubmitMessage:
@@ -96,6 +97,50 @@ def test_approval_must_match_exact_pending_request() -> None:
     assert accepted.state.active_run is not None
     assert accepted.state.active_run.status is ActiveRunStatus.RUNNABLE
     assert accepted.state.active_run.pending_request is None
+
+
+def test_natural_language_correction_replaces_unexecuted_pending_approval() -> None:
+    seed = conversation_with_active_goal()
+    started = accept_action(
+        state=seed,
+        action=_submit(
+            seq=seed.next_action_seq,
+            revision=seed.revision,
+            message="write draft.md",
+        ),
+    ).state
+    started = start_tool_batch(
+        started,
+        (ToolCall("tool-call-1", "write_file", {"path": "draft.md"}),),
+    )
+    paused = pause_for_approval(
+        started,
+        ApprovalRequest(
+            request_id="approval-1",
+            run_id="run-1",
+            tool_call_id="tool-call-1",
+            binding_digest="binding-1",
+            preview="write draft.md",
+        ),
+    )
+    correction = SubmitMessage(
+        conversation_id="conversation-1",
+        action_seq=started.next_action_seq,
+        expected_revision=paused.revision,
+        run_id="run-correction",
+        message="write final.md instead",
+    )
+
+    transition = accept_action(paused, correction)
+
+    assert transition.disposition is ActionDisposition.ACCEPTED
+    assert transition.state.active_run is not None
+    assert transition.state.active_run.run_id == "run-correction"
+    assert transition.state.active_run.pending_request is None
+    assert transition.state.facts[-1].content == {
+        "text": "write final.md instead",
+        "control": "goal_correction",
+    }
 
 
 def test_replay_precedes_revision_and_evicted_sequences_expire() -> None:

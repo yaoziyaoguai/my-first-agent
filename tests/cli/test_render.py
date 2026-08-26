@@ -169,3 +169,34 @@ def test_disclosure_and_recovery_are_contextual_without_protocol_ids() -> None:
     assert "internal-disclosure-digest" not in rendered
     assert "internal-recovery-id" not in rendered
     assert "/ack-provider" not in rendered
+
+
+def test_fatal_result_carries_bounded_exception_summary() -> None:
+    # 016 真实 E3 第 19/24 轮 J8:runtime_failure 的异常细节在 RunResult.message
+    # 里,但渲染只打 error_code,产品缺口无法定诊(REPL 退出码 1 且无 traceback)。
+    # FAILED_FATAL 渲染必须携带 bounded 的异常摘要。
+    output: list[str] = []
+    renderer = TerminalRenderer(output.append)
+    state = ConversationState.new("conversation-1")
+
+    renderer.render_result(
+        RunResult(
+            RunStatus.FAILED_FATAL,
+            state,
+            error_code="runtime_failure",
+            message="CheckpointConflictError: revision 7 != 6 at checkpoint append",
+        )
+    )
+    renderer.render_result(
+        RunResult(
+            RunStatus.FAILED_FATAL,
+            state,
+            error_code="runtime_failure",
+            message=" ".join(["detail"] * 2000),
+        )
+    )
+
+    assert "Run failed: runtime_failure" in output[0]
+    assert "CheckpointConflictError" in output[0]
+    assert "revision 7 != 6" in output[0]
+    assert len(output[1]) < 400

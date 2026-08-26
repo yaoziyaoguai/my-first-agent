@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from collections.abc import Mapping
 
 import httpx
 
+from agent.transport_audit import TransportAttemptRecorder
 from agent.web.contracts import WebExtractedPage, WebSearchHit, WebSearchResponse
 from agent.web.profile import TAVILY_DESTINATION, WebProfileV1
 from agent.web.safety import WebUrlError, admit_public_url, citation_locator
@@ -17,7 +19,8 @@ _MAX_JSON_DEPTH = 8
 _MAX_QUERY_CHARS = 1_000
 _MAX_TITLE_CHARS = 512
 _MAX_SEARCH_CONTENT_CHARS = 4_000
-_MAX_EXTRACT_CONTENT_CHARS = 50_000
+# 给工具的 JSON locator/envelope 保留空间，保证整个 ToolResult 仍落在 50k 上限内。
+_MAX_EXTRACT_CONTENT_CHARS = 48_000
 _MAX_REQUEST_ID_CHARS = 256
 TAVILY_SEARCH_PATH = "/search"
 TAVILY_EXTRACT_PATH = "/extract"
@@ -58,6 +61,7 @@ class TavilyClient:
         *,
         api_key: str,
         http_client: httpx.Client | None = None,
+        attempt_recorder: TransportAttemptRecorder | None = None,
     ) -> None:
         if (
             not isinstance(api_key, str)
@@ -74,6 +78,7 @@ class TavilyClient:
             follow_redirects=False,
             trust_env=False,
         )
+        self._attempt_recorder = attempt_recorder
 
     @property
     def owns_client(self) -> bool:
@@ -163,21 +168,28 @@ class TavilyClient:
             raise WebProtocolError("Tavily extract returned a URL outside policy") from error
         if returned_url != url:
             raise WebProtocolError("Tavily extract URL did not match the approved URL")
-        content = _required_string(
-            raw_result,
-            "raw_content",
-            _MAX_EXTRACT_CONTENT_CHARS,
-            allow_empty=False,
-        )
+        raw_content = raw_result.get("raw_content")
+        if not isinstance(raw_content, str) or not raw_content:
+            raise WebProtocolError("Tavily raw_content is malformed")
+        truncated = len(raw_content) > _MAX_EXTRACT_CONTENT_CHARS
+        content = raw_content[:_MAX_EXTRACT_CONTENT_CHARS]
         return WebExtractedPage(
             url=url,
             citation_locator=citation_locator(url),
             content=content,
             request_id=_optional_request_id(document),
+            truncated=truncated,
+            original_content_digest=(
+                hashlib.sha256(raw_content.encode("utf-8")).hexdigest()
+                if truncated
+                else None
+            ),
         )
 
     def _post_json(self, path: str, payload: Mapping[str, object]) -> dict[str, object]:
         try:
+            if self._attempt_recorder is not None:
+                self._attempt_recorder("web", TAVILY_DESTINATION)
             with self._http_client.stream(
                 "POST",
                 TAVILY_DESTINATION + path,

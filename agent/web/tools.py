@@ -198,6 +198,9 @@ def _fetch_output(
                 origin_request_digest=hashlib.sha256(
                     page.url.encode("utf-8")
                 ).hexdigest(),
+                original_content_digest=page.original_content_digest,
+                truncated=page.truncated,
+                truncation_reason=("source_content_limit" if page.truncated else None),
             ),
         ),
     )
@@ -263,7 +266,8 @@ def _fetch_spec(profile: WebProfileV1) -> ToolSpec:
         version="1.0.0",
         description=(
             "Extract one public source previously returned by web_search. Accepts only "
-            "the Runtime-issued opaque source_ref and requires separate approval."
+            "a Runtime-issued opaque source_ref listed in "
+            "FIRST_AGENT_RUNTIME_WEB_FETCH_REFS and requires separate approval."
         ),
         input_schema={
             "type": "object",

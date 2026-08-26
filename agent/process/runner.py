@@ -28,6 +28,7 @@ from agent.process.contracts import (
 _CHUNK = 65_536
 _SELECT_SLICE = 0.2
 _HARD_DRAIN_MARGIN = 2.0  # pipe drain 宽限（秒），在 deadline+grace 之外
+_POST_KILL_VERIFY_BUDGET = 6.0
 
 
 class ProcessCleanupError(RuntimeError):
@@ -229,15 +230,21 @@ def _terminate_group(proc: subprocess.Popen, pgid: int, profile: ResourceProfile
     # Post-KILL verification：must confirm group gone。Any failure → ProcessCleanupError。
     # 循环内机会性收尸 leader：SIGKILL 后 leader 僵尸未 reap 时 killpg(0) 会持续报告
     # 存活（慢/负载机器上 proc.wait(kill_grace) 可能超时错过退出窗口）→ 纯探测循环
-    # 偶发耗尽 → 诚实 ProcessCleanupError（E3 content 门 j3 flake 实测）。预算保持
-    # 30 次（≈6s，bounded-cleanup 合同 <10s 不变）；KILL 未送达（EPERM）时每次
-    # wait(0.1) 有界，不会无限阻塞。
-    for _ in range(30):
+    # 偶发耗尽 → 诚实 ProcessCleanupError（E3 content 门 j3 flake 实测）。按
+    # monotonic 给予完整 6s，而不是固定 30 次：leader 已先 reap 时旧循环每次只
+    # sleep 0.1s，实际仅给 orphan/zombie 约 3s。TERM grace + 该预算仍满足冻结的
+    # bounded-cleanup <10s；KILL 未送达（EPERM）也不会无限阻塞。
+    verification_deadline = time.monotonic() + _POST_KILL_VERIFY_BUDGET
+    while time.monotonic() < verification_deadline:
+        remaining = verification_deadline - time.monotonic()
         with suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=0.1)
+            proc.wait(timeout=min(0.1, max(0.0, remaining)))
         if not _group_alive(pgid):
             return term_sent, kill_sent, True
-        time.sleep(0.1)
+        remaining = verification_deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(0.1, remaining))
     raise ProcessCleanupError(
         "process group survived TERM+KILL; cannot confirm cleanup"
     )

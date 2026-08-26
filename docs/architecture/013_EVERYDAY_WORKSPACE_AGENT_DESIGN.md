@@ -190,7 +190,8 @@ durable raw facts 独立重算证明。知道引用名不等于拥有完成证�
 trusted state 冲突的 completion control 只能在同一个 `run_turn` 内得到有界 repair；repair 仍失败则
 fail closed。Provider 响应若无法严格归一化，所有 tool/control 均为零接纳、零执行；Runtime 可在相同可信
 上下文上有界重试，超过限额则以 `invalid_provider_response` 终止。everyday composition 显式使用
-`max_invalid_repairs=4`，只约束严格协议/control 修复；任务停滞独立使用
+`max_invalid_repairs=8`，只约束连续的严格协议/control 修复；成功的 control 或
+tool batch 会重置该计数，连续第九次仍 fail closed。任务停滞独立使用
 `max_no_progress_replans=16`。后者按连续独立 model response 的相同语义指纹计数，同一并行 tool batch 只算一次；
 换策略、真实 tool result 或新增 evidence 会重置。任何 repair 都不得宽松解析 JSON、伪造 evidence、重放 effect
 或要求用户输入“继续”。

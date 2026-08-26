@@ -182,16 +182,21 @@ def test_process_runner_large_stderr_does_not_cause_false_unconfirmed() -> None:
 
 def test_process_runner_temp_dir_removed_after_run(tmp_path, monkeypatch) -> None:
     """F-G8-2: per-run temp dir 在成功路径与 deadline/crash cleanup 后都必须消失（不泄漏）。"""
-    import glob
     import tempfile
 
-    tmp_root = tempfile.gettempdir()
+    created_dirs = []
 
-    def _subagent_dirs() -> set[str]:
-        return set(glob.glob(f"{tmp_root}/subagent-child-*"))
+    def isolated_mkdtemp(*, prefix):  # noqa: ANN001, ANN202
+        run_dir = tmp_path / f"{prefix}{len(created_dirs)}"
+        run_dir.mkdir(mode=0o700)
+        created_dirs.append(run_dir)
+        return str(run_dir)
+
+    # 系统 temp 是进程共享 namespace；比较全机 glob 会被同时运行的另一个
+    # first-agent 干扰。固定本测试实际创建的目录，仍验证同一产品清理路径。
+    monkeypatch.setattr(tempfile, "mkdtemp", isolated_mkdtemp)
 
     # 成功路径
-    before = _subagent_dirs()
     runner_ok = ChildProcessRunner(
         provider_spec=_fake_spec(text="done"),
         profile=_profile(),
@@ -201,7 +206,7 @@ def test_process_runner_temp_dir_removed_after_run(tmp_path, monkeypatch) -> Non
         objective="ok", handoff="", parent_idempotency_key="parent:run-1:dir-ok"
     )
     assert res_ok.receipt_state == "terminated"
-    assert _subagent_dirs() == before, "temp dir leaked after success"
+    assert created_dirs and not created_dirs[-1].exists(), "temp dir leaked after success"
 
     # deadline-kill cleanup 路径
     runner_kill = ChildProcessRunner(
@@ -213,7 +218,7 @@ def test_process_runner_temp_dir_removed_after_run(tmp_path, monkeypatch) -> Non
         objective="hang", handoff="", parent_idempotency_key="parent:run-1:dir-kill"
     )
     assert res_kill.receipt_state == "unconfirmed"
-    assert _subagent_dirs() == before, "temp dir leaked after deadline cleanup"
+    assert not created_dirs[-1].exists(), "temp dir leaked after deadline cleanup"
 
 
 def test_process_runner_oversized_stdout_is_unconfirmed(monkeypatch) -> None:
@@ -273,11 +278,16 @@ def test_015_config_dir_cleanup_retries_transient_rmdir_failure(
         return real_rmdir(self)
 
     monkeypatch.setattr(_Path, "rmdir", flaky_rmdir)
-    import glob as _glob
     import tempfile as _tempfile
 
-    tmp_root = _tempfile.gettempdir()
-    before = set(_glob.glob(f"{tmp_root}/subagent-child-*"))
+    run_dir = tmp_path / "subagent-child-transient"
+
+    def isolated_mkdtemp(*, prefix):  # noqa: ANN001, ANN202
+        assert prefix == "subagent-child-"
+        run_dir.mkdir(mode=0o700)
+        return str(run_dir)
+
+    monkeypatch.setattr(_tempfile, "mkdtemp", isolated_mkdtemp)
     runner = ChildProcessRunner(
         provider_spec=_fake_spec(text="cleanup-probe"),
         profile=_profile(),
@@ -287,8 +297,7 @@ def test_015_config_dir_cleanup_retries_transient_rmdir_failure(
         objective="cleanup", handoff="", parent_idempotency_key="parent:run-1:dir-retry"
     )
     assert result.receipt_state == "terminated"
-    after = set(_glob.glob(f"{tmp_root}/subagent-child-*"))
-    assert after == before, "transient rmdir failure must not leak the per-run dir"
+    assert not run_dir.exists(), "transient rmdir failure must not leak the per-run dir"
 
 
 def test_015_persistent_config_cleanup_failure_cannot_report_success(

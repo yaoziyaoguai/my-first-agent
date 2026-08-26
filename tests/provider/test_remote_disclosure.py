@@ -11,6 +11,7 @@ from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     AcknowledgeProviderDisclosure,
     ActiveRunStatus,
+    BeginAnswer,
     ConversationFact,
     ConversationState,
     FactKind,
@@ -208,7 +209,9 @@ def test_owner_preference_category_requires_new_acknowledgement(tmp_path) -> Non
             confirmed=True,
         )
     )
-    provider = ScriptedProvider(ModelResponse((ModelTextBlock("must not send"),)))
+    provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-owner-preferences"))
+    )
     changed = AgentRuntime(
         provider=provider,
         provider_descriptor=_descriptor(),
@@ -229,10 +232,27 @@ def test_owner_preference_category_requires_new_acknowledgement(tmp_path) -> Non
 
     assert result.status is RunStatus.AWAITING_DISCLOSURE
     assert provider.calls == []
+    intent_request = store.state.provider_disclosure_request
+    assert intent_request is not None
+    assert "owner_preferences" not in intent_request.data_classes
+
+    result = changed.run_turn(
+        AcknowledgeProviderDisclosure(
+            conversation_id=store.state.conversation_id,
+            action_seq=store.state.next_action_seq,
+            expected_revision=store.state.revision,
+            request_digest=intent_request.request_digest,
+            acknowledged_at="2026-08-02T01:01:00Z",
+        ),
+        store.load(),
+    )
+
+    assert result.status is RunStatus.AWAITING_DISCLOSURE
+    assert len(provider.calls) == 1, "intent must be chosen before preferences are loaded"
     request = store.state.provider_disclosure_request
     assert request is not None
     assert "owner_preferences" in request.data_classes
-    assert request.request_digest != first_request.request_digest
+    assert request.request_digest != intent_request.request_digest
 
 
 def test_event_loss_cannot_bypass_durable_disclosure() -> None:

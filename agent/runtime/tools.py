@@ -21,6 +21,7 @@ from agent.runtime.contracts import (
     ApprovalRequest,
     ApprovalRequired,
     ArtifactConfirmationRequirementV1,
+    CitationManifestV1,
     EgressClass,
     EvidenceOracleKind,
     ExecutionAuthorityClass,
@@ -153,6 +154,17 @@ class KernelToolRuntime:
         if registration is None:
             return self._error(call.tool_call_id, "unknown_tool", "Unknown tool requested.")
 
+        if context.goal_correction_pending:
+            return self._error(
+                call.tool_call_id,
+                "goal_correction_required",
+                (
+                    "The user's latest Goal correction must be accepted as a "
+                    "goal_delta_proposal before any product tool can run. No tool effect or "
+                    "observation was performed."
+                ),
+            )
+
         arguments, validation_error = _validate_arguments(
             call.arguments,
             registration.spec.input_schema,
@@ -160,14 +172,174 @@ class KernelToolRuntime:
         if validation_error is not None:
             return self._error(call.tool_call_id, "invalid_arguments", validation_error)
 
+        if (
+            context.public_web_requirement_pending
+            and registration.spec.side_effect is not SideEffectClass.READ_ONLY
+        ):
+            return self._error(
+                call.tool_call_id,
+                "public_web_source_required",
+                (
+                    "The active Goal requires an approved public Web source receipt before "
+                    "any write or external process effect. Use the advertised web_search "
+                    "tool first; do not substitute workspace search or completion prose."
+                ),
+            )
+
+        if (
+            call.name == "write_file"
+            and registration.spec.side_effect is SideEffectClass.WRITE
+            and isinstance(arguments.get("path"), str)
+            and arguments["path"].endswith(".citations.json")
+        ):
+            canonical_manifest = self._canonical_citation_sidecar_content(
+                call.name,
+                arguments,
+                context,
+            )
+            if canonical_manifest is None:
+                exact_pairs = "; ".join(
+                    f"{source_ref} -> {source_id}"
+                    for source_ref, source_id in context.citable_citation_sources
+                ) or "none"
+                return self._error(
+                    call.tool_call_id,
+                    "citation_manifest_required",
+                    (
+                        "Do not hand-write this sidecar. Follow these exact steps in order: "
+                        "(1) read_file the artifact you just wrote (for example "
+                        "research.md) so its exact content digest enters this run; "
+                        "(2) call build_citation_manifest with the artifact path, the "
+                        "exact artifact content you read back, and one citation pair "
+                        "chosen from these exact citable pairs: "
+                        f"{exact_pairs}; (3) write_file the sidecar by copying that "
+                        "build_citation_manifest ToolResult byte-for-byte as content — "
+                        "one transport-added final newline is accepted and removed. Any "
+                        "other JSON is rejected before the effect."
+                    ),
+                )
+            arguments = dict(arguments)
+            arguments["content"] = canonical_manifest
+
+        if registration.spec.safety_policy.get("kind") == "citation_manifest_builder":
+            if not context.citation_manifest_allowed:
+                return self._error(
+                    call.tool_call_id,
+                    "citation_manifest_not_required",
+                    (
+                        "build_citation_manifest is available only when the active Goal "
+                        "explicitly targets a .citations.json sidecar. Do not build a "
+                        "manifest for this Goal; after the required file read-back, use "
+                        "completion_claim with the advertised evidence refs."
+                    ),
+                )
+
+            artifact_path = arguments.get("artifact_path")
+            if artifact_path not in context.citation_artifact_paths:
+                allowed_paths = ", ".join(context.citation_artifact_paths) or "none"
+                return self._error(
+                    call.tool_call_id,
+                    "citation_artifact_not_authorized",
+                    (
+                        "The citation manifest must describe a non-sidecar artifact target "
+                        f"from the active Goal. Allowed artifact_path values: {allowed_paths}. "
+                        "Read that artifact and pass its exact content; never cite the "
+                        ".citations.json sidecar itself."
+                    ),
+                )
+            if context.goal_id is not None and (
+                arguments.get("goal_id") != context.goal_id
+                or arguments.get("goal_revision") != context.goal_revision
+            ):
+                return self._error(
+                    call.tool_call_id,
+                    "citation_goal_identity_mismatch",
+                    (
+                        "The citation manifest must copy goal_id and goal_revision exactly "
+                        "from the current trusted_goal block. Do not use an earlier revision "
+                        "or another identity; rebuild the manifest with the current "
+                        "Runtime-owned identity and retry."
+                    ),
+                )
+            citations = arguments.get("citations")
+            requested_refs = (
+                tuple(
+                    citation.get("source_ref")
+                    for citation in citations
+                    if isinstance(citation, dict)
+                )
+                if isinstance(citations, list)
+                else ()
+            )
+            requested_pairs = (
+                tuple(
+                    (citation.get("source_ref"), citation.get("source_id"))
+                    for citation in citations
+                    if isinstance(citation, dict)
+                )
+                if isinstance(citations, list)
+                else ()
+            )
+            allowed_pairs = set(context.citable_citation_sources)
+            if (
+                not requested_refs
+                or len(requested_refs) != len(citations)
+                or len(requested_pairs) != len(citations)
+                or any(pair not in allowed_pairs for pair in requested_pairs)
+            ):
+                exact_pairs = "; ".join(
+                    f"{source_ref} -> {source_id}"
+                    for source_ref, source_id in context.citable_citation_sources
+                ) or "none"
+                return self._error(
+                    call.tool_call_id,
+                    "citation_source_not_citable",
+                    (
+                        "The only permitted citations are Runtime-verified non-truncated "
+                        "source_ref/source_id pairs from the active Goal. Copy one of these "
+                        f"exact pairs: {exact_pairs}. Remove denied citations; fetch another "
+                        "complete source only when this list is empty; then rebuild the "
+                        "manifest and rewrite its sidecar."
+                    ),
+                )
+            markers = tuple(
+                citation.get("marker")
+                for citation in citations
+                if isinstance(citation, dict)
+            )
+            if (
+                len(set(requested_pairs)) != len(requested_pairs)
+                or len(set(markers)) != len(markers)
+            ):
+                return self._error(
+                    call.tool_call_id,
+                    "citation_entries_not_one_to_one",
+                    (
+                        "Citation manifest entries must be one-to-one. Use each exact source "
+                        "pair once with one unique bracketed marker. If the same source "
+                        "supports multiple statements, reuse its one marker in the artifact "
+                        "instead of duplicating the manifest entry; then rebuild the sidecar."
+                    ),
+                )
+
         source_authority_required = (
             registration.spec.safety_policy.get("source_authority_required") is True
         )
-        if source_authority_required and context.source_authority is None:
+        requested_source_ref = arguments.get("source_ref")
+        if source_authority_required and (
+            context.source_authority is None
+            or requested_source_ref not in context.web_fetch_source_refs
+        ):
+            exact_refs = ", ".join(context.web_fetch_source_refs) or "none"
             return self._error(
                 call.tool_call_id,
                 "source_authority_required",
-                "This tool requires a Runtime-verified source reference.",
+                (
+                    "This tool requires a Runtime-verified, currently unattempted Web "
+                    f"Search source reference. Exact permitted refs: {exact_refs}. Copy "
+                    "one unchanged from FIRST_AGENT_RUNTIME_WEB_FETCH_REFS; do not use "
+                    "a web_extracted_content or citation ref."
+                ),
             )
         try:
             binding = self._prepare_binding(
@@ -177,6 +349,18 @@ class KernelToolRuntime:
             )
             _canonical_json(binding)
         except Exception:
+            if registration.spec.safety_policy.get("kind") == "citation_manifest_builder":
+                return self._error(
+                    call.tool_call_id,
+                    "citation_manifest_invalid",
+                    (
+                        "The citation manifest arguments are structurally invalid. Use the "
+                        "current trusted_goal identity, exact artifact read-back text, one "
+                        "unique bracketed marker that occurs in that text, and each "
+                        "Runtime-advertised source_ref/source_id pair at most once. No effect "
+                        "occurred; correct the arguments and retry."
+                    ),
+                )
             return self._error(
                 call.tool_call_id,
                 "binding_failure",
@@ -194,6 +378,18 @@ class KernelToolRuntime:
                 "Tool policy evaluation failed closed.",
             )
         if decision is PolicyDecision.DENY:
+            if binding.get("reason") == "workspace_file_policy":
+                return self._error(
+                    call.tool_call_id,
+                    "workspace_file_denied",
+                    (
+                        "The workspace file operation was rejected before any effect. Use an "
+                        "exact workspace-relative path (never an absolute, parent, private, "
+                        "or invented path); call list_files on '.' when discovery is needed, "
+                        "then retry the exact entry. A .citations.json sidecar must be rebuilt "
+                        "and replaced with write_file, not edit_file."
+                    ),
+                )
             return self._error(call.tool_call_id, "policy_denied", "Tool policy denied the call.")
         if registration.spec.egress is EgressClass.PUBLIC_NETWORK:
             # PUBLIC_NETWORK 的用户可见外发不能被 registration 自定义 policy
@@ -310,6 +506,39 @@ class KernelToolRuntime:
         return intent
 
     @staticmethod
+    def _canonical_citation_sidecar_content(
+        tool_name: str,
+        arguments: dict[str, JSONValue],
+        context: ToolPrepareContext,
+    ) -> str | None:
+        path = arguments.get("path")
+        content = arguments.get("content")
+        if (
+            tool_name != "write_file"
+            or not context.citation_manifest_allowed
+            or path not in context.citation_sidecar_paths
+            or not isinstance(content, str)
+        ):
+            return None
+        canonical = content[:-1] if content.endswith("\n") else content
+        if (
+            hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            not in context.citation_manifest_content_digests
+        ):
+            return None
+        try:
+            manifest = CitationManifestV1.from_json(canonical)
+        except ValueError:
+            return None
+        if (
+            manifest.goal_id != context.goal_id
+            or manifest.goal_revision != context.goal_revision
+            or manifest.artifact_path not in context.citation_artifact_paths
+        ):
+            return None
+        return canonical
+
+    @staticmethod
     def _artifact_confirmation_requirement(
         context: ToolPrepareContext,
     ) -> ArtifactConfirmationRequirementV1 | None:
@@ -317,16 +546,32 @@ class KernelToolRuntime:
             item
             for item in context.proposed_criteria
             if item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
+            and item.criterion_id not in context.admitted_criterion_ids
         )
         if len(proposed) > 1:
+            # 016 真实 E3（第 23 轮 J12）:只陈述规则时模型无法自纠而被困到
+            # blocked;消息必须点名冲突 criteria 并给出恢复动作。
             raise ValueError(
-                "one local_process approval can bind at most one artifact requirement"
+                "one local_process approval can bind at most one artifact "
+                "requirement; proposed filesystem criteria: "
+                + ", ".join(
+                    f"{item.criterion_id}={item.artifact_path or 'deferred'}"
+                    for item in proposed
+                )
+                + "; propose a goal_delta_proposal that keeps at most one "
+                "unconfirmed filesystem criterion, or complete the pending "
+                "artifact confirmation first"
             )
         if not proposed:
             return None
         criterion = proposed[0]
         if criterion.artifact_path is None:
-            raise ValueError("filesystem criterion is missing artifact_path")
+            # 唯一 pending criterion 仍是 deferred 时没有可确认的 artifact——
+            # 绑定只发生在具体文件写入批准,而 validator 产物不经 write_file。
+            # hard error 会让该 goal 形状永久无法运行 validator(016 真实 E3
+            # 第 23/27/34 轮死锁);返回 None 走普通批准,criterion 维持 pending,
+            # 不铸造任何 evidence/authority。
+            return None
         return ArtifactConfirmationRequirementV1(
             criterion_id=criterion.criterion_id,
             artifact_path=criterion.artifact_path,

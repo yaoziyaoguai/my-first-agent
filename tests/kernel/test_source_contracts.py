@@ -8,15 +8,19 @@ import pytest
 
 from agent.runtime.context import ContextLimitError, ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
+    AcknowledgeProviderDisclosure,
     ApprovalGrant,
     ApprovalPolicy,
     ApprovalRequired,
+    BeginAnswer,
     ConversationFact,
     ConversationState,
     EgressClass,
     ExecutionAuthorityClass,
     ExecutionIntent,
     FactKind,
+    InteractionState,
+    ModelResponse,
     OutputPolicy,
     PolicyDecision,
     ProviderDescriptor,
@@ -328,7 +332,11 @@ def test_context_maps_only_valid_kernel_receipts_to_untrusted_data_class() -> No
             "metadata": result.metadata,
         },
     )
-    state = replace(ConversationState.new("conversation-1"), facts=(fact,))
+    state = replace(
+        ConversationState.new("conversation-1"),
+        interaction_state=InteractionState.ANSWERING,
+        facts=(fact,),
+    )
     action = SubmitMessage(
         conversation_id="conversation-1",
         action_seq=1,
@@ -550,7 +558,9 @@ def test_new_source_data_class_requires_a_new_provider_disclosure() -> None:
         provider_disclosure_receipt=old_receipt,
     )
     store = InMemoryCheckpointStore(state)
-    provider = ScriptedProvider()
+    provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-source-disclosure"))
+    )
     from agent.runtime.loop import AgentRuntime, InvocationLimits
 
     agent_runtime = AgentRuntime(
@@ -580,6 +590,26 @@ def test_new_source_data_class_requires_a_new_provider_disclosure() -> None:
 
     assert result.status is RunStatus.AWAITING_DISCLOSURE
     assert provider.calls == []
+    intent_request = store.state.provider_disclosure_request
+    assert intent_request is not None
+    assert "workspace_excerpt" not in intent_request.data_classes
+
+    result = agent_runtime.run_turn(
+        AcknowledgeProviderDisclosure(
+            conversation_id=store.state.conversation_id,
+            action_seq=store.state.next_action_seq,
+            expected_revision=store.state.revision,
+            request_digest=intent_request.request_digest,
+            acknowledged_at="2026-08-04T00:01:00Z",
+        ),
+        store.load(),
+    )
+
+    assert result.status is RunStatus.AWAITING_DISCLOSURE
+    assert len(provider.calls) == 1
     assert store.state.provider_disclosure_request is not None
     assert "workspace_excerpt" in store.state.provider_disclosure_request.data_classes
-    assert store.state.provider_disclosure_request.request_digest != old_request.request_digest
+    assert (
+        store.state.provider_disclosure_request.request_digest
+        != intent_request.request_digest
+    )

@@ -51,7 +51,7 @@ def test_configured_web_resources_are_two_static_governed_tools() -> None:
     assert all(item.spec.egress.value == "public_network" for item in resources.registrations)
 
 
-def test_saved_web_profile_without_exact_credential_fails_before_runtime(
+def test_saved_web_profile_without_exact_credential_preserves_local_runtime(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -75,10 +75,7 @@ def test_saved_web_profile_without_exact_credential_fails_before_runtime(
         write_fn=output.append,
     )
 
-    assert exit_code == 2
-    assert any(
-        "Web profile credential environment variable is not set: "
-        "FIRST_AGENT_WEB_API_KEY" in line
-        for line in output
-    )
+    assert exit_code == 0
+    assert any("Web: temporarily unavailable" in line for line in output)
+    assert any("FIRST_AGENT_WEB_API_KEY" in line for line in output)
     assert all("secret-value" not in line for line in output)

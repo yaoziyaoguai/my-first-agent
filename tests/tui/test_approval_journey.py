@@ -30,6 +30,7 @@ from tests.kernel.fakes import (
     InMemoryCheckpointStore,
     ScriptedProvider,
     conversation_with_active_goal,
+    goal_noop_response,
 )
 
 
@@ -88,6 +89,7 @@ def test_pending_reopen_keyboard_journey_and_shared_lifecycle(tmp_path: Path) ->
     # 起步；app 经 build_submit 从 authoritative state 派生合法 seq/revision。
     store = InMemoryCheckpointStore(conversation_with_active_goal("tui-1"))
     provider = ScriptedProvider(
+        goal_noop_response("tui-approval-user-supplement"),
         ModelResponse((ModelToolCall("c1", "write_fixture", {}),)),
         _blocked_response("tui-approved-blocked", "approved and done"),
     )
@@ -154,6 +156,7 @@ def test_pilot_reject_keyboard_journey_executes_nothing(tmp_path: Path) -> None:
 
     store = InMemoryCheckpointStore(conversation_with_active_goal("tui-reject"))
     provider = ScriptedProvider(
+        goal_noop_response("tui-rejection-user-supplement"),
         ModelResponse((ModelToolCall("c1", "write_fixture", {}),)),
         _blocked_response("tui-rejected-blocked", "rejected and done"),
     )

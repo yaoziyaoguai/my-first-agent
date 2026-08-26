@@ -19,11 +19,14 @@ import pytest
 
 from agent.provider.anthropic_http import AnthropicCompatibleProvider
 from agent.provider.config import AgentProviderConfig
+from agent.provider.normalize import context_to_openai_messages
 from agent.provider.openai_http import OpenAICompatibleProvider
 from agent.provider.protocol import ProviderProtocolError
 from agent.runtime.context import ContextLimits, KernelContextManager
+from agent.runtime.context_control import reserved_control_schema
 from agent.runtime.contracts import (
     AdmittedCriterion,
+    BeginAnswer,
     BlockedClaim,
     BudgetReport,
     ClarificationRequest,
@@ -32,14 +35,15 @@ from agent.runtime.contracts import (
     ControlReceipt,
     ConversationFact,
     ConversationState,
+    DirectResponse,
     EvidenceOracleKind,
     ExecutionAuthorityClass,
     FactKind,
     GoalDelta,
     GoalDeltaProposal,
+    GoalDraftProposal,
     GoalFrame,
     GoalProgress,
-    GoalProposal,
     GoalStatus,
     ModelMessage,
     ModelResponse,
@@ -49,6 +53,7 @@ from agent.runtime.contracts import (
     SubmitMessage,
     ToolDefinition,
     canonical_json_digest,
+    closed_evidence_id,
 )
 from agent.runtime.tools import KernelToolRuntime
 
@@ -71,6 +76,13 @@ _EXPECTED_CONTROL = GoalProgress(
     summary="finished reading the fixture",
     next_step="summarize the fixture contents",
 )
+
+_BEGIN_ANSWER_ARGUMENTS: dict[str, object] = {
+    "kind": "begin_answer",
+    "correlation_id": "ctl-begin-answer",
+}
+
+_EXPECTED_BEGIN_ANSWER = BeginAnswer(correlation_id="ctl-begin-answer")
 
 
 def _context() -> ContextPack:
@@ -353,6 +365,232 @@ def test_context_pack_has_independent_control_schema_and_atomic_receipts() -> No
     assert RESERVED_CONTROL_NAME not in {tool.name for tool in context.tools}
 
 
+def test_bootstrap_schema_requires_intent_before_any_product_discovery() -> None:
+    # 016 §5.0 intent gate：显式任务先 goal_proposal；普通问答需要 grounding
+    # 时先 begin_answer。decision 前没有 product discovery 可用。
+    state = ConversationState(
+        conversation_id="schema-window-conversation",
+        facts=(
+            ConversationFact(
+                "action:1:user",
+                FactKind.USER_MESSAGE,
+                {"text": "research pathlib and write the results into draft.md"},
+            ),
+        ),
+    )
+    context = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+        workspace_identity_digest="workspace-schema",
+        authority_snapshot="authority-schema",
+        strict_control_schema=True,
+    ).build(
+        state,
+        SubmitMessage(
+            conversation_id=state.conversation_id,
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            run_id="schema-window-run",
+            message="research pathlib and write the results into draft.md",
+        ),
+        (),
+    )
+
+    assert context.control_schema is not None
+    description = context.control_schema["description"]
+    assert "research-to-file task; do so before product discovery" in description
+    assert "use begin_answer before any product tool or context source" in description
+    assert "deferred filesystem criterion" in description
+
+
+def test_correction_pending_schema_shows_exact_delta_envelope_example() -> None:
+    # 016 真实 E3 J11:模型在 correction 后以三种方式反复弄错 delta wire 形状
+    # (缺 updated_at、把 delta 五字段摊平到顶层、复用 correlation_id)。closed
+    # 解码不动摇;correction-pending 的 schema description 必须给出精确嵌套示例,
+    # 让模型一次构造正确,而不是在修复循环里逐维度震荡。
+    from agent.runtime.context_control import reserved_control_schema
+
+    schema = reserved_control_schema(goal_present=True, goal_correction_is_pending=True)
+    description = schema["description"]
+    assert '"kind":"goal_delta_proposal"' in description
+    assert '"delta":{' in description
+    assert '"updated_at":null' in description
+    assert "nest" in description.lower()
+    assert "correlation_id you have not used" in description
+
+
+def test_correction_pending_portable_schema_only_exposes_exact_delta_fields() -> None:
+    # correction-pending 只有一种合法 control。若 portable schema 仍展示其他
+    # control 的可选字段，真实 OpenAI-compatible 模型会把它们混入 payload，
+    # 随后被同一 closed decoder 正确拒绝。这里让 wire contract 与 Runtime
+    # 此刻实际允许的唯一形状一致，不靠提示词猜测哪些字段该省略。
+    from agent.runtime.context_control import reserved_control_schema
+
+    schema = reserved_control_schema(
+        goal_present=True,
+        goal_id="goal-1",
+        goal_revision=7,
+        goal_correction_is_pending=True,
+    )
+    portable = schema["input_schema"]
+
+    assert set(portable["properties"]) == {"kind", "correlation_id", "delta"}
+    assert portable["required"] == ["kind", "correlation_id", "delta"]
+    assert portable["properties"]["kind"]["enum"] == ["goal_delta_proposal"]
+    delta_properties = portable["properties"]["delta"]["properties"]
+    assert delta_properties["goal_id"]["enum"] == ["goal-1"]
+    assert delta_properties["expected_revision"]["enum"] == [7]
+    assert portable["additionalProperties"] is False
+
+
+def test_correction_pending_example_payload_is_atomic_for_filesystem_goals() -> None:
+    # 016 真实 E3 第 59/68 轮 J11:模型照抄 correction-pending 示例的 targets-only
+    # delta,对带 filesystem criterion 的 Goal 必然触发 state.py 的
+    # "filesystem artifact criteria must match corrected targets in one atomic
+    # delta",在 repair 额度内反复失败直至 fatal。示例必须展示原子形状;本测试
+    # 把示例 payload 逐字代换后交给真实 accept_goal_delta_proposal,对 FS goal
+    # 必须一次受理(当前 targets-only 示例会先 Red)。
+    import re
+
+    from agent.runtime.context_control import reserved_control_schema
+    from agent.runtime.state import accept_goal_delta_proposal
+
+    criterion = ProposedCriterion(
+        criterion_id="criterion-fs",
+        description="researched results written to the target file",
+        oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+        artifact_path="draft.md",
+    )
+    goal = GoalFrame(
+        goal_id="goal-1",
+        revision=1,
+        created_from_fact_ids=("action:1:user",),
+        workspace_identity_digest="workspace",
+        user_outcome="write researched results into draft.md",
+        beneficiary="user",
+        targets=("draft.md",),
+        scope=("draft.md",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(criterion,),
+        admitted_criteria=(),
+        authority_snapshot="authority",
+        status=GoalStatus.GOAL_READY,
+        created_at="2026-08-23T00:00:00Z",
+        updated_at="2026-08-23T00:00:00Z",
+    )
+    state = ConversationState(
+        conversation_id="conversation",
+        facts=(
+            ConversationFact("action:1:user", FactKind.USER_MESSAGE, {"text": "task"}),
+            ConversationFact(
+                "action:2:user",
+                FactKind.USER_MESSAGE,
+                {"text": "final.md please", "control": "goal_correction"},
+            ),
+        ),
+        goal=goal,
+    )
+    schema = reserved_control_schema(goal_present=True, goal_correction_is_pending=True)
+    description = str(schema["description"])
+    match = re.search(r"Exact payload shape: (\{.*?\}) — ", description)
+    assert match is not None, "correction-pending schema must embed a payload example"
+    substitutions = {
+        "<id you have not used before>": "ctl-example-1",
+        "<trusted_goal.goal_id>": goal.goal_id,
+        "<trusted_goal.revision>": str(goal.revision),
+        "<the user's change>": "write into final.md instead",
+        "<new target>": "final.md",
+        "<existing criterion_id>": criterion.criterion_id,
+        "<same description>": criterion.description,
+    }
+    payload_text = match.group(1)
+    for placeholder, value in substitutions.items():
+        payload_text = payload_text.replace(placeholder, value)
+    payload = json.loads(payload_text)
+    proposal = GoalDeltaProposal(
+        correlation_id=payload["correlation_id"],
+        delta=GoalDelta(
+            goal_id=payload["delta"]["goal_id"],
+            expected_revision=payload["delta"]["expected_revision"],
+            reason=payload["delta"]["reason"],
+            updates=payload["delta"]["updates"],
+            updated_at=payload["delta"]["updated_at"],
+        ),
+    )
+    # 照抄示例的模型对 FS goal 必须一次通过;不抛异常即 Green。
+    accept_goal_delta_proposal(state, proposal)
+
+
+def test_goal_present_schema_shows_completion_envelope_example() -> None:
+    # 016 真实 E3:旅程终点 completion_claim 形状错误( refs 抄错/缺字段)会连续
+    # 耗尽修复额度并触发 fatal;goal-present 的 schema description 必须像
+    # correction-pending 一样给出精确 payload 示例。
+    from agent.runtime.context_control import reserved_control_schema
+
+    schema = reserved_control_schema(goal_present=True)
+    description = schema["description"]
+    assert '"kind":"completion_claim"' in description
+    assert '"criterion_evidence_refs"' in description
+    assert "expected_completion_evidence_refs" in description
+
+
+def test_bootstrap_trusted_block_carries_goal_first_decision_rule() -> None:
+    # 016 §5.2 goal-first:bootstrap 是模型最先看到、标记 trusted 的 pinned 块。
+    # 显式任务必须在任何 source 检索前提案 Goal,否则同一 action 的窗口关闭、
+    # 旅程无法完成(真实 E3 J11 实测 tools-first 死胡同)。决策规则必须出现在
+    # 这个最高显著度位置,而不仅是 schema description 的尾部。
+    state = ConversationState(
+        conversation_id="bootstrap-rule-conversation",
+        facts=(
+            ConversationFact(
+                "action:1:user",
+                FactKind.USER_MESSAGE,
+                {"text": "research pathlib and write the results into draft.md"},
+            ),
+        ),
+    )
+    context = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+        workspace_identity_digest="workspace-schema",
+        authority_snapshot="authority-schema",
+    ).build(
+        state,
+        SubmitMessage(
+            conversation_id=state.conversation_id,
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            run_id="bootstrap-rule-run",
+            message="research pathlib and write the results into draft.md",
+        ),
+        (),
+    )
+
+    blocks = [
+        block
+        for message in context.messages
+        for block in message.content
+        if isinstance(block, dict) and block.get("type") == "trusted_goal_bootstrap"
+    ]
+    assert blocks, "trusted_goal_bootstrap block must be projected"
+    rule = blocks[0].get("decision_rule")
+    assert isinstance(rule, str)
+    assert "submit goal_proposal first" in rule
+    assert "before any product tool call" in rule
+    # context 层合法还不够:provider 序列化层(两个 adapter 共用)必须同样接受,
+    # 否则每一轮 generate 都在发送前 fail(016 J11 实测 5 连 invalid fatal)。
+    from agent.provider.normalize import validate_context_pack
+
+    validate_context_pack(context)
+    openai_messages = context_to_openai_messages(context)
+    assert any(
+        "submit goal_proposal first" in str(part)
+        for message in openai_messages
+        for part in ([message.get("content")] if isinstance(message.get("content"), str) else [])
+    )
+
+
 def test_production_control_schema_is_portable_closed_and_model_readable() -> None:
     state = ConversationState(
         conversation_id="schema-conversation",
@@ -390,7 +628,7 @@ def test_production_control_schema_is_portable_closed_and_model_readable() -> No
     assert "goal_bootstrap" in context.data_classes
     description = context.control_schema["description"]
     assert "Do not use goal_proposal for questions, explanations, or discussion" in description
-    assert "explicit bounded task, artifact, or file change" in description
+    assert "artifact, file change, run-and-verify" in description
     schema = context.control_schema["input_schema"]
     assert schema["type"] == "object"
     assert schema["additionalProperties"] is False
@@ -406,16 +644,16 @@ def test_production_control_schema_is_portable_closed_and_model_readable() -> No
         "boundary_code",
         "missing_fields",
         "safe_assumptions",
-        "goal_frame",
-        "goal_id",
-        "goal_revision",
-        "summary",
+        "user_outcome",
+        "beneficiary",
+        "targets",
+        "scope",
+        "non_goals",
+        "assumptions",
+        "proposed_criteria",
+        "requires_public_web",
+        "requires_local_process",
         "next_step",
-        "delta",
-        "criterion_evidence_refs",
-        "blocker",
-        "safe_attempts",
-        "resume_condition",
     }
     unsupported_keywords = {
         "oneOf",
@@ -438,22 +676,14 @@ def test_production_control_schema_is_portable_closed_and_model_readable() -> No
                 assert_portable_subset(child)
 
     assert_portable_subset(schema)
-    goal_schema = schema["properties"]["goal_frame"]
-    assert set(goal_schema["required"]) == set(goal_schema["properties"])
-    assert "must be empty" in goal_schema["properties"]["admitted_criteria"]["description"]
-    assert goal_schema["properties"]["status"]["enum"] == ["goal_ready"]
-    assert goal_schema["additionalProperties"] is False
-    proposed = goal_schema["properties"]["proposed_criteria"]["items"]
+    assert "goal_frame" not in schema["properties"]
+    proposed = schema["properties"]["proposed_criteria"]["items"]
     assert set(proposed["required"]) == {
         "criterion_id",
         "description",
         "oracle_kind",
         "artifact_path",
     }
-    delta_updates = schema["properties"]["delta"]["properties"]["updates"]
-    assert "admitted_criteria" not in delta_updates["properties"]
-    assert "authority_snapshot" not in delta_updates["properties"]
-
     strict_schema = context.control_schema["strict_input_schema"]
     assert strict_schema["type"] == "object"
     assert strict_schema["required"] == ["payload"]
@@ -462,6 +692,53 @@ def test_production_control_schema_is_portable_closed_and_model_readable() -> No
     assert {
         variant["properties"]["kind"]["enum"][0] for variant in variants
     } == set(schema["properties"]["kind"]["enum"])
+    strict_goal = next(
+        variant
+        for variant in variants
+        if variant["properties"]["kind"]["enum"] == ["goal_proposal"]
+    )
+    assert set(strict_goal["properties"]) == {
+        "kind",
+        "correlation_id",
+        "user_outcome",
+        "beneficiary",
+        "targets",
+        "scope",
+        "non_goals",
+        "assumptions",
+        "proposed_criteria",
+        "requires_public_web",
+        "requires_local_process",
+    }
+    criterion_variants = strict_goal["properties"]["proposed_criteria"]["items"][
+        "anyOf"
+    ]
+    assert {
+        tuple(variant["properties"]["oracle_kind"]["enum"])
+        for variant in criterion_variants
+    } == {
+        ("filesystem_digest",),
+        (
+            "tool_receipt",
+            "user_confirmation",
+            "research_provenance",
+            "web_source_receipt",
+        ),
+    }
+    non_file_variant = next(
+        variant
+        for variant in criterion_variants
+        if "tool_receipt" in variant["properties"]["oracle_kind"]["enum"]
+    )
+    assert non_file_variant["properties"]["artifact_path"]["enum"] == [""]
+    file_variant = next(
+        variant
+        for variant in criterion_variants
+        if variant["properties"]["oracle_kind"]["enum"] == ["filesystem_digest"]
+    )
+    file_path_schema = file_variant["properties"]["artifact_path"]
+    assert "pattern" not in file_path_schema
+    assert "at most one criterion may be deferred" in file_path_schema["description"]
 
     def assert_strict_objects(value: object) -> None:
         if isinstance(value, dict):
@@ -562,6 +839,7 @@ def test_installed_goal_control_schema_no_longer_advertises_goal_proposal() -> N
         limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
         workspace_identity_digest="workspace-schema",
         authority_snapshot="authority-schema",
+        strict_control_schema=True,
     ).build(
         state,
         SubmitMessage(
@@ -579,14 +857,118 @@ def test_installed_goal_control_schema_no_longer_advertises_goal_proposal() -> N
     assert "goal_proposal" not in kinds
     assert set(kinds) == {
         "clarification_request",
-        "goal_delta_proposal",
         "completion_claim",
         "blocked_claim",
     }
+    assert "goal_delta_proposal" not in kinds
+
+    properties = context.control_schema["input_schema"]["properties"]
+    assert set(properties) == {
+        "kind",
+        "correlation_id",
+        "question",
+        "boundary_code",
+        "missing_fields",
+        "safe_assumptions",
+        "goal_id",
+        "goal_revision",
+        "criterion_evidence_refs",
+        "blocker",
+        "safe_attempts",
+        "resume_condition",
+    }
+    expected_refs = [
+        closed_evidence_id(
+            _EXPECTED_GOAL_FRAME.goal_id,
+            _EXPECTED_GOAL_FRAME.revision,
+            "crit-2",
+        )
+    ]
+    assert properties["goal_id"]["enum"] == [_EXPECTED_GOAL_FRAME.goal_id]
+    assert properties["goal_revision"]["enum"] == [_EXPECTED_GOAL_FRAME.revision]
+    assert properties["criterion_evidence_refs"]["enum"] == [expected_refs]
+
+    strict_variants = context.control_schema["strict_input_schema"]["properties"][
+        "payload"
+    ]["anyOf"]
+    completion = next(
+        variant
+        for variant in strict_variants
+        if variant["properties"]["kind"]["enum"] == ["completion_claim"]
+    )
+    assert completion["properties"]["goal_id"]["enum"] == [
+        _EXPECTED_GOAL_FRAME.goal_id
+    ]
+    assert completion["properties"]["goal_revision"]["enum"] == [
+        _EXPECTED_GOAL_FRAME.revision
+    ]
+    assert completion["properties"]["criterion_evidence_refs"]["enum"] == [
+        expected_refs
+    ]
     assert "goal_proposal is unavailable" in context.control_schema["description"]
+    assert "cannot end with direct_response prose" in context.control_schema["description"]
     description = context.control_schema["description"]
     assert "goal_progress is currently unavailable" in description
     assert "call that product tool now" in context.control_schema["description"]
+
+
+def test_portable_schema_gives_exact_goal_progress_payload_when_available() -> None:
+    state = ConversationState(
+        conversation_id="schema-progress-conversation",
+        facts=(
+            ConversationFact(
+                "action:1:user",
+                FactKind.USER_MESSAGE,
+                {"text": "continue the report"},
+            ),
+            ConversationFact(
+                "run:schema-progress-run:tool-result:1",
+                FactKind.TOOL_RESULT,
+                {"executed": True, "is_error": False},
+            ),
+        ),
+        goal=_EXPECTED_GOAL_FRAME,
+    )
+    context = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+        workspace_identity_digest="workspace-schema",
+        authority_snapshot="authority-schema",
+    ).build(
+        state,
+        SubmitMessage(
+            conversation_id=state.conversation_id,
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            run_id="schema-progress-run",
+            message="continue the report",
+        ),
+        (),
+    )
+
+    assert context.control_schema is not None
+    assert set(context.control_schema["input_schema"]["properties"]) == {
+        "kind",
+        "correlation_id",
+        "question",
+        "boundary_code",
+        "missing_fields",
+        "safe_assumptions",
+        "goal_id",
+        "goal_revision",
+        "summary",
+        "next_step",
+        "criterion_evidence_refs",
+        "blocker",
+        "safe_attempts",
+        "resume_condition",
+    }
+    description = context.control_schema["description"]
+    assert "Exact goal_progress payload shape" in description
+    assert f'"goal_id":"{_EXPECTED_GOAL_FRAME.goal_id}"' in description
+    assert f'"goal_revision":{_EXPECTED_GOAL_FRAME.revision}' in description
+    assert '"summary":"<material progress already achieved>"' in description
+    assert '"next_step":"<next concrete action>"' in description
 
 
 def test_source_result_in_same_user_action_hides_goal_proposal_until_fresh_action(
@@ -625,7 +1007,7 @@ def test_source_result_in_same_user_action_hides_goal_proposal_until_fresh_actio
 
     assert context.control_schema is not None
     kinds = context.control_schema["input_schema"]["properties"]["kind"]["enum"]
-    assert kinds == ["clarification_request"]
+    assert kinds == ["direct_response", "clarification_request"]
     assert "fresh user action" in context.control_schema["description"]
 
 
@@ -783,10 +1165,8 @@ def test_openai_control_receipts_project_into_trusted_system_context() -> None:
     assert ModelTextBlock("continuing after receipt") in response.blocks
 
 
-# U3C-G2T1:六个合法 control 变体的归一化合同。wire 形状规则:kind 与
-# correlation_id 平铺;goal_proposal/goal_delta_proposal 分别以 goal_frame/delta
-# 携带 canonical 嵌套对象(字段拼写与 enum 字符串值同 contracts/checkpoint 现行
-# canonical 形状);其余变体字段平铺且与 immutable contract 字段名一致。
+# U3C-G2T1:合法 control 变体的归一化合同。goal_proposal 只携带语义草案；
+# Goal identity、workspace/authority binding、状态与时间不进入模型 wire。
 _CLARIFICATION_ARGUMENTS: dict[str, object] = {
     "kind": "clarification_request",
     "correlation_id": "ctl-clarify-1",
@@ -802,6 +1182,17 @@ _EXPECTED_CLARIFICATION = ClarificationRequest(
     boundary_code="target",
     missing_fields=("target_path",),
     safe_assumptions=("workspace stays read-only until confirmed",),
+)
+
+_DIRECT_RESPONSE_ARGUMENTS: dict[str, object] = {
+    "kind": "direct_response",
+    "correlation_id": "ctl-answer-1",
+    "text": "Paris is the capital of France.",
+}
+
+_EXPECTED_DIRECT_RESPONSE = DirectResponse(
+    correlation_id="ctl-answer-1",
+    text="Paris is the capital of France.",
 )
 
 _GOAL_FRAME_WIRE: dict[str, object] = {
@@ -888,9 +1279,82 @@ _GOAL_PROPOSAL_ARGUMENTS: dict[str, object] = {
     "goal_frame": _GOAL_FRAME_WIRE,
 }
 
-_EXPECTED_GOAL_PROPOSAL = GoalProposal(
-    correlation_id="ctl-proposal-1",
-    goal_frame=_EXPECTED_GOAL_FRAME,
+_GOAL_DRAFT_ARGUMENTS: dict[str, object] = {
+    "kind": "goal_proposal",
+    "correlation_id": "ctl-draft-1",
+    "user_outcome": "write a verified summary",
+    "beneficiary": "workspace owner",
+    "targets": ["notes/summary.md"],
+    "scope": ["notes/"],
+    "non_goals": ["do not edit other files"],
+    "assumptions": ["notes directory is the selected workspace"],
+    "proposed_criteria": [
+        {
+            "criterion_id": "crit-draft-1",
+            "description": "summary exists",
+            "oracle_kind": "filesystem_digest",
+            "artifact_path": "notes/summary.md",
+        }
+    ],
+    "requires_public_web": False,
+    "requires_local_process": False,
+    "next_step": "read the target directory",
+}
+
+_EXPECTED_GOAL_DRAFT = GoalDraftProposal(
+    correlation_id="ctl-draft-1",
+    user_outcome="write a verified summary",
+    beneficiary="workspace owner",
+    targets=("notes/summary.md",),
+    scope=("notes/",),
+    non_goals=("do not edit other files",),
+    assumptions=("notes directory is the selected workspace",),
+    proposed_criteria=(
+        ProposedCriterion(
+            "crit-draft-1",
+            "summary exists",
+            oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+            artifact_path="notes/summary.md",
+        ),
+    ),
+    next_step="read the target directory",
+    requires_public_web=False,
+    requires_local_process=False,
+)
+
+_DEFERRED_ARTIFACT_GOAL_DRAFT_ARGUMENTS: dict[str, object] = {
+    **_GOAL_DRAFT_ARGUMENTS,
+    "correlation_id": "ctl-draft-deferred-artifact",
+    "targets": ["locate and fix the existing greet implementation"],
+    "proposed_criteria": [
+        {
+            "criterion_id": "crit-draft-deferred-artifact",
+            "description": "the located greet implementation has the requested fix",
+            "oracle_kind": "filesystem_digest",
+            "artifact_path": "",
+        }
+    ],
+    "next_step": "inspect the workspace to locate the implementation",
+}
+
+_EXPECTED_DEFERRED_ARTIFACT_GOAL_DRAFT = GoalDraftProposal(
+    correlation_id="ctl-draft-deferred-artifact",
+    user_outcome="write a verified summary",
+    beneficiary="workspace owner",
+    targets=("locate and fix the existing greet implementation",),
+    scope=("notes/",),
+    non_goals=("do not edit other files",),
+    assumptions=("notes directory is the selected workspace",),
+    proposed_criteria=(
+        ProposedCriterion(
+            "crit-draft-deferred-artifact",
+            "the located greet implementation has the requested fix",
+            oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+        ),
+    ),
+    next_step="inspect the workspace to locate the implementation",
+    requires_public_web=False,
+    requires_local_process=False,
 )
 
 
@@ -1022,8 +1486,15 @@ _EXPECTED_BLOCKED = BlockedClaim(
 )
 
 _VALID_CONTROL_CASES = [
+    pytest.param(_DIRECT_RESPONSE_ARGUMENTS, _EXPECTED_DIRECT_RESPONSE, id="direct-response"),
+    pytest.param(_BEGIN_ANSWER_ARGUMENTS, _EXPECTED_BEGIN_ANSWER, id="begin-answer"),
     pytest.param(_CLARIFICATION_ARGUMENTS, _EXPECTED_CLARIFICATION, id="clarification-request"),
-    pytest.param(_GOAL_PROPOSAL_ARGUMENTS, _EXPECTED_GOAL_PROPOSAL, id="goal-proposal"),
+    pytest.param(_GOAL_DRAFT_ARGUMENTS, _EXPECTED_GOAL_DRAFT, id="goal-draft"),
+    pytest.param(
+        _DEFERRED_ARTIFACT_GOAL_DRAFT_ARGUMENTS,
+        _EXPECTED_DEFERRED_ARTIFACT_GOAL_DRAFT,
+        id="goal-draft-deferred-artifact",
+    ),
     pytest.param(_GOAL_PROGRESS_ARGUMENTS, _EXPECTED_CONTROL, id="goal-progress"),
     pytest.param(
         _GOAL_DELTA_PROPOSAL_ARGUMENTS,
@@ -1033,6 +1504,220 @@ _VALID_CONTROL_CASES = [
     pytest.param(_COMPLETION_ARGUMENTS, _EXPECTED_COMPLETION, id="completion-claim"),
     pytest.param(_BLOCKED_ARGUMENTS, _EXPECTED_BLOCKED, id="blocked-claim"),
 ]
+
+
+def _portable_goal_bound_context(
+    *,
+    allowed_kinds: list[str] | None = None,
+    goal_ids: list[object] | None = None,
+    goal_revisions: list[object] | None = None,
+) -> ContextPack:
+    schema = _control_schema()
+    properties = schema["input_schema"]["properties"]
+    properties.update(
+        {
+            "kind": {
+                "type": "string",
+                "enum": allowed_kinds
+                or ["goal_progress", "completion_claim", "blocked_claim"],
+            },
+            "goal_id": {"type": "string", "enum": goal_ids or ["goal-1"]},
+            "goal_revision": {
+                "type": "integer",
+                "enum": goal_revisions or [2],
+            },
+        }
+    )
+    return replace(_context(), control_schema=schema)
+
+
+@pytest.mark.parametrize(("provider_cls", "provider_type", "payload_builder"), PROVIDER_CASES)
+def test_portable_completion_restores_fully_omitted_runtime_goal_binding(
+    provider_cls, provider_type, payload_builder
+) -> None:
+    portable_arguments = copy.deepcopy(_COMPLETION_ARGUMENTS)
+    portable_arguments.pop("goal_id")
+    portable_arguments.pop("goal_revision")
+    payload = payload_builder(RESERVED_CONTROL_NAME, portable_arguments)
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+
+    with httpx.Client(transport=transport) as client:
+        response = provider_cls(config=_config(provider_type), http_client=client).generate(
+            _portable_goal_bound_context()
+        )
+
+    assert response.control == _EXPECTED_COMPLETION
+
+
+@pytest.mark.parametrize(("provider_cls", "provider_type", "payload_builder"), PROVIDER_CASES)
+@pytest.mark.parametrize(
+    "binding_patch",
+    (
+        {"goal_id": "goal-1"},
+        {"goal_revision": 2},
+        {"goal_id": "goal-forged", "goal_revision": 2},
+        {"goal_id": "goal-1", "goal_revision": 3},
+    ),
+)
+def test_portable_completion_rejects_partial_or_conflicting_runtime_goal_binding(
+    provider_cls, provider_type, payload_builder, binding_patch
+) -> None:
+    arguments = {
+        key: value
+        for key, value in _COMPLETION_ARGUMENTS.items()
+        if key not in {"goal_id", "goal_revision"}
+    }
+    arguments.update(binding_patch)
+    payload = payload_builder(RESERVED_CONTROL_NAME, arguments)
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+
+    with httpx.Client(transport=transport) as client:
+        provider = provider_cls(config=_config(provider_type), http_client=client)
+        with pytest.raises(ProviderProtocolError):
+            provider.generate(_portable_goal_bound_context())
+
+
+@pytest.mark.parametrize(("provider_cls", "provider_type", "payload_builder"), PROVIDER_CASES)
+def test_portable_completion_accepts_exact_supplied_runtime_goal_binding(
+    provider_cls, provider_type, payload_builder
+) -> None:
+    payload = payload_builder(RESERVED_CONTROL_NAME, copy.deepcopy(_COMPLETION_ARGUMENTS))
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+
+    with httpx.Client(transport=transport) as client:
+        response = provider_cls(config=_config(provider_type), http_client=client).generate(
+            _portable_goal_bound_context()
+        )
+
+    assert response.control == _EXPECTED_COMPLETION
+
+
+@pytest.mark.parametrize(("provider_cls", "provider_type", "payload_builder"), PROVIDER_CASES)
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda arguments: arguments.pop("criterion_evidence_refs"),
+        lambda arguments: arguments.__setitem__("criterion_evidence_refs", "evid-1"),
+        lambda arguments: arguments.__setitem__("unexpected", "field"),
+    ),
+    ids=("missing-refs", "wrong-refs-type", "extra-field"),
+)
+def test_portable_completion_restoration_keeps_other_fields_fail_closed(
+    provider_cls, provider_type, payload_builder, mutation
+) -> None:
+    arguments = {
+        key: value
+        for key, value in _COMPLETION_ARGUMENTS.items()
+        if key not in {"goal_id", "goal_revision"}
+    }
+    mutation(arguments)
+    payload = payload_builder(RESERVED_CONTROL_NAME, arguments)
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+
+    with httpx.Client(transport=transport) as client:
+        provider = provider_cls(config=_config(provider_type), http_client=client)
+        with pytest.raises(ProviderProtocolError):
+            provider.generate(_portable_goal_bound_context())
+
+
+@pytest.mark.parametrize(("provider_cls", "provider_type", "payload_builder"), PROVIDER_CASES)
+@pytest.mark.parametrize(
+    "context",
+    (
+        _context(),
+        _portable_goal_bound_context(goal_ids=["goal-1", "goal-2"]),
+        _portable_goal_bound_context(goal_revisions=[2, 3]),
+        _portable_goal_bound_context(allowed_kinds=["blocked_claim"]),
+    ),
+    ids=(
+        "no-control-schema",
+        "non-singleton-goal-id",
+        "non-singleton-revision",
+        "kind-not-allowed",
+    ),
+)
+def test_portable_completion_does_not_restore_without_an_exact_trusted_binding(
+    provider_cls, provider_type, payload_builder, context
+) -> None:
+    arguments = {
+        key: value
+        for key, value in _COMPLETION_ARGUMENTS.items()
+        if key not in {"goal_id", "goal_revision"}
+    }
+    payload = payload_builder(RESERVED_CONTROL_NAME, arguments)
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+
+    with httpx.Client(transport=transport) as client:
+        provider = provider_cls(config=_config(provider_type), http_client=client)
+        with pytest.raises(ProviderProtocolError):
+            provider.generate(context)
+
+
+@pytest.mark.parametrize(("provider_cls", "provider_type", "payload_builder"), PROVIDER_CASES)
+def test_strict_wrapped_control_never_restores_omitted_runtime_goal_binding(
+    provider_cls, provider_type, payload_builder
+) -> None:
+    arguments = {
+        "payload": {
+            key: value
+            for key, value in _COMPLETION_ARGUMENTS.items()
+            if key not in {"goal_id", "goal_revision"}
+        }
+    }
+    payload = payload_builder(RESERVED_CONTROL_NAME, arguments)
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+
+    with httpx.Client(transport=transport) as client:
+        provider = provider_cls(config=_config(provider_type), http_client=client)
+        with pytest.raises(ProviderProtocolError):
+            provider.generate(_portable_goal_bound_context())
+
+
+def test_openai_strict_mode_never_restores_an_unwrapped_completion_binding() -> None:
+    arguments = {
+        key: value
+        for key, value in _COMPLETION_ARGUMENTS.items()
+        if key not in {"goal_id", "goal_revision"}
+    }
+    payload = _openai_tool_call_payload(RESERVED_CONTROL_NAME, arguments)
+    context = replace(
+        _context(),
+        control_schema=reserved_control_schema(
+            goal_present=True,
+            goal_id="goal-1",
+            goal_revision=2,
+            expected_completion_evidence_refs=("evid-1", "evid-2"),
+            strict=True,
+        ),
+    )
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+
+    with httpx.Client(transport=transport) as client:
+        provider = OpenAICompatibleProvider(
+            config=replace(_config("openai_compatible"), strict_tools=True),
+            http_client=client,
+        )
+        with pytest.raises(ProviderProtocolError):
+            provider.generate(context)
+
+
+@pytest.mark.parametrize(("provider_cls", "provider_type", "payload_builder"), PROVIDER_CASES)
+@pytest.mark.parametrize("arguments", (_GOAL_PROGRESS_ARGUMENTS, _BLOCKED_ARGUMENTS))
+def test_non_completion_controls_do_not_restore_omitted_runtime_goal_binding(
+    provider_cls, provider_type, payload_builder, arguments
+) -> None:
+    portable_arguments = {
+        key: value
+        for key, value in arguments.items()
+        if key not in {"goal_id", "goal_revision"}
+    }
+    payload = payload_builder(RESERVED_CONTROL_NAME, portable_arguments)
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+
+    with httpx.Client(transport=transport) as client:
+        provider = provider_cls(config=_config(provider_type), http_client=client)
+        with pytest.raises(ProviderProtocolError):
+            provider.generate(_portable_goal_bound_context())
 
 
 def _inject_leading_text(provider_type: str, payload: dict[str, object], text: str) -> None:
@@ -1045,7 +1730,7 @@ def _inject_leading_text(provider_type: str, payload: dict[str, object], text: s
 
 @pytest.mark.parametrize(("provider_cls", "provider_type", "payload_builder"), PROVIDER_CASES)
 @pytest.mark.parametrize(("arguments", "expected_control"), _VALID_CONTROL_CASES)
-def test_all_six_valid_control_variants_normalize_to_typed_control(
+def test_all_valid_control_variants_normalize_to_typed_control(
     provider_cls, provider_type, payload_builder, arguments, expected_control
 ) -> None:
     payload = payload_builder(RESERVED_CONTROL_NAME, copy.deepcopy(arguments))
@@ -1060,6 +1745,67 @@ def test_all_six_valid_control_variants_normalize_to_typed_control(
     assert response.blocks == (ModelTextBlock("control narration"),)
     assert response.stop_reason == "tool_use"
     assert (response.input_tokens, response.output_tokens) == (11, 5)
+
+
+@pytest.mark.parametrize(("provider_cls", "provider_type", "payload_builder"), PROVIDER_CASES)
+def test_goal_draft_next_step_is_an_optional_hint(
+    provider_cls, provider_type, payload_builder
+) -> None:
+    arguments = copy.deepcopy(_GOAL_DRAFT_ARGUMENTS)
+    arguments.pop("next_step")
+    payload = payload_builder(RESERVED_CONTROL_NAME, arguments)
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+
+    with httpx.Client(transport=transport) as client:
+        response = provider_cls(config=_config(provider_type), http_client=client).generate(
+            _context()
+        )
+
+    assert response.control == replace(_EXPECTED_GOAL_DRAFT, next_step=None)
+
+
+@pytest.mark.parametrize(("provider_cls", "provider_type", "payload_builder"), PROVIDER_CASES)
+def test_goal_delta_accepts_only_exact_redundant_outer_goal_binding(
+    provider_cls, provider_type, payload_builder
+) -> None:
+    """兼容端点偶尔回声嵌套 binding；只有逐字一致的冗余副本可被规范化。"""
+
+    arguments = {
+        **copy.deepcopy(_GOAL_DELTA_PROPOSAL_ARGUMENTS),
+        "goal_id": _GOAL_DELTA_WIRE["goal_id"],
+        "goal_revision": _GOAL_DELTA_WIRE["expected_revision"],
+    }
+    payload = payload_builder(RESERVED_CONTROL_NAME, arguments)
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+
+    with httpx.Client(transport=transport) as client:
+        response = provider_cls(config=_config(provider_type), http_client=client).generate(
+            _context()
+        )
+
+    assert response.control == _EXPECTED_GOAL_DELTA_PROPOSAL
+
+
+@pytest.mark.parametrize(("provider_cls", "provider_type", "payload_builder"), PROVIDER_CASES)
+@pytest.mark.parametrize(
+    "outer_binding",
+    (
+        {"goal_id": "goal-forged", "goal_revision": 1},
+        {"goal_id": "goal-2", "goal_revision": 2},
+        {"goal_id": "goal-2"},
+    ),
+)
+def test_goal_delta_rejects_conflicting_or_partial_outer_goal_binding(
+    provider_cls, provider_type, payload_builder, outer_binding
+) -> None:
+    arguments = {**copy.deepcopy(_GOAL_DELTA_PROPOSAL_ARGUMENTS), **outer_binding}
+    payload = payload_builder(RESERVED_CONTROL_NAME, arguments)
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+
+    with httpx.Client(transport=transport) as client:
+        provider = provider_cls(config=_config(provider_type), http_client=client)
+        with pytest.raises(ProviderProtocolError):
+            provider.generate(_context())
 
 
 # U3C-G2T2:malformed/冲突 fail-closed 矩阵。每类违例取一个克隆变异用例,
@@ -1091,6 +1837,7 @@ _RECEIPT_ECHO_ARGUMENTS: dict[str, object] = {
 }
 
 _MALFORMED_CONTROL_ARGUMENT_CASES = [
+    pytest.param(_GOAL_PROPOSAL_ARGUMENTS, id="model-minted-goal-frame"),
     pytest.param(dict(_GOAL_PROGRESS_ARGUMENTS, note="extra"), id="unknown-top-level-field"),
     pytest.param(dict(_GOAL_PROGRESS_ARGUMENTS, summary=7), id="summary-not-string"),
     pytest.param(
@@ -1173,6 +1920,26 @@ def test_malformed_reserved_control_arguments_fail_closed(
         provider = provider_cls(config=_config(provider_type), http_client=client)
         with pytest.raises(ProviderProtocolError):
             provider.generate(_context())
+
+
+@pytest.mark.parametrize(("provider_cls", "provider_type", "payload_builder"), PROVIDER_CASES)
+def test_malformed_control_rejection_carries_bounded_shape_detail(
+    provider_cls, provider_type, payload_builder
+) -> None:
+    # 真实模型在 correction 后可能反复提交形状错误的 delta;修复消息只报
+    # malformed_control 时模型无从自纠(016 真实 E3 J11 实测)。归一化层必须
+    # 给出只含键名/期望形状的有界 detail——绝不含 wire 值、正文或 credential。
+    arguments = _mutated_goal_delta_proposal(lambda delta: delta.pop("updated_at"))
+    payload = payload_builder(RESERVED_CONTROL_NAME, copy.deepcopy(arguments))
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+    with httpx.Client(transport=transport) as client:
+        provider = provider_cls(config=_config(provider_type), http_client=client)
+        with pytest.raises(ProviderProtocolError) as raised:
+            provider.generate(_context())
+
+    assert raised.value.reason == "malformed_control"
+    detail = getattr(raised.value, "detail", None)
+    assert isinstance(detail, str) and "updated_at" in detail
 
 
 def _append_native_call(

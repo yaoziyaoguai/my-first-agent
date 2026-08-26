@@ -5,6 +5,7 @@ from agent.runtime.contracts import (
     ActionDisposition,
     ActiveRun,
     ActiveRunStatus,
+    BeginAnswer,
     ContinuationPhase,
     ConversationState,
     EgressClass,
@@ -105,6 +106,7 @@ class ExplodingPublicObservationRuntime:
 
 def test_unknown_tool_outcome_never_retries_automatically() -> None:
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-unknown-outcome")),
         ModelResponse((ModelToolCall("call-1", "explode", {}),)),
         ModelResponse((ModelTextBlock("continued"),)),
     )
@@ -133,7 +135,7 @@ def test_unknown_tool_outcome_never_retries_automatically() -> None:
 
     assert paused.status is RunStatus.AWAITING_RECOVERY
     assert paused.request is not None
-    assert len(provider.calls) == 1
+    assert len(provider.calls) == 2
 
     resolved = ResolveUnknownToolOutcome(
         conversation_id="conversation-1",
@@ -146,7 +148,7 @@ def test_unknown_tool_outcome_never_retries_automatically() -> None:
     completed = runtime.run_turn(resolved, store.load())
 
     assert completed.status is RunStatus.COMPLETED
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 3
     assert store.state.last_safe_result is not None
     assert store.state.last_safe_result.status is RunStatus.COMPLETED
     assert store.state.last_safe_result.run_id == "run-1"
@@ -207,6 +209,7 @@ def test_resume_of_crashed_executing_checkpoint_enters_recovery() -> None:
 
 def test_public_observation_recovery_is_typed_exactly_once_and_never_resends() -> None:
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-public-observation")),
         ModelResponse((ModelToolCall("call-1", "web_search", {}),)),
         ModelResponse((ModelTextBlock("continued without retry"),)),
     )
@@ -234,7 +237,7 @@ def test_public_observation_recovery_is_typed_exactly_once_and_never_resends() -
         store.load(),
     )
     assert paused.status is RunStatus.AWAITING_RECOVERY
-    assert len(provider.calls) == 1
+    assert len(provider.calls) == 2
     assert store.state.active_run is not None
     assert store.state.active_run.executing_intent is not None
 
@@ -260,7 +263,7 @@ def test_public_observation_recovery_is_typed_exactly_once_and_never_resends() -
     completed = runtime.run_turn(action, store.load())
 
     assert completed.status is RunStatus.COMPLETED
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 3
     observations = [
         fact
         for fact in store.state.facts
@@ -273,7 +276,7 @@ def test_public_observation_recovery_is_typed_exactly_once_and_never_resends() -
     replayed = runtime.run_turn(action, store.load())
     assert replayed.status is RunStatus.COMPLETED
     assert replayed.replayed is True
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 3
     assert len(
         [
             fact

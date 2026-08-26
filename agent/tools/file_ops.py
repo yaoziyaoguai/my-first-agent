@@ -519,8 +519,9 @@ def _write_spec() -> ToolSpec:
                     "type": "string",
                     "description": (
                         "Exact file content. For a .citations.json path, copy the raw "
-                        "build_citation_manifest ToolResult text byte-for-byte: no code "
-                        "fence, outer quotes, prefix, suffix, or trailing newline."
+                        "build_citation_manifest ToolResult text: no code fence, outer "
+                        "quotes, prefix, or suffix. A single transport-added final newline "
+                        "is accepted and removed before approval."
                     ),
                 },
             },

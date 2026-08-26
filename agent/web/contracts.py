@@ -27,6 +27,8 @@ class WebExtractedPage:
     citation_locator: str
     content: str
     request_id: str | None = None
+    truncated: bool = False
+    original_content_digest: str | None = None
 
 
 __all__ = ["WebExtractedPage", "WebSearchHit", "WebSearchResponse"]

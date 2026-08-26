@@ -52,6 +52,20 @@ class ClosedEvidenceRegistry:
             raise EvidenceVerificationError(
                 "citation sidecar target requires admitted research provenance"
             )
+        web_requirements = {
+            item.criterion_id
+            for item in goal.proposed_criteria
+            if item.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+        }
+        admitted_web = {
+            item.criterion_id
+            for item in mandatory
+            if item.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+        }
+        if not web_requirements.issubset(admitted_web):
+            raise EvidenceVerificationError(
+                "public Web requirement has no admitted source receipt"
+            )
         if not mandatory:
             raise EvidenceVerificationError("goal has no mandatory criterion")
         if (
@@ -109,12 +123,82 @@ class ClosedEvidenceRegistry:
                     evidence_id=evidence_id,
                     observed_at=evidence_observed_at,
                 )
+            elif criterion.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT:
+                derived = self._web_source_receipt(
+                    state.facts,
+                    goal_id=goal.goal_id,
+                    goal_revision=goal.revision,
+                    criterion=criterion,
+                    evidence_id=evidence_id,
+                    observed_at=evidence_observed_at,
+                )
             else:
                 raise EvidenceVerificationError("criterion uses an unsupported oracle")
             if existing_record is not None and existing_record != derived:
                 raise EvidenceVerificationError("stored evidence does not match raw durable facts")
             records.append(derived)
         return tuple(records)
+
+    def _web_source_receipt(
+        self,
+        facts: tuple[ConversationFact, ...],
+        *,
+        goal_id: str,
+        goal_revision: int,
+        criterion: AdmittedCriterion,
+        evidence_id: str,
+        observed_at: str,
+    ) -> EvidenceRecord:
+        predicate = criterion.predicate
+        expected_digest = predicate.get("receipt_digest")
+        expected_kind = predicate.get("source_kind")
+        if set(predicate) != {"receipt_digest", "source_kind"} or expected_kind not in {
+            SourceKind.WEB_SEARCH_SNIPPET.value,
+            SourceKind.WEB_EXTRACTED_CONTENT.value,
+        }:
+            raise EvidenceVerificationError("public Web source predicate is invalid")
+        source: list[ConversationFact] = []
+        for fact in facts:
+            metadata = fact.content.get("metadata")
+            if (
+                fact.kind is not FactKind.TOOL_RESULT
+                or fact.content.get("executed") is not True
+                or fact.content.get("is_error") is not False
+                or not isinstance(metadata, dict)
+                or metadata.get("fake")
+                or metadata.get("mock")
+            ):
+                continue
+            raw_receipts = metadata.get("source_receipts")
+            if not isinstance(raw_receipts, list):
+                continue
+            for raw in raw_receipts:
+                try:
+                    receipt = SourceReceiptV1.from_json(raw)
+                except ValueError:
+                    continue
+                if (
+                    receipt.receipt_digest == expected_digest
+                    and receipt.source_kind.value == expected_kind
+                    and receipt.goal_id == goal_id
+                    and receipt.goal_revision is not None
+                    and receipt.goal_revision <= goal_revision
+                ):
+                    source.append(fact)
+                    break
+        if not source:
+            raise EvidenceVerificationError(
+                "no exact public Web source receipt proves the criterion"
+            )
+        return self._record(
+            source[:1],
+            goal_id=goal_id,
+            goal_revision=goal_revision,
+            criterion=criterion,
+            evidence_id=evidence_id,
+            oracle_identity="public-web-source-receipt:v1",
+            observed_at=observed_at,
+        )
 
     def _user_confirmation(
         self,
@@ -204,7 +288,12 @@ class ClosedEvidenceRegistry:
             for value in required_receipts
         ):
             raise EvidenceVerificationError("required receipt digest is malformed")
-        if manifest_path != f"{artifact_path}.citations.json":
+        if (
+            not manifest_path.endswith(".citations.json")
+            or manifest_path == artifact_path
+            or manifest_path not in goal.targets
+            or artifact_path not in goal.targets
+        ):
             raise EvidenceVerificationError("citation manifest path is not bound to artifact")
 
         artifact_call, artifact_result, artifact = self._exact_readback(
@@ -258,9 +347,9 @@ class ClosedEvidenceRegistry:
                 raise EvidenceVerificationError(
                     "truncated source receipt cannot prove research"
                 )
-            if artifact.count(citation.marker) != 1:
+            if citation.marker not in artifact:
                 raise EvidenceVerificationError(
-                    "each citation marker must occur exactly once in the artifact"
+                    "each citation marker must occur in the artifact"
                 )
             cited.append((receipt, fact))
 

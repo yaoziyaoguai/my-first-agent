@@ -22,6 +22,7 @@ from tests.kernel.fakes import (
     InMemoryCheckpointStore,
     ScriptedProvider,
     conversation_with_active_goal,
+    goal_noop_response,
 )
 
 
@@ -72,11 +73,14 @@ def test_cas_failure_before_executing_invokes_zero_callables() -> None:
         calls += 1
         return "done"
 
-    # 有 Goal 时 save#4 才是 EXECUTING checkpoint;否则会在 goal guard 处早退,
-    # 注入点永远打不中 mark_executing,断言只会空洞地通过。
+    # 已有 Goal 的用户补充先由 no-op delta 消费并记录 replan；save#6 才是
+    # EXECUTING checkpoint。注入点必须命中 mark_executing，断言才不空洞。
     store = InMemoryCheckpointStore(conversation_with_active_goal())
-    store.fail_on_save = 4
-    provider = ScriptedProvider(ModelResponse((ModelToolCall("call-1", "write_fixture", {}),)))
+    store.fail_on_save = 6
+    provider = ScriptedProvider(
+        goal_noop_response("effect-cas-user-supplement"),
+        ModelResponse((ModelToolCall("call-1", "write_fixture", {}),)),
+    )
 
     result = _runtime(store, provider, effect).run_turn(_action(store.state), store.load())
 
@@ -93,8 +97,9 @@ def test_result_save_failure_enters_unknown_outcome_recovery() -> None:
         return "done"
 
     store = InMemoryCheckpointStore(conversation_with_active_goal())
-    store.fail_on_save = 5
+    store.fail_on_save = 7
     provider = ScriptedProvider(
+        goal_noop_response("effect-save-user-supplement"),
         ModelResponse((ModelToolCall("call-1", "write_fixture", {}),)),
         ModelResponse((ModelTextBlock("must not auto retry"),)),
     )
@@ -103,7 +108,7 @@ def test_result_save_failure_enters_unknown_outcome_recovery() -> None:
 
     assert result.status is RunStatus.AWAITING_RECOVERY
     assert calls == 1
-    assert len(provider.calls) == 1
+    assert len(provider.calls) == 2
     assert store.state.active_run is not None
     assert store.state.active_run.status.value == "awaiting_recovery"
 
@@ -118,6 +123,7 @@ def test_write_callable_exception_enters_unknown_outcome_recovery() -> None:
 
     store = InMemoryCheckpointStore(conversation_with_active_goal())
     provider = ScriptedProvider(
+        goal_noop_response("effect-exception-user-supplement"),
         ModelResponse((ModelToolCall("call-1", "write_fixture", {}),)),
         ModelResponse((ModelTextBlock("must not auto retry"),)),
     )
@@ -129,7 +135,7 @@ def test_write_callable_exception_enters_unknown_outcome_recovery() -> None:
 
     assert result.status is RunStatus.AWAITING_RECOVERY
     assert calls == 1
-    assert len(provider.calls) == 1
+    assert len(provider.calls) == 2
     assert store.state.active_run is not None
     assert store.state.active_run.status.value == "awaiting_recovery"
 

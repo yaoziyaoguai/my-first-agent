@@ -7,6 +7,7 @@ revision、BudgetReport 的 source selection，以及召回内容进入下一 Co
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from agent.memory.contracts import ProviderTrustProfile
@@ -17,6 +18,7 @@ from agent.runtime.contracts import (
     ContextQuery,
     ContextSourceLimits,
     ConversationState,
+    InteractionState,
     SubmitMessage,
 )
 
@@ -69,7 +71,10 @@ def test_memory_candidate_appears_as_untrusted_context_under_budget(tmp_path: Pa
         workspace_identity_digest=SCOPE,
         context_scope_digest=SCOPE,
     )
-    state = ConversationState.new("c1")
+    state = replace(
+        ConversationState.new("c1"),
+        interaction_state=InteractionState.ANSWERING,
+    )
     action = SubmitMessage(
         conversation_id="c1",
         action_seq=1,

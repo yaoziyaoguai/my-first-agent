@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from collections.abc import Mapping
 from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
@@ -18,6 +20,7 @@ from agent.runtime.contracts import (
     ActiveRunStatus,
     ApprovalGrant,
     ApprovalRequest,
+    BeginAnswer,
     BlockedClaim,
     CancelGoal,
     CancelRun,
@@ -41,6 +44,7 @@ from agent.runtime.contracts import (
     GoalBootstrap,
     GoalDelta,
     GoalDeltaProposal,
+    GoalDraftProposal,
     GoalFrame,
     GoalProgress,
     GoalProposal,
@@ -61,6 +65,8 @@ from agent.runtime.contracts import (
     RevokeProcessAuthority,
     RunStatus,
     SideEffectClass,
+    SourceKind,
+    SourceReceiptV1,
     SubmitMessage,
     ToolCall,
     canonical_action_digest,
@@ -71,6 +77,419 @@ from agent.runtime.contracts import (
 
 class GoalRevisionConflictError(ValueError):
     pass
+
+
+_EXPLICIT_PUBLIC_WEB_PATTERNS = (
+    re.compile(
+        r"(?:公开(?:的)?(?:资料|信息|来源|说明|网页|网站|\s*web)|"
+        r"(?:联网|在线|网上)(?:资料|信息|来源|搜索|查找)|"
+        r"(?:最新|当前).{0,16}(?:公开|网页|网站|web|在线))",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:public\s+(?:web|source|sources|information)|"
+        r"web\s+(?:research|source|sources|search)|"
+        r"online\s+(?:source|sources|research|information)|"
+        r"(?:latest|current).{0,24}(?:public|online|web)|"
+        r"(?:latest|current)\s+(?:release|package|version|versions|information|"
+        r"info|documentation|docs|data|news))\b",
+        re.IGNORECASE,
+    ),
+)
+_EXPLICIT_LOCAL_PROCESS_PATTERNS = (
+    re.compile(
+        r"(?:^|[\n:：])\s*(?:(?:please\s+)?(?:run|execute)\s+|"
+        r"(?:请\s*)?(?:运行|执行)\s*)"
+        r"[A-Za-z0-9_.-]+\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:调用|使用)\s*local_process\b|"
+        r"\b(?:call|invoke)\s+(?:the\s+)?local_process\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:运行|执行|跑|启动).{0,24}(?:测试|校验|验证|检查|构建|命令|脚本|校验器)|"
+        r"(?:测试|构建|校验|验证).{0,16}(?:运行|执行|确认|通过)|"
+        r"(?:运行|执行)\s+(?:\./|/)[^\s,;，。]+",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:run|execute|build|test|validate|check)\b.{0,40}"
+        r"(?:test|tests|validator|command|script|build|format|project)\b|"
+        r"\b(?:run|execute)\s+(?:\./|/)[^\s,;]+",
+        re.IGNORECASE,
+    ),
+)
+_NON_AUTHORITATIVE_PUBLIC_WEB_SPANS = (
+    re.compile(
+        r"\b(?:explain|explains|explaining|describe|describes|describing)\b\s+"
+        r"(?:the\s+)?(?:latest|current)\s+(?:release|package|version|versions)"
+        r"(?:\s+(?:versioning|information|docs?|data))?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:contain|contains|containing|include|includes|including|mention|"
+        r"mentions|mentioning)\b[^,.;!?]{0,24}\b(?:the\s+)?phrase\s+"
+        r"(?:public\s+web\s+research|web\s+(?:research|search)|"
+        r"(?:latest|current)\s+(?:release|package|version|information))\b",
+        re.IGNORECASE,
+    ),
+)
+_NON_AUTHORITATIVE_LOCAL_PROCESS_SPANS = (
+    re.compile(
+        r"^\s*how\s+(?:do|can|should|would)\s+(?:i|we|you)\s+"
+        r"(?:run|execute|build|test|validate|check)\b[^?]*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*what\s+(?:command|script|tool)\b[^?]{0,32}"
+        r"(?:run|runs|execute|executes|test|tests|validate|validates)\b[^?]*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*(?:如何|怎么|为什么)[^，。；;!?！？]{0,32}"
+        r"(?:运行|执行|测试|校验|验证)[^，。；;!?！？]*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:explain|explains|explaining|describe|describes|describing)\b\s+"
+        r"how\s+to\s+(?:run|execute|build|test|validate|check)\s+"
+        r"(?:the\s+)?(?:project\s+)?(?:tests?|validator|command|script|build)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:contain|contains|containing|include|includes|including|mention|"
+        r"mentions|mentioning)\b[^,.;!?]{0,24}\b(?:the\s+)?phrase\s+"
+        r"(?:call|invoke)\s+(?:the\s+)?local_process\b",
+        re.IGNORECASE,
+    ),
+)
+_NEGATED_PUBLIC_WEB_PATTERNS = (
+    re.compile(
+        r"(?:不要|别|不得|禁止|无需|不用|不需要|不准)"
+        r"[^，。；;,.!?！？]{0,16}"
+        r"(?:联网|上网|在线|网上|公开(?:资料|信息|来源|网页|网站)|web)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:仅|只)(?:使用|用|在)?[^，。；;,.!?！？]{0,8}本地"
+        r"[^，。；;,.!?！？]{0,12}(?:资料|信息|来源|文件|数据)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:do\s+not|don't|must\s+not|never|without|no\s+need\s+to)"
+        r"[^,.;!?]{0,32}(?:web|online|internet|public\s+source|external\s+source|"
+        r"(?:latest|current)[^,.;!?]{0,16}(?:release|package|version|information|"
+        r"info|documentation|docs|data|news))",
+        re.IGNORECASE,
+    ),
+)
+_NEGATED_LOCAL_PROCESS_PATTERNS = (
+    re.compile(
+        r"(?:不要|别|不得|禁止|无需|不用|不需要|不准)"
+        r"[^，。；;,.!?！？]{0,16}(?:调用|使用)?\s*local_process\b|"
+        r"\b(?:do\s+not|don't|must\s+not|never|without|no\s+need\s+to)"
+        r"[^,.;!?]{0,24}(?:call|invoke)?\s*(?:the\s+)?local_process\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:不要|别|不得|禁止|无需|不用|不需要|不准)"
+        r"[^，。；;,.!?！？]{0,16}"
+        r"(?:运行|执行|跑|启动|测试|构建|校验|验证|命令|脚本|校验器)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:do\s+not|don't|must\s+not|never|without|no\s+need\s+to)"
+        r"[^,.;!?]{0,24}(?:run|execute|build|test|validate|validator|command|script)",
+        re.IGNORECASE,
+    ),
+)
+_REQUIREMENT_CLAUSE_BOUNDARY = re.compile(
+    r"(?:[，。；;,!?！？]+|\.(?!/)|但是|但|而是|\bbut\b|\bhowever\b)",
+    re.IGNORECASE,
+)
+_PROCESS_OUTPUT_PATH_PATTERN = re.compile(
+    r"(?:^|[/_.-])(?:test|tests|testing|result|results|output|outputs|log|logs|"
+    r"coverage|junit|check|validator)(?:[/_.-]|$)",
+    re.IGNORECASE,
+)
+_PROCESS_OUTPUT_DESCRIPTION_PATTERN = re.compile(
+    r"(?:测试|校验|验证).{0,16}(?:输出|结果|日志|报告|文件)|"
+    r"\b(?:test|validation|validator|check).{0,24}(?:output|result|log|report|file)\b",
+    re.IGNORECASE,
+)
+_PROCESS_ENTRYPOINT_PATTERN = re.compile(
+    r"(?:运行|执行|run|execute)\s+((?:\./|/)[^\s，。；;,!?！？]+)",
+    re.IGNORECASE,
+)
+_PROCESS_ENTRYPOINT_CLAUSE_BOUNDARY = re.compile(
+    r"(?:[，。；;,!?！？]+|\.(?=\s|$)|但是|但|而是|\bbut\b|\bhowever\b)",
+    re.IGNORECASE,
+)
+
+
+def _goal_source_text(
+    state: ConversationState,
+    bootstrap: GoalBootstrap,
+) -> str:
+    source = next(
+        (
+            fact
+            for fact in state.facts
+            if fact.fact_id == bootstrap.source_fact_id
+            and fact.kind is FactKind.USER_MESSAGE
+        ),
+        None,
+    )
+    text = source.content.get("text") if source is not None else None
+    return text if isinstance(text, str) else ""
+
+
+def _matches_any(text: str, patterns: tuple[re.Pattern[str], ...]) -> bool:
+    return any(pattern.search(text) is not None for pattern in patterns)
+
+
+def _without_non_authoritative_spans(
+    text: str,
+    patterns: tuple[re.Pattern[str], ...],
+) -> str:
+    candidate = text
+    for pattern in patterns:
+        candidate = pattern.sub(" ", candidate)
+    return candidate
+
+
+def _classify_explicit_requirement(
+    text: str,
+    *,
+    positive_patterns: tuple[re.Pattern[str], ...],
+    negative_patterns: tuple[re.Pattern[str], ...],
+    non_authoritative_spans: tuple[re.Pattern[str], ...] = (),
+) -> bool | None:
+    """返回 authoritative 文本对一种 effect 的明确要求、禁止或未表态。"""
+
+    classification: bool | None = None
+    for clause in _REQUIREMENT_CLAUSE_BOUNDARY.split(text):
+        if not clause.strip():
+            continue
+        candidate = _without_non_authoritative_spans(
+            clause,
+            non_authoritative_spans,
+        )
+        negative = _matches_any(candidate, negative_patterns)
+        if _matches_any(candidate, positive_patterns) and not negative:
+            classification = True
+        elif negative:
+            classification = False
+    return classification
+
+
+def _public_web_requirement(text: str) -> bool | None:
+    return _classify_explicit_requirement(
+        text,
+        positive_patterns=_EXPLICIT_PUBLIC_WEB_PATTERNS,
+        negative_patterns=_NEGATED_PUBLIC_WEB_PATTERNS,
+        non_authoritative_spans=_NON_AUTHORITATIVE_PUBLIC_WEB_SPANS,
+    )
+
+
+def _local_process_requirement(text: str) -> bool | None:
+    return _classify_explicit_requirement(
+        text,
+        positive_patterns=_EXPLICIT_LOCAL_PROCESS_PATTERNS,
+        negative_patterns=_NEGATED_LOCAL_PROCESS_PATTERNS,
+        non_authoritative_spans=_NON_AUTHORITATIVE_LOCAL_PROCESS_SPANS,
+    )
+
+
+def normalize_process_entrypoint(value: str) -> str:
+    """规范化 authoritative fact 与 ToolCall 中的同一个 entrypoint token。"""
+
+    return value.strip().rstrip("。；;,.!?！？")
+
+
+def authoritative_process_entrypoints(state: ConversationState) -> frozenset[str]:
+    """提取当前 Goal 中仍生效的显式 process entrypoint。
+
+    这里只读取 Runtime 已接受的 authoritative user facts。否定 clause 会撤销同一
+    path，避免 ``不要运行 ./old，只运行 ./check`` 被错误解释成两个必跑入口。
+    没有显式 path 时返回空集；该场景仍由 exact process approval 绑定实际命令。
+    """
+
+    goal = state.goal
+    if goal is None:
+        return frozenset()
+    source_ids = set(goal.created_from_fact_ids)
+    requested: set[str] = set()
+    for fact in state.facts:
+        if fact.fact_id not in source_ids or fact.kind is not FactKind.USER_MESSAGE:
+            continue
+        text = fact.content.get("text")
+        if not isinstance(text, str):
+            continue
+        clauses = tuple(
+            _without_non_authoritative_spans(
+                clause,
+                _NON_AUTHORITATIVE_LOCAL_PROCESS_SPANS,
+            )
+            for clause in _PROCESS_ENTRYPOINT_CLAUSE_BOUNDARY.split(text)
+        )
+        if (
+            fact.content.get("control") == "goal_correction"
+            and any(
+                _PROCESS_ENTRYPOINT_PATTERN.search(clause) is not None
+                for clause in clauses
+            )
+        ):
+            # 显式 entrypoint correction 替换旧 command authority；artifact-only
+            # correction 没有 process path，因此仍保留原来的 exact binding。
+            requested.clear()
+        for clause in clauses:
+            entrypoints = {
+                normalize_process_entrypoint(match.group(1))
+                for match in _PROCESS_ENTRYPOINT_PATTERN.finditer(clause)
+            }
+            if not entrypoints:
+                continue
+            negative = _matches_any(clause, _NEGATED_LOCAL_PROCESS_PATTERNS)
+            if negative:
+                requested.difference_update(entrypoints)
+            elif _matches_any(clause, _EXPLICIT_LOCAL_PROCESS_PATTERNS):
+                requested.update(entrypoints)
+    return frozenset(requested)
+
+
+def process_entrypoint_matches_authority(
+    state: ConversationState,
+    executable: str,
+) -> bool:
+    """显式 path 是 evidence admission 下界；无 path 时由 exact approval 绑定。"""
+
+    requested = authoritative_process_entrypoints(state)
+    return not requested or normalize_process_entrypoint(executable) in requested
+
+
+def _looks_like_invented_process_artifact(
+    criterion: ProposedCriterion,
+    *,
+    source_text: str,
+) -> bool:
+    path = criterion.artifact_path
+    if path is None or path.casefold() in source_text.casefold():
+        return False
+    return (
+        _PROCESS_OUTPUT_PATH_PATTERN.search(path) is not None
+        or _PROCESS_OUTPUT_DESCRIPTION_PATTERN.search(criterion.description) is not None
+    )
+
+
+def _uses_runtime_owned_obligation_id(criterion: ProposedCriterion) -> bool:
+    return criterion.criterion_id.startswith(
+        ("criterion:required-public-web:", "criterion:required-local-process:")
+    )
+
+
+def _is_runtime_owned_obligation(criterion: ProposedCriterion) -> bool:
+    return (
+        criterion.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+        and criterion.criterion_id.startswith("criterion:required-public-web:")
+    ) or (
+        criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+        and criterion.criterion_id.startswith("criterion:required-local-process:")
+    )
+
+
+def _apply_correction_lower_bounds(
+    goal: GoalFrame,
+    correction: ConversationFact,
+) -> GoalFrame:
+    """从 authoritative correction 补铸模型不能省略的 Web/process 义务。"""
+
+    text = correction.content.get("text")
+    source_text = text if isinstance(text, str) else ""
+    required = tuple(
+        oracle_kind
+        for oracle_kind, classification in (
+            (EvidenceOracleKind.WEB_SOURCE_RECEIPT, _public_web_requirement(source_text)),
+            (EvidenceOracleKind.TOOL_RECEIPT, _local_process_requirement(source_text)),
+        )
+        if classification is True
+    )
+    if not required:
+        return goal
+    identity = canonical_json_digest(
+        {
+            "goal_id": goal.goal_id,
+            "correction_fact_id": correction.fact_id,
+            "correction_text": source_text,
+        }
+    )
+    criteria = goal.proposed_criteria
+    for oracle_kind in required:
+        runtime_owned = tuple(
+            item
+            for item in criteria
+            if item.oracle_kind is oracle_kind and _is_runtime_owned_obligation(item)
+        )
+        criteria = tuple(
+            item
+            for item in criteria
+            if item.oracle_kind is not oracle_kind or _is_runtime_owned_obligation(item)
+        )
+        if runtime_owned:
+            continue
+        if oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT:
+            criterion = ProposedCriterion(
+                criterion_id=f"criterion:required-public-web:{identity[:16]}",
+                description="the requested public Web source was actually retrieved",
+                oracle_kind=oracle_kind,
+            )
+        else:
+            criterion = ProposedCriterion(
+                criterion_id=f"criterion:required-local-process:{identity[:16]}",
+                description=(
+                    "the explicitly requested local validation process exits successfully"
+                ),
+                oracle_kind=oracle_kind,
+            )
+        criteria = (*criteria, criterion)
+    retained_ids = {item.criterion_id for item in criteria}
+    return replace(
+        goal,
+        proposed_criteria=criteria,
+        admitted_criteria=tuple(
+            item for item in goal.admitted_criteria if item.criterion_id in retained_ids
+        ),
+    )
+
+
+def _unconsumed_goal_correction(
+    state: ConversationState,
+    goal: GoalFrame,
+) -> ConversationFact | None:
+    return next(
+        (
+            fact
+            for fact in reversed(state.facts)
+            if fact.kind is FactKind.USER_MESSAGE
+            and fact.content.get("control") == "goal_correction"
+            and fact.fact_id not in goal.created_from_fact_ids
+        ),
+        None,
+    )
+
+
+def goal_correction_adds_runtime_obligation(state: ConversationState) -> bool:
+    """判断当前 correction 是否让 Runtime lower-bound 发生真实变化。"""
+
+    goal = state.goal
+    if goal is None:
+        return False
+    correction = _unconsumed_goal_correction(state, goal)
+    if correction is None:
+        return False
+    return _apply_correction_lower_bounds(goal, correction) != goal
 
 
 def _require_new_goal(state: ConversationState, goal: GoalFrame) -> None:
@@ -130,6 +549,38 @@ def accept_clarification_request(
     )
 
 
+def accept_begin_answer(
+    state: ConversationState,
+    request: BeginAnswer,
+) -> ConversationState:
+    """持久化本 run 的只读问答选择，不授予 Goal 或 effect authority。"""
+
+    _require_unused_correlation(state, request.correlation_id)
+    if state.goal is not None:
+        raise ValueError("begin_answer requires no Goal")
+    if state.active_run is None:
+        raise ValueError("begin_answer requires an active run")
+    if state.interaction_state is InteractionState.ANSWERING:
+        raise ValueError("begin_answer was already accepted for this run")
+    if source_result_since_latest_user(state):
+        raise ValueError("begin_answer must precede source retrieval")
+    accepted_revision = state.revision + 1
+    receipt = ControlReceipt.create(
+        correlation_id=request.correlation_id,
+        control_kind="begin_answer",
+        goal_id=None,
+        goal_revision=None,
+        accepted_state_revision=accepted_revision,
+        payload_digest=canonical_json_digest({"interaction_state": "answering"}),
+    )
+    return replace(
+        state,
+        revision=accepted_revision,
+        interaction_state=InteractionState.ANSWERING,
+        control_receipts=(*state.control_receipts, receipt),
+    )
+
+
 def accept_goal_proposal(
     state: ConversationState,
     proposal: GoalProposal,
@@ -169,6 +620,131 @@ def accept_goal_proposal(
         revision=accepted_revision,
         goal=goal,
         control_receipts=(*state.control_receipts, receipt),
+    )
+
+
+def accept_goal_draft_proposal(
+    state: ConversationState,
+    proposal: GoalDraftProposal,
+    bootstrap: GoalBootstrap | None,
+    *,
+    admitted_at: str,
+) -> ConversationState:
+    """由模型语义草案铸造完整 Goal；Runtime-owned 字段不经过模型 wire。"""
+
+    if bootstrap is None:
+        raise ValueError("model GoalDraftProposal requires Runtime goal bootstrap")
+    source_text = _goal_source_text(state, bootstrap)
+    public_web_requirement = _public_web_requirement(source_text)
+    local_process_requirement = _local_process_requirement(source_text)
+    # Web/process 义务会抬高 evidence 与 authority 下界；模型可以描述，
+    # 但只有 authoritative user fact 可以创建。
+    requires_public_web = public_web_requirement is True
+    requires_local_process = local_process_requirement is True
+    mismatched_artifacts = tuple(
+        item.artifact_path
+        for item in proposal.proposed_criteria
+        if item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
+        and item.artifact_path is not None
+        and item.artifact_path not in proposal.targets
+    )
+    if mismatched_artifacts:
+        raise ValueError(
+            "filesystem artifact criteria must match targets; use one deferred "
+            "filesystem criterion when discovery is required, and represent requested "
+            "test success with requires_local_process rather than an invented output file"
+        )
+    invented_process_artifacts = tuple(
+        item.artifact_path
+        for item in proposal.proposed_criteria
+        if requires_local_process
+        and item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
+        and _looks_like_invented_process_artifact(item, source_text=source_text)
+    )
+    if invented_process_artifacts:
+        raise ValueError(
+            "filesystem criterion looks like an invented process output that the user "
+            "did not request; remove it and represent run/test/validation success only "
+            "with requires_local_process=true"
+        )
+    goal_identity = canonical_json_digest(
+        {
+            "correlation_id": proposal.correlation_id,
+            "source_fact_id": bootstrap.source_fact_id,
+            "workspace_identity_digest": bootstrap.workspace_identity_digest,
+            "authority_snapshot": bootstrap.authority_snapshot,
+            "user_outcome": proposal.user_outcome,
+            "targets": proposal.targets,
+        }
+    )
+    if any(
+        _uses_runtime_owned_obligation_id(item)
+        for item in proposal.proposed_criteria
+    ):
+        raise ValueError(
+            "criterion:required-* identifiers are reserved for Runtime-owned obligations"
+        )
+    proposed_criteria = tuple(
+        item
+        for item in proposal.proposed_criteria
+        if item.oracle_kind
+        not in (
+            EvidenceOracleKind.WEB_SOURCE_RECEIPT,
+            EvidenceOracleKind.TOOL_RECEIPT,
+        )
+    )
+    if requires_public_web:
+        proposed_criteria = (
+            *(
+                item
+                for item in proposed_criteria
+                if item.oracle_kind is not EvidenceOracleKind.WEB_SOURCE_RECEIPT
+            ),
+            ProposedCriterion(
+                criterion_id=f"criterion:required-public-web:{goal_identity[:16]}",
+                description="the requested public Web source was actually retrieved",
+                oracle_kind=EvidenceOracleKind.WEB_SOURCE_RECEIPT,
+            ),
+        )
+    if requires_local_process:
+        proposed_criteria = (
+            *(
+                item
+                for item in proposed_criteria
+                if item.oracle_kind is not EvidenceOracleKind.TOOL_RECEIPT
+            ),
+            ProposedCriterion(
+                criterion_id=f"criterion:required-local-process:{goal_identity[:16]}",
+                description=(
+                    "the explicitly requested local validation process exits successfully"
+                ),
+                oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+            ),
+        )
+    goal = GoalFrame(
+        goal_id=f"goal-v1-{goal_identity[:24]}",
+        revision=1,
+        created_from_fact_ids=(bootstrap.source_fact_id,),
+        workspace_identity_digest=bootstrap.workspace_identity_digest,
+        user_outcome=proposal.user_outcome,
+        beneficiary=proposal.beneficiary,
+        targets=proposal.targets,
+        scope=proposal.scope,
+        non_goals=proposal.non_goals,
+        assumptions=proposal.assumptions,
+        proposed_criteria=proposed_criteria,
+        admitted_criteria=(),
+        authority_snapshot=bootstrap.authority_snapshot,
+        status=GoalStatus.GOAL_READY,
+        created_at=admitted_at,
+        updated_at=admitted_at,
+        progress_summary=None,
+        next_step=proposal.next_step,
+    )
+    return accept_goal_proposal(
+        state,
+        GoalProposal(proposal.correlation_id, goal),
+        bootstrap,
     )
 
 
@@ -239,10 +815,53 @@ def apply_goal_delta(state: ConversationState, delta: GoalDelta) -> Conversation
     }
     for field_name in tuple_fields & updates.keys():
         updates[field_name] = tuple(updates[field_name])
+    semantic_source_changed = bool(
+        {"user_outcome", "scope"} & delta.updates.keys()
+    )
     if "proposed_criteria" in updates:
         updates["proposed_criteria"] = tuple(
             _decode_delta_proposed_criterion(item) for item in updates["proposed_criteria"]
         )
+        if any(
+            _uses_runtime_owned_obligation_id(item)
+            for item in updates["proposed_criteria"]
+        ):
+            raise ValueError(
+                "criterion:required-* identifiers are reserved for Runtime-owned "
+                "obligations"
+            )
+        # 模型可重写文件 criteria，但 Web/process 义务只能由 Runtime 从
+        # authoritative user fact 补铸。旧的 Runtime lower-bound 会继续保留；
+        # 模型既不能删除它，也不能借 correction 凭空增加同类 authority。
+        updates["proposed_criteria"] = tuple(
+            item
+            for item in updates["proposed_criteria"]
+            if item.oracle_kind
+            not in (
+                EvidenceOracleKind.WEB_SOURCE_RECEIPT,
+                EvidenceOracleKind.TOOL_RECEIPT,
+            )
+        )
+        updated_ids = {item.criterion_id for item in updates["proposed_criteria"]}
+        admitted_web_ids = {
+            item.criterion_id
+            for item in goal.admitted_criteria
+            if item.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+        }
+        carried = tuple(
+            item
+            for item in goal.proposed_criteria
+            if (
+                _is_runtime_owned_obligation(item)
+                or (
+                    not semantic_source_changed
+                    and item.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+                    and item.criterion_id in admitted_web_ids
+                )
+            )
+            and item.criterion_id not in updated_ids
+        )
+        updates["proposed_criteria"] = (*updates["proposed_criteria"], *carried)
     authority_fields = {
         "user_outcome",
         "beneficiary",
@@ -262,6 +881,42 @@ def apply_goal_delta(state: ConversationState, delta: GoalDelta) -> Conversation
         ),
     )
     updated_goal = replace(goal, **updates)
+    # process receipt 只证明 correction 前那次具体执行，不能跨任何新意图复用。
+    updated_goal = replace(
+        updated_goal,
+        admitted_criteria=tuple(
+            item
+            for item in updated_goal.admitted_criteria
+            if item.oracle_kind is not EvidenceOracleKind.TOOL_RECEIPT
+        ),
+    )
+    if semantic_source_changed:
+        # Web receipt 可随纯 artifact-path 修正复用；outcome/scope 改变后来源
+        # 必须重新满足新的语义边界。
+        updated_goal = replace(
+            updated_goal,
+            admitted_criteria=tuple(
+                item
+                for item in updated_goal.admitted_criteria
+                if item.oracle_kind is not EvidenceOracleKind.WEB_SOURCE_RECEIPT
+            ),
+        )
+    if {"user_outcome", "targets", "proposed_criteria"} & delta.updates.keys():
+        retained_web_ids = {
+            item.criterion_id
+            for item in updated_goal.proposed_criteria
+            if item.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+        }
+        updated_goal = replace(
+            updated_goal,
+            admitted_criteria=tuple(
+                item
+                for item in updated_goal.admitted_criteria
+                if item.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+                and item.criterion_id in retained_web_ids
+                and not semantic_source_changed
+            ),
+        )
     return replace(
         state,
         revision=state.revision + 1,
@@ -303,15 +958,55 @@ def accept_goal_delta_proposal(
     state: ConversationState,
     proposal: GoalDeltaProposal,
 ) -> ConversationState:
-    """受理 revision-bound delta；模型提议本身不产生任何新 authority。"""
+    """受理 revision-bound delta；只有当前用户 correction 能授权其一次变更。"""
 
     _require_unused_correlation(state, proposal.correlation_id)
     if {"admitted_criteria", "authority_snapshot"} & proposal.delta.updates.keys():
         raise ValueError("model GoalDeltaProposal cannot mint admission or authority")
+    current_goal = state.goal
+    if current_goal is None:
+        raise ValueError("goal delta requires a current goal")
+    correction = _unconsumed_goal_correction(state, current_goal)
+    if correction is None:
+        # 区分"从未有 correction"与"已被此前的 delta 消费":后者说明 Goal 已被
+        # 修正,模型应基于修正后的 Goal 继续,而不是反复重发 delta(016 J11 实测)。
+        if any(
+            fact.kind is FactKind.USER_MESSAGE
+            and fact.content.get("control") == "goal_correction"
+            for fact in state.facts
+        ):
+            raise ValueError(
+                "the user correction has already been consumed by an earlier "
+                "goal_delta_proposal; proceed with the corrected goal instead"
+            )
+        raise ValueError("goal delta requires one unconsumed user correction")
     updated = apply_goal_delta(state, proposal.delta)
     goal = updated.goal
     if goal is None:
         raise ValueError("goal delta did not retain a goal")
+    goal = _apply_correction_lower_bounds(goal, correction)
+    if "targets" in proposal.delta.updates:
+        mismatched_artifacts = tuple(
+            item.artifact_path
+            for item in goal.proposed_criteria
+            if item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
+            and item.artifact_path is not None
+            and item.artifact_path not in goal.targets
+        )
+        if mismatched_artifacts:
+            raise ValueError(
+                "filesystem artifact criteria must match corrected targets in one atomic delta"
+            )
+    goal = replace(
+        goal,
+        created_from_fact_ids=(*goal.created_from_fact_ids, correction.fact_id),
+        status=(
+            GoalStatus.GOAL_READY
+            if goal.status is GoalStatus.NEEDS_AUTHORITY
+            else goal.status
+        ),
+    )
+    updated = replace(updated, goal=goal)
     receipt = ControlReceipt.create(
         correlation_id=proposal.correlation_id,
         control_kind="goal_delta_proposal",
@@ -321,6 +1016,53 @@ def accept_goal_delta_proposal(
         payload_digest=canonical_json_digest(asdict(proposal.delta)),
     )
     return replace(updated, control_receipts=(*updated.control_receipts, receipt))
+
+
+def acknowledge_noop_goal_delta(
+    state: ConversationState,
+    proposal: GoalDeltaProposal,
+) -> ConversationState:
+    """消费一次用户补充，但不为语义未变化的 Goal 制造新 revision。"""
+
+    _require_unused_correlation(state, proposal.correlation_id)
+    goal = state.goal
+    if goal is None:
+        raise ValueError("goal delta requires a current goal")
+    if (
+        proposal.delta.goal_id != goal.goal_id
+        or proposal.delta.expected_revision != goal.revision
+    ):
+        raise GoalRevisionConflictError("goal identity or revision mismatch")
+    correction = _unconsumed_goal_correction(state, goal)
+    if correction is None:
+        if any(
+            fact.kind is FactKind.USER_MESSAGE
+            and fact.content.get("control") == "goal_correction"
+            for fact in state.facts
+        ):
+            raise ValueError(
+                "the user correction has already been consumed by an earlier "
+                "goal_delta_proposal; proceed with the corrected goal instead"
+            )
+        raise ValueError("goal delta requires one unconsumed user correction")
+    accepted_revision = state.revision + 1
+    receipt = ControlReceipt.create(
+        correlation_id=proposal.correlation_id,
+        control_kind="goal_delta_proposal",
+        goal_id=goal.goal_id,
+        goal_revision=goal.revision,
+        accepted_state_revision=accepted_revision,
+        payload_digest=canonical_json_digest(asdict(proposal.delta)),
+    )
+    return replace(
+        state,
+        revision=accepted_revision,
+        goal=replace(
+            goal,
+            created_from_fact_ids=(*goal.created_from_fact_ids, correction.fact_id),
+        ),
+        control_receipts=(*state.control_receipts, receipt),
+    )
 
 
 def accept_blocked_claim(
@@ -754,6 +1496,20 @@ def verify_goal_completion(state: ConversationState) -> ConversationState:
             raise ValueError(
                 "artifact criterion must be admitted before completion verification"
             )
+    process_requirements = tuple(
+        criterion
+        for criterion in goal.proposed_criteria
+        if criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+    )
+    for requirement in process_requirements:
+        if not any(
+            criterion.criterion_id == requirement.criterion_id
+            and criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+            for criterion in mandatory
+        ):
+            raise ValueError(
+                "process criterion must be admitted before completion verification"
+            )
     evidence_by_criterion = {
         record.criterion_id: record for record in referenced.values()
     }
@@ -853,7 +1609,7 @@ def _action_is_legal(state: ConversationState, action: Action) -> tuple[bool, st
             return False, "criterion_confirmation_mismatch"
         return True, None
     if isinstance(action, SubmitMessage):
-        if active is not None:
+        if active is not None and active.status is not ActiveRunStatus.AWAITING_APPROVAL:
             return False, "illegal_action_for_state"
         if not action.message.strip() or not action.run_id:
             return False, "invalid_submit_message"
@@ -1078,15 +1834,57 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
             )
         return replace(state, facts=(*state.facts, fact), evidence_records=evidence)
     if isinstance(action, SubmitMessage):
+        correction = (
+            state.goal is not None
+            and state.goal.status
+            not in {GoalStatus.PAUSED, GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED}
+            and (
+                state.active_run is None
+                or state.active_run.status is ActiveRunStatus.AWAITING_APPROVAL
+            )
+        )
+        facts = state.facts
+        content = {"text": action.message}
+        if correction:
+            # 旧 intent 尚未执行；用户普通文本会撤回它，并成为下一次 GoalDelta
+            # 唯一可消费的 authority source。未完成 batch 中的每个 call 都必须先有
+            # durable 非执行结果，保持 Anthropic/OpenAI 的 tool continuity 闭合。
+            content["control"] = "goal_correction"
+            if state.active_run is not None:
+                superseded = tuple(
+                    ConversationFact(
+                        fact_id=(
+                            f"action:{action.action_seq}:superseded-tool:"
+                            f"{call.tool_call_id}"
+                        ),
+                        kind=FactKind.TOOL_RESULT,
+                        content={
+                            "tool_call_id": call.tool_call_id,
+                            "text": (
+                                "Tool call was not executed because the user corrected "
+                                "the Goal."
+                            ),
+                            "is_error": True,
+                            "executed": False,
+                            "superseded": True,
+                        },
+                    )
+                    for call in state.active_run.tool_calls[
+                        state.active_run.batch_cursor :
+                    ]
+                )
+                facts = (*facts, *superseded)
         fact = ConversationFact(
             fact_id=f"action:{action.action_seq}:user",
             kind=FactKind.USER_MESSAGE,
-            content={"text": action.message},
+            content=content,
         )
         return replace(
             state,
-            facts=(*state.facts, fact),
+            facts=(*facts, fact),
             active_run=ActiveRun(run_id=action.run_id),
+            completion_claim=None,
+            interaction_state=InteractionState.IDLE,
         )
 
     if isinstance(action, PauseGoal):
@@ -1312,11 +2110,33 @@ def _admit_approved_file_criterion(
         or pending.new_content_digest is None
     ):
         return state
-    criterion_id = (
-        goal.proposed_criteria[0].criterion_id
-        if len(goal.proposed_criteria) == 1
-        else f"criterion:approved-write:{call.tool_call_id}"
+    matching_proposals = tuple(
+        item
+        for item in goal.proposed_criteria
+        if item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
+        and item.artifact_path == path
     )
+    deferred_proposals = tuple(
+        item
+        for item in goal.proposed_criteria
+        if item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
+        and item.artifact_path is None
+    )
+    bound_proposal_id: str | None = None
+    if not matching_proposals and len(deferred_proposals) == 1:
+        matching_proposals = deferred_proposals
+        bound_proposal_id = deferred_proposals[0].criterion_id
+    if matching_proposals:
+        criteria = tuple(
+            (item.criterion_id, item.description) for item in matching_proposals
+        )
+    else:
+        criteria = (
+            (
+                f"criterion:approved-write:{call.tool_call_id}",
+                f"approved file {path} has the exact requested content",
+            ),
+        )
     source = next(
         (
             fact
@@ -1335,38 +2155,39 @@ def _admit_approved_file_criterion(
         "path": path,
         "sha256": pending.new_content_digest,
     }
-    if any(
-        item.criterion_id == criterion_id
-        and item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
-        and item.predicate == predicate
-        for item in goal.admitted_criteria
+    criterion_ids = {criterion_id for criterion_id, _description in criteria}
+    if all(
+        any(
+            item.criterion_id == criterion_id
+            and item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
+            and item.predicate == predicate
+            for item in goal.admitted_criteria
+        )
+        for criterion_id in criterion_ids
     ):
         return state
-    binding = CriterionAdmissionBinding.create(
-        binding_id=f"criterion-admission:approval:{action.action_seq}:{call.tool_call_id}",
-        goal_id=goal.goal_id,
-        goal_revision=goal.revision,
-        workspace_identity_digest=goal.workspace_identity_digest,
-        criterion_id=criterion_id,
-        user_outcome_fact_id=source.fact_id,
-        user_outcome_digest=source_digest,
-        oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
-        predicate=predicate,
-        required_evidence_class="workspace_file",
+    admitted = tuple(
+        CriterionAdmissionBinding.create(
+            binding_id=(
+                f"criterion-admission:approval:{action.action_seq}:"
+                f"{call.tool_call_id}:{criterion_id}"
+            ),
+            goal_id=goal.goal_id,
+            goal_revision=goal.revision,
+            workspace_identity_digest=goal.workspace_identity_digest,
+            criterion_id=criterion_id,
+            user_outcome_fact_id=source.fact_id,
+            user_outcome_digest=source_digest,
+            oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+            predicate=predicate,
+            required_evidence_class="workspace_file",
+        ).admit(description)
+        for criterion_id, description in criteria
     )
-    description = next(
-        (
-            item.description
-            for item in goal.proposed_criteria
-            if item.criterion_id == criterion_id
-        ),
-        f"approved file {path} has the exact requested content",
-    )
-    admitted = binding.admit(description)
     superseded_ids = {
         item.criterion_id
         for item in goal.admitted_criteria
-        if item.criterion_id == criterion_id
+        if item.criterion_id in criterion_ids
         or (
             item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
             and item.predicate.get("path") == path
@@ -1390,11 +2211,18 @@ def _admit_approved_file_criterion(
         for item in state.evidence_records
         if item.criterion_id not in superseded_ids
     )
+    proposed_criteria = tuple(
+        replace(item, artifact_path=path)
+        if item.criterion_id == bound_proposal_id
+        else item
+        for item in goal.proposed_criteria
+    )
     return replace(
         state,
         goal=replace(
             goal,
-            admitted_criteria=(*retained_criteria, admitted),
+            proposed_criteria=proposed_criteria,
+            admitted_criteria=(*retained_criteria, *admitted),
         ),
         evidence_records=retained_evidence,
         completion_claim=None,
@@ -1425,6 +2253,18 @@ def _admit_approved_research_criterion(
         or pending.new_content_digest is None
     ):
         return state
+    # prepare 已把 transport 追加的单个换行移除并将 canonical digest 放进
+    # ApprovalRequest；状态准入必须使用同一份已批准内容，不能重新解释原始参数。
+    if hashlib.sha256(content.encode("utf-8")).hexdigest() != pending.new_content_digest:
+        if not content.endswith("\n"):
+            return state
+        canonical_content = content[:-1]
+        if (
+            hashlib.sha256(canonical_content.encode("utf-8")).hexdigest()
+            != pending.new_content_digest
+        ):
+            return state
+        content = canonical_content
     try:
         manifest = CitationManifestV1.from_json(content)
     except ValueError:
@@ -1432,7 +2272,7 @@ def _admit_approved_research_criterion(
     if (
         manifest.goal_id != goal.goal_id
         or manifest.goal_revision != goal.revision
-        or path != f"{manifest.artifact_path}.citations.json"
+        or path == manifest.artifact_path
         or path not in goal.targets
         or manifest.artifact_path not in goal.targets
     ):
@@ -1460,14 +2300,12 @@ def _admit_approved_research_criterion(
         "manifest_path": path,
         "manifest_sha256": pending.new_content_digest,
         "manifest_digest": manifest.manifest_digest,
-        "minimum_distinct_sources": 3,
-        "required_source_kinds": [
-            "history_excerpt",
-            "workspace_excerpt",
-            "web_extracted_content",
+        "minimum_distinct_sources": len(manifest.citations),
+        "required_source_kinds": [],
+        "required_source_classes": [],
+        "required_receipt_digests": [
+            citation.receipt_digest for citation in manifest.citations
         ],
-        "required_source_classes": ["history", "workspace"],
-        "required_receipt_digests": [],
     }
     binding = CriterionAdmissionBinding.create(
         binding_id=f"criterion-admission:research:{action.action_seq}:{call.tool_call_id}",
@@ -1519,9 +2357,53 @@ def _admit_approved_process_receipt_criterion(
         or candidate.workspace_identity_digest != goal.workspace_identity_digest
     ):
         raise ValueError("process candidate does not bind the current Goal")
+    admitted_ids = {item.criterion_id for item in goal.admitted_criteria}
+    proposed_requirement = next(
+        (
+            item
+            for item in goal.proposed_criteria
+            if item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+            and item.criterion_id not in admitted_ids
+        ),
+        None,
+    )
+    if (
+        proposed_requirement is not None
+        and _is_runtime_owned_obligation(proposed_requirement)
+    ):
+        active = state.active_run
+        call = (
+            next(
+                (
+                    item
+                    for item in active.tool_calls
+                    if item.tool_call_id == pending.tool_call_id
+                ),
+                None,
+            )
+            if active is not None
+            else None
+        )
+        executable = (
+            call.arguments.get("executable")
+            if call is not None and call.name == "local_process"
+            else None
+        )
+        if not isinstance(executable, str):
+            raise ValueError(
+                "Runtime-owned process criterion requires the pending local_process call"
+            )
+        if not process_entrypoint_matches_authority(state, executable):
+            # approval 只授予这笔 effect 的 lease；它不能把另一个命令改写成用户
+            # 明示 validator 的完成证据。
+            return state
     criterion_id = (
-        f"criterion:process-receipt:{goal.goal_id}:{goal.revision}:"
-        f"{pending.tool_call_id}"
+        proposed_requirement.criterion_id
+        if proposed_requirement is not None
+        else (
+            f"criterion:process-receipt:{goal.goal_id}:{goal.revision}:"
+            f"{pending.tool_call_id}"
+        )
     )
     if any(
         item.criterion_id == criterion_id
@@ -1565,7 +2447,9 @@ def _admit_approved_process_receipt_criterion(
         required_evidence_class="process_receipt",
     )
     admitted = binding.admit(
-        "approved local_process must produce the exact successful Kernel receipt"
+        proposed_requirement.description
+        if proposed_requirement is not None
+        else "approved local_process must produce the exact successful Kernel receipt"
     )
     return replace(
         state,
@@ -1749,6 +2633,111 @@ def admit_process_receipt_criterion(
     )
 
 
+def admit_web_source_criterion(
+    state: ConversationState,
+    *,
+    tool_call_id: str,
+    action_seq: int,
+) -> ConversationState:
+    """把当前 Goal 的真实 Web source receipt 铸成 mandatory completion 证据。"""
+
+    goal = state.goal
+    if goal is None:
+        return state
+    requirements = tuple(
+        item
+        for item in goal.proposed_criteria
+        if item.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+    )
+    if not requirements:
+        return state
+    fact = next(
+        (
+            item
+            for item in reversed(state.facts)
+            if item.kind is FactKind.TOOL_RESULT
+            and item.content.get("tool_call_id") == tool_call_id
+            and item.content.get("executed") is True
+            and item.content.get("is_error") is False
+        ),
+        None,
+    )
+    metadata = fact.content.get("metadata") if fact is not None else None
+    if (
+        fact is None
+        or not isinstance(metadata, dict)
+        or metadata.get("fake")
+        or metadata.get("mock")
+    ):
+        return state
+    raw_receipts = metadata.get("source_receipts")
+    if not isinstance(raw_receipts, list):
+        return state
+    receipts: list[SourceReceiptV1] = []
+    for raw in raw_receipts:
+        try:
+            receipt = SourceReceiptV1.from_json(raw)
+        except ValueError:
+            continue
+        if (
+            receipt.conversation_id == state.conversation_id
+            and receipt.goal_id == goal.goal_id
+            and receipt.goal_revision == goal.revision
+            and receipt.source_kind
+            in {SourceKind.WEB_SEARCH_SNIPPET, SourceKind.WEB_EXTRACTED_CONTENT}
+        ):
+            receipts.append(receipt)
+    if not receipts:
+        return state
+    source = next(
+        (
+            item
+            for item in state.facts
+            if item.fact_id in goal.created_from_fact_ids
+            and item.kind is FactKind.USER_MESSAGE
+        ),
+        None,
+    )
+    if source is None:
+        return state
+    source_digest = canonical_json_digest(
+        {"fact_id": source.fact_id, "kind": source.kind, "content": source.content}
+    )
+    receipt = receipts[0]
+    retained = tuple(
+        item
+        for item in goal.admitted_criteria
+        if item.criterion_id not in {requirement.criterion_id for requirement in requirements}
+    )
+    admitted = []
+    for requirement in requirements:
+        predicate = {
+            "receipt_digest": receipt.receipt_digest,
+            "source_kind": receipt.source_kind.value,
+        }
+        binding = CriterionAdmissionBinding.create(
+            binding_id=(
+                f"criterion-admission:web-source:{action_seq}:{tool_call_id}:"
+                f"{requirement.criterion_id}"
+            ),
+            goal_id=goal.goal_id,
+            goal_revision=goal.revision,
+            workspace_identity_digest=goal.workspace_identity_digest,
+            criterion_id=requirement.criterion_id,
+            user_outcome_fact_id=source.fact_id,
+            user_outcome_digest=source_digest,
+            oracle_kind=EvidenceOracleKind.WEB_SOURCE_RECEIPT,
+            predicate=predicate,
+            required_evidence_class="public_web_source",
+        )
+        admitted.append(binding.admit(requirement.description))
+    return replace(
+        state,
+        goal=replace(goal, admitted_criteria=(*retained, *admitted)),
+        completion_claim=None,
+    )
+
+
 def accept_action(
     state: ConversationState | None,
     action: Action,
@@ -1855,6 +2844,11 @@ def complete_run(state: ConversationState, *, message: str | None = None) -> Con
         revision=state.revision + 1,
         facts=facts,
         active_run=None,
+        interaction_state=(
+            InteractionState.IDLE
+            if state.interaction_state is InteractionState.ANSWERING
+            else state.interaction_state
+        ),
         last_safe_result=RecordedRunResult(
             status=RunStatus.COMPLETED,
             run_id=active.run_id,

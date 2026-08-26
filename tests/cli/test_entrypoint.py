@@ -40,7 +40,8 @@ def test_state_root_inside_workspace_fails_startup(tmp_path: Path) -> None:
     )
 
     assert exit_code == 2
-    assert output[0].startswith("Startup failed: ValueError")
+    assert output[0].startswith("Startup failed:")
+    assert "ValueError" not in output[0]
     assert "outside" in output[0]
 
 
@@ -100,7 +101,7 @@ def test_invalid_provider_configuration_exits_without_traceback(
     )
 
     assert exit_code != 0
-    assert output == ["Startup failed: ProviderConfigurationError: provider_configuration_error"]
+    assert output == ["Startup failed: provider_configuration_error"]
     assert "fixture-secret" not in output[0]
 
 
@@ -247,7 +248,8 @@ def test_invalid_skill_root_fails_startup_without_traceback(tmp_path: Path) -> N
     )
 
     assert exit_code == 2
-    assert output[0].startswith("Startup failed: SkillSchemaError")
+    assert output[0].startswith("Startup failed:")
+    assert "SkillSchemaError" not in output[0]
 
 
 # --- U7 lifecycle: shared queue sink + close-stack reverse-close once ---

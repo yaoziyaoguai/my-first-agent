@@ -120,7 +120,7 @@ P0/P1/P2。权威状态与残余限制见 `docs/implementation/014_EXECUTION_LOG
 014 仍不实现跨 workspace history、shell/process、multi-root、authenticated Web/browser、外部写入、后台
 crawler/scheduler 或自我优化。
 
-## Current milestone
+## Delivered foundation
 
 ### 015 Governed Local Action — 目标级权限租约与受治理的本机执行（已交付并验证）
 
@@ -140,6 +140,24 @@ crawler/scheduler 或自我优化。
 interactive/TTY、后台 daemon、authenticated browser、整机控制、动态 tool registry、并行 worker 或自主优化。
 完整合同见 `docs/plans/2026-08-09-001-feat-governed-local-action-plan.md`；真实三连 E3、materialized tree、
 独立评审与 Codex 终裁证据见 `docs/implementation/015_EXECUTION_LOG.md`。
+
+## Current milestone
+
+### 016 First Agent 1.0 — 把已有能力收束成一个产品（fail-closed promotion）
+
+016 不再增加 capability owner。它只解决一个更重要的问题：不了解内部 Runtime、Goal、receipt 或
+checkpoint 的用户，能否从安装开始，通过一个 `first-agent` 入口完成聊天、当前目录文件任务、公开研究和
+受治理本机程序任务，并在退出或失败后准确恢复。
+
+晋级条件不是“代码看起来齐了”，而是 clean install、guided setup、默认启动、失败投影和 deterministic U1
+全部通过，然后从 installed console entry point 完成 12 条真实 Model + Tavily journey，连续三轮 25 项
+closed claim 全 true，最后再由 fresh reviewer 复核。U3 的 authoritative 状态只由 detached
+`docs/acceptance/016_FIRST_AGENT_1_0_INDEPENDENT_REVIEW.md` 记录：它只有在绑定同一 delivery identity 并
+明确写明 PASS 时才把该 identity 晋级为 delivered/accepted；缺失、pending 或 identity 不匹配均保持
+`1.0.0` promotion candidate。
+
+本里程碑明确不做整机/浏览器控制、后台 daemon、自主改写自身、平行 planner/executor loop 或第二套 Runtime。
+这些能力若未来进入 roadmap，必须在 1.0 默认路径真实稳定后另立权限与验收合同。
 
 ## Success metrics
 

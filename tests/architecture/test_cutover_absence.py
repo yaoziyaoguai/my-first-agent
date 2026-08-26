@@ -79,6 +79,7 @@ def test_product_tree_contains_only_kernel_packages() -> None:
         "agent/subagent/runtime_factory.py",
         "agent/subagent/tools.py",
         "agent/tools/__init__.py",
+        "agent/transport_audit.py",
         "agent/tui/__init__.py",
         "agent/tui/adapter.py",
         "agent/tui/app.py",

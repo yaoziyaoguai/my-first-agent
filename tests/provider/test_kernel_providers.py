@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -20,6 +21,7 @@ from agent.provider.protocol import (
     ProviderAuthError,
     ProviderConfigurationError,
     ProviderFatalError,
+    ProviderHTTPError,
     ProviderProtocolError,
     ProviderRetryableError,
     ProviderTimeoutError,
@@ -116,6 +118,33 @@ def test_fake_provider_is_a_script_or_exact_latest_user_echo() -> None:
     assert echo.generate(_context()) == ModelResponse((ModelTextBlock("read a fixture"),))
 
 
+@pytest.mark.parametrize(
+    ("provider_type", "provider_class"),
+    PROVIDER_CASES,
+)
+def test_http_provider_records_attempt_before_transport_failure(
+    provider_type: str,
+    provider_class: type[AnthropicCompatibleProvider | OpenAICompatibleProvider],
+) -> None:
+    attempts: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("fixture connect", request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        provider = provider_class(
+            config=_config(provider_type),
+            http_client=client,
+            attempt_recorder=lambda kind, destination: attempts.append(
+                (kind, destination)
+            ),
+        )
+        with pytest.raises(ProviderTransportError):
+            provider.generate(_context())
+
+    assert attempts == [("model", "https://provider.invalid")]
+
+
 def test_http_protocols_project_only_kernel_validated_opaque_source_refs() -> None:
     source_ref = "source-ref:v1:" + "a" * 64
     source_id = "source:v1:" + "b" * 64
@@ -161,6 +190,46 @@ def test_http_protocols_project_only_kernel_validated_opaque_source_refs() -> No
         assert "https://example.com/article" in wire_text
         assert "2026-08-05T00:00:00Z" in wire_text
         assert '"truncated":false' in wire_text
+        assert "FIRST_AGENT_RUNTIME_WEB_FETCH_REFS" not in wire_text
+
+
+def test_http_protocols_label_only_search_snippet_refs_as_web_fetchable() -> None:
+    source_ref = "source-ref:v1:" + "a" * 64
+    source_id = "source:v1:" + "b" * 64
+    context = _context()
+    messages = list(context.messages)
+    result = dict(messages[-1].content[0])
+    result["source_refs"] = [source_ref]
+    result["citation_sources"] = [
+        {"source_ref": source_ref, "source_id": source_id}
+    ]
+    result["untrusted"] = True
+    result["source_contexts"] = [
+        {
+            "source_ref": source_ref,
+            "source_kind": "web_search_snippet",
+            "origin_locator": "https://example.com/article",
+            "observed_at": "2026-08-05T00:00:00Z",
+            "truncated": False,
+        }
+    ]
+    messages[-1] = ModelMessage(role="user", content=(result,))
+    context = ContextPack(
+        system=context.system,
+        messages=tuple(messages),
+        tools=context.tools,
+        budget=context.budget,
+    )
+
+    for wire_text in (
+        context_to_anthropic_messages(context)[-1]["content"][0]["content"],
+        context_to_openai_messages(context)[-1]["content"],
+    ):
+        assert (
+            'FIRST_AGENT_RUNTIME_WEB_FETCH_REFS {"source_refs":["'
+            + source_ref
+            + '"]}'
+        ) in wire_text
 
 
 def test_http_protocols_frame_untrusted_process_output_as_data() -> None:
@@ -309,6 +378,126 @@ def test_http_protocols_normalize_to_one_shape_and_make_one_request_each() -> No
         message for message in openai_body["messages"] if message["role"] == "tool"
     )
     assert openai_call["id"] == openai_result["tool_call_id"] == "call-prev"
+
+
+def test_openai_tool_call_history_uses_empty_content_instead_of_null() -> None:
+    """DeepSeek V4 要求无文本的 assistant tool-call 仍携带 string content。"""
+
+    context = ContextPack(
+        system="Use only the supplied tools.",
+        messages=(
+            ModelMessage(
+                role="user",
+                content=({"type": "text", "text": "read a fixture"},),
+            ),
+            ModelMessage(
+                role="assistant",
+                content=(
+                    {
+                        "type": "tool_call",
+                        "tool_call_id": "call-prev",
+                        "name": "read_file",
+                        "arguments": {"path": "fixture.txt"},
+                    },
+                ),
+            ),
+            ModelMessage(
+                role="user",
+                content=(
+                    {
+                        "type": "tool_result",
+                        "tool_call_id": "call-prev",
+                        "text": "fixture contents",
+                        "is_error": False,
+                    },
+                ),
+            ),
+        ),
+        tools=(),
+        budget=BudgetReport(
+            input_limit=2_000,
+            estimated_input_tokens=120,
+            output_reserve=200,
+        ),
+    )
+
+    assistant = next(
+        message
+        for message in context_to_openai_messages(context)
+        if message["role"] == "assistant"
+    )
+
+    assert assistant["role"] == "assistant"
+    assert assistant["content"] == ""
+    assert assistant["tool_calls"][0]["id"] == "call-prev"
+
+
+@pytest.mark.parametrize(
+    "messages",
+    (
+        (
+            ModelMessage(
+                role="assistant",
+                content=(
+                    {
+                        "type": "tool_call",
+                        "tool_call_id": "call-unclosed",
+                        "name": "read_file",
+                        "arguments": {"path": "fixture.txt"},
+                    },
+                ),
+            ),
+            ModelMessage(role="user", content=({"type": "text", "text": "continue"},)),
+        ),
+        (
+            ModelMessage(
+                role="user",
+                content=(
+                    {
+                        "type": "tool_result",
+                        "tool_call_id": "call-orphan",
+                        "text": "fixture contents",
+                        "is_error": False,
+                    },
+                ),
+            ),
+        ),
+    ),
+)
+def test_openai_provider_rejects_unclosed_or_orphan_tool_history_before_send(
+    messages: tuple[ModelMessage, ...],
+) -> None:
+    """Restart/cropping must never turn invalid tool history into an upstream 400."""
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "unexpected"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    context = replace(_context(), messages=messages)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleProvider(
+            config=_config("openai_compatible"),
+            http_client=client,
+        )
+        with pytest.raises(
+            ProviderProtocolError,
+            match="invalid_tool_message_continuity",
+        ):
+            provider.generate(context)
+
+    assert requests == []
 
 
 def test_openai_tool_arguments_preserve_literal_newline_compatibly() -> None:
@@ -667,6 +856,32 @@ def test_auth_status_is_fatal_without_response_or_credential_leak(
     assert isinstance(caught.value, ProviderFatalError)
     assert secret not in str(caught.value)
     assert secret not in repr(config)
+
+
+@pytest.mark.parametrize(("provider_type", "provider_class"), PROVIDER_CASES)
+@pytest.mark.parametrize("status", [400, 402, 404, 422])
+def test_fatal_http_status_keeps_only_safe_status_diagnostic(
+    status: int,
+    provider_type: str,
+    provider_class: type[AnthropicCompatibleProvider] | type[OpenAICompatibleProvider],
+) -> None:
+    secret = "fatal-http-fixture-secret"
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(status, text=f"upstream {secret}")
+        )
+    )
+    provider = provider_class(
+        config=_config(provider_type, credential=secret),
+        http_client=client,
+    )
+
+    with client, pytest.raises(ProviderHTTPError) as caught:
+        provider.generate(_context())
+
+    assert caught.value.status_code == status
+    assert str(caught.value) == f"provider_http_error_status_{status}"
+    assert secret not in str(caught.value)
 
 
 @pytest.mark.parametrize(("provider_type", "provider_class"), PROVIDER_CASES)

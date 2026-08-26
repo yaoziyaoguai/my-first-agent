@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 
 import httpx
@@ -12,6 +13,7 @@ from agent.web.client import (
     WebProtocolError,
     WebRateLimitError,
     WebTimeoutError,
+    WebTransportError,
 )
 from agent.web.profile import WebProfileV1
 
@@ -222,6 +224,31 @@ def test_tavily_timeout_is_typed_without_retry() -> None:
     assert count == 1
 
 
+def test_tavily_records_attempt_before_transport_failure() -> None:
+    attempts: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("fixture connect", request=request)
+
+    with httpx.Client(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=False,
+        trust_env=False,
+    ) as http_client:
+        client = TavilyClient(
+            _profile(),
+            api_key="secret-value",
+            http_client=http_client,
+            attempt_recorder=lambda kind, destination: attempts.append(
+                (kind, destination)
+            ),
+        )
+        with pytest.raises(WebTransportError):
+            client.search("bounded public query", max_results=1)
+
+    assert attempts == [("web", "https://api.tavily.com")]
+
+
 def test_tavily_extract_rejects_mismatched_url_and_oversized_fields() -> None:
     responses = iter(
         (
@@ -264,3 +291,31 @@ def test_tavily_extract_rejects_mismatched_url_and_oversized_fields() -> None:
             client.extract("https://example.com/article")
         with pytest.raises(WebProtocolError, match="oversized"):
             client.search("bounded public query", max_results=1)
+
+
+def test_tavily_extract_truncates_oversized_page_with_original_digest() -> None:
+    url = "https://example.com/long-article"
+    raw_content = "x" * 48_001
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return _json_response(
+            {
+                "results": [{"url": url, "raw_content": raw_content}],
+                "failed_results": [],
+            }
+        )
+
+    with httpx.Client(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=False,
+        trust_env=False,
+    ) as http_client:
+        page = TavilyClient(
+            _profile(), api_key="secret-value", http_client=http_client
+        ).extract(url)
+
+    assert page.content == raw_content[:48_000]
+    assert page.truncated is True
+    assert page.original_content_digest == hashlib.sha256(
+        raw_content.encode("utf-8")
+    ).hexdigest()

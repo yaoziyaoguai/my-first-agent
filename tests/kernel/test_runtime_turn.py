@@ -3,6 +3,7 @@ from __future__ import annotations
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    BeginAnswer,
     ConversationState,
     ExecutionAuthorityClass,
     ModelResponse,
@@ -86,6 +87,7 @@ def test_tool_result_rebuilds_context_before_final_response() -> None:
         output_limit_chars=100,
     )
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-read-result")),
         ModelResponse((ModelToolCall("call-1", "read_fixture", {"path": "a.txt"}),)),
         ModelResponse((ModelTextBlock("used the file"),)),
     )
@@ -96,10 +98,10 @@ def test_tool_result_rebuilds_context_before_final_response() -> None:
 
     assert result.status is RunStatus.COMPLETED
     assert calls == ["a.txt"]
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 3
     assert any(
         block.get("type") == "tool_result"
-        for message in provider.calls[1].messages
+        for message in provider.calls[2].messages
         for block in message.content
     )
 
@@ -119,6 +121,7 @@ def test_text_with_tool_call_is_preamble_not_completion() -> None:
         output_limit_chars=20,
     )
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-preamble-read")),
         ModelResponse(
             (
                 ModelTextBlock("I will inspect it."),
@@ -133,5 +136,4 @@ def test_text_with_tool_call_is_preamble_not_completion() -> None:
     result = runtime.run_turn(_submit(store.state), store.load())
 
     assert result.message == "final"
-    assert len(provider.calls) == 2
-
+    assert len(provider.calls) == 3

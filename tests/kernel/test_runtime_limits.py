@@ -3,6 +3,7 @@ from __future__ import annotations
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    BeginAnswer,
     ConversationState,
     ExecutionAuthorityClass,
     ModelResponse,
@@ -36,6 +37,7 @@ def test_invocation_limit_pauses_and_resume_gets_fresh_budget() -> None:
         output_limit_chars=10,
     )
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-limited-read")),
         ModelResponse((ModelToolCall("call-1", "read_fixture", {}),)),
         ModelResponse((ModelTextBlock("final"),)),
     )
@@ -49,7 +51,7 @@ def test_invocation_limit_pauses_and_resume_gets_fresh_budget() -> None:
         tool_runtime=KernelToolRuntime((RegisteredTool(spec, lambda intent: "ok"),)),
         checkpoint_store=store,
         event_sink=CollectingSink(),
-        limits=InvocationLimits(max_model_calls=1),
+        limits=InvocationLimits(max_model_calls=2),
         invocation_id_factory=lambda: "invocation-1",
     )
     submit = SubmitMessage(
@@ -95,6 +97,7 @@ def test_unbounded_cumulative_limits_allow_a_progressing_model_tool_loop() -> No
         output_limit_chars=10,
     )
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-two-reads")),
         ModelResponse((ModelToolCall("call-1", "read_fixture", {"path": "one"}),)),
         ModelResponse((ModelToolCall("call-2", "read_fixture", {"path": "two"}),)),
         ModelResponse((ModelTextBlock("final"),), output_tokens=100),
@@ -194,6 +197,7 @@ def test_tool_call_limit_pauses_before_the_next_callable() -> None:
         output_limit_chars=10,
     )
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-batched-read")),
         ModelResponse(
             (
                 ModelToolCall("call-1", "read_fixture", {"path": "one"}),

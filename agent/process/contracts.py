@@ -20,11 +20,10 @@ from agent.runtime.contracts import KnownNotExecuted  # noqa: F401  re-export
 # same-UID trust boundary 的准确措辞（design §3.2 / §12.1）。approval preview、README、
 # UI 都引用同一文本，确保不宣称 OS sandbox / filesystem confinement / network denial。
 SAME_UID_TRUST_NOTICE = (
-    "Same-UID operator-trusted process: the approved command runs as your OS user. "
-    "cwd is only the starting directory and does not confine filesystem access; the "
-    "child can read or write other same-UID files, open network connections, and spawn "
-    "further processes that may leave the observed process group. This is not an OS "
-    "sandbox, not a filesystem confinement, and not a network denial."
+    "这个程序将以你的本机账号权限运行（same-UID），不是 sandbox。cwd 只是启动目录，"
+    "不会限制它访问该账号可访问的其他文件、网络或派生更多进程。Same-UID "
+    "operator-trusted process: this is not an OS sandbox, not a filesystem confinement, "
+    "and not a network denial."
 )
 
 

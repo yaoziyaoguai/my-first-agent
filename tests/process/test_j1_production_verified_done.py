@@ -23,7 +23,6 @@ from agent.runtime.contracts import (
     ContextPack,
     EvidenceOracleKind,
     GoalFrame,
-    GoalProposal,
     GoalStatus,
     ModelResponse,
     ModelTextBlock,
@@ -33,7 +32,7 @@ from agent.runtime.contracts import (
     SubmitMessage,
 )
 from agent.runtime.loop import InvocationLimits
-from tests.kernel.fakes import CollectingSink
+from tests.kernel.fakes import CollectingSink, goal_draft_from_frame
 
 
 def _sha256_hex(data: str) -> str:
@@ -58,9 +57,9 @@ class _J1ProductionProvider:
             # GoalProposal first (no source reads before goal)
             bootstrap = context.goal_bootstrap
             assert bootstrap is not None
-            return ModelResponse((), control=GoalProposal(
+            return ModelResponse((), control=goal_draft_from_frame(
                 correlation_id="proposal-j1",
-                goal_frame=GoalFrame(
+                goal=GoalFrame(
                     goal_id="goal-j1-prod",
                     revision=1,
                     created_from_fact_ids=(bootstrap.source_fact_id,),
@@ -78,6 +77,11 @@ class _J1ProductionProvider:
                             "artifact reads back with exact sha256",
                             oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
                             artifact_path=self.artifact_path,
+                        ),
+                        ProposedCriterion(
+                            "criterion:model-process-receipt",
+                            "the requested process exits successfully",
+                            oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
                         ),
                     ),
                     admitted_criteria=(),
@@ -108,8 +112,8 @@ class _J1ProductionProvider:
             )
             return ModelResponse((), control=CompletionClaim(
                 correlation_id="completion-j1",
-                goal_id="goal-j1-prod",
-                goal_revision=1,
+                goal_id=goal_block["goal_id"],
+                goal_revision=goal_block["goal_revision"],
                 criterion_evidence_refs=tuple(
                     goal_block["expected_completion_evidence_refs"]
                 ),

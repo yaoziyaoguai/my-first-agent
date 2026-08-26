@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 
 from agent.runtime.contracts import (
+    BlockedClaim,
+    CompletionClaim,
     ContextPack,
     ConversationFact,
     ConversationState,
     FactKind,
+    GoalDelta,
+    GoalDeltaProposal,
+    GoalDraftProposal,
     GoalFrame,
+    GoalProgress,
     GoalStatus,
     LoadedSnapshot,
     ModelResponse,
@@ -16,6 +23,143 @@ from agent.runtime.contracts import (
     RuntimeEvent,
 )
 from agent.subagent.contracts import ProviderDeadlineCapability
+
+RUNTIME_GOAL_ID = "__runtime_goal__"
+ScriptedResponse = ModelResponse | Exception | Callable[[ContextPack], ModelResponse]
+
+
+def _trusted_goal_projection(context: ContextPack) -> dict | None:
+    return next(
+        (
+            block
+            for message in context.messages
+            for block in message.content
+            if isinstance(block, dict) and block.get("type") == "trusted_goal"
+        ),
+        None,
+    )
+
+
+def runtime_goal_identity(context: ContextPack) -> tuple[str, int] | None:
+    """读取 Runtime 投影给 Provider 的 trusted Goal 身份。"""
+
+    trusted = _trusted_goal_projection(context)
+    if trusted is None:
+        return None
+    goal_id = trusted.get("goal_id")
+    goal_revision = trusted.get("goal_revision")
+    if not isinstance(goal_id, str) or not isinstance(goal_revision, int):
+        return None
+    return goal_id, goal_revision
+
+
+def bind_runtime_goal(response: ModelResponse, context: ContextPack) -> ModelResponse:
+    """显式占位符让 scripted test 引用 Runtime 铸造的 Goal 身份。"""
+
+    trusted = _trusted_goal_projection(context)
+    identity = runtime_goal_identity(context)
+    control = response.control
+    if identity is None or control is None:
+        return response
+    goal_id, goal_revision = identity
+    if (
+        isinstance(control, (BlockedClaim, CompletionClaim, GoalProgress))
+        and control.goal_id == RUNTIME_GOAL_ID
+    ):
+        evidence_refs = (
+            trusted.get("expected_completion_evidence_refs")
+            if isinstance(control, CompletionClaim) and trusted is not None
+            else None
+        )
+        return replace(
+            response,
+            control=replace(
+                control,
+                goal_id=goal_id,
+                goal_revision=goal_revision,
+                **(
+                    {"criterion_evidence_refs": tuple(evidence_refs)}
+                    if isinstance(evidence_refs, list)
+                    and all(isinstance(item, str) for item in evidence_refs)
+                    else {}
+                ),
+            ),
+        )
+    if (
+        isinstance(control, GoalDeltaProposal)
+        and control.delta.goal_id == RUNTIME_GOAL_ID
+    ):
+        return replace(
+            response,
+            control=replace(
+                control,
+                delta=replace(
+                    control.delta,
+                    goal_id=goal_id,
+                    expected_revision=goal_revision,
+                ),
+            ),
+        )
+    return response
+
+
+def goal_draft_from_frame(
+    correlation_id: str,
+    goal: GoalFrame,
+) -> GoalDraftProposal:
+    """把旧测试 fixture 的语义字段投影为真实模型唯一允许的 Goal 草案。"""
+
+    return GoalDraftProposal(
+        correlation_id=correlation_id,
+        user_outcome=goal.user_outcome,
+        beneficiary=goal.beneficiary,
+        targets=goal.targets,
+        scope=goal.scope,
+        non_goals=goal.non_goals,
+        assumptions=goal.assumptions,
+        proposed_criteria=goal.proposed_criteria,
+        next_step=goal.next_step or "continue the requested task",
+        requires_public_web=any(
+            item.oracle_kind is not None
+            and item.oracle_kind.value == "web_source_receipt"
+            for item in goal.proposed_criteria
+        ),
+        requires_local_process=any(
+            item.oracle_kind is not None
+            and item.oracle_kind.value == "tool_receipt"
+            for item in goal.proposed_criteria
+        ),
+    )
+
+
+def goal_noop_response(
+    correlation_id: str,
+) -> Callable[[ContextPack], ModelResponse]:
+    """确认当前用户补充不改变 trusted Goal，供已有 Goal 的测试场景使用。"""
+
+    def response(context: ContextPack) -> ModelResponse:
+        trusted = _trusted_goal_projection(context)
+        if trusted is None:
+            raise AssertionError("trusted_goal is required for a no-op goal delta")
+        targets = trusted.get("targets")
+        if not isinstance(targets, list) or not all(
+            isinstance(item, str) and item for item in targets
+        ):
+            raise AssertionError("trusted_goal targets are required for a no-op goal delta")
+        return ModelResponse(
+            (),
+            control=GoalDeltaProposal(
+                correlation_id=correlation_id,
+                delta=GoalDelta(
+                    goal_id=RUNTIME_GOAL_ID,
+                    expected_revision=1,
+                    reason="the user supplement does not change the trusted goal",
+                    updates={"targets": targets},
+                ),
+            ),
+        )
+
+    return response
 
 
 def conversation_with_active_goal(conversation_id: str = "conversation-1") -> ConversationState:
@@ -69,7 +213,7 @@ class ScriptedProvider:
         receipt_type="synchronous",
     )
 
-    def __init__(self, *responses: ModelResponse | Exception) -> None:
+    def __init__(self, *responses: ScriptedResponse) -> None:
         self._responses = deque(responses)
         self.calls: list[ContextPack] = []
 
@@ -80,7 +224,9 @@ class ScriptedProvider:
         response = self._responses.popleft()
         if isinstance(response, Exception):
             raise response
-        return response
+        if callable(response):
+            response = response(context)
+        return bind_runtime_goal(response, context)
 
 
 @dataclass

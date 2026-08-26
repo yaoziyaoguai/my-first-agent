@@ -18,7 +18,6 @@ from agent.runtime.context import ContextLimits
 from agent.runtime.contracts import (
     AcknowledgeProviderDisclosure,
     GoalFrame,
-    GoalProposal,
     GoalStatus,
     ModelResponse,
     ModelToolCall,
@@ -29,7 +28,7 @@ from agent.runtime.contracts import (
 )
 from agent.runtime.loop import InvocationLimits
 from agent.runtime.tools import RegisteredTool
-from tests.kernel.fakes import CollectingSink
+from tests.kernel.fakes import CollectingSink, goal_draft_from_frame
 
 
 class _CleanupFailProvider:
@@ -45,9 +44,9 @@ class _CleanupFailProvider:
         if index == 1:
             bootstrap = context.goal_bootstrap
             assert bootstrap is not None
-            return ModelResponse((), control=GoalProposal(
+            return ModelResponse((), control=goal_draft_from_frame(
                 correlation_id="cleanup-fail",
-                goal_frame=GoalFrame(
+                goal=GoalFrame(
                     goal_id="goal-cleanup-fail",
                     revision=1,
                     created_from_fact_ids=(bootstrap.source_fact_id,),

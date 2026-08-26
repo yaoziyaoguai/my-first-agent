@@ -12,6 +12,7 @@ from agent.runtime.contracts import (
     ActiveRunStatus,
     ApprovalGrant,
     ApprovalRequired,
+    BeginAnswer,
     ConversationFact,
     ConversationState,
     ExecutionIntent,
@@ -26,6 +27,7 @@ from agent.runtime.contracts import (
     SubmitMessage,
     ToolCall,
     ToolPrepareContext,
+    ToolResult,
 )
 from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.tools import KernelToolRuntime
@@ -43,13 +45,18 @@ def _profile() -> WebProfileV1:
     )
 
 
-def _context(*, source_authority=None) -> ToolPrepareContext:  # noqa: ANN001
+def _context(
+    *,
+    source_authority=None,  # noqa: ANN001
+    web_fetch_source_refs=(),  # noqa: ANN001
+) -> ToolPrepareContext:
     return ToolPrepareContext(
         conversation_id="conversation-1",
         run_id="run-web",
         state_revision=1,
         approval_basis_revision=1,
         source_authority=source_authority,
+        web_fetch_source_refs=web_fetch_source_refs,
     )
 
 
@@ -174,11 +181,22 @@ def test_web_fetch_requires_current_source_authority_and_approves_exact_url() ->
             )
         )
         call = ToolCall("fetch-1", "web_fetch", {"source_ref": source_ref})
-        denied = runtime.prepare(call, _context())
+        denied = runtime.prepare(
+            call,
+            _context(web_fetch_source_refs=(source_ref,)),
+        )
         assert denied.metadata["code"] == "source_authority_required"
+        assert source_ref in denied.content
+        assert "currently unattempted" in denied.content
         assert requests == []
 
-        pending = runtime.prepare(call, _context(source_authority=authority))
+        pending = runtime.prepare(
+            call,
+            _context(
+                source_authority=authority,
+                web_fetch_source_refs=(source_ref,),
+            ),
+        )
         assert isinstance(pending, ApprovalRequired)
         assert full_url in pending.request.preview
         assert f"Destination: {TAVILY_DESTINATION}/extract" in pending.request.preview
@@ -193,9 +211,13 @@ def test_web_fetch_requires_current_source_authority_and_approves_exact_url() ->
             in pending.request.preview
         )
         assert pending.request.target_digest == hashlib.sha256(full_url.encode()).hexdigest()
+        assert "FIRST_AGENT_RUNTIME_WEB_FETCH_REFS" in runtime.definitions()[1].description
         intent = runtime.prepare(
             call,
-            _context(source_authority=authority),
+            _context(
+                source_authority=authority,
+                web_fetch_source_refs=(source_ref,),
+            ),
             approval=ApprovalGrant(
                 pending.request.request_id,
                 pending.request.binding_digest,
@@ -213,6 +235,109 @@ def test_web_fetch_requires_current_source_authority_and_approves_exact_url() ->
     assert result.metadata["source_receipts"][0]["source_kind"] == (
         "web_extracted_content"
     )
+
+
+def test_web_fetch_rejects_stale_or_already_attempted_authority() -> None:
+    authority = SourceAuthorityBinding.create(
+        source_fact_id="fact-old-search-result",
+        receipt_digest="a" * 64,
+        conversation_id="conversation-1",
+        request_identity="old-search-request",
+        canonical_url="https://example.com/old",
+    )
+    source_ref = "source-ref:v1:" + "a" * 64
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: pytest.fail("stale authority must not send")
+        ),
+        follow_redirects=False,
+        trust_env=False,
+    ) as http_client:
+        runtime = KernelToolRuntime(
+            build_web_tool_registrations(
+                TavilyClient(
+                    _profile(),
+                    api_key="secret-value",
+                    http_client=http_client,
+                ),
+                _profile(),
+                clock=lambda: "2026-08-04T00:00:00Z",
+            )
+        )
+        denied = runtime.prepare(
+            ToolCall("fetch-stale", "web_fetch", {"source_ref": source_ref}),
+            _context(source_authority=authority, web_fetch_source_refs=()),
+        )
+
+    assert isinstance(denied, ToolResult)
+    assert denied.metadata["code"] == "source_authority_required"
+    assert "currently unattempted" in denied.content
+
+
+def test_web_fetch_receipt_marks_bounded_page_truncation() -> None:
+    full_url = "https://example.com/long-article"
+    raw_content = "x" * 48_001
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json={
+                "results": [{"url": full_url, "raw_content": raw_content}],
+                "failed_results": [],
+            },
+        )
+
+    authority = SourceAuthorityBinding.create(
+        source_fact_id="fact-search-result",
+        receipt_digest="a" * 64,
+        conversation_id="conversation-1",
+        request_identity="search-request-identity",
+        canonical_url=full_url,
+    )
+    source_ref = "source-ref:v1:" + "a" * 64
+    with httpx.Client(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=False,
+        trust_env=False,
+    ) as http_client:
+        runtime = KernelToolRuntime(
+            build_web_tool_registrations(
+                TavilyClient(_profile(), api_key="secret-value", http_client=http_client),
+                _profile(),
+                clock=lambda: "2026-08-04T00:00:00Z",
+            )
+        )
+        call = ToolCall("fetch-long", "web_fetch", {"source_ref": source_ref})
+        pending = runtime.prepare(
+            call,
+            _context(
+                source_authority=authority,
+                web_fetch_source_refs=(source_ref,),
+            ),
+        )
+        assert isinstance(pending, ApprovalRequired)
+        intent = runtime.prepare(
+            call,
+            _context(
+                source_authority=authority,
+                web_fetch_source_refs=(source_ref,),
+            ),
+            approval=ApprovalGrant(
+                pending.request.request_id,
+                pending.request.binding_digest,
+                approval_basis_revision=1,
+            ),
+        )
+        assert isinstance(intent, ExecutionIntent)
+        result = runtime.invoke(intent)
+
+    receipt = result.metadata["source_receipts"][0]
+    assert receipt["truncated"] is True
+    assert receipt["truncation_reason"] == "source_content_limit"
+    assert receipt["original_content_digest"] == hashlib.sha256(
+        raw_content.encode("utf-8")
+    ).hexdigest()
 
 
 def test_runtime_recovers_full_approved_url_from_digest_bound_search_result() -> None:
@@ -332,6 +457,7 @@ def test_model_runtime_approval_client_result_and_next_context_e2() -> None:
         )
 
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-web-answer")),
         ModelResponse(
             (
                 ModelToolCall(
@@ -399,11 +525,11 @@ def test_model_runtime_approval_client_result_and_next_context_e2() -> None:
     assert completed.status is RunStatus.COMPLETED
     assert completed.message == "Grounded answer."
     assert len(requests) == 1
-    assert len(provider.calls) == 2
-    assert "public_web_content" in provider.calls[1].data_classes
+    assert len(provider.calls) == 3
+    assert "public_web_content" in provider.calls[2].data_classes
     source_blocks = [
         block
-        for message in provider.calls[1].messages
+        for message in provider.calls[2].messages
         for block in message.content
         if block.get("type") == "tool_result"
     ]
@@ -425,6 +551,7 @@ def test_web_unknown_outcome_uses_real_tavily_runtime_path_without_resend(
         raise httpx.ConnectError("connection failed", request=request)
 
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-web-unknown")),
         ModelResponse(
             (
                 ModelToolCall(
@@ -492,7 +619,7 @@ def test_web_unknown_outcome_uses_real_tavily_runtime_path_without_resend(
         executing = store.state.active_run.executing_intent
         assert executing is not None
         assert len(requests) == 1
-        assert len(provider.calls) == 1
+        assert len(provider.calls) == 2
 
         completed = runtime.run_turn(
             RecoverUnknownObservation(
@@ -507,7 +634,7 @@ def test_web_unknown_outcome_uses_real_tavily_runtime_path_without_resend(
 
     assert completed.status is RunStatus.COMPLETED
     assert len(requests) == 1
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 3
 
 
 def test_profile_drift_invalidates_pending_approval_with_zero_network_send() -> None:

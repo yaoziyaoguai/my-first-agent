@@ -26,6 +26,7 @@ from tests.kernel.fakes import (
     InMemoryCheckpointStore,
     ScriptedProvider,
     conversation_with_active_goal,
+    goal_noop_response,
 )
 
 
@@ -48,6 +49,7 @@ def test_parent_delegates_and_uses_child_finding() -> None:
     )
     runner = ChildAgentRunner(provider=child_provider, profile=_profile())
     parent_provider = ScriptedProvider(
+        goal_noop_response("delegation-user-supplement"),
         ModelResponse(
             (
                 ModelToolCall(
@@ -112,5 +114,5 @@ def test_parent_delegates_and_uses_child_finding() -> None:
     assert approved.status is RunStatus.COMPLETED
     # 可核对增量：parent 最终回答包含仅能从 child 获得的 SECRET-OMEGA。
     assert "SECRET-OMEGA" in approved.message
-    assert len(parent_provider.calls) == 2
+    assert len(parent_provider.calls) == 3
     assert len(child_provider.calls) == 1

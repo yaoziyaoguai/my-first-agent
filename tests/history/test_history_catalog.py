@@ -15,6 +15,7 @@ from agent.history.tools import build_history_tool_registrations
 from agent.runtime.checkpoint import LocalCheckpointStore
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
+    BeginAnswer,
     CompletionClaim,
     ConversationFact,
     ConversationState,
@@ -320,6 +321,7 @@ def test_history_tools_mint_kernel_source_receipts_and_runtime_reuses_one_loop(
     )
     catalog = _catalog(opened, exclude_current=True)
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-history-answer")),
         ModelResponse(
             (ModelToolCall("history-call", "history_search", {"query": "local-first"}),)
         ),
@@ -349,11 +351,11 @@ def test_history_tools_mint_kernel_source_receipts_and_runtime_reuses_one_loop(
     result = runtime.run_turn(action, snapshot)
 
     assert result.status is RunStatus.COMPLETED
-    assert len(provider.calls) == 2
-    assert "first_agent_history" in provider.calls[1].data_classes
+    assert len(provider.calls) == 3
+    assert "first_agent_history" in provider.calls[2].data_classes
     history_blocks = [
         block
-        for message in provider.calls[1].messages
+        for message in provider.calls[2].messages
         for block in message.content
         if block.get("type") == "tool_result"
     ]

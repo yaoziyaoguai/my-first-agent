@@ -8,6 +8,7 @@ from agent.composition import build_composition
 from agent.runtime.context import ContextLimits
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    BeginAnswer,
     ExecutionAuthorityClass,
     ModelResponse,
     ModelTextBlock,
@@ -30,7 +31,7 @@ from tests.kernel.fakes import CollectingSink, ScriptedProvider
 SCOPE = "workspace-scope-digest"
 
 
-def _occurrence(message: str = "run the benign nightly check") -> ScheduledOccurrence:
+def _occurrence(message: str = "what is the benign nightly status") -> ScheduledOccurrence:
     return ScheduledOccurrence(
         schedule_id="nightly-build",
         occurrence_id="2026-07-19T00:00:00Z",
@@ -118,7 +119,10 @@ def test_paused_status_is_needs_human(tmp_path: Path) -> None:
     state_root = tmp_path / "state"
     state_root.mkdir(mode=0o700)
     occurrence = _occurrence()
-    provider = ScriptedProvider(ModelResponse((ModelToolCall("c1", "read_gated_fixture", {}),)))
+    provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-scheduled-read")),
+        ModelResponse((ModelToolCall("c1", "read_gated_fixture", {}),)),
+    )
     composition, store, snapshot = _build_for(occurrence, state_root, provider)
 
     report = ScheduledOccurrenceCaller(composition.runtime, store, snapshot, occurrence).run_once()
@@ -165,6 +169,7 @@ def test_human_resolution_duplicate_reports_authoritative_terminal_state(tmp_pat
     state_root.mkdir(mode=0o700)
     occurrence = _occurrence()
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-scheduled-resolution")),
         ModelResponse((ModelToolCall("c1", "read_gated_fixture", {}),)),
         ModelResponse((ModelTextBlock("resolved ok"),)),
     )

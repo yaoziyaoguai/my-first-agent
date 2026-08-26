@@ -15,20 +15,23 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    BeginAnswer,
     BlockedClaim,
     ClarificationRequest,
     ConversationState,
+    DirectResponse,
     EvidenceOracleKind,
     ExecutionAuthorityClass,
     FactKind,
     GoalFrame,
     GoalProgress,
-    GoalProposal,
     GoalStatus,
     InteractionState,
     ModelResponse,
@@ -44,7 +47,13 @@ from agent.runtime.contracts import (
 )
 from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.tools import KernelToolRuntime, RegisteredTool
-from tests.kernel.fakes import CollectingSink, InMemoryCheckpointStore, ScriptedProvider
+from tests.kernel.fakes import (
+    RUNTIME_GOAL_ID,
+    CollectingSink,
+    InMemoryCheckpointStore,
+    ScriptedProvider,
+    goal_draft_from_frame,
+)
 
 _CLARIFYING_QUESTION = "Which direction should the migration take: keep v1 or move to v2?"
 
@@ -126,6 +135,33 @@ def _task_tool(executions: list[str]) -> RegisteredTool:
     return RegisteredTool(spec, run)
 
 
+def _discovery_tool(executions: list[str]) -> RegisteredTool:
+    spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name="list_files",
+        version="1",
+        description="List bounded workspace paths",
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.LOW,
+        side_effect=SideEffectClass.READ_ONLY,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.NEVER,
+        safety_policy={"fixture": True},
+        output_limit_chars=100,
+    )
+
+    def run(intent) -> str:
+        executions.append(intent.arguments["path"])
+        return "data.csv\ncheck-report"
+
+    return RegisteredTool(spec, run)
+
+
 def _goal_frame() -> GoalFrame:
     return GoalFrame(
         goal_id="goal-1",
@@ -135,7 +171,7 @@ def _goal_frame() -> GoalFrame:
         workspace_identity_digest="workspace-digest-1",
         user_outcome="Persist the requested note",
         beneficiary="user",
-        targets=("workspace",),
+        targets=("notes/todo.md",),
         scope=("workspace/notes",),
         non_goals=(),
         assumptions=(),
@@ -205,6 +241,184 @@ def test_direct_answer_does_not_create_goal() -> None:
     assert executions == []
 
 
+def test_typed_direct_response_does_not_create_goal_or_tool_effect() -> None:
+    timeline: list[tuple[str, object]] = []
+    store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
+    executions: list[str] = []
+    provider = ScriptedProvider(
+        ModelResponse(
+            (),
+            control=DirectResponse(
+                correlation_id="control-answer-1",
+                text="Paris is the capital.",
+            ),
+        )
+    )
+    runtime = _runtime(provider, store, timeline, (_task_tool(executions),))
+
+    result = runtime.run_turn(
+        _submit(store.state, "What is the capital of France?"),
+        store.load(),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.message == "Paris is the capital."
+    assert store.state.goal is None
+    assert store.state.interaction_state is InteractionState.IDLE
+    assert len(provider.calls) == 1
+    assert [entry for entry in timeline if entry[0].startswith("tool_")] == []
+    assert executions == []
+
+
+def test_begin_answer_opens_only_read_tools_and_finishes_without_goal() -> None:
+    timeline: list[tuple[str, object]] = []
+    store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
+    executions: list[str] = []
+    provider = ScriptedProvider(
+        ModelResponse(
+            (),
+            control=BeginAnswer(correlation_id="control-begin-answer-1"),
+        ),
+        ModelResponse((ModelToolCall("list-1", "list_files", {"path": "."}),)),
+        ModelResponse(
+            (),
+            control=DirectResponse(
+                correlation_id="control-grounded-answer-1",
+                text="I found data.csv and check-report.",
+            ),
+        ),
+    )
+    runtime = _runtime(
+        provider,
+        store,
+        timeline,
+        (_discovery_tool(executions), _task_tool(executions)),
+    )
+
+    result = runtime.run_turn(
+        _submit(store.state, "Which files are in this project?"),
+        store.load(),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.message == "I found data.csv and check-report."
+    assert store.state.goal is None
+    assert store.state.interaction_state is InteractionState.IDLE
+    assert executions == ["."]
+    assert provider.calls[0].tools == ()
+    assert [tool.name for tool in provider.calls[1].tools] == ["list_files"]
+    assert "goal_proposal" not in provider.calls[1].control_schema["input_schema"][
+        "properties"
+    ]["kind"]["enum"]
+    assert [
+        receipt.control_kind for receipt in store.state.control_receipts
+    ] == ["begin_answer"]
+
+
+def test_unadvertised_read_tool_cannot_bypass_intent_gate() -> None:
+    timeline: list[tuple[str, object]] = []
+    store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
+    executions: list[str] = []
+    provider = ScriptedProvider(
+        ModelResponse((ModelToolCall("list-hidden", "list_files", {"path": "."}),)),
+        ModelResponse((), control=BeginAnswer(correlation_id="control-after-denial")),
+        ModelResponse((ModelToolCall("list-visible", "list_files", {"path": "."}),)),
+        ModelResponse(
+            (),
+            control=DirectResponse(
+                correlation_id="control-answer-after-read",
+                text="I found the project files.",
+            ),
+        ),
+    )
+    runtime = _runtime(provider, store, timeline, (_discovery_tool(executions),))
+
+    result = runtime.run_turn(
+        _submit(store.state, "Which files are here?"),
+        store.load(),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert executions == ["."], "only the post-begin_answer read may execute"
+    assert sum(entry == ("tool_prepare", "list_files") for entry in timeline) == 1
+    assert any(
+        fact.content.get("code") == "unadvertised_tool"
+        for fact in store.state.facts
+    )
+
+
+def test_grounded_answer_cannot_upgrade_source_content_into_goal_authority() -> None:
+    timeline: list[tuple[str, object]] = []
+    store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
+    executions: list[str] = []
+    provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer(correlation_id="control-answer-mode")),
+        ModelResponse((ModelToolCall("list-1", "list_files", {"path": "."}),)),
+        ModelResponse(
+            (),
+            control=goal_draft_from_frame("control-source-derived-goal", _goal_frame()),
+        ),
+        ModelResponse(
+            (),
+            control=DirectResponse(
+                correlation_id="control-answer-after-rejection",
+                text="The project contains data.csv and check-report.",
+            ),
+        ),
+    )
+    runtime = _runtime(provider, store, timeline, (_discovery_tool(executions),))
+
+    result = runtime.run_turn(
+        _submit(store.state, "What does this project contain?"),
+        store.load(),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert store.state.goal is None
+    assert executions == ["."]
+    assert any(
+        fact.content.get("code") == "invalid_model_control"
+        and "goal_proposal" in fact.content.get("text", "")
+        for fact in store.state.facts
+    )
+    assert all(
+        receipt.control_kind != "goal_proposal"
+        for receipt in store.state.control_receipts
+    )
+
+
+@pytest.mark.parametrize(
+    "prior_interaction",
+    [InteractionState.ANSWERING, InteractionState.CLARIFYING],
+)
+def test_fresh_user_action_reenters_intent_gate(prior_interaction: InteractionState) -> None:
+    timeline: list[tuple[str, object]] = []
+    initial = replace(
+        ConversationState.new("conversation-1"),
+        interaction_state=prior_interaction,
+    )
+    store = RecordingCheckpointStore(initial, timeline)
+    provider = ScriptedProvider(
+        ModelResponse(
+            (),
+            control=DirectResponse(
+                correlation_id=f"control-fresh-{prior_interaction.value}",
+                text="A fresh answer.",
+            ),
+        )
+    )
+    runtime = _runtime(provider, store, timeline, (_discovery_tool([]),))
+
+    result = runtime.run_turn(_submit(store.state, "A new question"), store.load())
+
+    assert result.status is RunStatus.COMPLETED
+    assert provider.calls[0].tools == ()
+    assert "goal_proposal" in provider.calls[0].control_schema["input_schema"][
+        "properties"
+    ]["kind"]["enum"]
+    assert store.state.interaction_state is InteractionState.IDLE
+
+
 def test_direction_boundary_clarification_has_zero_tool_effect() -> None:
     timeline: list[tuple[str, object]] = []
     store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
@@ -241,18 +455,114 @@ def test_direction_boundary_clarification_has_zero_tool_effect() -> None:
     assert store.state.goal is None
 
 
+def test_discoverable_workspace_clarification_is_rejected_before_user_interrupt() -> None:
+    timeline: list[tuple[str, object]] = []
+    store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
+    executions: list[str] = []
+    provider = ScriptedProvider(
+        ModelResponse(
+            (),
+            control=ClarificationRequest(
+                correlation_id="control-discoverable-clarify",
+                question="Which CSV file should I read?",
+                boundary_code="workspace_details",
+                missing_fields=("csv_path",),
+                safe_assumptions=(),
+            ),
+        ),
+        ModelResponse(
+            (),
+            control=BeginAnswer(correlation_id="control-discoverable-begin-answer"),
+        ),
+        ModelResponse(
+            (ModelToolCall("list-1", "list_files", {"path": "."}),),
+        ),
+        ModelResponse(
+            (),
+            control=DirectResponse(
+                correlation_id="control-discovered-answer",
+                text="I found data.csv and check-report.",
+            ),
+        ),
+    )
+    runtime = _runtime(
+        provider,
+        store,
+        timeline,
+        (_discovery_tool(executions),),
+    )
+
+    result = runtime.run_turn(
+        _submit(store.state, "Use the CSV and existing validator."),
+        store.load(),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert executions == ["."]
+    assert store.state.interaction_state is InteractionState.IDLE
+    assert any(
+        fact.content.get("code") == "clarification_requires_discovery"
+        and "begin_answer" in fact.content.get("text", "")
+        for fact in store.state.facts
+    )
+
+
+def test_discovery_policy_directs_explicit_task_to_goal_proposal_before_sources() -> None:
+    # 016 §5.2 goal-first:clarification_requires_discovery 的修复消息必须告知模型,
+    # 显式可验收任务应先提交 goal_proposal——同一 action 内成功的 source 检索会
+    # 关闭铸造窗口,否则真实模型会在“先探索再提案”后陷入无合规路径的死胡同。
+    timeline: list[tuple[str, object]] = []
+    store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
+    executions: list[str] = []
+    provider = ScriptedProvider(
+        ModelResponse(
+            (),
+            control=ClarificationRequest(
+                correlation_id="control-clarify-first",
+                question="Which file should I write?",
+                boundary_code="workspace_details",
+                missing_fields=("target_path",),
+                safe_assumptions=(),
+            ),
+        ),
+        ModelResponse((ModelToolCall("list-1", "list_files", {"path": "."}),)),
+        ModelResponse(
+            (),
+            control=DirectResponse(
+                correlation_id="control-discovered-answer",
+                text="I found data.csv.",
+            ),
+        ),
+    )
+    runtime = _runtime(provider, store, timeline, (_discovery_tool(executions),))
+
+    runtime.run_turn(_submit(store.state, "Use the CSV."), store.load())
+
+    messages = [
+        fact.content.get("text", "")
+        for fact in store.state.facts
+        if fact.content.get("code") == "clarification_requires_discovery"
+    ]
+    assert messages, "clarification_requires_discovery policy must fire"
+    assert any(
+        "submit goal_proposal first" in text for text in messages
+    ), "policy must offer the goal-first compliant path before forcing discovery"
+
+
 def test_explicit_task_persists_goal_before_rebuilding_context() -> None:
     timeline: list[tuple[str, object]] = []
     store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
     executions: list[str] = []
     provider = ScriptedProvider(
-        ModelResponse((), control=GoalProposal("control-goal-1", _goal_frame())),
+        ModelResponse(
+            (), control=goal_draft_from_frame("control-goal-1", _goal_frame())
+        ),
         ModelResponse((ModelToolCall("call-1", "write_note", {"path": "notes/todo.md"}),)),
         ModelResponse(
             (),
             control=BlockedClaim(
                 correlation_id="control-goal-1-blocked",
-                goal_id="goal-1",
+                goal_id=RUNTIME_GOAL_ID,
                 goal_revision=1,
                 blocker="note written; completion evidence is unavailable",
                 safe_attempts=("wrote the requested note",),
@@ -268,7 +578,7 @@ def test_explicit_task_persists_goal_before_rebuilding_context() -> None:
     )
 
     assert store.state.goal is not None, "explicit task must persist its Goal durably by CAS"
-    assert store.state.goal.goal_id == "goal-1"
+    assert store.state.goal.goal_id.startswith("goal-v1-")
 
     labels = [entry[0] for entry in timeline]
     assert "goal_cas" in labels
@@ -288,15 +598,15 @@ def test_explicit_task_persists_goal_before_rebuilding_context() -> None:
     assert result.status is RunStatus.COMPLETED
 
 
-def test_task_tool_call_without_durable_goal_fails_before_prepare() -> None:
+def test_unadvertised_task_tool_without_goal_is_denied_before_prepare() -> None:
     timeline: list[tuple[str, object]] = []
     store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
     executions: list[str] = []
-    # 模型在没有任何 GoalProposal 的情况下直接发起 effectful 任务工具调用;
-    # 第二条响应仅防脚本耗尽,fail-closed 实现不会消费它。
+    # 模型在没有任何 GoalProposal 的情况下直接发起 effectful 任务工具调用；
+    # Runtime 拒绝该调用后仍允许模型安全地改答普通文本。
     provider = ScriptedProvider(
         ModelResponse((ModelToolCall("call-1", "write_note", {"path": "notes/todo.md"}),)),
-        ModelResponse((ModelTextBlock("fallback answer that must never be needed"),)),
+        ModelResponse((ModelTextBlock("I cannot modify files without a Goal."),)),
     )
     runtime = _runtime(provider, store, timeline, (_task_tool(executions),))
 
@@ -308,8 +618,46 @@ def test_task_tool_call_without_durable_goal_fails_before_prepare() -> None:
     )
     assert [entry for entry in timeline if entry[0] == "tool_invoke"] == []
     assert executions == [], "the tool callable must never execute without a durable Goal"
-    assert result.status is not RunStatus.COMPLETED, "fail closed must not complete the run"
+    assert result.status is RunStatus.COMPLETED
+    assert result.message == "I cannot modify files without a Goal."
+    assert any(
+        fact.content.get("code") == "unadvertised_tool"
+        for fact in store.state.facts
+    )
     assert store.state.goal is None
+
+
+def test_invented_tool_without_goal_is_denied_before_tool_batch() -> None:
+    timeline: list[tuple[str, object]] = []
+    store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
+    provider = ScriptedProvider(
+        ModelResponse((ModelToolCall("call-unknown", "run_project_tests", {}),)),
+        ModelResponse((ModelTextBlock("I need a Goal before doing project work."),)),
+    )
+    runtime = _runtime(provider, store, timeline, ())
+
+    # 这条测试只隔离“模型凭空发明工具”的安全边界；显式任务必须先铸造 Goal、
+    # 且不能用普通文本逃逸，由 016 的 explicit-non-prose 契约单独覆盖。
+    result = runtime.run_turn(
+        _submit(store.state, "What does running project tests verify?"),
+        store.load(),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert [entry for entry in timeline if entry[0] == "tool_prepare"] == []
+    assert not any(fact.kind is FactKind.TOOL_CALLS for fact in store.state.facts), (
+        "a made-up tool name must not create a pre-Goal tool batch"
+    )
+    assert any(
+        fact.kind is FactKind.POLICY_RESULT
+        and fact.content.get("code") == "unadvertised_tool"
+        for fact in store.state.facts
+    )
+    assert not any(
+        fact.kind is FactKind.TOOL_RESULT
+        and fact.content.get("metadata", {}).get("code") == "unknown_tool"
+        for fact in store.state.facts
+    )
 
 
 def test_control_and_illegal_tool_mix_fails_closed() -> None:
@@ -320,7 +668,7 @@ def test_control_and_illegal_tool_mix_fails_closed() -> None:
     initial_state = store.state
     progress = GoalProgress(
         correlation_id="control-progress-mix",
-        goal_id="goal-1",
+        goal_id=RUNTIME_GOAL_ID,
         goal_revision=1,
         summary="working",
         next_step="continue",
@@ -371,7 +719,10 @@ def test_active_goal_plain_done_text_cannot_end_goal() -> None:
     store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
     executions: list[str] = []
     provider = ScriptedProvider(
-        ModelResponse((), control=GoalProposal("control-goal-plain-done", _goal_frame())),
+        ModelResponse(
+            (),
+            control=goal_draft_from_frame("control-goal-plain-done", _goal_frame()),
+        ),
         ModelResponse((ModelTextBlock("Goal accepted."),)),
         ModelResponse((ModelTextBlock("done"),)),
     )
@@ -421,13 +772,16 @@ def test_progress_control_continues_without_user_continue_message() -> None:
     executions: list[str] = []
     progress = GoalProgress(
         correlation_id="control-progress-1",
-        goal_id="goal-1",
+        goal_id=RUNTIME_GOAL_ID,
         goal_revision=1,
         summary=_PROGRESS_SUMMARY,
         next_step=_PROGRESS_NEXT_STEP,
     )
     provider = ScriptedProvider(
-        ModelResponse((), control=GoalProposal("control-goal-progress-setup", _goal_frame())),
+        ModelResponse(
+            (),
+            control=goal_draft_from_frame("control-goal-progress-setup", _goal_frame()),
+        ),
         ModelResponse(
             (ModelToolCall("write-before-progress", "write_note", {"path": "notes/todo.md"}),)
         ),
@@ -436,7 +790,7 @@ def test_progress_control_continues_without_user_continue_message() -> None:
             (),
             control=BlockedClaim(
                 correlation_id="control-progress-blocked",
-                goal_id="goal-1",
+                goal_id=RUNTIME_GOAL_ID,
                 goal_revision=1,
                 blocker="the note body still needs a user-provided source",
                 safe_attempts=("recorded the verified progress",),
@@ -460,7 +814,7 @@ def test_progress_control_continues_without_user_continue_message() -> None:
 
     goal = store.state.goal
     assert goal is not None, "accepted progress must not drop the durable Goal"
-    assert goal.goal_id == "goal-1"
+    assert goal.goal_id.startswith("goal-v1-")
     assert goal.status is GoalStatus.BLOCKED
     assert goal.progress_summary == _PROGRESS_SUMMARY
     assert goal.next_step == "provide the note source"
@@ -500,20 +854,23 @@ def test_repeated_goal_progress_requires_a_product_action_before_more_progress()
     executions: list[str] = []
     first_progress = GoalProgress(
         correlation_id="control-progress-first",
-        goal_id="goal-1",
+        goal_id=RUNTIME_GOAL_ID,
         goal_revision=1,
         summary="Prepared the next safe step.",
         next_step="Write notes/todo.md.",
     )
     repeated_progress = GoalProgress(
         correlation_id="control-progress-repeated",
-        goal_id="goal-1",
+        goal_id=RUNTIME_GOAL_ID,
         goal_revision=1,
         summary="Still preparing the next safe step.",
         next_step="Write notes/todo.md.",
     )
     provider = ScriptedProvider(
-        ModelResponse((), control=GoalProposal("control-goal-progress", _goal_frame())),
+        ModelResponse(
+            (),
+            control=goal_draft_from_frame("control-goal-progress", _goal_frame()),
+        ),
         ModelResponse(
             (ModelToolCall("write-before-progress", "write_note", {"path": "notes/first.md"}),)
         ),
@@ -526,7 +883,7 @@ def test_repeated_goal_progress_requires_a_product_action_before_more_progress()
             (),
             control=BlockedClaim(
                 correlation_id="control-progress-blocked-after-tool",
-                goal_id="goal-1",
+                goal_id=RUNTIME_GOAL_ID,
                 goal_revision=1,
                 blocker="closed verification evidence is unavailable",
                 safe_attempts=("wrote the requested note",),
@@ -557,13 +914,71 @@ def test_repeated_goal_progress_requires_a_product_action_before_more_progress()
     )
 
 
+def test_reused_goal_progress_correlation_is_repairable_control_input() -> None:
+    timeline: list[tuple[str, object]] = []
+    store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
+    executions: list[str] = []
+    progress = GoalProgress(
+        correlation_id="control-goal-progress-reuse",
+        goal_id=RUNTIME_GOAL_ID,
+        goal_revision=1,
+        summary="Completed one concrete write.",
+        next_step="Continue with the remaining requested work.",
+    )
+    provider = ScriptedProvider(
+        ModelResponse(
+            (),
+            control=goal_draft_from_frame("control-goal-progress-reuse", _goal_frame()),
+        ),
+        ModelResponse(
+            (
+                ModelToolCall(
+                    "write-before-first-progress",
+                    "write_note",
+                    {"path": "notes/first.md"},
+                ),
+            )
+        ),
+        ModelResponse((), control=progress),
+        ModelResponse(
+            (),
+            control=BlockedClaim(
+                correlation_id="control-progress-reuse-blocked",
+                goal_id=RUNTIME_GOAL_ID,
+                goal_revision=1,
+                blocker="closed verification evidence is unavailable",
+                safe_attempts=("completed one concrete write",),
+                resume_condition="provide a closed verification oracle",
+            ),
+        ),
+    )
+
+    result = _runtime(
+        provider,
+        store,
+        timeline,
+        (_task_tool(executions),),
+    ).run_turn(
+        _submit(store.state, "Write a note file notes/todo.md with my plan"),
+        store.load(),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert executions == ["notes/first.md"]
+    assert any(
+        fact.content.get("code") == "invalid_model_control"
+        and "new correlation_id" in fact.content.get("text", "")
+        for fact in store.state.facts
+    )
+
+
 def test_persistent_goal_progress_without_product_action_fails_closed() -> None:
     timeline: list[tuple[str, object]] = []
     store = RecordingCheckpointStore(ConversationState.new("conversation-1"), timeline)
     progresses = tuple(
         GoalProgress(
             correlation_id=f"control-progress-stalled-{index}",
-            goal_id="goal-1",
+            goal_id=RUNTIME_GOAL_ID,
             goal_revision=1,
             summary=f"Narrated progress {index}.",
             next_step="Write notes/todo.md.",
@@ -571,7 +986,9 @@ def test_persistent_goal_progress_without_product_action_fails_closed() -> None:
         for index in range(3)
     )
     provider = ScriptedProvider(
-        ModelResponse((), control=GoalProposal("control-goal-stalled", _goal_frame())),
+        ModelResponse(
+            (), control=goal_draft_from_frame("control-goal-stalled", _goal_frame())
+        ),
         *(ModelResponse((), control=progress) for progress in progresses),
     )
     runtime = _runtime(provider, store, timeline, (_task_tool([]),))
@@ -581,7 +998,7 @@ def test_persistent_goal_progress_without_product_action_fails_closed() -> None:
         store.load(),
     )
 
-    assert result.status is RunStatus.FAILED_FATAL
+    assert result.status is RunStatus.LIMIT_REACHED
     assert result.error_code == "no_progress"
     assert len(provider.calls) == 3
     assert sum(

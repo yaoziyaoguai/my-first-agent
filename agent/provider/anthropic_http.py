@@ -12,6 +12,7 @@ from agent.provider.normalize import (
     context_to_anthropic_messages,
     context_tools_to_anthropic,
     normalize_anthropic_response,
+    trusted_completion_goal_binding,
     trusted_system_projection,
 )
 from agent.provider.protocol import (
@@ -24,6 +25,7 @@ from agent.provider.protocol import (
     ProviderTransportError,
 )
 from agent.runtime.contracts import ContextPack, ModelResponse
+from agent.transport_audit import TransportAttemptRecorder
 
 DEFAULT_MAX_RESPONSE_BYTES = 4_000_000
 
@@ -37,12 +39,14 @@ class AnthropicCompatibleProvider:
         config: AgentProviderConfig,
         http_client: httpx.Client | None = None,
         max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+        attempt_recorder: TransportAttemptRecorder | None = None,
     ) -> None:
         if config.provider_type != "anthropic_compatible" or max_response_bytes < 1:
             raise ProviderConfigurationError()
         self._config = config
         self._http_client = http_client
         self._max_response_bytes = max_response_bytes
+        self._attempt_recorder = attempt_recorder
 
     def _client(self) -> httpx.Client:
         if self._http_client is None:
@@ -84,6 +88,8 @@ class AnthropicCompatibleProvider:
             body["tools"] = tools
 
         try:
+            if self._attempt_recorder is not None:
+                self._attempt_recorder("model", self._config.base_url)
             with self._client().stream(
                 "POST",
                 self._config.endpoint,
@@ -110,7 +116,10 @@ class AnthropicCompatibleProvider:
             payload = json.loads(b"".join(chunks))
         except ValueError:
             raise ProviderProtocolError("malformed_response") from None
-        return normalize_anthropic_response(payload)
+        return normalize_anthropic_response(
+            payload,
+            trusted_completion_binding=trusted_completion_goal_binding(context),
+        )
 
 
 def _raise_for_status(status_code: int) -> None:

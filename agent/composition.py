@@ -14,6 +14,7 @@ import secrets
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 
 import httpx
@@ -49,6 +50,7 @@ from agent.skill.catalog import SkillLimits, build_skill_catalog
 from agent.skill.tools import build_skill_tool_registrations
 from agent.tools.file_ops import DEFAULT_PRIVATE_ROOTS, build_file_tool_registrations
 from agent.tools.path_safety import WorkspaceBoundary
+from agent.transport_audit import TransportAttemptRecorder
 from agent.web.client import TavilyClient
 from agent.web.profile import WebProfileV1
 from agent.web.tools import build_web_tool_registrations
@@ -94,6 +96,16 @@ class WebResources:
 
     registrations: tuple[RegisteredTool, ...]
     closeables: tuple[Callable[[], None], ...]
+    readiness: WebReadiness
+    credential_env: str | None = None
+
+
+class WebReadiness(StrEnum):
+    """只描述本地配置就绪度；启动时不做网络健康检查。"""
+
+    NOT_ENABLED = "not_enabled"
+    READY = "ready"
+    TEMPORARILY_UNAVAILABLE = "temporarily_unavailable"
 
 
 def build_web_resources(
@@ -102,18 +114,26 @@ def build_web_resources(
     credential: str | None,
     http_client: httpx.Client | None = None,
     clock: Callable[[], str] | None = None,
+    attempt_recorder: TransportAttemptRecorder | None = None,
 ) -> WebResources:
     """未配置时显式关闭；配置后 key 只进入 client 内存。"""
     if profile is None:
         if credential is not None:
             raise ValueError("Web credential cannot be supplied without a profile")
-        return WebResources((), ())
+        return WebResources((), (), WebReadiness.NOT_ENABLED)
     if not credential:
-        raise ValueError(
-            "Web profile credential environment variable is not set: "
-            f"{profile.credential_env}"
+        return WebResources(
+            (),
+            (),
+            WebReadiness.TEMPORARILY_UNAVAILABLE,
+            credential_env=profile.credential_env,
         )
-    client = TavilyClient(profile, api_key=credential, http_client=http_client)
+    client = TavilyClient(
+        profile,
+        api_key=credential,
+        http_client=http_client,
+        attempt_recorder=attempt_recorder,
+    )
     observed_at = clock or (
         lambda: datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     )
@@ -124,6 +144,8 @@ def build_web_resources(
             clock=observed_at,
         ),
         closeables=(client.close,) if client.owns_client else (),
+        readiness=WebReadiness.READY,
+        credential_env=profile.credential_env,
     )
 
 

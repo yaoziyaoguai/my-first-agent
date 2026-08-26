@@ -15,7 +15,6 @@ from agent.runtime.contracts import (
     CompletionClaim,
     ConversationState,
     EvidenceOracleKind,
-    GoalProposal,
     GoalStatus,
     ModelResponse,
     ModelTextBlock,
@@ -28,7 +27,7 @@ from agent.runtime.tools import KernelToolRuntime
 from agent.tools.file_ops import build_file_tool_registrations
 from main import EVERYDAY_SYSTEM_POLICY
 from tests.continuity.test_contracts import _goal
-from tests.kernel.fakes import ScriptedProvider
+from tests.kernel.fakes import RUNTIME_GOAL_ID, ScriptedProvider, goal_draft_from_frame
 
 
 def _composition(provider, store, workspace: Path, output: list[str]):
@@ -101,7 +100,9 @@ def test_everyday_policy_keeps_discussion_goal_free_and_forbids_progress_loops()
     assert "Discussion, explanation, comparison, and brainstorming are answer-only" in (
         EVERYDAY_SYSTEM_POLICY
     )
-    assert "Only an explicit request to create, write, edit, or save" in EVERYDAY_SYSTEM_POLICY
+    assert "Only an explicit request for a verifiable result starts a Goal" in (
+        EVERYDAY_SYSTEM_POLICY
+    )
     assert "goal_progress never substitutes for a product tool call" in EVERYDAY_SYSTEM_POLICY
 
 
@@ -125,7 +126,7 @@ def test_discussion_stays_goal_free_until_explicit_artifact_then_verifies(
         ),
         ModelResponse(
             (),
-            control=GoalProposal(
+            control=goal_draft_from_frame(
                 "proposal-013-idea",
                 _artifact_goal(
                     source_fact_id="action:2:user",
@@ -154,7 +155,7 @@ def test_discussion_stays_goal_free_until_explicit_artifact_then_verifies(
                 # 真实 DeepSeek 曾复用 GoalProposal 的 correlation_id；Runtime 必须
                 # 在同一 run 内要求一次有界修复，不能把用户的任务打成 fatal。
                 correlation_id="proposal-013-idea",
-                goal_id=goal_id,
+                goal_id=RUNTIME_GOAL_ID,
                 goal_revision=1,
                 criterion_evidence_refs=(evidence_id,),
             ),
@@ -163,7 +164,7 @@ def test_discussion_stays_goal_free_until_explicit_artifact_then_verifies(
             (),
             control=CompletionClaim(
                 correlation_id="completion-013-idea",
-                goal_id=goal_id,
+                goal_id=RUNTIME_GOAL_ID,
                 goal_revision=1,
                 criterion_evidence_refs=(evidence_id,),
             ),
@@ -218,7 +219,7 @@ def test_empty_workspace_can_discover_root_and_create_verified_artifact(
     provider = ScriptedProvider(
         ModelResponse(
             (),
-            control=GoalProposal(
+            control=goal_draft_from_frame(
                 "proposal-013-empty",
                 _artifact_goal(
                     source_fact_id="action:1:user",
@@ -246,7 +247,7 @@ def test_empty_workspace_can_discover_root_and_create_verified_artifact(
             (),
             control=CompletionClaim(
                 correlation_id="completion-013-empty",
-                goal_id=goal_id,
+                goal_id=RUNTIME_GOAL_ID,
                 goal_revision=1,
                 criterion_evidence_refs=(
                     f"evidence:{goal_id}:1:{criterion_id}",
@@ -302,7 +303,7 @@ def test_existing_workspace_restart_changes_only_target_and_preserves_sentinels(
     provider = ScriptedProvider(
         ModelResponse(
             (),
-            control=GoalProposal(
+            control=goal_draft_from_frame(
                 "proposal-013-readme",
                 _artifact_goal(
                     source_fact_id="action:1:user",
@@ -333,7 +334,7 @@ def test_existing_workspace_restart_changes_only_target_and_preserves_sentinels(
             (),
             control=CompletionClaim(
                 correlation_id="completion-013-readme",
-                goal_id=goal_id,
+                goal_id=RUNTIME_GOAL_ID,
                 goal_revision=1,
                 criterion_evidence_refs=(evidence_id,),
             ),
@@ -355,7 +356,7 @@ def test_existing_workspace_restart_changes_only_target_and_preserves_sentinels(
     assert first_exit == 0, store.load().state.last_safe_result
     before_restart = store.load().state
     assert before_restart.goal is not None
-    assert before_restart.goal.goal_id == goal_id
+    assert before_restart.goal.goal_id.startswith("goal-v1-")
     assert target.read_text(encoding="utf-8") == "Title\nOld summary\n"
     assert "Execute this operation? [y/N]" in "\n".join(first_output)
     calls_before_restart = len(provider.calls)
@@ -386,7 +387,8 @@ def test_existing_workspace_restart_changes_only_target_and_preserves_sentinels(
     )
     assert target.read_text(encoding="utf-8") == "Title\nNew bounded summary\n"
     final = restarted_store.load().state
-    assert final.goal is not None and final.goal.goal_id == goal_id
+    assert final.goal is not None
+    assert final.goal.goal_id == before_restart.goal.goal_id
     assert final.goal.status is GoalStatus.VERIFIED_DONE
     assert {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in sentinels

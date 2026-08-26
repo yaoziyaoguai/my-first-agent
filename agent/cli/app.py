@@ -381,7 +381,10 @@ def _parse_action(
 
     if command.startswith("/"):
         return None, "Unknown command."
-    if state.active_run is not None:
+    if (
+        state.active_run is not None
+        and state.active_run.status is not ActiveRunStatus.AWAITING_APPROVAL
+    ):
         status = state.active_run.status.value
         return None, f"A run is paused ({status}); use its matching reserved command."
     return SubmitMessage(**common, run_id=make_run_id(), message=raw), None

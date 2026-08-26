@@ -21,6 +21,25 @@ G8 之前 SubAgent 属于这种限制（HTTP adapter 无 honest hard-deadline）
 并经独立 G8 复核（stderr/temp/stdout-bound 闭合）后，SubAgent 已有真实 hard-deadline provider 路径，
 不再 safe-unavailable，已晋级 `locally-verified`（真实 HTTP provider in child 仍为 E3，pending）。
 
+## 016 product convergence status
+
+016 的状态由同一 delivery identity 的证据 fail-closed 派生。它不新增底层能力，而是把 012—015 已有的
+对话、workspace/history、公开 Web、文件 effect、本机程序执行和可信连续性收束成可安装、可 guided setup、
+无参数启动、可读暂停/恢复的一条默认产品路径。
+
+已实现的 candidate 边界包括：distribution metadata `1.0.0` 与 installed `--version`、guided provider/Web
+setup、Web 三态本地降级、可读 startup、安全 process notice，以及连续 16 次 semantic no-progress 后保留
+active Goal 的可恢复暂停。某个 delivery identity 是否完成 deterministic U1、materialized tree 与真实
+Model + Tavily 十二旅程连续三轮 U2，只能由同一 seal identity 的 receipt 和 fail-closed attestation 判定；
+旧 identity 的三连不能随 ordinary source 变化复用，本状态页不单独缓存该结论。
+
+U3 的 authoritative 状态只由 detached `docs/acceptance/016_FIRST_AGENT_1_0_INDEPENDENT_REVIEW.md` 记录。
+该文件只有在绑定当前 delivery identity、核对 U0/U1/U2 并明确写明 PASS 时，才把 016 晋级为
+`accepted/delivered`；文件缺失、pending、FAIL 或 identity 不匹配时，状态保持 `implemented-candidate`。
+真实 U2 证据不能由 Fake/scripted/reference test 或旧 identity receipt 替代。完整边界见
+`016_FIRST_AGENT_1_0_EXPERIENCE_DESIGN.md` 与
+`docs/acceptance/016_FIRST_AGENT_1_0_E3.md`。
+
 ## Current matrix
 
 | Capability | Current claim | Trusted evidence | Blocking closure | Permitted wording |

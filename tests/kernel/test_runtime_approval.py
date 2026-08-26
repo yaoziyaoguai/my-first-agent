@@ -23,6 +23,7 @@ from tests.kernel.fakes import (
     InMemoryCheckpointStore,
     ScriptedProvider,
     conversation_with_active_goal,
+    goal_noop_response,
 )
 
 
@@ -47,6 +48,7 @@ def test_approval_pause_is_durable_and_exact_resume_executes_once() -> None:
         output_limit_chars=50,
     )
     provider = ScriptedProvider(
+        goal_noop_response("approval-user-supplement"),
         ModelResponse((ModelToolCall("call-1", "write_fixture", {"content": "hello"}),)),
         ModelResponse(
             (),
@@ -66,7 +68,7 @@ def test_approval_pause_is_durable_and_exact_resume_executes_once() -> None:
         provider=provider,
         context_manager=KernelContextManager(
             system_policy="policy",
-            limits=ContextLimits(max_input_tokens=2_000, output_reserve=200),
+            limits=ContextLimits(max_input_tokens=8_000, output_reserve=200),
         ),
         tool_runtime=KernelToolRuntime(
             (
@@ -108,7 +110,7 @@ def test_approval_pause_is_durable_and_exact_resume_executes_once() -> None:
 
     assert completed.status is RunStatus.COMPLETED
     assert calls == ["hello"]
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 3
 
 
 def test_resume_reemits_same_approval_without_provider_or_tool_call() -> None:
@@ -126,6 +128,7 @@ def test_resume_reemits_same_approval_without_provider_or_tool_call() -> None:
         output_limit_chars=20,
     )
     provider = ScriptedProvider(
+        goal_noop_response("approval-resume-user-supplement"),
         ModelResponse((ModelToolCall("call-1", "write_fixture", {}),)),
     )
     store = InMemoryCheckpointStore(conversation_with_active_goal())
@@ -160,7 +163,7 @@ def test_resume_reemits_same_approval_without_provider_or_tool_call() -> None:
     second = runtime.run_turn(resume, store.load())
 
     assert first.status is second.status is RunStatus.AWAITING_APPROVAL
-    assert len(provider.calls) == 1
+    assert len(provider.calls) == 2
     assert sink.events[-1].event_id == first_event_id
 
 
@@ -185,6 +188,7 @@ def test_successful_approved_request_is_not_repeated_after_resume() -> None:
         output_limit_chars=50,
     )
     provider = ScriptedProvider(
+        goal_noop_response("approval-repeat-user-supplement"),
         *(
             ModelResponse(
                 (ModelToolCall(f"fetch-{index}", "fetch_fixture", {"ref": "same"}),)
@@ -235,6 +239,6 @@ def test_successful_approved_request_is_not_repeated_after_resume() -> None:
         store.load(),
     )
 
-    assert result.status is RunStatus.FAILED_FATAL
+    assert result.status is RunStatus.LIMIT_REACHED
     assert result.error_code == "no_progress"
     assert calls == ["same"]

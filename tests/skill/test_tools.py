@@ -5,6 +5,7 @@ from pathlib import Path
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    BeginAnswer,
     ConversationState,
     ExecutionAuthorityClass,
     ExecutionIntent,
@@ -323,6 +324,7 @@ def test_activation_body_flows_into_context_unclipped_when_budget_allows(
     max_tool_result_chars = 4_000
     store = InMemoryCheckpointStore(ConversationState.new("conversation-1"))
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-skill-activation")),
         ModelResponse((ModelToolCall("call-1", "skill__code-review", {}),)),
         ModelResponse((ModelTextBlock("done"),)),
     )

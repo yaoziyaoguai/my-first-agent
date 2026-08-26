@@ -2,6 +2,12 @@
 
 一个从当前目录开始工作的 local-first 日常 Agent。
 
+`1.0.0` 的目标不是增加更多能力，而是让第一次安装、guided setup、无参数启动、可选 Web、暂停与恢复
+形成一条普通用户可理解的默认路径。当前 delivery identity 的 U0/U1、materialized clean-room 与真实
+Model + Tavily U2 十二旅程连续三轮必须全部通过。最终 promotion 状态 fail closed：只有 detached
+`docs/acceptance/016_FIRST_AGENT_1_0_INDEPENDENT_REVIEW.md` 对同一 delivery identity 明确记录 U3 PASS 时，
+该 identity 才是已交付的 First Agent 1.0；文件缺失、pending 或 identity 不匹配时仍是 promotion candidate。
+
 它使用同一个自然语言入口回答问题、讨论想法或完成有界的当前目录文件任务。底层仍刻意保持为一个模型循环、一个上下文管理器、一个受治理的工具执行路径和一个可恢复状态机。它可以在逐次批准后通过固定 Tavily 入口查询公开 Web；015 Governed Local Action 已通过真实 E3、独立评审与 Codex 终裁，作为已交付能力提供受治理的结构化本机执行（`local_process`：exact 同意批准、Goal 限定租约、closed 环境与资源档案）。任意网页直连、浏览器自动化、整机控制与任意 shell 仍不在交付范围内，也不存在第二套 Agent loop。
 
 ## 当前能力
@@ -35,28 +41,27 @@ Graphify 和 Understand Anything 是 Coding Agent 理解本仓库时可使用的
 
 ## 快速开始
 
-先把凭据放进你选择的环境变量，再一次性保存不含秘密的 Provider profile：
+安装后运行 guided setup。它只询问 provider、model、base URL 和 credential 环境变量名，不读取或保存
+credential value，也不会发送模型请求：
 
 ```bash
-python -m pip install -e .
+python -m pip wheel --no-deps --wheel-dir dist .
+python -m pip install dist/first_agent-1.0.0-py3-none-any.whl
+first-agent setup
+
+# 按 setup 最后显示的变量名，在当前 shell 注入 key，例如：
 export FIRST_AGENT_API_KEY='set-in-your-shell'
-first-agent setup \
-  --provider openai_compatible \
-  --model your-model \
-  --base-url https://provider.example
 
 cd /path/to/any-empty-or-existing-directory
 first-agent
 ```
 
-公开 Web 是可选能力。需要时先保存不含秘密的固定 Tavily profile；key 仍只放在你选择的环境变量里：
+公开 Web 是可选能力。需要时运行同一个 installed command，阅读第三方处理说明并在当前提示确认；key 仍
+只放在你选择的环境变量里：
 
 ```bash
+first-agent setup-web
 export FIRST_AGENT_WEB_API_KEY='set-in-your-shell'
-first-agent setup-web \
-  --credential-env FIRST_AGENT_WEB_API_KEY \
-  --timeout 10 \
-  --max-results 5
 ```
 
 `setup-web` 不读取或保存 key，只保存固定 destination、credential 环境变量名、timeout、结果上限和第三方

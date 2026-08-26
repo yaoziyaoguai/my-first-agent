@@ -5,17 +5,23 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass, replace
 
 from agent.runtime.context_control import (
+    goal_correction_pending,
     goal_progress_available,
     reserved_control_schema,
     web_fetch_available,
+    web_fetch_source_refs,
 )
 from agent.runtime.context_source import (
     ContextLimitError,
     ToolResultSourceProjection,
+    citable_citation_sources,
+    citable_source_refs,
     project_tool_result_sources,
+    public_web_requirement_pending,
 )
 from agent.runtime.contracts import (
     Action,
@@ -32,6 +38,7 @@ from agent.runtime.contracts import (
     FactKind,
     GoalBootstrap,
     GoalStatus,
+    InteractionState,
     JSONValue,
     ModelMessage,
     SideEffectClass,
@@ -42,6 +49,88 @@ from agent.runtime.contracts import (
     source_result_since_latest_user,
 )
 from agent.runtime.ports import ContextSource, RetryableContextSourceError
+
+# 这不是自然语言分类器：只识别句首、语法上已明确要求非文字结果的窄集合，
+# 用来 veto “直接文字即可完成”。其余表达仍由同一个 typed intent gate 判断。
+_EXPLICIT_NON_PROSE_OUTCOME_PATTERNS = (
+    re.compile(
+        r"^\s*(?:(?:请(?:你)?|麻烦(?:你)?|帮我|替我|给我|你能(?:帮我)?|"
+        r"能否(?:帮我)?|可否(?:帮我)?)\s*)?"
+        r"(?:创建|新建|写入|保存|修改|编辑|修复|删除|移动|复制|运行|执行|"
+        r"测试|构建|校验|验证)"
+    ),
+    re.compile(
+        r"^\s*(?:把|将).{0,160}(?:写入|写到|保存|修改|编辑|修复|修好|删除|"
+        r"移动|复制|运行|执行|测试|构建|校验|验证)"
+    ),
+    re.compile(
+        r"^\s*为.{0,160}(?:写(?:一|个|份|入|到)|创建|新建|保存|修改|编辑|"
+        r"修复|运行|测试|校验|验证)"
+    ),
+    re.compile(r"^\s*(?:调查|研究).{0,160}(?:写入|写到|保存|生成)"),
+    re.compile(
+        r"^\s*结合.{0,160}(?:写入|写到|保存|整理.{0,80}(?:到|进))"
+    ),
+    re.compile(
+        r"^\s*先.{0,160}(?:再|然后)(?:把|将).{0,160}"
+        r"(?:写入|写到|保存|生成|修改|编辑|修复|运行|执行|测试|校验|验证)"
+    ),
+    re.compile(
+        r"^\s*(?:看看|看一下|阅读|查看|分析|了解|结合).{0,240}"
+        r"(?:创建|新建|写入|写到|保存|生成|修改|编辑|修复|修好|删除|移动|"
+        r"复制|运行|执行|测试|构建|校验|验证)"
+    ),
+    re.compile(
+        r"^\s*(?:(?:please|kindly)\s+|(?:can|could|would)\s+you\s+)?"
+        r"(?:create|write|edit|save|fix|delete|move|copy|run|test|build|"
+        r"validate|check|execute)\b",
+        re.IGNORECASE,
+    ),
+)
+
+_ACTION_EXPLANATION_QUESTION_PATTERNS = (
+    re.compile(
+        r"^\s*(?:看看|看一下|阅读|查看|分析|了解|结合).{0,240}"
+        r"(?:会|能|要|需要|是否|是不是|为何|为什么|如何|怎么|哪些|什么|多久|"
+        r"多少|哪里|哪种).{0,80}[吗么嘛呢?？]\s*$"
+    ),
+    re.compile(
+        r"^\s*先.{0,240}(?:会|能|要|需要|是否|是不是|为何|为什么|如何|怎么|"
+        r"哪些|什么|多久|多少|哪里|哪种).{0,80}[吗么嘛呢?？]\s*$"
+    ),
+    re.compile(
+        r"^\s*(?:创建|新建|写入|保存|修改|编辑|修复|删除|移动|复制|运行|执行|"
+        r"测试|构建|校验|验证).{0,160}(?:是什么意思|(?:会|能|要|需要|需不需要)"
+        r".{0,80}[吗么嘛呢]|是否|是不是|为何|为什么|如何|怎么|哪些|什么|多久|"
+        r"多少|哪里|哪种).*[?？]?\s*$"
+    ),
+    re.compile(
+        r"^\s*(?:create|write|edit|save|fix|delete|move|copy|run|test|build|"
+        r"validate|check|execute)\b.{0,160}(?:[—–,:;\-]\s*(?:will|would|does|"
+        r"do|is|are|can|could|should)\b|\b(?:what|why|how|which|when|where)\b)"
+        r".*\?\s*$",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _explicit_non_prose_outcome_requested(state: ConversationState) -> bool:
+    source = next(
+        (fact for fact in reversed(state.facts) if fact.kind is FactKind.USER_MESSAGE),
+        None,
+    )
+    text = source.content.get("text") if source is not None else None
+    if not isinstance(text, str):
+        return False
+    if any(
+        pattern.search(text) is not None
+        for pattern in _ACTION_EXPLANATION_QUESTION_PATTERNS
+    ):
+        return False
+    return any(
+        pattern.search(text) is not None
+        for pattern in _EXPLICIT_NON_PROSE_OUTCOME_PATTERNS
+    )
 
 
 def _receipt_continuity_payload(receipt: ControlReceipt) -> dict[str, JSONValue]:
@@ -131,27 +220,157 @@ class KernelContextManager:
         if action.conversation_id != state.conversation_id:
             raise ValueError("action and state conversation must match")
 
-        # 初始 no-Goal 阶段在模型可见能力层就移除 effectful callable；Runtime
-        # 的 prepare 前检查仍保留为第二道 fail-closed 防线，防止模型臆造隐藏工具名。
+        # no-Goal 的首次模型调用是 intent gate：在 Runtime 接受问答或 Goal
+        # 选择前，不让任何 product tool/context source 参与语义分类。这样外部内容
+        # 只能支持已经选定的 ANSWERING，不能反向铸造任务 authority。
         # PAUSED Goal 同样只暴露只读能力：任务推进/effect 必须先显式 ResumeGoal。
         goal_paused = state.goal is not None and state.goal.status is GoalStatus.PAUSED
-        exposed_tools = (
-            tools
-            if state.goal is not None and not goal_paused
-            else tuple(
+        answer_mode_active = (
+            state.goal is None
+            and state.interaction_state is InteractionState.ANSWERING
+        )
+        intent_decision_pending = state.goal is None and not answer_mode_active
+        correction_pending = goal_correction_pending(state)
+        explicit_non_prose_outcome = (
+            intent_decision_pending and _explicit_non_prose_outcome_requested(state)
+        )
+        if intent_decision_pending:
+            exposed_tools = ()
+        elif state.goal is not None and not goal_paused:
+            exposed_tools = tools
+        else:
+            exposed_tools = tuple(
                 tool for tool in tools if tool.side_effect is SideEffectClass.READ_ONLY
             )
-        )
+        if correction_pending:
+            exposed_tools = ()
         if not web_fetch_available(state):
             exposed_tools = tuple(
                 tool for tool in exposed_tools if tool.name != "web_fetch"
             )
+        else:
+            fetchable_refs = web_fetch_source_refs(state)
+            if fetchable_refs:
+                constrained_tools: list[ToolDefinition] = []
+                for tool in exposed_tools:
+                    if tool.name != "web_fetch":
+                        constrained_tools.append(tool)
+                        continue
+                    input_schema = dict(tool.input_schema)
+                    properties = dict(input_schema.get("properties", {}))
+                    source_ref_schema = dict(properties.get("source_ref", {}))
+                    source_ref_schema["enum"] = list(fetchable_refs)
+                    properties["source_ref"] = source_ref_schema
+                    input_schema["properties"] = properties
+                    constrained_tools.append(replace(tool, input_schema=input_schema))
+                exposed_tools = tuple(constrained_tools)
 
-        projected_facts, clipped_ids = self._clip_tool_results(state.facts)
+        facts_for_projection = state.facts
+        if intent_decision_pending:
+            run_prefix = (
+                f"run:{state.active_run.run_id}:"
+                if state.active_run is not None
+                else ""
+            )
+            facts_for_projection = tuple(
+                fact
+                for fact in state.facts
+                if fact.kind in {FactKind.USER_MESSAGE, FactKind.ASSISTANT_MESSAGE}
+                or (
+                    fact.kind is FactKind.POLICY_RESULT
+                    and bool(run_prefix)
+                    and fact.fact_id.startswith(run_prefix)
+                )
+            )
+        projected_facts, clipped_ids = self._clip_tool_results(facts_for_projection)
         projected_facts, source_projections = project_tool_result_sources(
             projected_facts,
             state,
         )
+        if public_web_requirement_pending(state, source_projections):
+            # mandatory Web receipt 尚未存在时，保留定位当前 workspace 输入所需的
+            # bounded read 工具和真正能闭合前置条件的 web_search；history 来源既不能
+            # 满足当前 Web 要求，又容易诱发空检索。receipt 入账后恢复完整工具集。
+            pending_web_tools = {
+                "list_files",
+                "read_file",
+                "read_file_chunk",
+                "search_paths",
+                "search_text",
+                "web_search",
+            }
+            exposed_tools = tuple(
+                tool
+                for tool in exposed_tools
+                if tool.name in pending_web_tools
+            )
+        citable_refs = (
+            citable_source_refs(source_projections) if state.goal is not None else ()
+        )
+        citable_pairs = (
+            citable_citation_sources(source_projections)
+            if state.goal is not None
+            else ()
+        )
+        citation_manifest_allowed = bool(
+            state.goal is not None
+            and any(target.endswith(".citations.json") for target in state.goal.targets)
+        )
+        citation_artifact_paths = (
+            tuple(
+                target
+                for target in state.goal.targets
+                if not target.endswith(".citations.json")
+            )
+            if citation_manifest_allowed and state.goal is not None
+            else ()
+        )
+        constrained_tools = []
+        for tool in exposed_tools:
+            if tool.name != "build_citation_manifest":
+                constrained_tools.append(tool)
+                continue
+            if (
+                not citation_manifest_allowed
+                or not citation_artifact_paths
+                or not citable_refs
+            ):
+                continue
+            input_schema = dict(tool.input_schema)
+            properties = dict(input_schema.get("properties", {}))
+            artifact_path_schema = dict(properties.get("artifact_path", {}))
+            artifact_path_schema["enum"] = list(citation_artifact_paths)
+            properties["artifact_path"] = artifact_path_schema
+            citations = dict(properties.get("citations", {}))
+            items = dict(citations.get("items", {}))
+            item_properties = dict(items.get("properties", {}))
+            pair_schemas: list[dict[str, object]] = []
+            for source_ref, source_id in citable_pairs:
+                pair_properties = dict(item_properties)
+                source_ref_schema = dict(pair_properties.get("source_ref", {}))
+                source_ref_schema["enum"] = [source_ref]
+                pair_properties["source_ref"] = source_ref_schema
+                source_id_schema = dict(pair_properties.get("source_id", {}))
+                source_id_schema["enum"] = [source_id]
+                pair_properties["source_id"] = source_id_schema
+                pair_schemas.append({**items, "properties": pair_properties})
+            citations["items"] = {"anyOf": pair_schemas}
+            properties["citations"] = citations
+            input_schema["properties"] = properties
+            exact_pairs = "; ".join(
+                f"{source_ref} -> {source_id}"
+                for source_ref, source_id in citable_pairs
+            )
+            constrained_tools.append(
+                replace(
+                    tool,
+                    description=(
+                        f"{tool.description} Current exact citable pairs: {exact_pairs}."
+                    ),
+                    input_schema=input_schema,
+                )
+            )
+        exposed_tools = tuple(constrained_tools)
         groups = self._group_facts(
             projected_facts,
             source_projections=source_projections,
@@ -163,7 +382,10 @@ class KernelContextManager:
         goal_bootstrap, bootstrap_group = self._goal_bootstrap_group(state)
         if bootstrap_group is not None:
             groups = (bootstrap_group, *groups)
-        source_groups, source_digests = self._collect_source_groups(state, action)
+        if intent_decision_pending:
+            source_groups, source_digests = (), ()
+        else:
+            source_groups, source_digests = self._collect_source_groups(state, action)
         groups = (*groups, *source_groups)
         progress_group = self._runtime_progress_group(
             state,
@@ -183,8 +405,43 @@ class KernelContextManager:
             if goal_paused
             else reserved_control_schema(
                 goal_present=state.goal is not None,
+                goal_id=state.goal.goal_id if state.goal is not None else None,
+                goal_revision=state.goal.revision if state.goal is not None else None,
+                expected_completion_evidence_refs=(
+                    tuple(
+                        closed_evidence_id(
+                            state.goal.goal_id,
+                            state.goal.revision,
+                            criterion.criterion_id,
+                        )
+                        for criterion in state.goal.admitted_criteria
+                        if criterion.mandatory
+                    )
+                    if state.goal is not None
+                    else None
+                ),
+                answer_mode_active=answer_mode_active,
+                begin_answer_is_available=(
+                    intent_decision_pending
+                    and bool(
+                        self._sources
+                        or any(
+                            fact.kind is FactKind.TOOL_RESULT
+                            for fact in state.facts
+                        )
+                        or any(
+                            tool.side_effect is SideEffectClass.READ_ONLY
+                            for tool in tools
+                        )
+                    )
+                ),
                 goal_progress_is_available=goal_progress_available(state),
-                goal_proposal_is_available=not source_result_since_latest_user(state),
+                goal_proposal_is_available=(
+                    intent_decision_pending
+                    and not source_result_since_latest_user(state)
+                ),
+                goal_correction_is_pending=correction_pending,
+                explicit_non_prose_outcome=explicit_non_prose_outcome,
                 strict=self._strict_control_schema,
             )
         )
@@ -349,7 +606,11 @@ class KernelContextManager:
         self,
         state: ConversationState,
     ) -> tuple[GoalBootstrap | None, _ContextGroup | None]:
-        if state.goal is not None or not self._workspace_identity_digest:
+        if (
+            state.goal is not None
+            or state.interaction_state is InteractionState.ANSWERING
+            or not self._workspace_identity_digest
+        ):
             return None, None
         source = next(
             (fact for fact in reversed(state.facts) if fact.kind is FactKind.USER_MESSAGE),
@@ -368,6 +629,30 @@ class KernelContextManager:
             "source_fact_id": bootstrap.source_fact_id,
             "workspace_identity_digest": bootstrap.workspace_identity_digest,
             "authority_snapshot": bootstrap.authority_snapshot,
+            "explicit_non_prose_outcome": _explicit_non_prose_outcome_requested(state),
+            # 016 §5.2 goal-first 决策规则放在模型最先看到的 trusted pinned 块:
+            # 显式任务必须在任何 product tool 调用之前提案 Goal——同一 user action
+            # 内成功的 source 检索会关闭 goal_proposal 窗口,而未知目标文件由
+            # deferred filesystem criterion 覆盖,不需要先探索。
+            "decision_rule": (
+                "First decide what this user message is. If it requests a verifiable "
+                "artifact, file change, run-and-verify, or research-to-file outcome, "
+                "submit goal_proposal first, before any product tool call: successful "
+                "source retrieval in this user action makes goal_proposal unavailable "
+                "until a fresh user action, and unknown target files belong in a "
+                "deferred filesystem criterion instead of discovery. Reading or "
+                "inspecting can happen after the Goal exists. If it is a question or "
+                "discussion, answer with direct_response; read-only discovery tools "
+                "ground answers but never open a closed goal window. Apply one prose-only "
+                "outcome test: if returning only answer text, with no write, edit, process, "
+                "or other requested action, would fail to fully satisfy any explicit "
+                "requested outcome, submit goal_proposal. A task that combines reading, Web "
+                "research, artifact creation, and validation remains one Goal; grounding is "
+                "a means, not the outcome. direct_response and begin_answer are allowed only "
+                "when answer text itself is the entire requested outcome. A conditional "
+                "read-only or answer-only fallback does not turn an explicit request "
+                "to act into a question; establish its Goal before attempting it."
+            ),
         }
         return bootstrap, _ContextGroup(
             fact_ids=(f"goal-bootstrap:{source.fact_id}",),

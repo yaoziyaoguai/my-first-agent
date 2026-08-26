@@ -7,7 +7,9 @@ from dataclasses import asdict, dataclass, replace
 from agent.runtime.contracts import (
     ConversationFact,
     ConversationState,
+    EvidenceOracleKind,
     FactKind,
+    SourceKind,
     SourceReceiptV1,
 )
 
@@ -50,6 +52,67 @@ _GENERIC_PROJECTION = ToolResultSourceProjection(
     source_refs=(),
     citation_sources=(),
 )
+
+
+def citable_source_refs(
+    projections: dict[str, ToolResultSourceProjection],
+) -> tuple[str, ...]:
+    """只暴露当前 Goal 下可证明内容的完整来源，不把搜索摘要当证据。"""
+
+    return tuple(
+        source_ref
+        for source_ref, _source_id in citable_citation_sources(projections)
+    )
+
+
+def citable_citation_sources(
+    projections: dict[str, ToolResultSourceProjection],
+) -> tuple[tuple[str, str], ...]:
+    """返回当前 Goal 可引用的 Runtime-issued exact ref/id pairs。"""
+
+    pairs: list[tuple[str, str]] = []
+    for projection in projections.values():
+        for (source_ref, source_id), receipt in zip(
+            projection.citation_sources,
+            projection.receipts,
+            strict=True,
+        ):
+            if receipt.truncated or receipt.source_kind is SourceKind.WEB_SEARCH_SNIPPET:
+                continue
+            pair = (source_ref, source_id)
+            if pair not in pairs:
+                pairs.append(pair)
+    return tuple(pairs)
+
+
+def public_web_requirement_pending(
+    state: ConversationState,
+    projections: dict[str, ToolResultSourceProjection],
+) -> bool:
+    goal = state.goal
+    if goal is None or not any(
+        item.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+        for item in goal.proposed_criteria
+    ):
+        return False
+    required_ids = {
+        item.criterion_id
+        for item in goal.proposed_criteria
+        if item.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+    }
+    satisfied_ids = {
+        item.criterion_id
+        for item in goal.admitted_criteria
+        if item.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+    }
+    if required_ids.issubset(satisfied_ids):
+        return False
+    return not any(
+        receipt.source_kind
+        in {SourceKind.WEB_SEARCH_SNIPPET, SourceKind.WEB_EXTRACTED_CONTENT}
+        for projection in projections.values()
+        for receipt in projection.receipts
+    )
 
 
 def project_tool_result_sources(

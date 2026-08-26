@@ -49,7 +49,15 @@ def local_process_tool_spec() -> ToolSpec:
             "Run one structured, shell-free foreground local process after exact "
             "same-UID approval. Provide executable, argv, workspace-relative cwd, and a "
             "closed resource profile (short/standard/long). No command string, shell, "
-            "pipeline, redirection, stdin, env, raw timeout, background or TTY."
+            "pipeline, redirection, stdin, env, raw timeout, background or TTY. When this "
+            "process validates a Goal artifact, materialize and read it back before "
+            "requesting this process because approval can require its current digest. "
+            "For an existing project test or validator, use read-only workspace tools to "
+            "find its direct workspace executable and invoke that path with only its real "
+            "arguments: never use list/find/cat as a process discovery command, and never "
+            "wrap it with sh/bash/python/env. A rejected unrelated candidate is not proof "
+            "that the requested validator cannot run; inspect the workspace result and "
+            "propose the direct executable instead."
         ),
         input_schema={
             "type": "object",

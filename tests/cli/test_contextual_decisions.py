@@ -194,6 +194,20 @@ def test_contextual_approval_binds_exact_pending_request(
     assert action.approved is approved
 
 
+def test_natural_language_at_approval_is_a_goal_correction() -> None:
+    state, _request = _approval_state()
+    runtime, output, _ = _run(
+        state,
+        "请改为写入 final.md，不要创建 draft.md。",
+        "/exit",
+    )
+
+    action = runtime.actions[0]
+    assert isinstance(action, SubmitMessage)
+    assert action.message == "请改为写入 final.md，不要创建 draft.md。"
+    assert output == []
+
+
 @pytest.mark.parametrize(
     ("answer", "resolution"),
     [

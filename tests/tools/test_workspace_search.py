@@ -9,6 +9,7 @@ import pytest
 import agent.tools.path_safety as path_safety
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
+    BeginAnswer,
     ConversationState,
     ExecutionIntent,
     ModelResponse,
@@ -408,6 +409,7 @@ def test_workspace_search_result_enters_next_model_context_as_untrusted_source(
         "The durable choice is local-first.", encoding="utf-8"
     )
     provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-workspace-search")),
         ModelResponse(
             (
                 ModelToolCall(
@@ -442,11 +444,11 @@ def test_workspace_search_result_enters_next_model_context_as_untrusted_source(
     result = runtime.run_turn(action, store.load())
 
     assert result.status is RunStatus.COMPLETED
-    assert len(provider.calls) == 2
-    assert "workspace_excerpt" in provider.calls[1].data_classes
+    assert len(provider.calls) == 3
+    assert "workspace_excerpt" in provider.calls[2].data_classes
     source_blocks = [
         block
-        for message in provider.calls[1].messages
+        for message in provider.calls[2].messages
         for block in message.content
         if block.get("type") == "tool_result"
     ]

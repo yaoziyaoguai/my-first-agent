@@ -970,11 +970,11 @@ def test_015_real_adapter_forces_control_on_proposal_turn() -> None:
     approvals=0）：真实 model 在每个 journey 首轮发 prose，不构造 GoalProposal。
 
     首轮（无 goal）``goal_bootstrap`` **present**（提供 workspace_identity_digest 让 model
-    构造 GoalProposal），但 ``openai_http`` 的 ``tool_choice="required"`` 条件含
+    构造 GoalProposal），但 ``openai_http`` 的 strict tool_choice 条件含
     ``goal_bootstrap is None`` → 首轮不强制 → model 发 prose → 无 GoalProposal → 全 journey
     无 goal → product_no_progress。strict agent 必须在每个 control_schema 存在的轮次都强制
     typed control（收紧，非放宽）。本测试用 production adapter + recording transport 证明
-    首轮 request 必含 ``tool_choice="required"``。
+    首轮 request 必须精确选择保留 control function，不能让只读产品工具抢在 Goal 前执行。
     """
 
     import httpx
@@ -1039,8 +1039,11 @@ def test_015_real_adapter_forces_control_on_proposal_turn() -> None:
     import json as _json
 
     body = _json.loads(recorded[0].content)
-    assert body.get("tool_choice") == "required", (
-        "proposal turn (goal_bootstrap present) must force typed control; "
+    assert body.get("tool_choice") == {
+        "type": "function",
+        "function": {"name": "first_agent_control_v1"},
+    }, (
+        "proposal turn (goal_bootstrap present) must force the reserved control; "
         f"got {body.get('tool_choice')!r}"
     )
 
@@ -1252,12 +1255,12 @@ def test_015_j2_driver_keeps_rejecting_rejected_fingerprint(tmp_path: Path) -> N
         def generate(self, context):  # noqa: ANN001, ANN201
             from agent.runtime.contracts import (
                 GoalFrame,
-                GoalProposal,
                 GoalStatus,
                 ModelResponse,
                 ModelToolCall,
                 ProposedCriterion,
             )
+            from tests.kernel.fakes import goal_draft_from_frame
 
             self.calls.append(context)
             index = len(self.calls)
@@ -1265,9 +1268,9 @@ def test_015_j2_driver_keeps_rejecting_rejected_fingerprint(tmp_path: Path) -> N
             if index == 1 and bootstrap is not None:
                 return ModelResponse(
                     (),
-                    control=GoalProposal(
+                    control=goal_draft_from_frame(
                         correlation_id="p-j2retry",
-                        goal_frame=GoalFrame(
+                        goal=GoalFrame(
                             goal_id="goal-j2retry",
                             revision=1,
                             created_from_fact_ids=(bootstrap.source_fact_id,),
@@ -1658,14 +1661,8 @@ def test_015_j4_phase3_drives_user_stop_via_production_cli_adapter(
 
 
 
-class _J3RealisticRepairProvider:
-    """模拟真实 DeepSeek j3 行为（§3.48 实测失败类别）。
-
-    第一次 GoalProposal 通过 provider normalize，但违反 reducer 校验（模型自造
-    source fact id / 预铸字段）；真实 E3 中该类拒绝使 run_turn 直接
-    FAILED_FATAL(runtime_failure)，j3 journey 静默终止（1 send、goal null、
-    claims 16/17 False）。修正后的提案与其余行为与 _J3JourneyProvider 一致。
-    """
+class _J3SemanticDraftProvider:
+    """只用 semantic draft 驱动 j3；Goal 身份与 bootstrap 绑定由 Runtime 铸造。"""
 
     def __init__(self, fixtures: e3.FixtureSet) -> None:
         self.fixtures = fixtures
@@ -1677,31 +1674,27 @@ class _J3RealisticRepairProvider:
 
     def generate(self, context):  # noqa: ANN001, ANN201
         from agent.runtime.contracts import (
+            EvidenceOracleKind,
             GoalFrame,
-            GoalProposal,
             GoalStatus,
             ModelResponse,
             ModelToolCall,
             ProposedCriterion,
         )
+        from tests.kernel.fakes import goal_draft_from_frame, runtime_goal_identity
 
         self.calls.append(context)
         index = len(self.calls)
         bootstrap = getattr(context, "goal_bootstrap", None)
-        if index in (1, 2) and bootstrap is not None:
-            # 第一次：模型自造 source fact id（真实模型常见错误）→ reducer 拒绝；
-            # 第二次：复制 bootstrap 的正确 binding。
-            source_fact = (
-                bootstrap.source_fact_id if index == 2 else "model-fabricated-fact"
-            )
+        if index == 1 and bootstrap is not None:
             return ModelResponse(
                 (),
-                control=GoalProposal(
-                    correlation_id=f"proposal-015-j3-r{index}",
-                    goal_frame=GoalFrame(
+                control=goal_draft_from_frame(
+                    correlation_id="proposal-015-j3-draft",
+                    goal=GoalFrame(
                         goal_id="goal-015-j3",
                         revision=1,
-                        created_from_fact_ids=(source_fact,),
+                        created_from_fact_ids=(bootstrap.source_fact_id,),
                         workspace_identity_digest=bootstrap.workspace_identity_digest,
                         user_outcome="Exercise process timeout and group cleanup",
                         beneficiary="user",
@@ -1713,6 +1706,7 @@ class _J3RealisticRepairProvider:
                             ProposedCriterion(
                                 "criterion-j3",
                                 "local_process hang-tree timeout handled",
+                                oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
                             ),
                         ),
                         admitted_criteria=(),
@@ -1723,7 +1717,7 @@ class _J3RealisticRepairProvider:
                     ),
                 ),
             )
-        if index == 3:
+        if index == 2:
             return ModelResponse(
                 (
                     ModelToolCall(
@@ -1738,18 +1732,21 @@ class _J3RealisticRepairProvider:
                     ),
                 )
             )
-        if index == 4:
+        if index == 3:
             # j3 无 CompletionClaim（acceptance：timeout 意味着无验证）；活跃 Goal
             # 的合法终态是 blocked_claim——repair 消息明确列出该选项，真实模型在
             # 有界预算内可自纠。
             from agent.runtime.contracts import BlockedClaim
 
+            identity = runtime_goal_identity(context)
+            assert identity is not None
+
             return ModelResponse(
                 (),
                 control=BlockedClaim(
                     correlation_id="block-015-j3",
-                    goal_id="goal-015-j3",
-                    goal_revision=1,
+                    goal_id=identity[0],
+                    goal_revision=identity[1],
                     blocker=(
                         "hang-tree timed out and was reaped; "
                         "the outcome cannot be verified"
@@ -1761,21 +1758,16 @@ class _J3RealisticRepairProvider:
         return ModelResponse(())
 
 
-def test_015_j3_rejected_first_proposal_gets_bounded_repair(tmp_path: Path) -> None:
-    """Codex 复验：j3 claims 16/17 False 的根因是 proposal 被 reducer 拒绝即 fatal。
-
-    真实 E3 §3.48：j3 只有一次 send（GoalProposal 通过 normalize），run 以
-    runtime_failure 告终、goal 未创建、无 exception shape——accept_goal_proposal 的
-    ValueError 经 run_turn 外层 except 变 FAILED_FATAL，harness 静默 break。可修复的
-    控制参数错误（与 malformed_control 同类）必须有有界修复路径，接受条件零放宽：
-    被拒提案不得创建 Goal，修正提案才创建并驱动 local_process 真实执行。
-    """
+def test_015_j3_semantic_draft_reaches_timeout_without_model_owned_goal_fields(
+    tmp_path: Path,
+) -> None:
+    """semantic draft 建立 Runtime-owned Goal 后仍能驱动真实 timeout journey。"""
 
     fixtures = e3.FixtureSet.create(tmp_path / "root")
     providers = {
         "j1": e3._J1JourneyProvider,
         "j5": e3._J5JourneyProvider,
-        "j3": _J3RealisticRepairProvider,
+        "j3": _J3SemanticDraftProvider,
         "j2": e3._J2JourneyProvider,
         "j4": e3._J4JourneyProvider,
     }
@@ -1794,22 +1786,20 @@ def test_015_j3_rejected_first_proposal_gets_bounded_repair(tmp_path: Path) -> N
     observation = e3.drive_attempt(
         factory,
         fixtures,
-        attempt_id="j3repair",
+        attempt_id="j3draft",
         clock=None,
         real_adapter_used=True,
         materialized_verified=True,
     )
     raw = observation.raw_observed
-    # 被拒提案不得创建 Goal；修复后提案创建 Goal 并驱动真实 timeout 执行。
     j3_state = raw["journeys"]["j3"]
     assert j3_state.goal is not None, (
-        f"j3 goal missing (run died on first rejected proposal); "
+        f"j3 Runtime-owned goal missing; "
         f"unhandled={raw.get('j3_unhandled_status')}/{raw.get('j3_unhandled_error_code')}"
     )
     assert raw.get("j3_outcome") == "timed_out_reaped"
     assert observation.claims["timeout_group_cleanup_confirmed"] is True
     assert observation.claims["timeout_not_verified_done"] is True
-    # run 不得因可修复的提案错误静默 fatal。
     assert "j3_unhandled_status" not in raw
 
 
@@ -1869,12 +1859,12 @@ def test_015_j2_provider_timeout_resumes_via_retryable_path(tmp_path: Path) -> N
         def generate(self, context):  # noqa: ANN001, ANN201
             from agent.runtime.contracts import (
                 GoalFrame,
-                GoalProposal,
                 GoalStatus,
                 ModelResponse,
                 ModelToolCall,
                 ProposedCriterion,
             )
+            from tests.kernel.fakes import goal_draft_from_frame, runtime_goal_identity
 
             self.calls.append(context)
             index = len(self.calls)
@@ -1882,9 +1872,9 @@ def test_015_j2_provider_timeout_resumes_via_retryable_path(tmp_path: Path) -> N
             if index == 1 and bootstrap is not None:
                 response = ModelResponse(
                     (),
-                    control=GoalProposal(
+                    control=goal_draft_from_frame(
                         correlation_id="p-j2timeout",
-                        goal_frame=GoalFrame(
+                        goal=GoalFrame(
                             goal_id="goal-j2timeout",
                             revision=1,
                             created_from_fact_ids=(bootstrap.source_fact_id,),
@@ -1949,12 +1939,15 @@ def test_015_j2_provider_timeout_resumes_via_retryable_path(tmp_path: Path) -> N
                 return response
             from agent.runtime.contracts import BlockedClaim
 
+            identity = runtime_goal_identity(context)
+            assert identity is not None
+
             response = ModelResponse(
                 (),
                 control=BlockedClaim(
                     correlation_id="block-015-j2-timeout",
-                    goal_id="goal-j2timeout",
-                    goal_revision=1,
+                    goal_id=identity[0],
+                    goal_revision=identity[1],
                     blocker=(
                         "the user rejected the changed command; "
                         "the exact command cannot satisfy the outcome alone"

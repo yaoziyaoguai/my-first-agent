@@ -107,6 +107,34 @@ def test_goal_control_disclosure_and_evidence_round_trip_in_v2(tmp_path) -> None
     assert document["schema_version"] == 2
 
 
+def test_answer_intent_and_receipt_round_trip_before_grounding_resumes(tmp_path) -> None:
+    """begin_answer 必须先落盘；进程重启后才能继续开放只读能力。"""
+
+    receipt = ControlReceipt.create(
+        correlation_id="control:begin-answer:1",
+        control_kind="begin_answer",
+        goal_id=None,
+        goal_revision=None,
+        accepted_state_revision=2,
+        payload_digest=canonical_json_digest({"interaction_state": "answering"}),
+    )
+    state = replace(
+        ConversationState.new("conversation:answer"),
+        revision=2,
+        interaction_state=InteractionState.ANSWERING,
+        active_run=ActiveRun(
+            run_id="run:answer",
+            status=ActiveRunStatus.PAUSED_RETRYABLE,
+        ),
+        control_receipts=(receipt,),
+    )
+
+    store = LocalCheckpointStore.initialize(tmp_path / "answer.json", state)
+
+    assert store.load().state == state
+    assert store.load().state.control_receipts[0].control_kind == "begin_answer"
+
+
 def test_v1_checkpoint_is_rejected_without_mutating_source(tmp_path) -> None:
     path = tmp_path / "conversation.json"
     LocalCheckpointStore.initialize(path, ConversationState.new("conversation:1"))

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ActiveRunStatus,
     ApprovalPolicy,
     BlockedClaim,
     ConversationState,
+    EvidenceOracleKind,
     ExecutionAuthorityClass,
     FactKind,
     KnownExecutedError,
@@ -13,10 +16,12 @@ from agent.runtime.contracts import (
     ModelResponse,
     ModelToolCall,
     OutputPolicy,
+    ProposedCriterion,
     ResolveApproval,
     RunStatus,
     SideEffectClass,
     SubmitMessage,
+    ToolPrepareContext,
     ToolRisk,
     ToolSpec,
 )
@@ -27,6 +32,7 @@ from tests.kernel.fakes import (
     InMemoryCheckpointStore,
     ScriptedProvider,
     conversation_with_active_goal,
+    goal_noop_response,
 )
 
 
@@ -52,7 +58,10 @@ def _write_spec(name: str) -> ToolSpec:
 
 
 def _build(registrations, provider_responses):
-    provider = ScriptedProvider(*provider_responses)
+    provider = ScriptedProvider(
+        goal_noop_response("tool-outcome-user-supplement"),
+        *provider_responses,
+    )
     # 本文件全部场景都要执行 effectful 工具,统一从已建立 Goal 的 seed 起步。
     store = InMemoryCheckpointStore(conversation_with_active_goal())
     runtime = AgentRuntime(
@@ -113,7 +122,7 @@ def test_known_not_executed_advances_cursor_without_recovery() -> None:
     result = runtime.run_turn(_submit(store.state), store.load())
 
     assert result.status is RunStatus.COMPLETED
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 3
     tool_result_facts = [
         fact
         for fact in store.state.facts
@@ -139,7 +148,7 @@ def test_unknown_write_exception_enters_recovery() -> None:
 
     assert result.status is RunStatus.AWAITING_RECOVERY
     assert result.request is not None
-    assert len(provider.calls) == 1
+    assert len(provider.calls) == 2
     assert store.state.active_run is not None
     assert store.state.active_run.status is ActiveRunStatus.AWAITING_RECOVERY
 
@@ -246,3 +255,86 @@ def test_known_executed_errors_are_not_success() -> None:
     assert tool_results[0].content["executed"] is True
     assert tool_results[0].content["is_error"] is True
     assert tool_results[0].content["metadata"]["code"] == "remote_error"
+
+
+def test_artifact_confirmation_ambiguity_message_names_criteria_and_remedy() -> None:
+    # 真实 E3（016 第 23 轮 J12）证明:process approval 撞上多个 filesystem
+    # criterion 时,旧消息只陈述规则,模型无法自纠而被困到 blocked。消息必须点名
+    # 冲突 criteria(id + path/deferred)并给出明确恢复动作。
+    context = ToolPrepareContext(
+        conversation_id="conv",
+        run_id="run",
+        state_revision=1,
+        proposed_criteria=(
+            ProposedCriterion(
+                criterion_id="crit-report",
+                description="report written",
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path="report.md",
+            ),
+            ProposedCriterion(
+                criterion_id="crit-check",
+                description="validator ledger",
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path=None,
+            ),
+        ),
+    )
+    with pytest.raises(ValueError) as excinfo:
+        KernelToolRuntime._artifact_confirmation_requirement(context)
+    message = str(excinfo.value)
+    assert "crit-report" in message
+    assert "report.md" in message
+    assert "crit-check" in message
+    assert "deferred" in message
+    assert "goal_delta_proposal" in message
+
+
+def test_artifact_confirmation_ignores_already_admitted_criteria() -> None:
+    # 016 真实 E3 第 23/27/34 轮:写批准后 criterion 同时保留在 proposed 与
+    # admitted;不过滤已确认项时,[已确认 report.md + validator criterion] 会被
+    # 误判为"多个 pending artifact 义务"而 fail-closed 死锁。已 admitted 的
+    # criterion 不再计入 process 绑定;剩余唯一 bound criterion 正常出 requirement。
+    admitted_report = ProposedCriterion(
+        criterion_id="crit-report",
+        description="report written",
+        oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+        artifact_path="report.md",
+    )
+    validator = ProposedCriterion(
+        criterion_id="crit-validator",
+        description="validator ledger",
+        oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+        artifact_path=".process-invocations",
+    )
+    context = ToolPrepareContext(
+        conversation_id="conv",
+        run_id="run",
+        state_revision=1,
+        proposed_criteria=(admitted_report, validator),
+        admitted_criterion_ids=frozenset({"crit-report"}),
+    )
+    requirement = KernelToolRuntime._artifact_confirmation_requirement(context)
+    assert requirement is not None
+    assert requirement.criterion_id == "crit-validator"
+    assert requirement.artifact_path == ".process-invocations"
+
+
+def test_artifact_confirmation_deferred_only_criterion_needs_no_requirement() -> None:
+    # 唯一 pending filesystem criterion 仍是 deferred 时,process 批准没有可确认
+    # 的 artifact(绑定只发生在具体文件写入批准,validator 产物不经 write_file)。
+    # 返回 None 走普通批准,而不是 hard error 死锁(016 真实 E3 第 23/27/34 轮)。
+    context = ToolPrepareContext(
+        conversation_id="conv",
+        run_id="run",
+        state_revision=1,
+        proposed_criteria=(
+            ProposedCriterion(
+                criterion_id="crit-check",
+                description="validator ledger",
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path=None,
+            ),
+        ),
+    )
+    assert KernelToolRuntime._artifact_confirmation_requirement(context) is None

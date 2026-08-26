@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "first-agent"
-version = "0.10.0"
+version = "1.0.0"
 description = "First Agent — local-first agent runtime"
 readme = "README.md"
 license = {text = "MIT"}
@@ -17,6 +17,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "ruff>=0.15.0",
+    "setuptools>=68.0",
 ]
 skill = [
     "PyYAML>=6,<7",

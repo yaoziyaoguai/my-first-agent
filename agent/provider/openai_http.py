@@ -12,6 +12,7 @@ from agent.provider.normalize import (
     context_to_openai_messages,
     context_tools_to_openai,
     normalize_openai_response,
+    trusted_completion_goal_binding,
 )
 from agent.provider.protocol import (
     ProviderAuthError,
@@ -22,7 +23,8 @@ from agent.provider.protocol import (
     ProviderTimeoutError,
     ProviderTransportError,
 )
-from agent.runtime.contracts import ContextPack, ModelResponse
+from agent.runtime.contracts import RESERVED_CONTROL_NAME, ContextPack, ModelResponse
+from agent.transport_audit import TransportAttemptRecorder
 
 DEFAULT_MAX_RESPONSE_BYTES = 4_000_000
 
@@ -36,12 +38,14 @@ class OpenAICompatibleProvider:
         config: AgentProviderConfig,
         http_client: httpx.Client | None = None,
         max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+        attempt_recorder: TransportAttemptRecorder | None = None,
     ) -> None:
         if config.provider_type != "openai_compatible" or max_response_bytes < 1:
             raise ProviderConfigurationError()
         self._config = config
         self._http_client = http_client
         self._max_response_bytes = max_response_bytes
+        self._attempt_recorder = attempt_recorder
 
     def _client(self) -> httpx.Client:
         if self._http_client is None:
@@ -80,15 +84,23 @@ class OpenAICompatibleProvider:
         if tools:
             body["tools"] = tools
         if self._config.strict_tools:
-            # Agent control 优先确定性；strict schema 负责形状，temperature=0
-            # 降低在多个合法 control 之间无意义漂移。control_schema 存在的每个轮次都
-            # 强制 typed control（tool_choice=required）：提案轮（goal_bootstrap present）
-            # 也必须发 control 而非 prose，否则真实 model 发文本不构造 GoalProposal。
+            # Agent control 优先确定性；strict schema 负责形状，temperature=0。
+            # bootstrap 轮精确选择保留 control，防止只读产品工具抢在 Goal 前执行；
+            # Goal 建立后仍允许模型在产品工具与 closed control 间选择。
             body["temperature"] = 0
             if context.control_schema is not None:
-                body["tool_choice"] = "required"
+                body["tool_choice"] = (
+                    {
+                        "type": "function",
+                        "function": {"name": RESERVED_CONTROL_NAME},
+                    }
+                    if context.goal_bootstrap is not None
+                    else "required"
+                )
 
         try:
+            if self._attempt_recorder is not None:
+                self._attempt_recorder("model", self._config.base_url)
             with self._client().stream(
                 "POST",
                 self._config.endpoint,
@@ -115,7 +127,14 @@ class OpenAICompatibleProvider:
             payload = json.loads(b"".join(chunks))
         except ValueError:
             raise ProviderProtocolError("malformed_response") from None
-        return normalize_openai_response(payload)
+        return normalize_openai_response(
+            payload,
+            trusted_completion_binding=(
+                None
+                if self._config.strict_tools
+                else trusted_completion_goal_binding(context)
+            ),
+        )
 
 
 def _raise_for_status(status_code: int) -> None:

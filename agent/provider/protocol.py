@@ -45,14 +45,26 @@ class ProviderAuthError(ProviderFatalError):
 class ProviderProtocolError(ProviderFatalError, InvalidProviderResponseError):
     code = "provider_protocol_error"
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, *, detail: str | None = None) -> None:
+        # detail 只允许携带结构事实(键名/期望形状),绝不含响应正文、值或
+        # credential;用于给模型 repair 消息提供有界自纠信息。
         self.reason = reason
+        self.detail = detail
         self.status_code = None
         RuntimeError.__init__(self, reason)
 
 
 class ProviderHTTPError(ProviderFatalError):
     code = "provider_http_error"
+
+    def __init__(self, *, status_code: int | None = None) -> None:
+        self.status_code = status_code
+        diagnostic = (
+            f"{self.code}_status_{status_code}"
+            if isinstance(status_code, int)
+            else self.code
+        )
+        RuntimeError.__init__(self, diagnostic)
 
 
 class ProviderHTTPRetryableError(ProviderRetryableError):

@@ -85,9 +85,10 @@ def _manifest_spec() -> ToolSpec:
         version="1.0.0",
         description=(
             "Build canonical CitationManifestV1 JSON from the exact artifact content "
-            "and Runtime-issued opaque source_ref/source_id pairs. Copy each pair from "
-            "FIRST_AGENT_RUNTIME_SOURCE_REFS; never invent it. This helper computes the "
-            "artifact digest but does not verify source truth."
+            "and Runtime-issued opaque source_ref/source_id pairs. Choose an exact pair "
+            "branch from this tool's current citations.items schema; generic Runtime "
+            "source frames include non-citable refs. Never invent or mix a pair. This "
+            "helper computes the artifact digest but does not verify source truth."
         ),
         input_schema={
             "type": "object",

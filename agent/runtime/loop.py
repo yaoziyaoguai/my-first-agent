@@ -610,6 +610,26 @@ class AgentRuntime:
                 message="Provider outcome is unknown; abandon this occurrence explicitly.",
                 outcome_state=unknown,
             )
+        if (
+            active.status is ActiveRunStatus.RUNNABLE
+            and active.phase is ContinuationPhase.EXECUTING
+            and active.executing_intent is not None
+        ):
+            executing = active.executing_intent
+            request = RecoveryRequest(
+                request_id=f"recovery-{executing.intent_digest[:16]}",
+                run_id=active.run_id,
+                tool_call_id=executing.tool_call_id,
+                binding_digest=executing.intent_digest,
+                summary="Tool outcome is unknown; classify it before continuing.",
+            )
+            recovering = pause_for_recovery(state, request)
+            return self._finish_pending(
+                current,
+                action,
+                warnings,
+                outcome_state=recovering,
+            )
         safely_reclaimable = (
             active.status is ActiveRunStatus.MODEL_EXECUTING
             and active.persisted_model_response is not None

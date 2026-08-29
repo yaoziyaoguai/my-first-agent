@@ -303,6 +303,9 @@ class RuntimeOccurrenceExecutor:
             return None
         if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
             raise ValueError("runtime checkpoint must be a real regular file")
+        _, snapshot = self._create_or_load(binding)
+        if snapshot.state.revision == 0:
+            return RecoveredOccurrenceV1(prepared=prepared, result=None)
         result = self._run(binding, prepared)
         return RecoveredOccurrenceV1(prepared=prepared, result=result)
 
@@ -439,6 +442,10 @@ def _execution_result(
         )
     elif report.error_code == "model_outcome_unknown":
         status = OccurrenceControlStatus.MODEL_OUTCOME_UNKNOWN
+        error_code = report.error_code
+        result_digest = None
+    elif report.error_code == "conversation_busy":
+        status = OccurrenceControlStatus.CLEANUP_UNKNOWN
         error_code = report.error_code
         result_digest = None
     elif report.occurrence_status == "needs_human":

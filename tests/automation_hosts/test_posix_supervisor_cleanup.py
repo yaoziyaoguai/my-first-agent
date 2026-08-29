@@ -62,7 +62,7 @@ def test_missing_start_ack_is_unknown_and_never_marks_running() -> None:
     assert outcome.result.error_code == "start_ack_timeout"
 
 
-def test_result_timeout_terminates_group_and_reports_worker_deadline() -> None:
+def test_result_timeout_after_execution_permit_is_effect_outcome_unknown() -> None:
     events: list[str] = []
 
     outcome = _supervisor("hang-after-start").run(
@@ -73,8 +73,49 @@ def test_result_timeout_terminates_group_and_reports_worker_deadline() -> None:
     assert events == ["ready", "started"]
     assert outcome.start_acknowledged is True
     assert outcome.cleanup_confirmed is True
-    assert outcome.result.status is OccurrenceControlStatus.WORKER_DEADLINE
-    assert outcome.result.error_code == "worker_deadline"
+    assert outcome.result.status is OccurrenceControlStatus.EFFECT_OUTCOME_UNKNOWN
+    assert outcome.result.error_code == "effect_outcome_unknown"
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ("partial-result-after-execute", "malformed-result-after-execute"),
+)
+def test_invalid_result_after_execution_permit_is_effect_outcome_unknown(
+    mode: str,
+) -> None:
+    events: list[str] = []
+
+    outcome = _supervisor(mode).run(
+        SupervisedOccurrenceSpecV1.from_prepared(_prepared()),
+        _callbacks(events),
+    )
+
+    assert events == ["ready", "started"]
+    assert outcome.start_acknowledged is True
+    assert outcome.cleanup_confirmed is True
+    assert outcome.result.status is OccurrenceControlStatus.EFFECT_OUTCOME_UNKNOWN
+    assert outcome.result.error_code == "effect_outcome_unknown"
+
+
+def test_partial_result_cleanup_uncertainty_reports_cleanup_unknown(monkeypatch) -> None:
+    events: list[str] = []
+
+    def unknown_liveness(_pgid: int) -> bool:
+        raise ProcessCleanupError("liveness unknown")
+
+    monkeypatch.setattr(posix_supervisor, "group_alive", unknown_liveness)
+
+    outcome = _supervisor("partial-result-after-execute").run(
+        SupervisedOccurrenceSpecV1.from_prepared(_prepared()),
+        _callbacks(events),
+    )
+
+    assert events == ["ready", "started"]
+    assert outcome.start_acknowledged is True
+    assert outcome.cleanup_confirmed is False
+    assert outcome.result.status is OccurrenceControlStatus.CLEANUP_UNKNOWN
+    assert outcome.result.error_code == "cleanup_unknown"
 
 
 def test_liveness_uncertainty_after_result_reports_cleanup_unknown(monkeypatch) -> None:

@@ -251,19 +251,19 @@ class PosixOccurrenceSupervisor:
 
             try:
                 result_frame = reader.read(self._result_timeout_seconds)
-            except _FrameTimeoutError:
-                result_frame = None
-            if result_frame is None:
+                if result_frame is None:
+                    raise ValueError("occurrence child exited before result")
+                result = self._decode_result(result_frame)
+            except Exception:
                 return self._terminal_unknown(
                     proc,
                     pgid,
                     spec,
                     process_identity_digest,
-                    OccurrenceControlStatus.WORKER_DEADLINE,
-                    "worker_deadline",
+                    OccurrenceControlStatus.EFFECT_OUTCOME_UNKNOWN,
+                    "effect_outcome_unknown",
                     start_acknowledged=True,
                 )
-            result = self._decode_result(result_frame)
             if (
                 result.checkpoint_identity_digest
                 != spec.prepared.checkpoint_identity_digest

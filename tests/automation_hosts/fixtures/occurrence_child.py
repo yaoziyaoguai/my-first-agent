@@ -69,6 +69,13 @@ def main() -> int:
     if mode == "hang-after-start":
         time.sleep(30)
         return 26
+    if mode == "partial-result-after-execute":
+        sys.stdout.buffer.write(b'{"type":"result"')
+        sys.stdout.buffer.flush()
+        return 28
+    if mode == "malformed-result-after-execute":
+        _send({"type": "result", "result": {}})
+        return 29
     _send(
         {
             "type": "result",

@@ -24,15 +24,23 @@ from agent.automation_hosts.runtime_executor import (
     RuntimeOccurrenceExecutor,
 )
 from agent.composition import build_composition
+from agent.runtime.checkpoint import LocalCheckpointStore
 from agent.runtime.context import ContextLimits
 from agent.runtime.contracts import (
+    ActiveRunStatus,
     BackgroundOccurrenceBindingV1,
     ConversationWorkspaceBindingV1,
+    EgressClass,
+    ExecutionAuthorityClass,
     ModelResponse,
     ModelTextBlock,
+    SideEffectClass,
+    SubmitMessage,
+    ToolCall,
     canonical_json_digest,
 )
 from agent.runtime.loop import InvocationLimits
+from agent.runtime.state import accept_action, mark_executing, start_tool_batch
 from agent.scheduler.contracts import ScheduledOccurrence
 from tests.automation.test_contracts import _definition
 from tests.kernel.fakes import CollectingSink, ScriptedProvider
@@ -216,6 +224,135 @@ def test_new_runtime_executor_recovers_terminal_checkpoint_without_duplicate_sen
     assert recovered.result.status is OccurrenceControlStatus.COMPLETED
     assert recovered.result.replayed is True
     assert len(provider.calls) == 1
+
+
+def test_runtime_executor_does_not_run_a_pristine_checkpoint_during_recovery(
+    tmp_path,
+) -> None:
+    state_root = tmp_path / "runtime"
+    state_root.mkdir(mode=0o700)
+    authority = _authority()
+    source, workspace = _objects()
+    provider = ScriptedProvider(ModelResponse((ModelTextBlock("bounded result"),)))
+    prepared = _executor(state_root, provider).initialize(authority, source, workspace)
+
+    recovered = _executor(state_root, provider).recover(authority)
+
+    assert len(provider.calls) == 0
+    assert recovered is not None
+    assert recovered.prepared == prepared
+    assert recovered.result is None
+
+
+def test_runtime_executor_recovery_reports_held_checkpoint_as_cleanup_unknown(
+    tmp_path,
+) -> None:
+    state_root = tmp_path / "runtime"
+    state_root.mkdir(mode=0o700)
+    authority = _authority()
+    source, workspace = _objects()
+    provider = ScriptedProvider(ModelResponse((ModelTextBlock("bounded result"),)))
+    executor = _executor(state_root, provider)
+    executor.initialize(authority, source, workspace)
+    occurrence = _binding(authority).scheduled_occurrence
+    checkpoint = state_root / occurrence.checkpoint_relative_path
+    store = LocalCheckpointStore(checkpoint)
+    snapshot = store.load()
+    started = accept_action(
+        snapshot.state,
+        SubmitMessage(
+            conversation_id=occurrence.conversation_id,
+            action_seq=1,
+            expected_revision=0,
+            run_id=occurrence.run_id,
+            message=occurrence.message,
+        ),
+    ).state
+    assert started.revision == 1
+    assert started.active_run is not None
+    lease = store.try_acquire(occurrence.conversation_id)
+    assert lease is not None
+    try:
+        store.compare_and_swap(snapshot, started)
+    finally:
+        lease.release()
+
+    holder = LocalCheckpointStore(checkpoint)
+    held_lease = holder.try_acquire(occurrence.conversation_id)
+    assert held_lease is not None
+    try:
+        recovered = _executor(state_root, provider).recover(authority)
+    finally:
+        held_lease.release()
+
+    assert len(provider.calls) == 0
+    assert recovered is not None
+    assert recovered.result is not None
+    assert recovered.result.status is OccurrenceControlStatus.CLEANUP_UNKNOWN
+    assert recovered.result.error_code == "conversation_busy"
+
+
+def test_runtime_executor_recovery_pauses_unfinished_executing_background_replay(
+    tmp_path,
+) -> None:
+    state_root = tmp_path / "runtime"
+    state_root.mkdir(mode=0o700)
+    authority = _authority()
+    source, workspace = _objects()
+    provider = ScriptedProvider(ModelResponse((ModelTextBlock("bounded result"),)))
+    executor = _executor(state_root, provider)
+    executor.initialize(authority, source, workspace)
+    occurrence = _binding(authority).scheduled_occurrence
+    checkpoint = state_root / occurrence.checkpoint_relative_path
+    store = LocalCheckpointStore(checkpoint)
+    snapshot = store.load()
+    action = SubmitMessage(
+        conversation_id=occurrence.conversation_id,
+        action_seq=1,
+        expected_revision=0,
+        run_id=occurrence.run_id,
+        message=occurrence.message,
+    )
+    started = accept_action(snapshot.state, action).state
+    batched = start_tool_batch(
+        started,
+        (ToolCall("tool-call-1", "write_fixture", {}),),
+    )
+    intent_digest = "e" * 64
+    executing = mark_executing(
+        batched,
+        tool_call_id="tool-call-1",
+        intent_digest=intent_digest,
+        idempotency_key=f"{occurrence.conversation_id}:{occurrence.run_id}:tool-call-1",
+        side_effect=SideEffectClass.WRITE,
+        egress=EgressClass.NONE,
+        operation="write_fixture",
+        request_identity="request:occurrence:executing",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+    )
+    lease = store.try_acquire(occurrence.conversation_id)
+    assert lease is not None
+    try:
+        store.compare_and_swap(snapshot, executing)
+    finally:
+        lease.release()
+
+    recovered = _executor(state_root, provider).recover(authority)
+    restored = LocalCheckpointStore(checkpoint).load().state
+
+    assert len(provider.calls) == 0
+    assert recovered is not None
+    assert recovered.result is not None
+    assert recovered.result.status is OccurrenceControlStatus.NEEDS_HUMAN
+    assert restored.active_run is not None
+    assert restored.active_run.status is ActiveRunStatus.AWAITING_RECOVERY
+    request = restored.active_run.pending_request
+    assert request is not None
+    assert request.request_id == "recovery-" + intent_digest[:16]
+    assert request.run_id == occurrence.run_id
+    assert request.tool_call_id == "tool-call-1"
+    assert request.binding_digest == intent_digest
+    assert request.summary == "Tool outcome is unknown; classify it before continuing."
 
 
 def test_runtime_executor_closes_an_occurrence_runtime_after_the_single_turn(

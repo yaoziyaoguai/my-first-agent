@@ -374,7 +374,7 @@ def test_unadmitted_filesystem_goal_keeps_write_tool_as_pending_obligation() -> 
         active_run=ActiveRun("run-corrected-file"),
     )
 
-    assert AgentRuntime._pending_goal_obligation_tools(
+    assert ClosedEvidenceRegistry().pending_obligation_tools(
         state,
         available_tools=("read_file", "write_file", "edit_file"),
     ) == ("write_file",)
@@ -414,11 +414,11 @@ def test_admitted_filesystem_goal_with_only_failed_read_still_requires_write() -
         active_run=ActiveRun("run-corrected-file"),
     )
 
-    assert AgentRuntime._pending_goal_obligation_tools(
+    assert ClosedEvidenceRegistry().pending_obligation_tools(
         state,
         available_tools=("read_file", "write_file", "edit_file"),
     ) == ("write_file",)
-    assert AgentRuntime._pending_goal_obligation_tools(
+    assert ClosedEvidenceRegistry().pending_obligation_tools(
         _state(),
         available_tools=("read_file", "write_file", "edit_file"),
     ) == ()

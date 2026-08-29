@@ -36,6 +36,7 @@ def create_or_load_occurrence_store(
     state = ConversationState.new(
         occurrence.conversation_id,
         workspace_binding=workspace_binding,
+        background_occurrence_binding=occurrence.background_binding,
     )
     try:
         store = LocalCheckpointStore.initialize(path, state)
@@ -45,6 +46,8 @@ def create_or_load_occurrence_store(
     if snapshot.state.conversation_id != occurrence.conversation_id:
         # 同 schedule+occurrence ID 但 message/time/scope 漂移：命中原文件，但不覆盖。
         raise SchedulerError("occurrence identity conflict on existing checkpoint")
+    if snapshot.state.background_occurrence_binding != occurrence.background_binding:
+        raise SchedulerError("occurrence background binding identity conflict")
     return store, snapshot
 
 

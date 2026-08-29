@@ -19,6 +19,9 @@ dev = [
     "ruff>=0.15.0",
     "setuptools>=68.0",
 ]
+browser = [
+    "playwright==1.62.0",
+]
 skill = [
     "PyYAML>=6,<7",
 ]
@@ -33,7 +36,7 @@ tui = [
 
 [project.scripts]
 first-agent = "main:main"
-first-agent-schedule = "main:run_schedule"
+first-agent-schedule = "agent.automation.cli:main"
 
 [tool.setuptools]
 py-modules = ["main"]
@@ -48,6 +51,9 @@ exclude = [".ua", "graphify-out"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent", "scripts", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

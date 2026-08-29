@@ -7,17 +7,23 @@ import contextlib
 import os
 import sys
 from collections.abc import Callable, Sequence
+from functools import partial
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from agent.cli.app import run_repl
 from agent.cli.render import TerminalRenderer, terminal_text
 from agent.composition import (
+    BrowserReadiness,
+    SandboxReadiness,
     WebReadiness,
+    browser_identity_digest_for_state_root,
+    build_browser_resources,
     build_composition,
     build_mcp_resources,
     build_memory_resources,
     build_owner_preference_resources,
+    build_sandbox_resources,
     build_tool_registrations,
     build_web_resources,
     load_mcp_catalog_file,
@@ -193,6 +199,15 @@ EVERYDAY_INVOCATION_LIMITS = InvocationLimits(
 
 _AFFIRMATIVE_SETUP_ANSWERS = frozenset({"y", "yes", "是", "允许"})
 
+# 017 native：restart 投影的 sandbox 恢复提示（closed 单值；Docker 的
+# bundle_review/base_drift 已随方向重做删除，不做 compatibility 映射）。
+_SANDBOX_RECOVERY_MESSAGES = {
+    "execution_unknown": (
+        "A sandbox command's outcome is unknown: resume to resolve it by "
+        "read-back before running anything new."
+    ),
+}
+
 
 class _InstalledVersionAction(argparse.Action):
     """只在用户请求版本时读取 installed distribution metadata。"""
@@ -256,6 +271,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         type=Path,
         help="explicit trusted Skill root directory (repeatable)",
+    )
+    advanced.add_argument(
+        "--browser",
+        action="store_true",
+        help="enable the governed dedicated Chromium (018 candidate)",
     )
     advanced.add_argument(
         "--mcp-catalog",
@@ -475,6 +495,131 @@ def _run_web_setup(
     return 0
 
 
+_SANDBOX_UNAVAILABLE_REASONS = {
+    "functional_probe_failed": "sandbox-exec functional probe failed",
+    "sandbox_exec_missing": "sandbox-exec not found on this machine",
+    "seatbelt_profile_refused": "sandbox-exec refused the probe profile",
+}
+
+
+def _sandbox_status_lines(resources) -> list[str]:  # noqa: ANN001
+    """启动一行 bounded 状态行：closed reason 文案，无 traceback/digest/路径。"""
+
+    if resources.readiness is SandboxReadiness.UNSUPPORTED:
+        return [
+            "Sandbox: unsupported on this platform; confined commands will "
+            "not run",
+        ]
+    if resources.readiness is SandboxReadiness.TEMPORARILY_UNAVAILABLE:
+        reason = _SANDBOX_UNAVAILABLE_REASONS.get(
+            resources.reason_code or "", "sandbox backend unavailable",
+        )
+        return [
+            f"Sandbox: unavailable ({reason}); confined commands will not run",
+        ]
+    return ["Sandbox: ready (macOS Seatbelt; workspace-write, network off)"]
+
+
+_BROWSER_UNAVAILABLE_REASONS = {
+    "browser_package_missing": (
+        "browser package missing; run pip install 'first-agent[browser]'"
+    ),
+    "browser_profile_permissions": (
+        "browser profile store permissions are wrong; fix the profile "
+        "directory to owner-only"
+    ),
+    "browser_binary_missing": (
+        "Chromium binary missing; install the Playwright Chromium browser"
+    ),
+    "browser_egress_unavailable": (
+        "browser egress guard unavailable; restore the governed DNS/egress service"
+    ),
+}
+
+
+def _browser_status_lines(resources) -> list[str]:  # noqa: ANN001
+    """一条 browser readiness 状态行 + next action；无内部细节。"""
+
+    if resources.readiness is BrowserReadiness.NOT_ENABLED:
+        return []
+    if resources.readiness is BrowserReadiness.TEMPORARILY_UNAVAILABLE:
+        reason = _BROWSER_UNAVAILABLE_REASONS.get(
+            resources.reason_code or "", "browser resources unavailable",
+        )
+        return [f"Browser: unavailable ({reason}); browser tasks will not run"]
+    return ["Browser: public-read ready; interactive profiles available"]
+
+
+def browser_profile_user_command(  # noqa: ANN001
+    command: str,
+    store,
+    *,
+    browser_identity_digest: str | None = None,
+):
+    """user-only profile 管理（create/list/revoke/clear）；不是模型工具。
+
+    输出只含 opaque profile ID 与状态；account label 原文、路径、cookie
+    永不出现。
+    """
+
+    parts = command.strip().split()
+    if not parts:
+        raise ValueError("empty browser profile command")
+    verb = parts[0]
+    if verb == "create":
+        create_parts = command.strip().split(maxsplit=2)
+        if len(create_parts) != 3 or browser_identity_digest is None:
+            raise ValueError(
+                "usage: /browser-profiles create <canonical HTTPS origin> "
+                "<account label>"
+            )
+        from agent.browser.url_policy import (
+            URLPolicyError,
+            browser_site_policy_digest,
+            canonical_https_origin,
+        )
+
+        try:
+            origin = canonical_https_origin(create_parts[1])
+            site_policy_digest = browser_site_policy_digest((origin,))
+        except URLPolicyError as error:
+            raise ValueError("profile requires one canonical HTTPS origin") from error
+        ref = store.create(
+            site_policy_digest=site_policy_digest,
+            account_label=create_parts[2],
+            browser_identity_digest=browser_identity_digest,
+        )
+        return f"Browser profile {ref.profile_id} created."
+    if verb == "list":
+        try:
+            profiles = sorted(store.list_profile_ids())
+        except OSError as error:
+            raise ValueError("profile store unavailable") from error
+        if not profiles:
+            return "No browser profiles."
+        return "Browser profiles:\n" + "\n".join(profiles)
+    if verb in ("revoke", "clear") and len(parts) == 2:
+        from agent.browser.contracts import BrowserCleanupOutcome
+        from agent.browser.profile_store import ProfileNotFoundError
+
+        profile_id = parts[1]
+        try:
+            ref = store.open(profile_id)
+        except ProfileNotFoundError as error:
+            raise ValueError("unknown browser profile") from error
+        if verb == "revoke":
+            store.revoke(ref)
+            return f"Browser profile {profile_id} revoked."
+        outcome = store.clear(ref)
+        if outcome is not BrowserCleanupOutcome.CLEANED:
+            return (
+                f"Browser profile {profile_id} cleanup unknown; it is "
+                "quarantined and cannot be reused."
+            )
+        return f"Browser profile {profile_id} cleared."
+    raise ValueError("unknown browser profile command")
+
+
 def _resolve_runtime_provider(
     args: argparse.Namespace,
     write_fn: Callable[[str], None],
@@ -563,6 +708,12 @@ def _startup_task_messages(
 ) -> tuple[str | None, str]:
     """把 durable restart 状态投影成诚实的用户提示，不暗示自动推进。"""
 
+    if projection.browser_takeover_pending:
+        return (
+            "Browser takeover session is no longer provable after restart; "
+            "run /browser-cancel before starting a fresh browser session.",
+            "Status: browser takeover needs human recovery",
+        )
     if projection.goal_id is None:
         return None, "Status: no unfinished task"
     outcome = terminal_text(projection.user_outcome or "unfinished task")
@@ -848,6 +999,38 @@ def main(
             )
             sources: list = []
             registrations.extend(web_resources.registrations)
+            sandbox_resources = build_sandbox_resources(
+                workspace,
+                session.state_root,
+                os.environ.get("PATH", ""),
+            )
+            registrations.extend(sandbox_resources.registrations)
+            browser_resources = build_browser_resources(
+                workspace,
+                session.state_root,
+                enabled=bool(getattr(args, "browser", False)),
+            )
+            browser_profile_handler = None
+            browser_takeover_handler = None
+            if browser_resources.readiness is BrowserReadiness.READY:
+                from agent.browser.profile_store import BrowserProfileStore
+
+                browser_profile_store = BrowserProfileStore(
+                    root=session.state_root / "browser" / "profiles"
+                )
+                browser_identity_digest = browser_identity_digest_for_state_root(
+                    session.state_root
+                )
+                browser_profile_handler = partial(
+                    browser_profile_user_command,
+                    store=browser_profile_store,
+                    browser_identity_digest=browser_identity_digest,
+                )
+                browser_takeover_handler = browser_resources.complete_takeover
+            registrations.extend(browser_resources.registrations)
+            for browser_closeable in browser_resources.closeables:
+                closeables.append(browser_closeable)
+                close_stack.callback(browser_closeable)
             context_scope_digest = session.workspace_identity.scope_digest
             provider_descriptor = _build_provider_descriptor(args)
             preference_resources = build_owner_preference_resources(
@@ -942,6 +1125,7 @@ def main(
                 context_scope_digest=context_scope_digest,
                 strict_control_schema=bool(args.strict_tools),
                 workspace_binding=session.workspace_binding,
+                browser_takeover_complete=browser_takeover_handler,
             )
             runtime = composition.runtime
         except (
@@ -962,7 +1146,10 @@ def main(
             f"(provider: {terminal_text(provider_descriptor.family)}/"
             f"{terminal_text(provider_descriptor.model)})"
         )
-        write_fn("Capabilities: files, history, local programs")
+        capabilities = "Capabilities: files, history, local programs"
+        if sandbox_resources.readiness is SandboxReadiness.READY:
+            capabilities += ", sandboxed execution"
+        write_fn(capabilities)
         if web_resources.readiness is WebReadiness.NOT_ENABLED:
             write_fn("Web: not enabled (run first-agent setup-web)")
         elif web_resources.readiness is WebReadiness.TEMPORARILY_UNAVAILABLE:
@@ -972,6 +1159,17 @@ def main(
             )
         else:
             write_fn("Web: ready")
+        for line in _sandbox_status_lines(sandbox_resources):
+            write_fn(line)
+        for line in _browser_status_lines(browser_resources):
+            write_fn(line)
+        if projection.sandbox_recovery is not None:
+            write_fn(
+                _SANDBOX_RECOVERY_MESSAGES.get(
+                    projection.sandbox_recovery,
+                    "A sandbox step needs attention before continuing.",
+                ),
+            )
         write_fn(startup_status_message)
         if args.tui:
             from agent.cli.actions import run_id_factory
@@ -997,6 +1195,7 @@ def main(
                 input_fn=input_fn,
                 write_fn=write_fn,
                 renderer=renderer,
+                browser_profile_command=browser_profile_handler,
             )
         except (CheckpointError, OSError) as error:
             write_fn(f"Runtime state failed: {type(error).__name__}")
@@ -1095,7 +1294,9 @@ def run_schedule(
                 strict_control_schema=bool(args.strict_tools),
                 workspace_binding=workspace_binding,
             )
-            for closeable in reversed(composition.close_stack):
+            # ExitStack 按注册逆序 unwind：正序注册才能得到构造逆序关闭
+            # （与 main() 的即时注册模式一致；此前 reversed 注册会正序关闭）。
+            for closeable in composition.close_stack:
                 close_stack.callback(closeable)
             report = ScheduledOccurrenceCaller(
                 composition.runtime, store, snapshot, occurrence

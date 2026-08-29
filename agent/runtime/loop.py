@@ -19,16 +19,21 @@ from agent.runtime.context_source import (
     public_web_requirement_pending,
 )
 from agent.runtime.contracts import (
+    AbandonUnknownModelOutcome,
     Action,
     ActionDisposition,
     ActiveRunStatus,
     ApprovalRequest,
     ApprovalRequired,
+    BackgroundExecutionAuthorityV1,
     BeginAnswer,
     BlockedClaim,
+    BrowserTakeoverRequestV1,
+    CancelBrowserTakeover,
     CancelGoal,
     CitationManifestV1,
     ClarificationRequest,
+    CompleteBrowserTakeover,
     CompletionClaim,
     ConfirmCriterion,
     ContextPack,
@@ -53,7 +58,9 @@ from agent.runtime.contracts import (
     ModelToolCall,
     PauseGoal,
     PendingRequest,
+    PersistedModelResponseV1,
     PreferenceAdmissionBinding,
+    ProviderCallIntentV1,
     ProviderDescriptor,
     ProviderDisclosureRequest,
     RecordedRunResult,
@@ -67,10 +74,13 @@ from agent.runtime.contracts import (
     SourceAuthorityBinding,
     SourceKind,
     SourceReceiptV1,
+    SubmitMessage,
     ToolCall,
     ToolPrepareContext,
     ToolResult,
+    canonical_action_digest,
     canonical_json_digest,
+    context_pack_digest,
 )
 from agent.runtime.control import ControlBinding, ControlInbox, ControlRequestKind
 from agent.runtime.evidence import ClosedEvidenceRegistry, EvidenceVerificationError
@@ -98,23 +108,29 @@ from agent.runtime.state import (
     append_policy_result,
     apply_control_request,
     authoritative_process_entrypoints,
+    begin_browser_takeover,
+    begin_provider_call,
     claim_run,
     complete_run,
+    consume_provider_response,
     end_run,
     fail_run,
     finalize_action,
     goal_correction_adds_runtime_obligation,
     mark_executing,
+    mark_model_outcome_unknown,
     normalize_process_entrypoint,
     pause_for_approval,
     pause_for_limit,
     pause_for_provider_disclosure,
     pause_for_recovery,
     pause_for_retryable,
+    reclaim_background_run,
     record_completion_claim,
     record_evidence,
     record_goal_progress,
     record_nonexecuted_tool_result,
+    record_provider_response,
     record_tool_result,
     start_tool_batch,
     verify_goal_completion,
@@ -204,6 +220,9 @@ class AgentRuntime:
         evidence_registry: ClosedEvidenceRegistry | None = None,
         evidence_time_factory: Callable[[], str] | None = None,
         workspace_binding: ConversationWorkspaceBindingV1 | None = None,
+        browser_takeover_complete: Callable[[BrowserTakeoverRequestV1], int]
+        | None = None,
+        background_execution_authority: BackgroundExecutionAuthorityV1 | None = None,
     ) -> None:
         self._provider = provider
         self._context_manager = context_manager
@@ -219,6 +238,8 @@ class AgentRuntime:
             lambda: datetime.now(UTC).isoformat().replace("+00:00", "Z")
         )
         self._workspace_binding = workspace_binding
+        self._browser_takeover_complete = browser_takeover_complete
+        self._background_execution_authority = background_execution_authority
         self._event_buffer: ContextVar[list[RuntimeEvent] | None] = ContextVar(
             "agent_runtime_event_buffer",
             default=None,
@@ -272,6 +293,34 @@ class AgentRuntime:
             if isinstance(binding_result, RunResult):
                 return binding_result
             current = binding_result
+            if self._background_execution_authority is not None:
+                occurrence_binding = current.state.background_occurrence_binding
+                if (
+                    occurrence_binding is None
+                    or occurrence_binding.binding_digest
+                    != self._background_execution_authority.occurrence_binding.binding_digest
+                ):
+                    return RunResult(
+                        status=RunStatus.CONFLICT,
+                        state=current.state,
+                        error_code="background_occurrence_binding_mismatch",
+                    )
+            resumed = self._resume_background_replay(action, current, warnings)
+            if resumed is not None:
+                return resumed
+            if (
+                current.state.browser_takeover_pending is not None
+                and not isinstance(
+                    action, (CompleteBrowserTakeover, CancelBrowserTakeover)
+                )
+            ):
+                # pending takeover 期间 provider/tool/observe/recording 为零：
+                # 只接受 typed complete/cancel controls。
+                return RunResult(
+                    status=RunStatus.CONFLICT,
+                    state=current.state,
+                    error_code="browser_takeover_pending",
+                )
             transition = accept_action(current.state, action)
             if transition.disposition is ActionDisposition.CONFLICT:
                 return RunResult(
@@ -294,6 +343,50 @@ class AgentRuntime:
                     message=recorded.message,
                     error_code=recorded.error_code,
                     replayed=True,
+                )
+
+            if isinstance(action, CompleteBrowserTakeover):
+                pending = current.state.browser_takeover_pending
+                if pending is None or self._browser_takeover_complete is None:
+                    return RunResult(
+                        status=RunStatus.CONFLICT,
+                        state=current.state,
+                        error_code="browser_takeover_completion_unavailable",
+                    )
+                try:
+                    completed_revision = self._browser_takeover_complete(pending)
+                except (OSError, ValueError):
+                    return RunResult(
+                        status=RunStatus.CONFLICT,
+                        state=current.state,
+                        error_code="browser_takeover_completion_failed",
+                    )
+                if completed_revision != pending.profile_revision + 1:
+                    return RunResult(
+                        status=RunStatus.CONFLICT,
+                        state=current.state,
+                        error_code="browser_takeover_revision_invalid",
+                    )
+
+            if (
+                isinstance(action, (CompleteBrowserTakeover, CancelBrowserTakeover))
+                and transition.state.active_run is None
+            ):
+                # 兼容只含 durable pending 的恢复投影。真实 product flow 会
+                # 保留原 active run，并在下方重新 claim 后继续唯一 _drive。
+                return self._finish(
+                    current,
+                    action,
+                    status=RunStatus.COMPLETED,
+                    warnings=warnings,
+                    event_kind=RuntimeEventKind.COMPLETED,
+                    message=(
+                        "browser takeover completed; profile revision advanced, "
+                        "fresh browser_observe required"
+                        if isinstance(action, CompleteBrowserTakeover)
+                        else "browser takeover cancelled"
+                    ),
+                    outcome_state=transition.state,
                 )
 
             if isinstance(action, (PauseGoal, ResumeGoal, CancelGoal, ConfirmCriterion)):
@@ -319,6 +412,18 @@ class AgentRuntime:
                             )
                         )
                     ),
+                    outcome_state=transition.state,
+                )
+
+            if isinstance(action, AbandonUnknownModelOutcome):
+                return self._finish(
+                    current,
+                    action,
+                    status=RunStatus.FAILED_FATAL,
+                    warnings=warnings,
+                    event_kind=RuntimeEventKind.FAILED,
+                    error_code="model_outcome_abandoned",
+                    message="Unknown provider outcome was abandoned for this occurrence.",
                     outcome_state=transition.state,
                 )
 
@@ -447,6 +552,80 @@ class AgentRuntime:
                 message=f"{type(error).__name__}: {error}",
                 delivery_warnings=tuple(warnings),
             )
+
+    def _resume_background_replay(
+        self,
+        action: Action,
+        current: LoadedSnapshot,
+        warnings: list[str],
+    ) -> RunResult | None:
+        """恢复同一 unfinished occurrence action，不创建 scheduler/model 第二循环。"""
+
+        state = current.state
+        active = state.active_run
+        if (
+            state.background_occurrence_binding is None
+            or not isinstance(action, SubmitMessage)
+            or active is None
+            or active.run_id != action.run_id
+        ):
+            return None
+        replay = next(
+            (
+                item
+                for item in state.replay_records
+                if item.action_seq == action.action_seq
+            ),
+            None,
+        )
+        if (
+            replay is None
+            or replay.result is not None
+            or replay.action_digest != canonical_action_digest(action)
+        ):
+            return None
+        if active.status is ActiveRunStatus.MODEL_OUTCOME_UNKNOWN:
+            return self._finish(
+                current,
+                action,
+                status=RunStatus.FAILED_RETRYABLE,
+                warnings=warnings,
+                event_kind=RuntimeEventKind.FAILED,
+                error_code="model_outcome_unknown",
+                message="Provider outcome is unknown; abandon this occurrence explicitly.",
+                outcome_state=state,
+            )
+        if (
+            active.status is ActiveRunStatus.MODEL_EXECUTING
+            and active.persisted_model_response is None
+        ):
+            unknown = mark_model_outcome_unknown(state)
+            return self._finish(
+                current,
+                action,
+                status=RunStatus.FAILED_RETRYABLE,
+                warnings=warnings,
+                event_kind=RuntimeEventKind.FAILED,
+                error_code="model_outcome_unknown",
+                message="Provider outcome is unknown; abandon this occurrence explicitly.",
+                outcome_state=unknown,
+            )
+        safely_reclaimable = (
+            active.status is ActiveRunStatus.MODEL_EXECUTING
+            and active.persisted_model_response is not None
+        ) or (
+            active.status is ActiveRunStatus.RUNNABLE
+            and active.phase is not ContinuationPhase.EXECUTING
+        )
+        if not safely_reclaimable:
+            return None
+        invocation_id = self._invocation_id_factory()
+        current = self._save(
+            current,
+            reclaim_background_run(state, invocation_id),
+        )
+        self._open_control_binding(current.state)
+        return self._drive(action, current, warnings)
 
     def _ensure_workspace_binding(
         self,
@@ -655,6 +834,11 @@ class AgentRuntime:
                             call,
                         ),
                         process_leases=current.state.process_leases,
+                        sandbox_leases=current.state.sandbox_leases,
+                        browser_leases=current.state.browser_leases,
+                        browser_takeover_pending=(
+                            current.state.browser_takeover_pending
+                        ),
                         proposed_criteria=(
                             current.state.goal.proposed_criteria
                             if current.state.goal is not None
@@ -711,6 +895,14 @@ class AgentRuntime:
                             current.state,
                         ),
                         goal_correction_pending=goal_correction_pending(current.state),
+                        background_execution_authority=(
+                            self._background_execution_authority
+                        ),
+                        background_tool_calls_used=active.tool_calls_used,
+                        background_sandbox_commands_used=(
+                            active.sandbox_commands_used
+                        ),
+                        background_browser_actions_used=active.browser_actions_used,
                     ),
                     approval=active.approval_grant,
                 )
@@ -831,6 +1023,15 @@ class AgentRuntime:
                         outcome_state=ended,
                     )
 
+                if prepared.browser_takeover_request is not None:
+                    # headed browser 是用户可见副作用。先把 exact takeover
+                    # request durable-save，再允许 ToolRuntime 调 adapter 切换窗口。
+                    pending_takeover = begin_browser_takeover(
+                        current.state,
+                        prepared.browser_takeover_request,
+                    )
+                    current = self._save(current, pending_takeover)
+
                 executing = mark_executing(
                     current.state,
                     tool_call_id=prepared.tool_call_id,
@@ -845,6 +1046,19 @@ class AgentRuntime:
                         prepared.process_lease.lease_id
                         if prepared.process_lease is not None
                         else None
+                    ),
+                    sandbox_lease_id=(
+                        prepared.sandbox_lease.lease_id
+                        if prepared.sandbox_lease is not None
+                        else None
+                    ),
+                    browser_lease_id=(
+                        prepared.browser_lease.lease_id
+                        if prepared.browser_lease is not None
+                        else None
+                    ),
+                    background_action_authority=(
+                        prepared.background_action_authority
                     ),
                 )
                 current = self._save(current, executing)
@@ -895,6 +1109,12 @@ class AgentRuntime:
                             tool_call_id=prepared.tool_call_id,
                             action_seq=action.action_seq,
                         )
+                    if (
+                        tool_result.browser_takeover_request is not None
+                        and post_result_state.browser_takeover_pending
+                        != tool_result.browser_takeover_request
+                    ):
+                        raise ValueError("browser takeover result changed durable binding")
                     current = self._save(current, post_result_state)
                 except Exception:
                     request = RecoveryRequest(
@@ -922,6 +1142,19 @@ class AgentRuntime:
                         },
                     )
                 )
+                if tool_result.browser_takeover_request is not None:
+                    # pending 已经在上一 CAS 中持久化且 invocation ownership
+                    # 已释放。必须立即返回，不能再调用 provider 或下一个 tool。
+                    return self._finish(
+                        current,
+                        action,
+                        status=RunStatus.COMPLETED,
+                        warnings=warnings,
+                        event_kind=RuntimeEventKind.COMPLETED,
+                        run_id=active.run_id,
+                        message="browser takeover waiting for user",
+                        outcome_state=current.state,
+                    )
                 if tool_result.executed and not tool_result.is_error:
                     verified = self._finish_if_durable_evidence_is_complete(
                         current,
@@ -948,7 +1181,29 @@ class AgentRuntime:
 
             if active.phase is not ContinuationPhase.MODEL:
                 raise RuntimeError("EXECUTING continuation must enter recovery before resume")
+            background_binding = current.state.background_occurrence_binding
+            recovering_persisted_response = (
+                active.status is ActiveRunStatus.MODEL_EXECUTING
+                and active.persisted_model_response is not None
+            )
             if (
+                background_binding is not None
+                and not recovering_persisted_response
+                and active.model_calls_used >= background_binding.model_call_limit
+            ):
+                paused = pause_for_limit(current.state)
+                return self._finish(
+                    current,
+                    action,
+                    status=RunStatus.LIMIT_REACHED,
+                    warnings=warnings,
+                    event_kind=RuntimeEventKind.LIMIT_REACHED,
+                    error_code="model_call_limit",
+                    outcome_state=paused,
+                )
+            if (
+                not recovering_persisted_response
+                and
                 self._limits.max_model_calls is not None
                 and model_calls >= self._limits.max_model_calls
             ):
@@ -1013,6 +1268,24 @@ class AgentRuntime:
                     outcome_state=paused,
                 )
             if (
+                not recovering_persisted_response
+                and background_binding is not None
+                and active.input_tokens_used + context.budget.estimated_input_tokens
+                > background_binding.max_input_tokens
+            ):
+                paused = pause_for_limit(current.state)
+                return self._finish(
+                    current,
+                    action,
+                    status=RunStatus.LIMIT_REACHED,
+                    warnings=warnings,
+                    event_kind=RuntimeEventKind.LIMIT_REACHED,
+                    error_code="input_token_limit",
+                    outcome_state=paused,
+                )
+            if (
+                not recovering_persisted_response
+                and
                 self._limits.max_input_tokens is not None
                 and input_tokens + context.budget.estimated_input_tokens
                 > self._limits.max_input_tokens
@@ -1047,11 +1320,72 @@ class AgentRuntime:
                     outcome_state=ended,
                 )
 
-            model_calls += 1
-            input_tokens += context.budget.estimated_input_tokens
+            if recovering_persisted_response:
+                intent = active.provider_call_intent
+                persisted = active.persisted_model_response
+                if (
+                    intent is None
+                    or persisted is None
+                    or background_binding is None
+                    or intent.action_seq != action.action_seq
+                    or intent.context_digest != context_pack_digest(context)
+                    or intent.occurrence_binding_digest
+                    != background_binding.binding_digest
+                ):
+                    unknown = mark_model_outcome_unknown(
+                        replace(
+                            current.state,
+                            active_run=replace(
+                                active,
+                                persisted_model_response=None,
+                            ),
+                        )
+                    )
+                    return self._finish(
+                        current,
+                        action,
+                        status=RunStatus.FAILED_RETRYABLE,
+                        warnings=warnings,
+                        event_kind=RuntimeEventKind.FAILED,
+                        error_code="model_response_binding_mismatch",
+                        outcome_state=unknown,
+                    )
+                response = persisted.response
+                current = LoadedSnapshot(
+                    state=consume_provider_response(current.state),
+                    token=current.token,
+                )
+            else:
+                model_calls += 1
+                input_tokens += context.budget.estimated_input_tokens
+                if background_binding is not None:
+                    intent = ProviderCallIntentV1.create(
+                        action_seq=action.action_seq,
+                        provider_call_index=active.model_calls_used + 1,
+                        context_digest=context_pack_digest(context),
+                        disclosure_digest=(
+                            disclosure.request_digest if disclosure is not None else None
+                        ),
+                        occurrence_binding_digest=background_binding.binding_digest,
+                    )
+                    current = self._save(
+                        current,
+                        begin_provider_call(
+                            current.state,
+                            intent,
+                            input_tokens=context.budget.estimated_input_tokens,
+                        ),
+                    )
             try:
-                response = self._provider.generate(context)
+                if not recovering_persisted_response:
+                    response = self._provider.generate(context)
             except InvalidProviderResponseError as error:
+                if background_binding is not None:
+                    return self._finish_background_model_unknown(
+                        current,
+                        action,
+                        warnings,
+                    )
                 # 归一化失败意味着本次响应的任何 tool/control 都未被接纳，
                 # 所以可以在相同 trusted context 上做有界重试；绝不宽松解析。
                 if invalid_repairs < self._limits.max_invalid_repairs:
@@ -1130,6 +1464,12 @@ class AgentRuntime:
                     outcome_state=failed,
                 )
             except RetryableProviderError as error:
+                if background_binding is not None:
+                    return self._finish_background_model_unknown(
+                        current,
+                        action,
+                        warnings,
+                    )
                 paused = pause_for_retryable(current.state)
                 provider_code = getattr(error, "code", "provider_retryable")
                 if provider_code == "provider_http_retryable":
@@ -1157,6 +1497,12 @@ class AgentRuntime:
                     outcome_state=paused,
                 )
             except Exception as error:
+                if background_binding is not None:
+                    return self._finish_background_model_unknown(
+                        current,
+                        action,
+                        warnings,
+                    )
                 provider_code = getattr(error, "code", "provider_failure")
                 if provider_code not in {
                     "provider_auth_error",
@@ -1181,7 +1527,41 @@ class AgentRuntime:
                     outcome_state=failed,
                 )
 
+            if background_binding is not None and not recovering_persisted_response:
+                active_after_send = current.state.active_run
+                if active_after_send is None or active_after_send.provider_call_intent is None:
+                    raise RuntimeError("background provider intent disappeared")
+                persisted = PersistedModelResponseV1.create(
+                    request_digest=active_after_send.provider_call_intent.request_digest,
+                    response=response,
+                )
+                current = self._save(
+                    current,
+                    record_provider_response(current.state, persisted),
+                )
+                current = LoadedSnapshot(
+                    state=consume_provider_response(current.state),
+                    token=current.token,
+                )
+
             output_tokens += response.bounded_output_tokens
+            current_active = current.state.active_run
+            if (
+                background_binding is not None
+                and current_active is not None
+                and current_active.output_tokens_used
+                > background_binding.max_output_tokens
+            ):
+                paused = pause_for_limit(current.state)
+                return self._finish(
+                    current,
+                    action,
+                    status=RunStatus.LIMIT_REACHED,
+                    warnings=warnings,
+                    event_kind=RuntimeEventKind.LIMIT_REACHED,
+                    error_code="output_token_limit",
+                    outcome_state=paused,
+                )
             if (
                 self._limits.max_output_tokens is not None
                 and output_tokens > self._limits.max_output_tokens
@@ -1781,7 +2161,7 @@ class AgentRuntime:
             if isinstance(control, BlockedClaim):
                 available_tools = tuple(sorted(tool.name for tool in context.tools))
                 pending_obligation_tools = (
-                    self._pending_goal_obligation_tools(
+                    self._evidence_registry.pending_obligation_tools(
                         current.state,
                         available_tools=available_tools,
                     )
@@ -1860,13 +2240,16 @@ class AgentRuntime:
                         )
                     except EvidenceVerificationError as error:
                         evidence_gap = str(error)
-                        repair_tools = self._repairable_evidence_tools(
+                        gap_repair = self._evidence_registry.assess_gap(
                             evidence_gap,
                             available_tools=available_tools,
                         )
-                        if repair_tools:
+                        if gap_repair.repairable_tools:
                             if no_progress.repair_exhausted(
-                                ("blocked_claim_with_repairable_evidence", *repair_tools),
+                                (
+                                    "blocked_claim_with_repairable_evidence",
+                                    *gap_repair.repairable_tools,
+                                ),
                                 allowance=self._limits.max_no_progress_replans,
                                 observation_id=model_calls,
                             ):
@@ -1889,8 +2272,8 @@ class AgentRuntime:
                                         "The blocked_claim was not accepted because the "
                                         "current evidence gap is repairable with an "
                                         "advertised product tool. Required next tool: "
-                                        f"{', '.join(repair_tools)}. "
-                                        + self._evidence_repair_instruction(evidence_gap)
+                                        f"{', '.join(gap_repair.repairable_tools)}. "
+                                        + gap_repair.repair_instruction
                                     ),
                                 ),
                             )
@@ -2035,7 +2418,12 @@ class AgentRuntime:
                         append_policy_result(
                             current.state,
                             code="completion_not_verified",
-                            message=(f"{error} " + self._evidence_repair_instruction(str(error))),
+                            message=(
+                                f"{error} "
+                                + self._evidence_registry.assess_gap(
+                                    str(error)
+                                ).repair_instruction
+                            ),
                         ),
                     )
                     continue
@@ -2368,6 +2756,24 @@ class AgentRuntime:
             outcome_state=state,
         )
 
+    def _finish_background_model_unknown(
+        self,
+        current: LoadedSnapshot,
+        action: Action,
+        warnings: list[str],
+    ) -> RunResult:
+        unknown = mark_model_outcome_unknown(current.state)
+        return self._finish(
+            current,
+            action,
+            status=RunStatus.FAILED_RETRYABLE,
+            warnings=warnings,
+            event_kind=RuntimeEventKind.FAILED,
+            error_code="model_outcome_unknown",
+            message="Provider outcome is unknown; abandon this occurrence explicitly.",
+            outcome_state=unknown,
+        )
+
     def _finish_no_progress(
         self,
         current: LoadedSnapshot,
@@ -2468,152 +2874,6 @@ class AgentRuntime:
             and bool(fact.content["calls"])
             for fact in state.facts
         )
-
-    @staticmethod
-    def _pending_goal_obligation_tools(
-        state: ConversationState,
-        *,
-        available_tools: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        """返回仍未准入或未被相关 attempt 支撑的 Goal 义务工具。"""
-
-        active = state.active_run
-        goal = state.goal
-        if active is None or goal is None:
-            return ()
-        admitted_ids = {
-            criterion.criterion_id
-            for criterion in goal.admitted_criteria
-            if criterion.mandatory
-        }
-        run_prefix = f"run:{active.run_id}:"
-        attempted_names: set[str] = set()
-        attempted_process_entrypoints: set[str] = set()
-        attempted_workspace_entrypoints: set[str] = set()
-        path_action_by_call_id: dict[str, tuple[str, str]] = {}
-        for fact in state.facts:
-            if fact.kind is not FactKind.TOOL_CALLS or not fact.fact_id.startswith(
-                run_prefix
-            ):
-                continue
-            for raw in fact.content.get("calls", ()):
-                if not isinstance(raw, dict):
-                    continue
-                call_id = raw.get("tool_call_id")
-                name = raw.get("name")
-                arguments = raw.get("arguments")
-                if isinstance(name, str):
-                    attempted_names.add(name)
-                if (
-                    name == "local_process"
-                    and isinstance(arguments, dict)
-                    and isinstance(arguments.get("executable"), str)
-                ):
-                    executable = arguments["executable"]
-                    normalized = normalize_process_entrypoint(executable)
-                    attempted_process_entrypoints.add(normalized)
-                    if executable.strip().strip("'\"").startswith("./"):
-                        attempted_workspace_entrypoints.add(normalized)
-                if (
-                    isinstance(call_id, str)
-                    and isinstance(name, str)
-                    and name in {"read_file", "write_file", "edit_file"}
-                    and isinstance(arguments, dict)
-                    and isinstance(arguments.get("path"), str)
-                ):
-                    path_action_by_call_id[call_id] = (name, arguments["path"])
-        successful_file_paths = {
-            path_action_by_call_id[call_id]
-            for fact in state.facts
-            if fact.kind is FactKind.TOOL_RESULT
-            and fact.fact_id.startswith(run_prefix)
-            and fact.content.get("executed") is True
-            and fact.content.get("is_error") is False
-            and isinstance((call_id := fact.content.get("tool_call_id")), str)
-            and call_id in path_action_by_call_id
-        }
-        available = set(available_tools)
-        requested_process_entrypoints = authoritative_process_entrypoints(state)
-        process_attempt_is_relevant = bool(attempted_process_entrypoints) and (
-            requested_process_entrypoints.issubset(
-                attempted_process_entrypoints
-            )
-            if requested_process_entrypoints
-            else bool(attempted_workspace_entrypoints)
-        )
-        required: list[str] = []
-        for criterion in goal.proposed_criteria:
-            if criterion.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST:
-                path = criterion.artifact_path
-                if criterion.criterion_id in admitted_ids and any(
-                    successful_path == path
-                    for _name, successful_path in successful_file_paths
-                ):
-                    # 成功的 exact write/edit/read 已把下一步收敛为 evidence
-                    # read-back 或 completion；失败的预读则不能替代仍可执行的写入。
-                    continue
-                for name in ("write_file", "edit_file"):
-                    if name in available:
-                        required.append(name)
-                        break
-                continue
-            if criterion.criterion_id in admitted_ids:
-                continue
-            elif (
-                criterion.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
-                and criterion.criterion_id.startswith("criterion:required-public-web:")
-                and not attempted_names.intersection({"web_search", "web_fetch"})
-            ):
-                for name in ("web_search", "web_fetch"):
-                    if name in available:
-                        required.append(name)
-                        break
-            elif (
-                criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
-                and criterion.criterion_id.startswith("criterion:required-local-process:")
-                and "local_process" in available
-                and not process_attempt_is_relevant
-            ):
-                required.append("local_process")
-        return tuple(dict.fromkeys(required))
-
-    @staticmethod
-    def _repairable_evidence_tools(
-        reason: str,
-        *,
-        available_tools: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        """把闭合 evidence oracle 的已知缺口映射到仍可调用的安全工具。"""
-
-        candidates: tuple[str, ...] = ()
-        if reason in {
-            "no exact read-back fact proves the filesystem criterion",
-            "no exact read-back fact proves the research artifact",
-        }:
-            candidates = ("read_file",)
-        elif reason in {
-            "citation manifest is not bound to the exact artifact",
-            "citation manifest is not bound to the current Goal",
-            "citation manifest read-back is invalid",
-            "each citation marker must occur in the artifact",
-        }:
-            candidates = (
-                "read_file",
-                "build_citation_manifest",
-                "write_file",
-                "edit_file",
-            )
-        elif reason == "citation sidecar target requires admitted research provenance":
-            candidates = ("build_citation_manifest", "write_file", "edit_file")
-        elif reason in {
-            "required source kind must contain extracted web content, not a search snippet",
-            "truncated source receipt cannot prove research",
-        }:
-            candidates = ("web_fetch",)
-        elif reason == "artifact contains an invented URL":
-            candidates = ("edit_file", "read_file")
-        available = set(available_tools)
-        return tuple(name for name in candidates if name in available)
 
     @staticmethod
     def _rejection_still_blocks_current_goal(state: ConversationState) -> bool:
@@ -2775,105 +3035,6 @@ class AgentRuntime:
             and fact.fact_id.startswith(prefix)
             and fact.content.get("code") == code
             for fact in state.facts
-        )
-
-    @staticmethod
-    def _evidence_repair_instruction(reason: str) -> str:
-        if reason == "no exact read-back fact proves the research artifact":
-            return (
-                "Do not repeat completion. Call read_file for the artifact, pass that "
-                "exact read-back text to build_citation_manifest with the existing source "
-                "refs, rewrite the citation sidecar with its canonical JSON, then read "
-                "both files back before a new completion claim."
-            )
-        if reason == "citation sidecar target requires admitted research provenance":
-            return (
-                "Do not repeat completion. Rebuild the citation manifest from current-Goal "
-                "source refs, write its canonical JSON to the exact .citations.json target "
-                "with approval, and read both artifact and sidecar back before retrying."
-            )
-        if "required source kind must contain extracted web content" in reason:
-            return (
-                "Do not repeat completion. Fetch an unattempted source_ref from the current "
-                "Web Search, then rebuild and rewrite the citation sidecar using the "
-                "extracted receipt before retrying."
-            )
-        if reason == "truncated source receipt cannot prove research":
-            return (
-                "Do not repeat completion or cite the truncated receipt. Call web_fetch "
-                "with a different unattempted source_ref from "
-                "FIRST_AGENT_RUNTIME_WEB_FETCH_REFS until the returned source is not "
-                "truncated, then rewrite the artifact and citation sidecar from that "
-                "receipt, read both back, and retry completion."
-            )
-        if reason == "source receipt is not bound to the current Goal":
-            return (
-                "Do not repeat completion. Some cited retrieval happened before this Goal. "
-                "Run materially different history, workspace, and Web source queries now "
-                "under trusted_goal, rebuild the report and citation manifest only from "
-                "those current-Goal source refs, rewrite both targets, and read both back."
-            )
-        if reason == "artifact contains an invented URL":
-            return (
-                "Do not repeat completion or fetch unrelated sources. Use edit_file on the "
-                "artifact to remove every literal URL that is not exactly a cited current-Goal "
-                "web_extracted_content origin_locator. Then read_file the changed artifact, "
-                "rebuild and rewrite the citation sidecar from that exact text and existing "
-                "source refs, read both targets back, and retry completion."
-            )
-        if reason in {
-            "required source class is not cited",
-            "required source kind is not cited",
-        }:
-            return (
-                "Do not repeat completion. If the needed current-Goal source class already "
-                "exists in FIRST_AGENT_RUNTIME_SOURCE_REFS, do not retrieve it again: remap "
-                "each valid marker to a distinct source of the required source class. Only "
-                "retrieve a new source when that "
-                "class is genuinely absent; then retrieve a new history or workspace source "
-                "and use its new source ref. Rebuild the report and citation manifest, rewrite "
-                "both targets, and read both back before retrying."
-            )
-        if reason in {
-            "completion claim is stale",
-            "completion claim evidence refs are not exact",
-        }:
-            # 第 65/70 轮 J11 实测:refs 抄错(常为复制了 revision 变更前的旧
-            # trusted_goal 投影块)并无"缺失 evidence"可创建;通用兜底会把模型
-            # 引导向 blocked_claim 而正确证据早已存在。此语境的唯一正确修复是
-            # 逐字复制当前投影。
-            return (
-                "Do not resend the same claim and do not report this Goal as blocked: "
-                "the required evidence already exists. The Goal revision or criterion "
-                "set changed since an earlier trusted_goal block. Copy goal_id, "
-                "goal_revision, and criterion_evidence_refs exactly, element for "
-                "element and in order, from the CURRENT trusted_goal block's "
-                "expected_completion_evidence_refs, then resend completion_claim."
-            )
-        if reason in {
-            "citation manifest is not bound to the exact artifact",
-            "citation manifest is not bound to the current Goal",
-            "citation manifest read-back is invalid",
-            "each citation marker must occur in the artifact",
-        }:
-            # 第 74/82/88/90 轮 J8 最后一公里:canonical sidecar 已存在但
-            # artifact 被再次编辑或 manifest 绑定过期;通用兜底无重建程序且以
-            # blocked_claim 为出路,模型随即 churn。重建是确定性程序:重读
-            # artifact 原文 → 以该原文与现有 refs 重建 manifest → 重写 sidecar
-            # canonical JSON → 双 read-back → 重新 claim;不得引导 blocked。
-            return (
-                "Do not repeat completion and do not report this Goal as blocked: the "
-                "current-Goal sources already exist. The citation sidecar no longer "
-                "matches the current artifact text. Call read_file for the artifact, "
-                "pass that exact read-back text to build_citation_manifest with the "
-                "existing current-Goal source refs and citation markers that occur in "
-                "that exact text, write the returned canonical JSON to the exact "
-                ".citations.json target with approval, read both files back, then "
-                "resend completion_claim."
-            )
-        return (
-            "Do not repeat completion. Call the concrete tools needed to create the "
-            "missing evidence, or send blocked_claim if no safe action can advance the Goal."
         )
 
     def _finish_if_durable_evidence_is_complete(

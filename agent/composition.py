@@ -19,6 +19,7 @@ from pathlib import Path
 
 import httpx
 
+from agent.browser.playwright_adapter import SocketAddressResolver
 from agent.history.catalog import HistoryCatalog
 from agent.history.tools import build_history_tool_registrations
 from agent.mcp.bridge import McpAsyncBridge, SessionTimeouts
@@ -38,13 +39,20 @@ from agent.process.tools import build_local_process_registration
 from agent.research.tools import build_research_tool_registrations
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
+    BackgroundExecutionAuthorityV1,
+    BrowserTakeoverRequestV1,
     ConversationWorkspaceBindingV1,
     ProviderDescriptor,
     canonical_json_digest,
 )
 from agent.runtime.control import ControlInbox
 from agent.runtime.loop import AgentRuntime, InvocationLimits
-from agent.runtime.ports import CheckpointStore, EventSink, ModelProvider
+from agent.runtime.ports import (
+    BackgroundClaimVerifier,
+    CheckpointStore,
+    EventSink,
+    ModelProvider,
+)
 from agent.runtime.tools import KernelToolRuntime, RegisteredTool
 from agent.skill.catalog import SkillLimits, build_skill_catalog
 from agent.skill.tools import build_skill_tool_registrations
@@ -88,6 +96,85 @@ class MemoryResources:
 
     source: object
     registrations: tuple[RegisteredTool, ...]
+
+class SandboxReadiness(StrEnum):
+    """native sandbox backend 的本地就绪度（只读 qualification 探测）。"""
+
+    UNSUPPORTED = "unsupported"
+    TEMPORARILY_UNAVAILABLE = "temporarily_unavailable"
+    READY = "ready"
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxResources:
+    """native sandbox composition 的副产品：唯一 registration + 就绪度。
+
+    无 closeables/receipt book——native 执行没有长生命周期 session，清理由
+    executor 的 per-invocation temp 与既有 process owner 拥有；receipt 由
+    Runtime 在 invoke 内铸造（不经 composition 的旁路 book）。
+    """
+
+    registrations: tuple[RegisteredTool, ...]
+    readiness: SandboxReadiness
+    reason_code: str | None = None
+
+
+def build_sandbox_resources(
+    workspace,
+    state_root,
+    captured_path: str,
+    *,
+    confiner=None,
+):  # noqa: ANN001, ANN202
+    """native sandbox 的静态组合：自动 qualification + 唯一 sandbox_exec。
+
+    无论 backend 是否可用都注册同一个 ``sandbox_exec``——danger-full-access
+    是不依赖 backend 的显式 unconfined bypass；confined 命令在 confine 处
+    fail closed（spec §2/§4）。没有 local_process fallback、没有 Docker
+    vocabulary。per-invocation temp/home 基座放在系统 temp 下的 session
+    专属目录（policy 冻结四 root 两两不交，temp/home 不得位于 state_root
+    的 unreadable carveout 内）。
+    """
+
+    import hashlib
+    import tempfile as _tempfile
+
+    from agent.sandbox.seatbelt import SeatbeltConfiner
+    from agent.sandbox.tools import build_sandbox_exec_registration
+
+    resolved_confiner = confiner or SeatbeltConfiner()
+    report = resolved_confiner.qualify()
+    state_root_path = Path(state_root)
+    base = (
+        Path(_tempfile.gettempdir())
+        / (
+            "first-agent-sbx-"
+            + hashlib.sha256(str(state_root_path).encode()).hexdigest()[:12]
+        )
+    )
+    temp_root = base / "temp"
+    home_root = base / "home"
+    temp_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    home_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    registration = build_sandbox_exec_registration(
+        workspace=workspace,
+        temp_root=temp_root,
+        state_root=state_root_path,
+        home=home_root,
+        captured_path=captured_path,
+        confiner=resolved_confiner,
+    )
+    if report.reason_code == "unsupported_platform":
+        readiness = SandboxReadiness.UNSUPPORTED
+    elif report.available:
+        readiness = SandboxReadiness.READY
+    else:
+        readiness = SandboxReadiness.TEMPORARILY_UNAVAILABLE
+    return SandboxResources(
+        registrations=(registration,),
+        readiness=readiness,
+        reason_code=None if report.available else report.reason_code,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +304,11 @@ def build_composition(
     control_inbox: ControlInbox | None = None,
     strict_control_schema: bool = False,
     workspace_binding: ConversationWorkspaceBindingV1 | None = None,
+    sandbox_receipt_book=None,
+    browser_takeover_complete: Callable[[object], int] | None = None,
+    background_claim_verifier: BackgroundClaimVerifier | None = None,
+    background_execution_authority: BackgroundExecutionAuthorityV1 | None = None,
+    tool_clock: Callable[[], str] | None = None,
 ) -> Composition:
     if workspace_binding is not None and (
         workspace_binding.workspace_identity_digest != workspace_identity_digest
@@ -224,7 +316,12 @@ def build_composition(
     ):
         raise ValueError("composition workspace binding does not match its identity inputs")
     control_inbox = control_inbox or ControlInbox()
-    tool_runtime = KernelToolRuntime(tool_registrations)
+    tool_runtime = KernelToolRuntime(
+        tool_registrations,
+        clock=tool_clock,
+        sandbox_receipt_book=sandbox_receipt_book,
+        background_claim_verifier=background_claim_verifier,
+    )
     definitions = tool_runtime.definitions()
     authority_snapshot = canonical_json_digest(
         {
@@ -266,6 +363,8 @@ def build_composition(
         provider_descriptor=provider_descriptor,
         control_inbox=control_inbox,
         workspace_binding=workspace_binding,
+        browser_takeover_complete=browser_takeover_complete,
+        background_execution_authority=background_execution_authority,
     )
     return Composition(
         runtime=runtime,
@@ -383,3 +482,244 @@ def _posix_process_lifecycle_available() -> bool:
     """仅当平台提供 bounded POSIX process-group lifecycle（killpg/setsid/no-follow）时注册。"""
 
     return all(hasattr(os, attr) for attr in ("killpg", "setsid", "O_NOFOLLOW"))
+
+
+# --------------------------------------------------------------------------- #
+# 018 governed browser tasks：optional composition（spec §11）
+# --------------------------------------------------------------------------- #
+
+
+class BrowserReadiness(StrEnum):
+    """browser 资源的 closed 就绪度；不可用只给一条 reason。"""
+
+    NOT_ENABLED = "not_enabled"
+    TEMPORARILY_UNAVAILABLE = "temporarily_unavailable"
+    READY = "ready"
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserResources:
+    """browser composition 的副产品：registrations + 有序 closeables。
+
+    closeables 按构造逆序关闭（后构造先关）；不可用时 registrations 为空，
+    绝不 fallback 到系统 Chrome/Safari/CDP。只额外暴露一个 Runtime 注入的
+    typed takeover completion port，不暴露 environment/store owner。
+    """
+
+    registrations: tuple[RegisteredTool, ...]
+    closeables: tuple[Callable[[], None], ...]
+    readiness: BrowserReadiness
+    reason_code: str | None = None
+    complete_takeover: Callable[[BrowserTakeoverRequestV1], int] | None = None
+
+
+def browser_identity_digest_for_state_root(state_root: Path) -> str:
+    """专属 browser installation identity；profile 创建与 composition 必须同源。"""
+
+    import hashlib
+
+    return hashlib.sha256(
+        f"first-agent-browser:{Path(state_root)}".encode()
+    ).hexdigest()
+
+
+def _default_browser_binary_available() -> bool:
+    """production read-only binary qualification：不启动 browser、不下载。
+
+    Playwright 的 driver lifecycle 隔离在短子进程中，避免仅查询
+    ``executable_path`` 时的异步收尾噪声污染产品进程；任何缺失、超时或
+    非零退出都视为不可用（fail closed，无 fallback）。
+    """
+
+    import subprocess as _subprocess
+    import sys as _sys
+
+    try:
+        probe = _subprocess.run(
+            [
+                _sys.executable,
+                "-c",
+                (
+                    "from playwright.sync_api import sync_playwright; "
+                    "p=sync_playwright().start(); "
+                    "print(p.chromium.executable_path); p.stop()"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, _subprocess.SubprocessError):
+        return False
+    if probe.returncode != 0:
+        return False
+    import os as _os
+
+    executable = probe.stdout.strip()
+    return bool(executable) and _os.path.exists(executable)
+
+
+def _default_browser_egress_ready(resolver: object) -> bool:
+    """production read-only egress qualification：构造 guard 即 ready。
+
+    guard 无 permissive 开关；resolver 构造成功（无异常）即代表 DNS 解析
+    通道可用。不发起任何网络请求。
+    """
+
+    return resolver is not None
+
+
+def _browser_qualification_reasons(
+    *,
+    playwright_factory: object | None,
+    profile_root: Path,
+    binary_available: bool,
+    egress_ok: bool,
+) -> str | None:
+    """read-only closed qualification：按优先级返回唯一 reason 或 None。
+
+    顺序：package → profile permissions → bundled binary → egress。
+    绝不启动或下载 browser，绝不 fallback。
+    """
+
+    import os as _os
+    import stat as _stat
+
+    if playwright_factory is None:
+        try:
+            import playwright.sync_api  # noqa: F401  lazy，base 启动不加载
+        except ImportError:
+            return "browser_package_missing"
+    try:
+        info = _os.lstat(profile_root)
+    except FileNotFoundError:
+        info = None
+    if info is not None:
+        if _stat.S_ISLNK(info.st_mode) or not _stat.S_ISDIR(info.st_mode):
+            return "browser_profile_permissions"
+        if info.st_mode & 0o077:
+            # owner-only 合同被破坏且非我们创建的 root：read-only 检查不改
+            # 权限，直接 fail closed（我们自己创建的 0700 root 不受影响）。
+            return "browser_profile_permissions"
+    if not binary_available:
+        return "browser_binary_missing"
+    if not egress_ok:
+        return "browser_egress_unavailable"
+    return None
+
+
+# 模块级私有 qualification seam：production 默认为真实只读探测；测试经
+# monkeypatch 注入确定布尔。不在公开签名暴露任何测试旋钮。
+def _browser_binary_available_for_factory() -> bool:
+    """注入 playwright_factory 的调用也走同一 binary 判据。
+
+    默认真实只读探测（本机无 playwright 包时返回 False）；测试 monkeypatch
+    本函数注入确定布尔，不改变 production qualification 语义。
+    """
+
+    return _default_browser_binary_available()
+
+
+_BROWSER_EGRESS_SEAM: Callable[[object], bool] = _default_browser_egress_ready
+
+
+def build_browser_resources(
+    workspace: Path,
+    state_root: Path,
+    *,
+    enabled: bool,
+    resolver: object | None = None,
+    playwright_factory: object | None = None,
+) -> BrowserResources:
+    """browser 静态组合：read-only qualification 后构造唯一 adapter 拥有的资源。
+
+    production 调用不传 resolver/playwright_factory（使用真实 DNS 与 lazy
+    Playwright）；测试只能经这两个 constructor seam 注入 fake。签名不含
+    allow_private/disable_guard/binary/egress 测试旋钮——binary/egress
+    qualification 是真实只读探测，注入只经模块级私有 seam
+    （``_BROWSER_BINARY_SEAM``/``_BROWSER_EGRESS_SEAM``，测试 monkeypatch）。
+    """
+
+    if not enabled:
+        return BrowserResources(
+            registrations=(),
+            closeables=(),
+            readiness=BrowserReadiness.NOT_ENABLED,
+            reason_code=None,
+            complete_takeover=None,
+        )
+    profile_root = Path(state_root) / "browser" / "profiles"
+    session_root = Path(state_root) / "browser" / "sessions"
+    resolved_resolver = (
+        resolver
+        if resolver is not None
+        else SocketAddressResolver()
+    )
+    binary_available = (
+        _browser_binary_available_for_factory()
+        if playwright_factory is not None
+        else _default_browser_binary_available()
+    )
+    egress_ok = _BROWSER_EGRESS_SEAM(resolved_resolver)
+    reason = _browser_qualification_reasons(
+        playwright_factory=playwright_factory,
+        profile_root=profile_root,
+        binary_available=binary_available,
+        egress_ok=egress_ok,
+    )
+    if reason is not None:
+        return BrowserResources(
+            registrations=(),
+            closeables=(),
+            readiness=BrowserReadiness.TEMPORARILY_UNAVAILABLE,
+            reason_code=reason,
+            complete_takeover=None,
+        )
+    import time as _time
+
+    from agent.browser.playwright_adapter import (
+        PlaywrightBrowserEnvironment,
+    )
+    from agent.browser.profile_store import BrowserProfileStore
+    from agent.browser.quarantine import BrowserQuarantine
+    from agent.browser.session_store import BrowserSessionStore
+    from agent.browser.takeover import complete_browser_takeover_profile
+    from agent.browser.tools import build_browser_tool_registrations
+
+    profile_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    session_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    browser_identity_digest = browser_identity_digest_for_state_root(Path(state_root))
+    quarantine_root = Path(state_root) / "browser" / "quarantine"
+    quarantine = BrowserQuarantine(root=quarantine_root)
+    environment = PlaywrightBrowserEnvironment(
+        playwright_factory=playwright_factory,  # type: ignore[arg-type]
+        resolver=resolved_resolver,
+        browser_identity_digest=browser_identity_digest,
+        profile_root=profile_root,
+        quarantine=quarantine,
+    )
+    profile_store = BrowserProfileStore(root=profile_root)
+    registrations = build_browser_tool_registrations(
+        environment=environment,
+        profile_store=profile_store,
+        session_store=BrowserSessionStore(root=session_root),
+        browser_identity_digest=browser_identity_digest,
+        clock=lambda: datetime.now(UTC).isoformat(),
+        monotonic_clock=_time.monotonic,
+        workspace=Path(workspace),
+        quarantine=quarantine,
+    )
+    closeables: tuple[Callable[[], None], ...] = (environment.shutdown,)
+    return BrowserResources(
+        registrations=registrations,
+        closeables=closeables,
+        readiness=BrowserReadiness.READY,
+        reason_code=None,
+        complete_takeover=lambda request: complete_browser_takeover_profile(
+            request,
+            profile_store,
+            browser_identity_digest=browser_identity_digest,
+            session_is_active=environment.takeover_session_active,
+        ),
+    )

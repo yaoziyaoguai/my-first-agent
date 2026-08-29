@@ -1998,6 +1998,38 @@ def test_016_interactive_terminal_output_preserves_provider_classification() -> 
     )
 
 
+def test_016_interactive_eof_waits_for_the_exiting_process() -> None:
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"The provider response was incompatible.\n")
+    os.close(write_fd)
+
+    class ExitingProcess:
+        def __init__(self) -> None:
+            self.stdout = os.fdopen(read_fd, "rb")
+            self.stdin = None
+            self.returncode = None
+            self.terminated = False
+
+        def poll(self):  # noqa: ANN201
+            return self.returncode
+
+        def wait(self, *, timeout):  # noqa: ANN001, ANN201
+            self.returncode = 0
+            return self.returncode
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    process = ExitingProcess()
+    session = e3.InteractiveSession(process)  # type: ignore[arg-type]
+
+    with pytest.raises(e3.InstalledConsoleTerminatedError) as caught:
+        session.wait_for_prompt(timeout=1)
+
+    assert caught.value.result.returncode == 0
+    assert not process.terminated
+
+
 def test_016_interactive_timeout_preserves_bounded_output_and_reaps_process() -> None:
     process = subprocess.Popen(
         [

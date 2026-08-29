@@ -475,9 +475,9 @@ def test_repeated_unverified_completion_claims_fail_as_no_progress() -> None:
 
 
 def test_research_readback_failure_has_executable_repair_instruction() -> None:
-    message = AgentRuntime._evidence_repair_instruction(
+    message = ClosedEvidenceRegistry().assess_gap(
         "no exact read-back fact proves the research artifact"
-    )
+    ).repair_instruction
 
     assert "read_file" in message
     assert "build_citation_manifest" in message
@@ -485,9 +485,9 @@ def test_research_readback_failure_has_executable_repair_instruction() -> None:
 
 
 def test_truncated_research_source_has_executable_alternate_fetch_instruction() -> None:
-    message = AgentRuntime._evidence_repair_instruction(
+    message = ClosedEvidenceRegistry().assess_gap(
         "truncated source receipt cannot prove research"
-    )
+    ).repair_instruction
 
     assert "unattempted" in message
     assert "web_fetch" in message
@@ -496,9 +496,9 @@ def test_truncated_research_source_has_executable_alternate_fetch_instruction() 
 
 
 def test_invented_url_failure_has_executable_repair_instruction() -> None:
-    message = AgentRuntime._evidence_repair_instruction(
+    message = ClosedEvidenceRegistry().assess_gap(
         "artifact contains an invented URL"
-    )
+    ).repair_instruction
 
     assert "web_extracted_content origin_locator" in message
     assert "edit_file" in message
@@ -506,9 +506,9 @@ def test_invented_url_failure_has_executable_repair_instruction() -> None:
 
 
 def test_pregoal_source_receipt_failure_requires_current_goal_retrieval() -> None:
-    message = AgentRuntime._evidence_repair_instruction(
+    message = ClosedEvidenceRegistry().assess_gap(
         "source receipt is not bound to the current Goal"
-    )
+    ).repair_instruction
 
     assert "before this Goal" in message
     assert "materially different" in message
@@ -516,9 +516,9 @@ def test_pregoal_source_receipt_failure_requires_current_goal_retrieval() -> Non
 
 
 def test_missing_source_class_repair_requires_new_grounded_source() -> None:
-    message = AgentRuntime._evidence_repair_instruction(
+    message = ClosedEvidenceRegistry().assess_gap(
         "required source class is not cited"
-    )
+    ).repair_instruction
 
     assert "history or workspace source" in message
     assert "new source ref" in message
@@ -614,7 +614,7 @@ def test_manifest_binding_failures_have_executable_rebuild_instruction() -> None
         "citation manifest read-back is invalid",
         "each citation marker must occur in the artifact",
     ):
-        message = AgentRuntime._evidence_repair_instruction(reason)
+        message = ClosedEvidenceRegistry().assess_gap(reason).repair_instruction
 
         assert "build_citation_manifest" in message, reason
         assert "blocked_claim" not in message, reason
@@ -631,7 +631,7 @@ def test_stale_or_inexact_completion_refs_have_copy_current_refs_instruction() -
         "completion claim evidence refs are not exact",
         "completion claim is stale",
     ):
-        message = AgentRuntime._evidence_repair_instruction(reason)
+        message = ClosedEvidenceRegistry().assess_gap(reason).repair_instruction
 
         assert "expected_completion_evidence_refs" in message, reason
         assert "blocked_claim" not in message, reason
@@ -642,7 +642,7 @@ def test_existing_source_classes_are_remapped_without_retrieval() -> None:
         "required source class is not cited",
         "required source kind is not cited",
     ):
-        message = AgentRuntime._evidence_repair_instruction(reason)
+        message = ClosedEvidenceRegistry().assess_gap(reason).repair_instruction
 
         assert "already exists" in message
         assert "valid marker" in message

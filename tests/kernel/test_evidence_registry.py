@@ -8,18 +8,24 @@ ToolResult fact 重算，不接受 fake/mock。
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from agent.runtime.contracts import (
+    ActiveRun,
     AdmittedCriterion,
     ConversationFact,
+    ConversationState,
     EvidenceOracleKind,
     ExecutionAuthorityClass,
     FactKind,
     ProcessOutcome,
     ProcessReceiptV1,
+    ProposedCriterion,
 )
 from agent.runtime.evidence import ClosedEvidenceRegistry, EvidenceVerificationError
+from tests.continuity.test_contracts import _goal
 
 
 def _criterion(predicate: dict) -> AdmittedCriterion:
@@ -385,3 +391,184 @@ def test_015_process_receipt_predicate_stdout_stderr_digests_are_enforced() -> N
             evidence_id="evidence-u7-digests-malformed",
             observed_at="now",
         )
+
+
+def _obligation_state(goal) -> ConversationState:  # noqa: ANN001
+    return ConversationState(
+        conversation_id="conversation-obligations",
+        facts=(
+            ConversationFact(
+                fact_id="fact:user:1",
+                kind=FactKind.USER_MESSAGE,
+                content={"text": "do the work"},
+            ),
+        ),
+        goal=goal,
+        active_run=ActiveRun("run-obligations"),
+    )
+
+
+def test_gap_assessment_dispatches_repair_tools_and_instruction_together() -> None:
+    """derive 失败原因的「可修工具 + 有界修复指引」必须由 evidence 模块同源分发。"""
+
+    assessment = ClosedEvidenceRegistry().assess_gap(
+        "no exact read-back fact proves the research artifact",
+        available_tools=(
+            "read_file",
+            "write_file",
+            "edit_file",
+            "build_citation_manifest",
+        ),
+    )
+
+    assert assessment.repairable_tools == ("read_file",)
+    assert "read_file" in assessment.repair_instruction
+    assert "build_citation_manifest" in assessment.repair_instruction
+    assert "rewrite the citation sidecar" in assessment.repair_instruction
+
+
+def test_gap_assessment_filters_tools_by_availability_not_instruction() -> None:
+    """修复指引是缺口本身的属性；工具列表才是可用工具的投影。"""
+
+    filtered = ClosedEvidenceRegistry().assess_gap(
+        "no exact read-back fact proves the research artifact",
+        available_tools=("edit_file",),
+    )
+    unfiltered = ClosedEvidenceRegistry().assess_gap(
+        "no exact read-back fact proves the research artifact",
+    )
+
+    assert filtered.repairable_tools == ()
+    assert filtered.repair_instruction == unfiltered.repair_instruction
+
+
+def test_gap_assessment_covers_manifest_binding_family_without_blocked_exit() -> None:
+    for reason in (
+        "citation manifest is not bound to the exact artifact",
+        "citation manifest is not bound to the current Goal",
+        "citation manifest read-back is invalid",
+        "each citation marker must occur in the artifact",
+    ):
+        assessment = ClosedEvidenceRegistry().assess_gap(
+            reason,
+            available_tools=("read_file", "build_citation_manifest", "write_file"),
+        )
+
+        assert assessment.repairable_tools == (
+            "read_file",
+            "build_citation_manifest",
+            "write_file",
+        ), reason
+        assert "build_citation_manifest" in assessment.repair_instruction, reason
+        assert "blocked_claim" not in assessment.repair_instruction, reason
+
+
+def test_gap_assessment_keeps_instruction_for_gap_without_repairable_tools() -> None:
+    assessment = ClosedEvidenceRegistry().assess_gap(
+        "source receipt is not bound to the current Goal",
+    )
+
+    assert assessment.repairable_tools == ()
+    assert "before this Goal" in assessment.repair_instruction
+    assert "materially different" in assessment.repair_instruction
+
+
+def test_gap_assessment_unknown_reason_falls_back_to_generic_instruction() -> None:
+    assessment = ClosedEvidenceRegistry().assess_gap(
+        "an unseen verification failure",
+        available_tools=("read_file",),
+    )
+
+    assert assessment.repairable_tools == ()
+    assert assessment.repair_instruction == (
+        "Do not repeat completion. Call the concrete tools needed to create the "
+        "missing evidence, or send blocked_claim if no safe action can advance the Goal."
+    )
+
+
+def test_gap_assessment_extended_web_kind_reason_keeps_substring_instruction() -> None:
+    """旧 _evidence_repair_instruction 对该家族是 substring 匹配。
+
+    带额外上下文的 reason 仍须取得专属 web_fetch 修复指引（不得退化为含
+    blocked_claim 的通用兜底）；同时保留旧 asymmetry——工具分发始终精确
+    匹配，扩展 reason 不能凭 substring 获得 web_fetch 工具。
+    """
+
+    extended = (
+        "required source kind must contain extracted web content, not a search "
+        "snippet (observed at goal revision 3)"
+    )
+    exact = (
+        "required source kind must contain extracted web content, not a search snippet"
+    )
+
+    assessment = ClosedEvidenceRegistry().assess_gap(
+        extended,
+        available_tools=("web_fetch",),
+    )
+
+    assert assessment.repair_instruction == ClosedEvidenceRegistry().assess_gap(
+        exact
+    ).repair_instruction
+    assert "unattempted source_ref" in assessment.repair_instruction
+    assert "blocked_claim" not in assessment.repair_instruction
+    assert assessment.repairable_tools == ()
+
+
+def test_pending_obligation_tools_requires_write_for_unadmitted_filesystem_goal() -> None:
+    state = _obligation_state(_goal(admitted_criteria=()))
+
+    assert ClosedEvidenceRegistry().pending_obligation_tools(
+        state,
+        available_tools=("read_file", "write_file", "edit_file"),
+    ) == ("write_file",)
+
+
+def test_pending_obligation_tools_empty_without_active_run_or_goal() -> None:
+    registry = ClosedEvidenceRegistry()
+    state = _obligation_state(_goal())
+
+    assert registry.pending_obligation_tools(
+        replace(state, active_run=None),
+        available_tools=("write_file",),
+    ) == ()
+    assert registry.pending_obligation_tools(
+        replace(state, goal=None),
+        available_tools=("write_file",),
+    ) == ()
+
+
+def test_pending_obligation_tools_requires_web_retrieval_until_attempted() -> None:
+    goal = _goal(
+        proposed_criteria=(
+            ProposedCriterion(
+                criterion_id="criterion:required-public-web:web-1",
+                description="public web source receipt",
+                oracle_kind=EvidenceOracleKind.WEB_SOURCE_RECEIPT,
+            ),
+        ),
+        admitted_criteria=(),
+    )
+
+    assert ClosedEvidenceRegistry().pending_obligation_tools(
+        _obligation_state(goal),
+        available_tools=("web_fetch", "read_file"),
+    ) == ("web_fetch",)
+
+
+def test_pending_obligation_tools_requires_process_until_relevant_attempt() -> None:
+    goal = _goal(
+        proposed_criteria=(
+            ProposedCriterion(
+                criterion_id="criterion:required-local-process:proc-1",
+                description="governed local process receipt",
+                oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+            ),
+        ),
+        admitted_criteria=(),
+    )
+
+    assert ClosedEvidenceRegistry().pending_obligation_tools(
+        _obligation_state(goal),
+        available_tools=("local_process", "read_file"),
+    ) == ("local_process",)

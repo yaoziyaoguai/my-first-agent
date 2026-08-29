@@ -25,7 +25,8 @@ from pathlib import Path
 import pytest
 
 from agent.process.contracts import ProcessDraftOutcome, ResourceProfile, ResourceProfileV1
-from agent.process.runner import ProcessCleanupError, run_local_process
+from agent.process.group import ProcessCleanupError
+from agent.process.runner import run_local_process
 
 
 def _fast_profile(*, deadline=2, cap=4096):
@@ -132,8 +133,11 @@ def test_015_esrch_pgid_probe_keeps_expected_identity_no_false_reaped(
 exec /bin/echo leader-done
 """
     exe = _make_executable(tmp_path, "esrch-descendant", fixture)
-    # 精确模拟 Popen 后 getpgid 命中 ESRCH race（leader 已退出）。
-    monkeypatch.setattr(runner_module, "_verified_pgid", lambda _pid: None)
+    # 精确模拟 Popen 后 getpgid 命中 ESRCH race（leader 已退出）：共享 seam 的
+    # verified_group_identity 在 ESRCH 时返回 pid（保留 expected identity）。
+    import agent.process.group as group_module
+
+    monkeypatch.setattr(group_module, "verified_group_identity", lambda pid: pid)
     recorded_proc: list[subprocess.Popen] = []
     real_popen = subprocess.Popen
 
@@ -149,7 +153,7 @@ exec /bin/echo leader-done
         probed_pgids.append(pgid)
         raise ProcessCleanupError("synthetic unconfirmable group")
 
-    monkeypatch.setattr(runner_module, "_group_alive", _unconfirmable_group)
+    monkeypatch.setattr(group_module, "group_alive", _unconfirmable_group)
     try:
         with pytest.raises(ProcessCleanupError):
             run_local_process(
@@ -183,7 +187,7 @@ sleep 30
 """
     exe = _make_executable(tmp_path, "unreachable-kill", fixture)
     # Monkeypatch: group always "alive" AND pipe closure always fails → cannot confirm
-    monkeypatch.setattr("agent.process.runner._group_alive", lambda _pgid: True)
+    monkeypatch.setattr("agent.process.group.group_alive", lambda _pgid: True)
     recorded_proc: list[subprocess.Popen] = []
     real_popen = subprocess.Popen
 
@@ -223,35 +227,36 @@ sleep 30
 def test_015_post_kill_verification_uses_full_bounded_time_budget(monkeypatch) -> None:
     """负载下 orphan zombie 可晚于旧的 30 次 probe 消失，但仍在 <10s 合同内。"""
 
-    import agent.process.runner as runner_module
+    import agent.process.group as group_module
 
     clock = [0.0]
-    monkeypatch.setattr(runner_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(group_module.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(
-        runner_module.time,
+        group_module.time,
         "sleep",
         lambda seconds: clock.__setitem__(0, clock[0] + seconds),
     )
-    monkeypatch.setattr(runner_module, "_signal_group", lambda _pgid, _sig: True)
+    monkeypatch.setattr(group_module, "_signal_group", lambda _pgid, _sig: True)
     probes = [0]
 
     def delayed_group_reap(_pgid: int) -> bool:
         probes[0] += 1
         return probes[0] < 37
 
-    monkeypatch.setattr(runner_module, "_group_alive", delayed_group_reap)
+    monkeypatch.setattr(group_module, "group_alive", delayed_group_reap)
 
     class ReapedLeader:
         def wait(self, timeout: float) -> int:  # noqa: ARG002
             return 0
 
-    result = runner_module._terminate_group(  # noqa: SLF001
+    result = group_module.terminate_group(  # noqa: SLF001
         ReapedLeader(),
         12345,
-        _fast_profile(deadline=1),
+        term_grace_seconds=1,
+        kill_grace_seconds=1,
     )
 
-    assert result == (True, True, True)
+    assert result == (True, True)
     assert 3 < clock[0] < 6
 
 
@@ -265,19 +270,26 @@ def test_015_pipe_eof_does_not_prove_process_group_cleanup(
     Runtime unknown-outcome recovery。
     """
 
-    import agent.process.runner as runner_module
+    import agent.process.group as group_module
 
     fixture = b"#!/bin/sh\ntrap '' TERM\nsleep 30\n"
     exe = _make_executable(tmp_path, "pipe-eof-is-not-group-proof", fixture)
 
-    def kill_then_unconfirmed(proc, pgid, profile):  # noqa: ANN001, ANN202
+    def kill_then_unconfirmed(  # noqa: ANN001, ANN202
+        proc,
+        pgid,
+        *,
+        term_grace_seconds,  # noqa: ARG001
+        kill_grace_seconds,
+        verify_budget_seconds=6.0,  # noqa: ARG001
+    ):
         with suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, signal.SIGKILL)
         with suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=profile.kill_grace_seconds)
+            proc.wait(timeout=kill_grace_seconds)
         raise ProcessCleanupError("group liveness remains unconfirmed")
 
-    monkeypatch.setattr(runner_module, "_terminate_group", kill_then_unconfirmed)
+    monkeypatch.setattr(group_module, "terminate_group", kill_then_unconfirmed)
     with pytest.raises(ProcessCleanupError):
         run_local_process(
             resolved_executable=exe,

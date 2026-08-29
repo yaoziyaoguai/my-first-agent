@@ -141,10 +141,23 @@ review；权威证据见 `docs/implementation/014_EXECUTION_LOG.md` §9.3。Fake
 真实 DeepSeek E3 三连、独立评审与 Codex 终裁均已通过；该能力已晋级为已交付，最终证据见
 `docs/implementation/015_EXECUTION_LOG.md`。
 
-这不是 shell。015 不接受命令字符串、pipeline、redirection、interactive TTY 或后台任务，也不宣称能阻止获批
+这不是 shell。015 本身不接受命令字符串、pipeline、redirection、interactive TTY 或后台任务，也不阻止获批
 子进程读取同一用户可访问的文件、联网或派生子进程。已交付结论只覆盖
 `docs/plans/2026-08-09-001-feat-governed-local-action-plan.md` 冻结的 POSIX/macOS-first 合同，不扩大为
-OS sandbox、任意 shell 或整机控制。
+任意 shell 或整机控制。017 在不改变这条结构化命令边界的前提下，另加下面的 macOS native sandbox。
+
+## 里程碑：macOS native sandbox
+
+017 为结构化 `sandbox_exec` 增加 macOS Seatbelt 隔离。默认 `workspace-write` 只写当前 workspace（敏感
+carveout 除外）和本次临时目录，`read-only` 不写；两者默认 `network=off`。每个请求仍展示 exact
+executable、argv、cwd、resource profile、mode 与 network，并只接受 Goal/revision/workspace/command/policy
+精确绑定的一次性批准。backend 不可用时 confined mode 零执行、不会回退到 `local_process`；显式
+`danger-full-access` 是单独批准的 unconfined bypass，receipt 会如实记录 `backend=none`。
+
+当前 sealed identity 已通过 clean materialized gate 与三次真实 Seatbelt E3，每次 11 条 journey 全 True；
+最终 promotion 状态只由绑定同一 identity 的 detached
+`docs/acceptance/017_SANDBOXED_WORKSPACE_EXECUTION_INDEPENDENT_REVIEW.md` 决定。017 仍不是任意 shell、浏览器
+自动化、整机控制、后台 daemon 或跨平台 sandbox 保证；Linux/Windows sandbox 不在本阶段合同内。
 
 ## HTTP Provider
 
@@ -287,3 +300,19 @@ git diff --check
 ```
 
 架构与状态语义见 [Kernel Architecture](docs/architecture/KERNEL_ARCHITECTURE.md)。此次重建是 breaking change：旧 CLI、旧状态格式和旧 Python 接口均不兼容，也不会被自动发现或迁移；未跟踪的旧运行数据保持原样。
+## Browser (018 fail-closed promotion)
+
+An optional governed dedicated-Chromium capability provides public-read sessions, site-bound interactive profiles with exact approvals, explicit user sign-in takeover, an egress guard, and download quarantine. It is disabled by default; enable it with `--browser` after installing the `browser` extra. The authoritative delivery status is the detached `docs/acceptance/018_GOVERNED_BROWSER_TASKS_INDEPENDENT_REVIEW.md`: it is accepted/delivered only when that review binds the current seal, verifier, runner, wheel, browser identity, and 3×13 receipt and records `PASS`; otherwise it remains an implemented candidate. This is not personal-browser or desktop control, arbitrary-site compatibility, background autonomy, or production-ready third-party integration.
+
+## Durable automations (019 split delivery)
+
+019 keeps the scheduling control plane portable. Definitions, canonical UTC scheduling, CAS
+lifecycle, bounded Runtime/ToolRuntime authority, recovery and purge depend only on typed ports;
+they do not select launchd, systemd, Cron, POSIX/Windows process APIs, Seatbelt or Playwright.
+The detached `docs/acceptance/019_CORE_INDEPENDENT_REVIEW.md` promotes that core only when it binds
+the current sealed/materialized 3×13 receipt and both independent review axes pass.
+
+That portable receipt does **not** mean unattended execution is runnable on this computer or on
+every OS. A macOS host profile is a separate qualification for real persistence, launchd wake,
+hard-deadline cleanup and sandbox composition. Linux, Windows and cloud profiles require their own
+equivalent receipts; no platform result is generalized to another platform.

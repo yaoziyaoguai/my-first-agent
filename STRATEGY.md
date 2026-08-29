@@ -159,6 +159,18 @@ closed claim 全 true，最后再由 fresh reviewer 复核。U3 的 authoritativ
 本里程碑明确不做整机/浏览器控制、后台 daemon、自主改写自身、平行 planner/executor loop 或第二套 Runtime。
 这些能力若未来进入 roadmap，必须在 1.0 默认路径真实稳定后另立权限与验收合同。
 
+### 017 Sandboxed Workspace Execution — macOS native confinement
+
+017 在同一 `AgentRuntime` / `KernelToolRuntime` 路径内增加一个 `sandbox_exec` governed tool，不增加第二套
+planner/executor loop。它复用 015 的 exact process preparation、资源上限、process-group cleanup 与 approval
+ordering，并用 macOS Seatbelt 实现 `read-only`、`workspace-write`、`danger-full-access` 三个 closed mode；
+confined mode 的 backend unavailable 必须零执行且不得回退，danger bypass 必须明确记录 unconfined facts。
+
+当前 exact source 已完成 deterministic U1、clean materialized gate 与三次真实 Seatbelt E3（每次 11 条
+journey）。是否晋级 delivered/accepted 只由同一 delivery identity 的 detached independent review 决定；
+该 review 缺失、FAIL 或 identity 不匹配时仍是 candidate。范围只覆盖当前 macOS/Seatbelt 合同，不宣称任意
+shell、浏览器任务、后台调度、整机控制或 Linux/Windows sandbox 已实现。
+
 ## Success metrics
 
 - 冻结 012 与当前 013 reference suite 的合同测试必须 100% 通过。
@@ -180,3 +192,8 @@ closed claim 全 true，最后再由 fresh reviewer 复核。U3 的 authoritativ
 **One-liner:** 一个知道什么时候该聊、什么时候该做，并记得你们共同经历过什么的本地个人 Agent。
 
 **Key message:** 从当前目录和最小权限开始。你只表达需求，First Agent 负责理解、行动、记忆和验证；只有真正改变结果或风险边界时，它才停下来问你。
+- 018 governed browser tasks: fail-closed promotion for dedicated Chromium, exact approvals, user takeover, egress guard and quarantine. Only the detached current-identity independent review can promote it to accepted/delivered; absent, failed or identity-mismatched review means implemented candidate. It excludes personal-browser/desktop control, arbitrary-site compatibility and background autonomy.
+- 019 durable automations uses split delivery: a platform-neutral control core over typed ports,
+  plus independently qualified host profiles. Portable-core acceptance does not claim runnable
+  unattended execution on any OS. The macOS profile may later qualify launchd/persistence/process
+  cleanup without changing the core or implying Linux/Windows/cloud support.

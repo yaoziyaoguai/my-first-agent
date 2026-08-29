@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import Enum, StrEnum
 from typing import TypeAlias
 from urllib.parse import urlsplit, urlunsplit
@@ -119,6 +119,8 @@ def closed_evidence_id(goal_id: str, goal_revision: int, criterion_id: str) -> s
 
 class ActiveRunStatus(StrEnum):
     RUNNABLE = "runnable"
+    MODEL_EXECUTING = "model_executing"
+    MODEL_OUTCOME_UNKNOWN = "model_outcome_unknown"
     AWAITING_APPROVAL = "awaiting_approval"
     AWAITING_RECOVERY = "awaiting_recovery"
     AWAITING_DISCLOSURE = "awaiting_disclosure"
@@ -171,6 +173,9 @@ class SideEffectClass(StrEnum):
 class EgressClass(StrEnum):
     NONE = "none"
     PUBLIC_NETWORK = "public_network"
+    # 017：sandbox 的受治理出口（OFF 之外的 PACKAGE_REGISTRY/EXACT_ALLOWLIST 都
+    # 只能经 internal-only network + project-owned CONNECT proxy）。
+    GOVERNED_NETWORK = "governed_network"
 
 
 class ExecutionAuthorityClass(StrEnum):
@@ -181,10 +186,18 @@ class ExecutionAuthorityClass(StrEnum):
     ``local_process`` 使用 ``LOCAL_SAME_UID_PROCESS``，Policy 必须要求 exact informed
     approval。该成员进入 ToolSpec/intent/executing-record identity，不得从 SideEffectClass
     或 EgressClass 推断，也不允许运行时 optional fallback。
+
+    017：``sandbox_exec`` 系列投影 ``ISOLATED_SANDBOX``——命令只在 qualified
+    Docker 隔离 environment 内执行；GOVERNED_NETWORK egress 仍需各自的 exact
+    approval（spec §3.1/§4.4）。
     """
 
     IN_PROCESS = "in_process"
     LOCAL_SAME_UID_PROCESS = "local_same_uid_process"
+    ISOLATED_SANDBOX = "isolated_sandbox"
+    # 018：browser session 内的受治理 effect；lease 由 ToolRuntime approval
+    # 铸造，adapter 只消费 typed lease 绑定。
+    BROWSER_SESSION = "browser_session"
 
 
 class SourceKind(StrEnum):
@@ -242,6 +255,9 @@ class EvidenceOracleKind(StrEnum):
     USER_CONFIRMATION = "user_confirmation"
     RESEARCH_PROVENANCE = "research_provenance"
     WEB_SOURCE_RECEIPT = "web_source_receipt"
+    # 018：durable browser action receipt + 同 session 之后的新鲜
+    # browser_observe readback 才能推导；页面成功文案/prose 不是证据。
+    BROWSER_READBACK = "browser_readback"
 
 
 class AuthoritySourceKind(StrEnum):
@@ -455,6 +471,19 @@ class CitationManifestV1:
 
 def _is_lower_hex(value: str, *, length: int) -> bool:
     return len(value) == length and all(character in "0123456789abcdef" for character in value)
+
+
+def _require_canonical_utc(value: object, field_name: str) -> None:
+    from datetime import UTC, datetime
+
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be canonical UTC")
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError as error:
+        raise ValueError(f"{field_name} must be canonical UTC") from error
+    if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != value:
+        raise ValueError(f"{field_name} must be canonical UTC")
 
 
 def _is_safe_relative_artifact_path(value: object) -> bool:
@@ -2088,6 +2117,901 @@ class ProcessReceiptV1:
             raise ValueError("process receipt digest mismatch")
 
 
+# --------------------------------------------------------------------------- #
+# 017 native sandbox durable authority。Runtime 只持久化用户批准的 exact
+# command + policy identity；backend/image/snapshot/bundle 不是 authority 成员。
+# lease 是 one-shot，并在 EXECUTING checkpoint 中消费。
+# --------------------------------------------------------------------------- #
+
+SANDBOX_MAX_USES = 1
+SANDBOX_EXPIRY_MINUTES = 120
+MAX_SANDBOX_LEASES = 16
+_SANDBOX_RECEIPT_OUTCOMES = frozenset(
+    {"exited", "signaled", "timed_out_reaped"},
+)
+_SANDBOX_MODES = frozenset(
+    {"read-only", "workspace-write", "danger-full-access"},
+)
+_SANDBOX_NETWORK_MODES = frozenset({"off", "full"})
+_SANDBOX_BACKENDS = frozenset({"seatbelt", "none"})
+_SANDBOX_ENFORCEMENTS = frozenset({"confined", "unconfined"})
+
+
+def _require_sandbox_digest(value: object, name: str) -> str:
+    import re as _re
+
+    valid = isinstance(value, str) and _re.fullmatch(r"[0-9a-f]{64}", value)
+    if not valid:
+        raise ValueError(f"sandbox authority {name} must be a valid digest")
+    return value  # type: ignore[return-value]
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxAuthorityCandidateV1:
+    """approval request 的 exact native command/policy 投影。"""
+
+    candidate_id: str
+    candidate_digest: str
+    goal_id: str
+    goal_revision: int
+    workspace_identity_digest: str
+    original_command_fingerprint: str
+    policy_digest: str
+    mode: str
+    network: str
+    readable_command: str
+    trust_notice_id: str
+    trust_notice_digest: str
+    issued_at: str
+    execution_authority: ExecutionAuthorityClass = (
+        ExecutionAuthorityClass.ISOLATED_SANDBOX
+    )
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        candidate_id: str,
+        goal_id: str,
+        goal_revision: int,
+        workspace_identity_digest: str,
+        original_command_fingerprint: str,
+        policy_digest: str,
+        mode: str,
+        network: str,
+        readable_command: str,
+        trust_notice_id: str,
+        trust_notice_digest: str,
+        issued_at: str,
+    ) -> SandboxAuthorityCandidateV1:
+        values = {
+            "candidate_id": candidate_id,
+            "goal_id": goal_id,
+            "goal_revision": goal_revision,
+            "workspace_identity_digest": workspace_identity_digest,
+            "original_command_fingerprint": original_command_fingerprint,
+            "policy_digest": policy_digest,
+            "mode": mode,
+            "network": network,
+            "readable_command": readable_command,
+            "trust_notice_id": trust_notice_id,
+            "trust_notice_digest": trust_notice_digest,
+            "issued_at": issued_at,
+            "execution_authority": ExecutionAuthorityClass.ISOLATED_SANDBOX.value,
+        }
+        return cls(
+            candidate_digest=canonical_json_digest(values),
+            goal_revision=goal_revision,
+            **{
+                key: value for key, value in values.items()
+                if key not in ("goal_revision", "execution_authority")
+            },
+        )
+
+    def _digest_values(self) -> dict[str, JSONValue]:
+        return {
+            "candidate_id": self.candidate_id,
+            "goal_id": self.goal_id,
+            "goal_revision": self.goal_revision,
+            "workspace_identity_digest": self.workspace_identity_digest,
+            "original_command_fingerprint": self.original_command_fingerprint,
+            "policy_digest": self.policy_digest,
+            "mode": self.mode,
+            "network": self.network,
+            "readable_command": self.readable_command,
+            "trust_notice_id": self.trust_notice_id,
+            "trust_notice_digest": self.trust_notice_digest,
+            "issued_at": self.issued_at,
+            "execution_authority": self.execution_authority.value,
+        }
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("candidate_id", self.candidate_id),
+            ("candidate_digest", self.candidate_digest),
+            ("goal_id", self.goal_id),
+            ("workspace_identity_digest", self.workspace_identity_digest),
+            ("readable_command", self.readable_command),
+            ("trust_notice_id", self.trust_notice_id),
+            ("trust_notice_digest", self.trust_notice_digest),
+            ("issued_at", self.issued_at),
+        ):
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"sandbox candidate {name} must not be empty")
+        if (
+            not isinstance(self.goal_revision, int)
+            or isinstance(self.goal_revision, bool)
+            or self.goal_revision < 1
+        ):
+            raise ValueError("sandbox candidate goal_revision must be positive")
+        _require_sandbox_digest(
+            self.original_command_fingerprint, "original_command_fingerprint",
+        )
+        _require_sandbox_digest(self.policy_digest, "policy_digest")
+        _require_sandbox_digest(self.trust_notice_digest, "trust_notice_digest")
+        if self.mode not in _SANDBOX_MODES:
+            raise ValueError("sandbox candidate mode must be closed")
+        if self.network not in _SANDBOX_NETWORK_MODES:
+            raise ValueError("sandbox candidate network must be closed")
+        if self.execution_authority is not ExecutionAuthorityClass.ISOLATED_SANDBOX:
+            raise ValueError("sandbox candidate must use ISOLATED_SANDBOX authority")
+        if canonical_json_digest(self._digest_values()) != self.candidate_digest:
+            raise ValueError("sandbox candidate digest mismatch")
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxAuthorityLeaseV1:
+    """ResolveApproval 铸造的 exact、one-shot、可过期 durable lease。"""
+
+    lease_id: str
+    lease_digest: str
+    candidate_digest: str
+    goal_id: str
+    goal_revision: int
+    workspace_identity_digest: str
+    original_command_fingerprint: str
+    policy_digest: str
+    mode: str
+    network: str
+    readable_command: str
+    trust_notice_id: str
+    trust_notice_digest: str
+    approved_request_identity: str
+    issued_at: str
+    expires_at: str
+    max_uses: int = SANDBOX_MAX_USES
+    uses_consumed: int = 0
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        lease_id: str,
+        candidate_digest: str,
+        goal_id: str,
+        goal_revision: int,
+        workspace_identity_digest: str,
+        original_command_fingerprint: str,
+        policy_digest: str,
+        mode: str,
+        network: str,
+        readable_command: str,
+        trust_notice_id: str,
+        trust_notice_digest: str,
+        approved_request_identity: str,
+        issued_at: str,
+        expires_at: str,
+    ) -> SandboxAuthorityLeaseV1:
+        values = {
+            "lease_id": lease_id,
+            "candidate_digest": candidate_digest,
+            "goal_id": goal_id,
+            "goal_revision": goal_revision,
+            "workspace_identity_digest": workspace_identity_digest,
+            "original_command_fingerprint": original_command_fingerprint,
+            "policy_digest": policy_digest,
+            "mode": mode,
+            "network": network,
+            "readable_command": readable_command,
+            "trust_notice_id": trust_notice_id,
+            "trust_notice_digest": trust_notice_digest,
+            "approved_request_identity": approved_request_identity,
+            "issued_at": issued_at,
+            "expires_at": expires_at,
+            "max_uses": SANDBOX_MAX_USES,
+        }
+        return cls(
+            lease_digest=canonical_json_digest(values),
+            goal_revision=goal_revision,
+            **{key: value for key, value in values.items() if key != "goal_revision"},
+        )
+
+    def _digest_values(self) -> dict[str, JSONValue]:
+        return {
+            "lease_id": self.lease_id,
+            "candidate_digest": self.candidate_digest,
+            "goal_id": self.goal_id,
+            "goal_revision": self.goal_revision,
+            "workspace_identity_digest": self.workspace_identity_digest,
+            "original_command_fingerprint": self.original_command_fingerprint,
+            "policy_digest": self.policy_digest,
+            "mode": self.mode,
+            "network": self.network,
+            "readable_command": self.readable_command,
+            "trust_notice_id": self.trust_notice_id,
+            "trust_notice_digest": self.trust_notice_digest,
+            "approved_request_identity": self.approved_request_identity,
+            "issued_at": self.issued_at,
+            "expires_at": self.expires_at,
+            "max_uses": self.max_uses,
+        }
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("lease_id", self.lease_id),
+            ("lease_digest", self.lease_digest),
+            ("candidate_digest", self.candidate_digest),
+            ("goal_id", self.goal_id),
+            ("workspace_identity_digest", self.workspace_identity_digest),
+            ("readable_command", self.readable_command),
+            ("trust_notice_id", self.trust_notice_id),
+            ("trust_notice_digest", self.trust_notice_digest),
+            ("approved_request_identity", self.approved_request_identity),
+            ("issued_at", self.issued_at),
+            ("expires_at", self.expires_at),
+        ):
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"sandbox lease {name} must not be empty")
+        if (
+            not isinstance(self.goal_revision, int)
+            or isinstance(self.goal_revision, bool)
+            or self.goal_revision < 1
+        ):
+            raise ValueError("sandbox lease goal_revision must be positive")
+        _require_sandbox_digest(
+            self.original_command_fingerprint, "original_command_fingerprint",
+        )
+        _require_sandbox_digest(self.policy_digest, "policy_digest")
+        _require_sandbox_digest(self.trust_notice_digest, "trust_notice_digest")
+        if self.mode not in _SANDBOX_MODES:
+            raise ValueError("sandbox lease mode must be closed")
+        if self.network not in _SANDBOX_NETWORK_MODES:
+            raise ValueError("sandbox lease network must be closed")
+        if self.max_uses != SANDBOX_MAX_USES:
+            raise ValueError("sandbox lease max_uses must be fixed at 1")
+        if (
+            not isinstance(self.uses_consumed, int)
+            or isinstance(self.uses_consumed, bool)
+            or not 0 <= self.uses_consumed <= SANDBOX_MAX_USES
+        ):
+            raise ValueError("sandbox lease uses_consumed out of range")
+        if canonical_json_digest(self._digest_values()) != self.lease_digest:
+            raise ValueError("sandbox lease digest mismatch")
+
+    def verify(self) -> bool:
+        """防篡改 oracle：重算 digest 与携带值比对。"""
+
+        try:
+            return canonical_json_digest(self._digest_values()) == self.lease_digest
+        except (ValueError, TypeError):
+            return False
+
+    def matches(
+        self,
+        *,
+        goal_id: str,
+        goal_revision: int,
+        workspace_identity_digest: str,
+        original_command_fingerprint: str,
+        policy_digest: str,
+        mode: str,
+        network: str,
+    ) -> bool:
+        """exact 匹配：全部 binding identity 相等（spec 漂移即失配）。"""
+
+        return (
+            self.goal_id == goal_id
+            and self.goal_revision == goal_revision
+            and self.workspace_identity_digest == workspace_identity_digest
+            and self.original_command_fingerprint == original_command_fingerprint
+            and self.policy_digest == policy_digest
+            and self.mode == mode
+            and self.network == network
+        )
+
+    def with_use_consumed(self, uses: int) -> SandboxAuthorityLeaseV1:
+        """单调递增 uses_consumed（digest 不变——uses 不在 lease identity 内）。"""
+
+        if not isinstance(uses, int) or isinstance(uses, bool):
+            raise ValueError("uses must be an int")
+        if uses <= self.uses_consumed:
+            raise ValueError("lease uses_consumed must increase monotonically")
+        if uses > SANDBOX_MAX_USES:
+            raise ValueError("lease use budget exhausted")
+        return SandboxAuthorityLeaseV1(
+            lease_id=self.lease_id,
+            lease_digest=self.lease_digest,
+            candidate_digest=self.candidate_digest,
+            goal_id=self.goal_id,
+            goal_revision=self.goal_revision,
+            workspace_identity_digest=self.workspace_identity_digest,
+            original_command_fingerprint=self.original_command_fingerprint,
+            policy_digest=self.policy_digest,
+            mode=self.mode,
+            network=self.network,
+            readable_command=self.readable_command,
+            trust_notice_id=self.trust_notice_id,
+            trust_notice_digest=self.trust_notice_digest,
+            approved_request_identity=self.approved_request_identity,
+            issued_at=self.issued_at,
+            expires_at=self.expires_at,
+            max_uses=self.max_uses,
+            uses_consumed=uses,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundSandboxReceiptV1:
+    """由 exact background action authority 铸造的 sandbox receipt。"""
+
+    receipt_id: str
+    receipt_digest: str
+    background_action_authority_digest: str
+    occurrence_binding_digest: str
+    goal_id: str
+    goal_revision: int
+    workspace_identity_digest: str
+    original_command_fingerprint: str
+    policy_digest: str
+    mode: str
+    network: str
+    backend: str
+    enforcement: str
+    profile_digest: str
+    outcome: str
+    draft_digest: str
+    issued_at: str
+
+    @classmethod
+    def create(cls, **kwargs: object) -> BackgroundSandboxReceiptV1:
+        values = {
+            name: kwargs[name]
+            for name in cls.__dataclass_fields__
+            if name != "receipt_digest"
+        }
+        return cls(receipt_digest=canonical_json_digest(values), **values)  # type: ignore[arg-type]
+
+    def _digest_values(self) -> dict[str, JSONValue]:
+        return {
+            name: getattr(self, name)
+            for name in self.__dataclass_fields__
+            if name != "receipt_digest"
+        }
+
+    def __post_init__(self) -> None:
+        for name in (
+            "receipt_id",
+            "goal_id",
+            "workspace_identity_digest",
+            "issued_at",
+        ):
+            if not isinstance(getattr(self, name), str) or not getattr(self, name):
+                raise ValueError(f"background sandbox receipt {name} must not be empty")
+        if (
+            not isinstance(self.goal_revision, int)
+            or isinstance(self.goal_revision, bool)
+            or self.goal_revision < 1
+        ):
+            raise ValueError("background sandbox receipt goal_revision must be positive")
+        for name in (
+            "receipt_digest",
+            "background_action_authority_digest",
+            "occurrence_binding_digest",
+            "original_command_fingerprint",
+            "policy_digest",
+            "draft_digest",
+        ):
+            _require_sandbox_digest(getattr(self, name), name)
+        if self.mode not in _SANDBOX_MODES or self.network not in _SANDBOX_NETWORK_MODES:
+            raise ValueError("background sandbox receipt mode/network must be closed")
+        if self.backend not in _SANDBOX_BACKENDS or self.enforcement not in _SANDBOX_ENFORCEMENTS:
+            raise ValueError("background sandbox receipt enforcement facts must be closed")
+        if (
+            self.backend != "seatbelt"
+            or self.enforcement != "confined"
+            or self.mode == "danger-full-access"
+            or self.network != "off"
+        ):
+            raise ValueError("background sandbox receipt must prove confined network-off execution")
+        _require_sandbox_digest(self.profile_digest, "profile_digest")
+        if self.outcome not in _SANDBOX_RECEIPT_OUTCOMES:
+            raise ValueError("background sandbox receipt outcome must be closed")
+        if canonical_json_digest(self._digest_values()) != self.receipt_digest:
+            raise ValueError("background sandbox receipt digest mismatch")
+
+    def to_json(self) -> dict[str, JSONValue]:
+        return {**self._digest_values(), "receipt_digest": self.receipt_digest}
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxReceiptV1:
+    """Runtime 铸造的 native sandbox durable execution receipt。"""
+
+    receipt_id: str
+    receipt_digest: str
+    lease_id: str
+    lease_digest: str
+    candidate_digest: str
+    goal_id: str
+    goal_revision: int
+    workspace_identity_digest: str
+    original_command_fingerprint: str
+    policy_digest: str
+    mode: str
+    network: str
+    backend: str
+    enforcement: str
+    profile_digest: str
+    outcome: str
+    draft_digest: str
+    issued_at: str
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        receipt_id: str,
+        lease_id: str,
+        lease_digest: str,
+        candidate_digest: str,
+        goal_id: str,
+        goal_revision: int,
+        workspace_identity_digest: str,
+        original_command_fingerprint: str,
+        policy_digest: str,
+        mode: str,
+        network: str,
+        backend: str,
+        enforcement: str,
+        profile_digest: str,
+        outcome: str,
+        draft_digest: str,
+        issued_at: str,
+    ) -> SandboxReceiptV1:
+        values = {
+            "receipt_id": receipt_id,
+            "lease_id": lease_id,
+            "lease_digest": lease_digest,
+            "candidate_digest": candidate_digest,
+            "goal_id": goal_id,
+            "goal_revision": goal_revision,
+            "workspace_identity_digest": workspace_identity_digest,
+            "original_command_fingerprint": original_command_fingerprint,
+            "policy_digest": policy_digest,
+            "mode": mode,
+            "network": network,
+            "backend": backend,
+            "enforcement": enforcement,
+            "profile_digest": profile_digest,
+            "outcome": outcome,
+            "draft_digest": draft_digest,
+            "issued_at": issued_at,
+        }
+        return cls(receipt_digest=canonical_json_digest(values), **values)
+
+    def _digest_values(self) -> dict[str, JSONValue]:
+        return {
+            "receipt_id": self.receipt_id,
+            "lease_id": self.lease_id,
+            "lease_digest": self.lease_digest,
+            "candidate_digest": self.candidate_digest,
+            "goal_id": self.goal_id,
+            "goal_revision": self.goal_revision,
+            "workspace_identity_digest": self.workspace_identity_digest,
+            "original_command_fingerprint": self.original_command_fingerprint,
+            "policy_digest": self.policy_digest,
+            "mode": self.mode,
+            "network": self.network,
+            "backend": self.backend,
+            "enforcement": self.enforcement,
+            "profile_digest": self.profile_digest,
+            "outcome": self.outcome,
+            "draft_digest": self.draft_digest,
+            "issued_at": self.issued_at,
+        }
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("receipt_id", self.receipt_id),
+            ("receipt_digest", self.receipt_digest),
+            ("lease_id", self.lease_id),
+            ("goal_id", self.goal_id),
+            ("workspace_identity_digest", self.workspace_identity_digest),
+            ("issued_at", self.issued_at),
+        ):
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"sandbox receipt {name} must not be empty")
+        if (
+            not isinstance(self.goal_revision, int)
+            or isinstance(self.goal_revision, bool)
+            or self.goal_revision < 1
+        ):
+            raise ValueError("sandbox receipt goal_revision must be positive")
+        for name in (
+            "lease_digest", "candidate_digest", "original_command_fingerprint",
+            "policy_digest", "draft_digest",
+        ):
+            _require_sandbox_digest(getattr(self, name), name)
+        if self.mode not in _SANDBOX_MODES or self.network not in _SANDBOX_NETWORK_MODES:
+            raise ValueError("sandbox receipt mode/network must be closed")
+        if self.backend not in _SANDBOX_BACKENDS or self.enforcement not in _SANDBOX_ENFORCEMENTS:
+            raise ValueError("sandbox receipt enforcement facts must be closed")
+        if self.backend == "seatbelt":
+            if self.enforcement != "confined":
+                raise ValueError("seatbelt receipt must be confined")
+            _require_sandbox_digest(self.profile_digest, "profile_digest")
+        elif self.enforcement != "unconfined" or self.profile_digest:
+            raise ValueError("native bypass receipt must be unconfined without profile")
+        if self.mode == "danger-full-access" and self.backend != "none":
+            raise ValueError("danger-full-access receipt must record native bypass")
+        if self.mode != "danger-full-access" and self.backend != "seatbelt":
+            raise ValueError("confined mode receipt must record seatbelt")
+        _require_sandbox_digest(self.draft_digest, "draft_digest")
+        if self.outcome not in _SANDBOX_RECEIPT_OUTCOMES:
+            raise ValueError(f"unknown sandbox receipt outcome: {self.outcome!r}")
+        if canonical_json_digest(self._digest_values()) != self.receipt_digest:
+            raise ValueError("sandbox receipt digest mismatch")
+
+    def to_json(self) -> dict[str, JSONValue]:
+        return {**self._digest_values(), "receipt_digest": self.receipt_digest}
+
+    @classmethod
+    def from_json(cls, value: object) -> SandboxReceiptV1:
+        if not isinstance(value, dict):
+            raise ValueError("sandbox receipt must be an object")
+        expected = {*cls.__dataclass_fields__}
+        if set(value) != expected:
+            raise ValueError("sandbox receipt has unknown or missing fields")
+        try:
+            return cls(**value)
+        except (TypeError, ValueError) as error:
+            raise ValueError("sandbox receipt is invalid") from error
+
+
+# 018 governed browser tasks：mode/consequence 的 closed 字符串值
+#（runtime 不 import browser 包——依赖方向只能是 browser → runtime）。
+BROWSER_MODE_VALUES = frozenset(
+    {"public_read_ephemeral", "site_bound_interactive"}
+)
+BROWSER_CONSEQUENCE_VALUES = frozenset(
+    {"observe", "disclose", "download", "upload", "commit"}
+)
+BROWSER_LEASE_MAX_USES = 1
+
+
+def _require_browser_mode(value: str) -> None:
+    if value not in BROWSER_MODE_VALUES:
+        raise ValueError("browser mode must be a closed member")
+
+
+def _require_browser_consequence(value: str) -> None:
+    if value not in BROWSER_CONSEQUENCE_VALUES:
+        raise ValueError("browser consequence must be a closed member")
+
+
+def _require_browser_datetime(value: str, field: str) -> None:
+    # durable 时间一律带时区 RFC3339 字符串（不 checkpoint monotonic）；
+    # 校验与比较都用解析后的 zoned datetime，绝不依赖字符串序。
+    _parse_browser_datetime(value, field)
+
+
+def _parse_browser_datetime(value: str, field: str):
+    if not isinstance(value, str) or "T" not in value or value[-6] not in "+-":
+        raise ValueError(f"browser {field} must be a zoned RFC3339 string")
+    from datetime import datetime
+
+    parsed = datetime.fromisoformat(value)
+    if parsed.utcoffset() is None:
+        raise ValueError(f"browser {field} must carry a timezone offset")
+    return parsed
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserActionCandidateV1:
+    """approval request 的 closed typed browser 投影（018 spec §6）。
+
+    持久化在 ``ApprovalRequest.browser_action_candidate`` 上，随
+    AWAITING_APPROVAL checkpoint strict round-trip；restart 后只能从该
+    durable candidate 铸造 lease。digest 覆盖全部绑定字段。
+    """
+
+    candidate_id: str
+    candidate_digest: str
+    goal_id: str
+    goal_revision: int
+    session_ref: str
+    browser_identity_digest: str
+    profile_ref: str | None
+    profile_revision: int | None
+    allowed_origins: tuple[str, ...]
+    mode: str
+    page_id: str
+    frame_id: str
+    observation_digest: str
+    action_digest: str
+    consequence: str
+    preview: str
+    issued_at: str
+    expires_at: str
+    max_uses: int = BROWSER_LEASE_MAX_USES
+
+    @classmethod
+    def create(cls, **kwargs: object) -> BrowserActionCandidateV1:
+        values = {
+            "candidate_id": kwargs["candidate_id"],
+            "goal_id": kwargs["goal_id"],
+            "goal_revision": kwargs["goal_revision"],
+            "session_ref": kwargs["session_ref"],
+            "browser_identity_digest": kwargs["browser_identity_digest"],
+            "profile_ref": kwargs["profile_ref"],
+            "profile_revision": kwargs["profile_revision"],
+            "allowed_origins": tuple(kwargs["allowed_origins"]),  # type: ignore[arg-type]
+            "mode": kwargs["mode"],
+            "page_id": kwargs["page_id"],
+            "frame_id": kwargs["frame_id"],
+            "observation_digest": kwargs["observation_digest"],
+            "action_digest": kwargs["action_digest"],
+            "consequence": kwargs["consequence"],
+            "preview": kwargs["preview"],
+            "issued_at": kwargs["issued_at"],
+            "expires_at": kwargs["expires_at"],
+            "max_uses": BROWSER_LEASE_MAX_USES,
+        }
+        return cls(candidate_digest=canonical_json_digest(values), **values)  # type: ignore[arg-type]
+
+    def _digest_values(self) -> dict[str, JSONValue]:
+        return {
+            "candidate_id": self.candidate_id,
+            "goal_id": self.goal_id,
+            "goal_revision": self.goal_revision,
+            "session_ref": self.session_ref,
+            "browser_identity_digest": self.browser_identity_digest,
+            "profile_ref": self.profile_ref,
+            "profile_revision": self.profile_revision,
+            "allowed_origins": list(self.allowed_origins),
+            "mode": self.mode,
+            "page_id": self.page_id,
+            "frame_id": self.frame_id,
+            "observation_digest": self.observation_digest,
+            "action_digest": self.action_digest,
+            "consequence": self.consequence,
+            "preview": self.preview,
+            "issued_at": self.issued_at,
+            "expires_at": self.expires_at,
+            "max_uses": self.max_uses,
+        }
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("candidate_id", self.candidate_id),
+            ("candidate_digest", self.candidate_digest),
+            ("goal_id", self.goal_id),
+            ("session_ref", self.session_ref),
+            ("browser_identity_digest", self.browser_identity_digest),
+            ("observation_digest", self.observation_digest),
+            ("action_digest", self.action_digest),
+            ("preview", self.preview),
+        ):
+            if not value:
+                raise ValueError(f"browser candidate {name} must not be empty")
+        if self.goal_revision < 0:
+            raise ValueError("browser candidate goal_revision must be non-negative")
+        if (self.profile_ref is None) != (self.profile_revision is None):
+            raise ValueError("browser candidate profile binding must be paired")
+        if self.mode == "public_read_ephemeral" and self.profile_ref is not None:
+            raise ValueError("public-read candidate must not bind a profile")
+        _require_browser_mode(self.mode)
+        _require_browser_consequence(self.consequence)
+        _require_browser_datetime(self.issued_at, "issued_at")
+        _require_browser_datetime(self.expires_at, "expires_at")
+        if self.max_uses != BROWSER_LEASE_MAX_USES:
+            raise ValueError("browser candidate max_uses must be fixed at 1")
+        if canonical_json_digest(self._digest_values()) != self.candidate_digest:
+            raise ValueError("browser candidate digest mismatch")
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserAuthorityLeaseV1:
+    """ResolveApproval 铸造的 exact、one-shot、RFC3339 可过期 durable lease。
+
+    ``authorizes`` 要求全部 binding identity exact equal（无 wildcard）；
+    public-read lease 不能授权 interactive consequence；uses_consumed 超过
+    max_uses 在构造层 fail closed。
+    """
+
+    lease_id: str
+    lease_digest: str
+    candidate_digest: str
+    goal_id: str
+    goal_revision: int
+    session_ref: str
+    browser_identity_digest: str
+    profile_ref: str | None
+    profile_revision: int | None
+    allowed_origins: tuple[str, ...]
+    mode: str
+    page_id: str
+    frame_id: str
+    observation_digest: str
+    action_digest: str
+    consequence: str
+    approved_request_identity: str
+    issued_at: str
+    expires_at: str
+    max_uses: int = BROWSER_LEASE_MAX_USES
+    uses_consumed: int = 0
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        lease_id: str,
+        candidate_digest: str,
+        goal_id: str,
+        goal_revision: int,
+        session_ref: str,
+        browser_identity_digest: str,
+        profile_ref: str | None,
+        profile_revision: int | None,
+        allowed_origins: tuple[str, ...],
+        mode: str,
+        page_id: str,
+        frame_id: str,
+        observation_digest: str,
+        action_digest: str,
+        consequence: str,
+        approved_request_identity: str,
+        issued_at: str,
+        expires_at: str,
+        max_uses: int = BROWSER_LEASE_MAX_USES,
+        uses_consumed: int = 0,
+    ) -> BrowserAuthorityLeaseV1:
+        values = {
+            "lease_id": lease_id,
+            "candidate_digest": candidate_digest,
+            "goal_id": goal_id,
+            "goal_revision": goal_revision,
+            "session_ref": session_ref,
+            "browser_identity_digest": browser_identity_digest,
+            "profile_ref": profile_ref,
+            "profile_revision": profile_revision,
+            "allowed_origins": list(allowed_origins),
+            "mode": mode,
+            "page_id": page_id,
+            "frame_id": frame_id,
+            "observation_digest": observation_digest,
+            "action_digest": action_digest,
+            "consequence": consequence,
+            "approved_request_identity": approved_request_identity,
+            "issued_at": issued_at,
+            "expires_at": expires_at,
+            "max_uses": max_uses,
+        }
+        return cls(
+            lease_digest=canonical_json_digest(values),
+            uses_consumed=uses_consumed,
+            allowed_origins=allowed_origins,
+            **{key: value for key, value in values.items() if key != "allowed_origins"},
+        )
+
+    def with_use_consumed(self, count: int) -> BrowserAuthorityLeaseV1:
+        if count > self.max_uses:
+            raise ValueError("browser lease use exhausted")
+        return replace(self, uses_consumed=count)
+
+    def authorizes(
+        self,
+        *,
+        goal_id: str,
+        goal_revision: int,
+        session_ref: str,
+        browser_identity_digest: str,
+        profile_ref: str | None,
+        profile_revision: int | None,
+        allowed_origins: tuple[str, ...],
+        mode: str,
+        page_id: str,
+        frame_id: str,
+        observation_digest: str,
+        action_digest: str,
+        consequence: str,
+        now: str,
+    ) -> bool:
+        # public-read lease 只能授权 observe 类 consequence（spec §4.1）。
+        if self.mode == "public_read_ephemeral" and consequence != "observe":
+            return False
+        if (
+            self.goal_id != goal_id
+            or self.goal_revision != goal_revision
+            or self.session_ref != session_ref
+            or self.browser_identity_digest != browser_identity_digest
+            or self.profile_ref != profile_ref
+            or self.profile_revision != profile_revision
+            or tuple(self.allowed_origins) != tuple(allowed_origins)
+            or self.mode != mode
+            or self.page_id != page_id
+            or self.frame_id != frame_id
+            or self.observation_digest != observation_digest
+            or self.action_digest != action_digest
+            or self.consequence != consequence
+        ):
+            return False
+        if self.uses_consumed >= self.max_uses:
+            return False
+        now_dt = _parse_browser_datetime(now, "now")
+        expires_dt = _parse_browser_datetime(self.expires_at, "expires_at")
+        return now_dt < expires_dt
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("lease_id", self.lease_id),
+            ("lease_digest", self.lease_digest),
+            ("candidate_digest", self.candidate_digest),
+            ("goal_id", self.goal_id),
+            ("session_ref", self.session_ref),
+            ("browser_identity_digest", self.browser_identity_digest),
+            ("observation_digest", self.observation_digest),
+            ("action_digest", self.action_digest),
+            ("approved_request_identity", self.approved_request_identity),
+        ):
+            if not value:
+                raise ValueError(f"browser lease {name} must not be empty")
+        if (self.profile_ref is None) != (self.profile_revision is None):
+            raise ValueError("browser lease profile binding must be paired")
+        _require_browser_mode(self.mode)
+        _require_browser_consequence(self.consequence)
+        _require_browser_datetime(self.issued_at, "issued_at")
+        _require_browser_datetime(self.expires_at, "expires_at")
+        if self.max_uses != BROWSER_LEASE_MAX_USES:
+            raise ValueError("browser lease max_uses must be fixed at 1")
+        if self.uses_consumed < 0 or self.uses_consumed > self.max_uses:
+            raise ValueError("browser lease uses_consumed out of range")
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserTakeoverRequestV1:
+    """user takeover 的 durable pending 请求（018 spec §7）。
+
+    只携带 opaque identity/digest；不携带 credential、storage-state 或页面
+    内容。complete 校验 exact request/session/profile 后递增期望 revision。
+    """
+
+    request_id: str
+    session_ref: str
+    profile_ref: str
+    profile_revision: int
+    browser_identity_digest: str
+    goal_id: str
+    goal_revision: int
+    requested_at: str
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("request_id", self.request_id),
+            ("session_ref", self.session_ref),
+            ("profile_ref", self.profile_ref),
+            ("browser_identity_digest", self.browser_identity_digest),
+            ("goal_id", self.goal_id),
+        ):
+            if not value:
+                raise ValueError(f"browser takeover {name} must not be empty")
+        if self.profile_revision <= 0:
+            raise ValueError("browser takeover profile_revision must be positive")
+        if self.goal_revision < 0:
+            raise ValueError("browser takeover goal_revision must be non-negative")
+        _require_browser_datetime(self.requested_at, "requested_at")
+
+
 @dataclass(frozen=True, slots=True)
 class ApprovalRequest:
     request_id: str
@@ -2110,12 +3034,18 @@ class ApprovalRequest:
     request_identity: str | None = None
     destination_digest: str | None = None
     cost_class: str | None = None
+    # 017：sandbox approval 的 closed typed 投影（随 AWAITING_APPROVAL checkpoint
+    # strict round-trip；restart 后只能从该 durable candidate 铸造 lease）。
+    sandbox_authority_candidate: SandboxAuthorityCandidateV1 | None = None
     trust_notice_id: str | None = None
     trust_notice_digest: str | None = None
     # 015 governed local action：approval request 持久化完整 closed process candidate。
     # 放在字段末尾以保持 012-014 的位置前缀（见 test_014_contract_extensions_preserve_...）。
     process_authority_candidate: ProcessAuthorityCandidateV1 | None = None
     artifact_confirmation_requirement: ArtifactConfirmationRequirementV1 | None = None
+    # 018：approval request 至多携带一个 strict browser candidate（单字段
+    # 即结构上限）；restart 后只能从该 durable candidate 铸造 lease。
+    browser_action_candidate: BrowserActionCandidateV1 | None = None
 
     def __post_init__(self) -> None:
         if not all(
@@ -2138,6 +3068,21 @@ class ApprovalRequest:
         ):
             raise ValueError(
                 "artifact confirmation requirement requires a process candidate"
+            )
+        # 018：一个 approval 至多携带一种 authority candidate——browser 与
+        # process/sandbox 混合并存会让 lease 铸造歧义，fail closed。
+        candidate_kinds = sum(
+            1
+            for candidate in (
+                self.process_authority_candidate,
+                self.sandbox_authority_candidate,
+                self.browser_action_candidate,
+            )
+            if candidate is not None
+        )
+        if candidate_kinds > 1:
+            raise ValueError(
+                "approval request carries mixed authority candidates"
             )
 
 
@@ -2192,6 +3137,83 @@ class ExecutingIntentRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderCallIntentV1:
+    action_seq: int
+    provider_call_index: int
+    context_digest: str
+    request_digest: str
+    disclosure_digest: str | None
+    occurrence_binding_digest: str
+    intent_digest: str
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        action_seq: int,
+        provider_call_index: int,
+        context_digest: str,
+        disclosure_digest: str | None,
+        occurrence_binding_digest: str,
+    ) -> ProviderCallIntentV1:
+        request_values = {
+            "action_seq": action_seq,
+            "provider_call_index": provider_call_index,
+            "context_digest": context_digest,
+        }
+        request_digest = canonical_json_digest(request_values)
+        intent_values = {
+            **request_values,
+            "request_digest": request_digest,
+            "disclosure_digest": disclosure_digest,
+            "occurrence_binding_digest": occurrence_binding_digest,
+        }
+        return cls(
+            **intent_values,
+            intent_digest=canonical_json_digest(intent_values),
+        )
+
+    def __post_init__(self) -> None:
+        for name in ("action_seq", "provider_call_index"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(f"provider call {name} must be positive")
+        for name in (
+            "context_digest",
+            "request_digest",
+            "occurrence_binding_digest",
+            "intent_digest",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not _is_lower_hex(value, length=64):
+                raise ValueError(f"provider call {name} must be 64 lowercase hex")
+        if self.disclosure_digest is not None and not _is_lower_hex(
+            self.disclosure_digest,
+            length=64,
+        ):
+            raise ValueError("provider call disclosure_digest must be 64 lowercase hex")
+        request_values = {
+            "action_seq": self.action_seq,
+            "provider_call_index": self.provider_call_index,
+            "context_digest": self.context_digest,
+        }
+        expected_request_digest = canonical_json_digest(request_values)
+        expected_intent_digest = canonical_json_digest(
+            {
+                **request_values,
+                "request_digest": expected_request_digest,
+                "disclosure_digest": self.disclosure_digest,
+                "occurrence_binding_digest": self.occurrence_binding_digest,
+            }
+        )
+        if (
+            self.request_digest != expected_request_digest
+            or self.intent_digest != expected_intent_digest
+        ):
+            raise ValueError("provider call intent digest mismatch")
+
+
+@dataclass(frozen=True, slots=True)
 class ActiveRun:
     run_id: str
     status: ActiveRunStatus = ActiveRunStatus.RUNNABLE
@@ -2204,6 +3226,14 @@ class ActiveRun:
     approval_grant: ApprovalGrant | None = None
     approved_request_ids: tuple[str, ...] = ()
     rejected_request_ids: tuple[str, ...] = ()
+    provider_call_intent: ProviderCallIntentV1 | None = None
+    persisted_model_response: PersistedModelResponseV1 | None = None
+    model_calls_used: int = 0
+    tool_calls_used: int = 0
+    sandbox_commands_used: int = 0
+    browser_actions_used: int = 0
+    input_tokens_used: int = 0
+    output_tokens_used: int = 0
 
     def __post_init__(self) -> None:
         if not self.run_id:
@@ -2212,6 +3242,17 @@ class ActiveRun:
             raise ValueError("batch_cursor must be non-negative")
         if self.owner_invocation_id == "":
             raise ValueError("owner_invocation_id must not be empty")
+        for name in (
+            "model_calls_used",
+            "tool_calls_used",
+            "sandbox_commands_used",
+            "browser_actions_used",
+            "input_tokens_used",
+            "output_tokens_used",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"{name} must be non-negative")
 
         call_ids = tuple(call.tool_call_id for call in self.tool_calls)
         if len(set(call_ids)) != len(call_ids):
@@ -2265,6 +3306,33 @@ class ActiveRun:
         elif self.pending_request is not None:
             raise ValueError("only awaiting states may retain a pending request")
 
+        if self.status is ActiveRunStatus.MODEL_EXECUTING:
+            if (
+                self.phase is not ContinuationPhase.MODEL
+                or self.provider_call_intent is None
+                or self.owner_invocation_id is None
+                or self.pending_request is not None
+                or self.model_calls_used != self.provider_call_intent.provider_call_index
+                or (
+                    self.persisted_model_response is not None
+                    and self.persisted_model_response.request_digest
+                    != self.provider_call_intent.request_digest
+                )
+            ):
+                raise ValueError("MODEL_EXECUTING must bind one owned provider call")
+        elif self.status is ActiveRunStatus.MODEL_OUTCOME_UNKNOWN:
+            if (
+                self.phase is not ContinuationPhase.MODEL
+                or self.provider_call_intent is None
+                or self.persisted_model_response is not None
+                or self.owner_invocation_id is not None
+                or self.pending_request is not None
+                or self.model_calls_used != self.provider_call_intent.provider_call_index
+            ):
+                raise ValueError("MODEL_OUTCOME_UNKNOWN must retain only the call intent")
+        elif self.provider_call_intent is not None or self.persisted_model_response is not None:
+            raise ValueError("only provider boundary states may retain provider call data")
+
         if self.status in {ActiveRunStatus.PAUSED_LIMIT, ActiveRunStatus.PAUSED_RETRYABLE}:
             if self.owner_invocation_id is not None:
                 raise ValueError("paused runs cannot retain an invocation owner")
@@ -2294,6 +3362,379 @@ class RecordedRunResult:
     message: str | None = None
     request_id: str | None = None
     error_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundOccurrenceBindingV1:
+    """Runtime checkpoint 中不含 raw capability 的 occurrence identity。"""
+
+    automation_id: str
+    automation_revision: int
+    occurrence_id: str
+    occurrence_index: int
+    scheduled_for_utc: str
+    definition_digest: str
+    grant_digest: str
+    claim_authority_digest: str
+    claim_capability_digest: str
+    checkpoint_identity_digest: str
+    deadline_utc: str
+    model_call_limit: int
+    tool_call_limit: int
+    sandbox_command_limit: int
+    browser_action_limit: int
+    max_input_tokens: int
+    max_output_tokens: int
+    binding_digest: str
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        automation_id: str,
+        automation_revision: int,
+        occurrence_id: str,
+        occurrence_index: int,
+        scheduled_for_utc: str,
+        definition_digest: str,
+        grant_digest: str,
+        claim_authority_digest: str,
+        claim_capability_digest: str,
+        checkpoint_identity_digest: str,
+        deadline_utc: str,
+        model_call_limit: int,
+        tool_call_limit: int,
+        sandbox_command_limit: int,
+        browser_action_limit: int,
+        max_input_tokens: int,
+        max_output_tokens: int,
+    ) -> BackgroundOccurrenceBindingV1:
+        values = {
+            "automation_id": automation_id,
+            "automation_revision": automation_revision,
+            "occurrence_id": occurrence_id,
+            "occurrence_index": occurrence_index,
+            "scheduled_for_utc": scheduled_for_utc,
+            "definition_digest": definition_digest,
+            "grant_digest": grant_digest,
+            "claim_authority_digest": claim_authority_digest,
+            "claim_capability_digest": claim_capability_digest,
+            "checkpoint_identity_digest": checkpoint_identity_digest,
+            "deadline_utc": deadline_utc,
+            "model_call_limit": model_call_limit,
+            "tool_call_limit": tool_call_limit,
+            "sandbox_command_limit": sandbox_command_limit,
+            "browser_action_limit": browser_action_limit,
+            "max_input_tokens": max_input_tokens,
+            "max_output_tokens": max_output_tokens,
+        }
+        return cls(**values, binding_digest=canonical_json_digest(values))
+
+    def __post_init__(self) -> None:
+        for name in ("automation_id", "occurrence_id"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value or len(value) > 128:
+                raise ValueError(f"background binding {name} must be bounded non-empty text")
+        for name in (
+            "automation_revision",
+            "model_call_limit",
+            "tool_call_limit",
+            "max_input_tokens",
+            "max_output_tokens",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(f"background binding {name} must be positive")
+        for name in ("sandbox_command_limit", "browser_action_limit"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"background binding {name} must be non-negative")
+        if (
+            not isinstance(self.occurrence_index, int)
+            or isinstance(self.occurrence_index, bool)
+            or self.occurrence_index < 0
+        ):
+            raise ValueError("background binding occurrence_index must be non-negative")
+        for name in (
+            "definition_digest",
+            "grant_digest",
+            "claim_authority_digest",
+            "claim_capability_digest",
+            "checkpoint_identity_digest",
+            "binding_digest",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not _is_lower_hex(value, length=64):
+                raise ValueError(f"background binding {name} must be 64 lowercase hex")
+        from datetime import UTC, datetime
+
+        for name in ("scheduled_for_utc", "deadline_utc"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise ValueError(f"background binding {name} must be canonical UTC")
+            try:
+                parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=UTC
+                )
+            except ValueError as error:
+                raise ValueError(
+                    f"background binding {name} must be canonical UTC"
+                ) from error
+            if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != value:
+                raise ValueError(f"background binding {name} must be canonical UTC")
+        values = {
+            name: getattr(self, name)
+            for name in self.__dataclass_fields__
+            if name != "binding_digest"
+        }
+        if canonical_json_digest(values) != self.binding_digest:
+            raise ValueError("background binding digest mismatch")
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundExecutionAuthorityV1:
+    """只驻留在 pre-bound occurrence composition 的 raw claim capability。"""
+
+    occurrence_binding: BackgroundOccurrenceBindingV1
+    claim_fencing_token: str
+    raw_capability: str = field(repr=False)
+    isolated_workspace_identity_digest: str = ""
+    background_environment_policy_digest: str | None = None
+    browser_origin_policy_digest: str | None = None
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        occurrence_binding: BackgroundOccurrenceBindingV1,
+        claim_fencing_token: str,
+        raw_capability: str,
+        isolated_workspace_identity_digest: str,
+        background_environment_policy_digest: str | None,
+        browser_origin_policy_digest: str | None,
+    ) -> BackgroundExecutionAuthorityV1:
+        return cls(
+            occurrence_binding=occurrence_binding,
+            claim_fencing_token=claim_fencing_token,
+            raw_capability=raw_capability,
+            isolated_workspace_identity_digest=isolated_workspace_identity_digest,
+            background_environment_policy_digest=(
+                background_environment_policy_digest
+            ),
+            browser_origin_policy_digest=browser_origin_policy_digest,
+        )
+
+    def __post_init__(self) -> None:
+        binding = self.occurrence_binding
+        if not isinstance(binding, BackgroundOccurrenceBindingV1):
+            raise TypeError("background execution authority requires an occurrence binding")
+        if not isinstance(self.claim_fencing_token, str) or not self.claim_fencing_token:
+            raise ValueError("background claim fencing token must not be empty")
+        if not isinstance(self.raw_capability, str) or len(self.raw_capability) < 32:
+            raise ValueError("background raw capability must be high entropy")
+        if not _is_lower_hex(self.isolated_workspace_identity_digest, length=64):
+            raise ValueError("background isolated workspace identity must be hex64")
+        for name in (
+            "background_environment_policy_digest",
+            "browser_origin_policy_digest",
+        ):
+            value = getattr(self, name)
+            if value is not None and not _is_lower_hex(value, length=64):
+                raise ValueError(f"background execution {name} must be null or hex64")
+        if canonical_json_digest(self.raw_capability) != binding.claim_capability_digest:
+            raise ValueError("background raw capability digest mismatch")
+        authority_values = {
+            "automation_id": binding.automation_id,
+            "automation_revision": binding.automation_revision,
+            "occurrence_id": binding.occurrence_id,
+            "occurrence_index": binding.occurrence_index,
+            "scheduled_for_utc": binding.scheduled_for_utc,
+            "definition_digest": binding.definition_digest,
+            "grant_digest": binding.grant_digest,
+            "claim_fencing_token": self.claim_fencing_token,
+            "checkpoint_identity": binding.checkpoint_identity_digest,
+            "deadline_utc": binding.deadline_utc,
+            "capability_digest": binding.claim_capability_digest,
+        }
+        if canonical_json_digest(authority_values) != binding.claim_authority_digest:
+            raise ValueError("background claim authority digest mismatch")
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundClaimCheckV1:
+    automation_id: str
+    automation_revision: int
+    occurrence_id: str
+    definition_digest: str
+    grant_digest: str
+    claim_authority_digest: str
+    claim_fencing_token: str
+    checkpoint_identity_digest: str
+    raw_capability: str = field(repr=False)
+    observed_at_utc: str = ""
+    check_digest: str = ""
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        execution_authority: BackgroundExecutionAuthorityV1,
+        observed_at_utc: str,
+    ) -> BackgroundClaimCheckV1:
+        binding = execution_authority.occurrence_binding
+        return cls(
+            automation_id=binding.automation_id,
+            automation_revision=binding.automation_revision,
+            occurrence_id=binding.occurrence_id,
+            definition_digest=binding.definition_digest,
+            grant_digest=binding.grant_digest,
+            claim_authority_digest=binding.claim_authority_digest,
+            claim_fencing_token=execution_authority.claim_fencing_token,
+            checkpoint_identity_digest=binding.checkpoint_identity_digest,
+            raw_capability=execution_authority.raw_capability,
+            observed_at_utc=observed_at_utc,
+        )
+
+    def __post_init__(self) -> None:
+        if not self.automation_id or not self.occurrence_id or not self.claim_fencing_token:
+            raise ValueError("background claim check identity must not be empty")
+        if (
+            not isinstance(self.automation_revision, int)
+            or isinstance(self.automation_revision, bool)
+            or self.automation_revision < 1
+        ):
+            raise ValueError("background claim revision must be positive")
+        for name in (
+            "definition_digest",
+            "grant_digest",
+            "claim_authority_digest",
+            "checkpoint_identity_digest",
+        ):
+            if not _is_lower_hex(getattr(self, name), length=64):
+                raise ValueError(f"background claim {name} must be hex64")
+        if not isinstance(self.raw_capability, str) or len(self.raw_capability) < 32:
+            raise ValueError("background claim raw capability must be high entropy")
+        _require_canonical_utc(self.observed_at_utc, "background claim observed_at_utc")
+        values = {
+            "automation_id": self.automation_id,
+            "automation_revision": self.automation_revision,
+            "occurrence_id": self.occurrence_id,
+            "definition_digest": self.definition_digest,
+            "grant_digest": self.grant_digest,
+            "claim_authority_digest": self.claim_authority_digest,
+            "claim_fencing_token": self.claim_fencing_token,
+            "checkpoint_identity_digest": self.checkpoint_identity_digest,
+            "raw_capability_digest": canonical_json_digest(self.raw_capability),
+            "observed_at_utc": self.observed_at_utc,
+        }
+        digest = canonical_json_digest(values)
+        if self.check_digest and self.check_digest != digest:
+            raise ValueError("background claim check digest mismatch")
+        object.__setattr__(self, "check_digest", digest)
+
+
+_BACKGROUND_CLAIM_REASONS = frozenset(
+    {"allowed", "not_found", "claim_mismatch", "not_running", "cancel_pending", "expired"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundClaimVerdictV1:
+    allowed: bool
+    reason: str
+    check_digest: str
+    claim_authority_digest: str | None
+    definition_digest: str | None
+    grant_digest: str | None
+    sandbox_confined: bool
+    browser_public_observe: bool
+    background_environment_policy_digest: str | None
+    browser_origin_policy_digest: str | None
+    verdict_digest: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.allowed, bool) or self.reason not in _BACKGROUND_CLAIM_REASONS:
+            raise ValueError("background claim verdict is not closed")
+        if self.allowed != (self.reason == "allowed"):
+            raise ValueError("background claim verdict polarity mismatch")
+        if not _is_lower_hex(self.check_digest, length=64):
+            raise ValueError("background claim verdict check digest must be hex64")
+        for name in ("sandbox_confined", "browser_public_observe"):
+            if not isinstance(getattr(self, name), bool):
+                raise TypeError(f"background claim verdict {name} must be bool")
+        digest_fields = (
+            self.claim_authority_digest,
+            self.definition_digest,
+            self.grant_digest,
+            self.background_environment_policy_digest,
+            self.browser_origin_policy_digest,
+        )
+        if any(
+            value is not None and not _is_lower_hex(value, length=64)
+            for value in digest_fields
+        ):
+            raise ValueError("background claim verdict digest field must be null or hex64")
+        if self.allowed and any(
+            value is None
+            for value in (
+                self.claim_authority_digest,
+                self.definition_digest,
+                self.grant_digest,
+            )
+        ):
+            raise ValueError("allowed background claim verdict requires exact identity")
+        values = {
+            name: getattr(self, name)
+            for name in self.__dataclass_fields__
+            if name != "verdict_digest"
+        }
+        digest = canonical_json_digest(values)
+        if self.verdict_digest and self.verdict_digest != digest:
+            raise ValueError("background claim verdict digest mismatch")
+        object.__setattr__(self, "verdict_digest", digest)
+
+
+_BACKGROUND_ACTION_CLASSES = frozenset(
+    {"sandbox_confined", "browser_public_observe"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundActionAuthorityV1:
+    action_class: str
+    action_fingerprint: str
+    occurrence_binding_digest: str
+    claim_verdict_digest: str
+    budget_ordinal: int
+    policy_digest: str
+    authority_digest: str = ""
+
+    def __post_init__(self) -> None:
+        if self.action_class not in _BACKGROUND_ACTION_CLASSES:
+            raise ValueError("background action class is not admitted")
+        for name in (
+            "action_fingerprint",
+            "occurrence_binding_digest",
+            "claim_verdict_digest",
+            "policy_digest",
+        ):
+            if not _is_lower_hex(getattr(self, name), length=64):
+                raise ValueError(f"background action {name} must be hex64")
+        if (
+            not isinstance(self.budget_ordinal, int)
+            or isinstance(self.budget_ordinal, bool)
+            or self.budget_ordinal < 1
+        ):
+            raise ValueError("background action budget ordinal must be positive")
+        values = {
+            name: getattr(self, name)
+            for name in self.__dataclass_fields__
+            if name != "authority_digest"
+        }
+        digest = canonical_json_digest(values)
+        if self.authority_digest and self.authority_digest != digest:
+            raise ValueError("background action authority digest mismatch")
+        object.__setattr__(self, "authority_digest", digest)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2368,9 +3809,16 @@ class ConversationState:
     provider_disclosure_receipt: ProviderDisclosureReceipt | None = None
     control_receipts: tuple[ControlReceipt, ...] = ()
     workspace_binding: ConversationWorkspaceBindingV1 | None = None
+    background_occurrence_binding: BackgroundOccurrenceBindingV1 | None = None
     # 015 governed local action：conversation state 拥有 active process authority lease。
     # 放在字段末尾以保持位置前缀。Goal revision / terminal transition 使其失效。
     process_leases: tuple[ProcessAuthorityLeaseV1, ...] = ()
+    # 017：sandbox durable leases（revision/terminal transition 失效，state 层执行）。
+    sandbox_leases: tuple[SandboxAuthorityLeaseV1, ...] = ()
+    # 018：browser durable leases 与 pending takeover（goal terminal 失效；
+    # takeover 只携带 opaque identity，永不携带 credential/storage-state）。
+    browser_leases: tuple[BrowserAuthorityLeaseV1, ...] = ()
+    browser_takeover_pending: BrowserTakeoverRequestV1 | None = None
 
     def __post_init__(self) -> None:
         if not self.conversation_id:
@@ -2380,6 +3828,11 @@ class ConversationState:
             ConversationWorkspaceBindingV1,
         ):
             raise TypeError("workspace_binding must use the closed v1 contract")
+        if self.background_occurrence_binding is not None and not isinstance(
+            self.background_occurrence_binding,
+            BackgroundOccurrenceBindingV1,
+        ):
+            raise TypeError("background_occurrence_binding must use the closed v1 contract")
         if self.revision < 0:
             raise ValueError("revision must be non-negative")
         if self.next_action_seq < 1:
@@ -2410,12 +3863,14 @@ class ConversationState:
                 or self.evidence_records
                 or self.completion_claim is not None
                 or self.process_leases
+                or self.sandbox_leases
             ):
                 raise ValueError(
-                    "goal authority, evidence, completion claim and process leases require a goal"
+                    "goal authority, evidence, completion claim and leases require a goal"
                 )
         else:
             self._validate_process_leases()
+            self._validate_sandbox_leases()
             if (
                 self.workspace_binding is not None
                 and self.goal.workspace_identity_digest
@@ -2516,16 +3971,39 @@ class ConversationState:
             ):
                 raise ValueError("process lease must bind the current goal revision")
 
+    def _validate_sandbox_leases(self) -> None:
+        """017：one-shot sandbox lease 只绑定当前 non-terminal Goal revision。"""
+
+        leases = self.sandbox_leases
+        if len(leases) > MAX_SANDBOX_LEASES:
+            raise ValueError("sandbox lease count exceeds bounded capacity")
+        lease_ids = tuple(lease.lease_id for lease in leases)
+        if len(set(lease_ids)) != len(lease_ids):
+            raise ValueError("sandbox lease_id must be unique")
+        goal = self.goal
+        assert goal is not None
+        if goal.status in (GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED) and leases:
+            raise ValueError("terminal goal must not retain sandbox leases")
+        for lease in leases:
+            if (
+                lease.goal_id != goal.goal_id
+                or lease.goal_revision != goal.revision
+                or lease.workspace_identity_digest != goal.workspace_identity_digest
+            ):
+                raise ValueError("sandbox lease must bind the current goal revision")
+
     @classmethod
     def new(
         cls,
         conversation_id: str,
         *,
         workspace_binding: ConversationWorkspaceBindingV1 | None = None,
+        background_occurrence_binding: BackgroundOccurrenceBindingV1 | None = None,
     ) -> ConversationState:
         return cls(
             conversation_id=conversation_id,
             workspace_binding=workspace_binding,
+            background_occurrence_binding=background_occurrence_binding,
         )
 
 
@@ -2594,6 +4072,36 @@ class RevokeProcessAuthority(RuntimeAction):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class CompleteBrowserTakeover(RuntimeAction):
+    """018：typed complete takeover control（user-only，spec §7）。
+
+    校验 exact request/session/profile；成功后期望 profile revision 递增
+    并要求 fresh browser_observe；不铸造任何 commit approval。
+    """
+
+    request_id: str
+    session_ref: str
+    expected_profile_revision: int
+
+    def __post_init__(self) -> None:
+        if not self.request_id or not self.session_ref:
+            raise ValueError("takeover control identity must not be empty")
+        if self.expected_profile_revision <= 0:
+            raise ValueError("expected_profile_revision must be positive")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CancelBrowserTakeover(RuntimeAction):
+    """018：typed cancel takeover control（user-only）。"""
+
+    request_id: str
+
+    def __post_init__(self) -> None:
+        if not self.request_id:
+            raise ValueError("takeover control identity must not be empty")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ResolveUnknownToolOutcome(RuntimeAction):
     request_id: str
     binding_digest: str
@@ -2608,6 +4116,20 @@ class RecoverUnknownObservation(RuntimeAction):
     def __post_init__(self) -> None:
         if not self.tool_call_id or not self.intent_digest:
             raise ValueError("observation recovery identity must not be empty")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AbandonUnknownModelOutcome(RuntimeAction):
+    occurrence_id: str
+    background_binding_digest: str
+    provider_call_intent_digest: str
+
+    def __post_init__(self) -> None:
+        if not self.occurrence_id:
+            raise ValueError("model outcome abandonment must bind an occurrence")
+        for name in ("background_binding_digest", "provider_call_intent_digest"):
+            if not _is_lower_hex(getattr(self, name), length=64):
+                raise ValueError(f"{name} must be 64 lowercase hex")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -2692,6 +4214,7 @@ Action: TypeAlias = (
     | ResolveApproval
     | ResolveUnknownToolOutcome
     | RecoverUnknownObservation
+    | AbandonUnknownModelOutcome
     | Resume
     | CancelRun
     | AcknowledgeProviderDisclosure
@@ -2701,6 +4224,8 @@ Action: TypeAlias = (
     | CancelGoal
     | ConfirmCriterion
     | RevokeProcessAuthority
+    | CompleteBrowserTakeover
+    | CancelBrowserTakeover
 )
 
 
@@ -3085,6 +4610,308 @@ class ModelResponse:
         return max(self.output_tokens or 0, 1, len(encoded))
 
 
+def context_pack_digest(context: ContextPack) -> str:
+    """绑定一次不可变 provider request 的完整 Runtime 投影。"""
+
+    return canonical_json_digest(asdict(context))
+
+
+def model_response_payload(response: ModelResponse) -> dict[str, JSONValue]:
+    blocks: list[JSONValue] = []
+    for block in response.blocks:
+        if isinstance(block, ModelTextBlock):
+            blocks.append({"type": "text", "text": block.text})
+        else:
+            blocks.append(
+                {
+                    "type": "tool_call",
+                    "tool_call_id": block.tool_call_id,
+                    "name": block.name,
+                    "arguments": block.arguments,
+                }
+            )
+    control = (
+        None
+        if response.control is None
+        else {
+            "type": type(response.control).__name__,
+            "payload": _canonical_json_value(asdict(response.control)),
+        }
+    )
+    return {
+        "blocks": blocks,
+        "control": control,
+        "stop_reason": response.stop_reason,
+        "input_tokens": response.input_tokens,
+        "output_tokens": response.output_tokens,
+    }
+
+
+def _exact_payload(value: object, keys: set[str], label: str) -> dict[str, JSONValue]:
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ValueError(f"{label} has unknown or missing fields")
+    _assert_json_compatible(value, path=label)
+    return value
+
+
+def _payload_string(value: object, label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string")
+    return value
+
+
+def _payload_int(value: object, label: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{label} must be an integer")
+    return value
+
+
+def model_response_from_payload(value: object) -> ModelResponse:
+    raw = _exact_payload(
+        value,
+        {"blocks", "control", "stop_reason", "input_tokens", "output_tokens"},
+        "model_response",
+    )
+    if not isinstance(raw["blocks"], list):
+        raise ValueError("model_response.blocks must be an array")
+    blocks: list[ModelTextBlock | ModelToolCall] = []
+    for item in raw["blocks"]:
+        if not isinstance(item, dict):
+            raise ValueError("model_response block must be an object")
+        block_type = item.get("type")
+        if block_type == "text":
+            item = _exact_payload(item, {"type", "text"}, "model_text_block")
+            blocks.append(ModelTextBlock(_payload_string(item["text"], "text")))
+        elif block_type == "tool_call":
+            item = _exact_payload(
+                item,
+                {"type", "tool_call_id", "name", "arguments"},
+                "model_tool_call",
+            )
+            arguments = item["arguments"]
+            if not isinstance(arguments, dict):
+                raise ValueError("model_tool_call.arguments must be an object")
+            blocks.append(
+                ModelToolCall(
+                    _payload_string(item["tool_call_id"], "tool_call_id"),
+                    _payload_string(item["name"], "name"),
+                    arguments,
+                )
+            )
+        else:
+            raise ValueError("model_response block type is unknown")
+
+    control = None
+    if raw["control"] is not None:
+        envelope = _exact_payload(
+            raw["control"], {"type", "payload"}, "model_control"
+        )
+        control_type = _payload_string(envelope["type"], "model_control.type")
+        payload = envelope["payload"]
+        if not isinstance(payload, dict):
+            raise ValueError("model_control.payload must be an object")
+        if control_type == "DirectResponse":
+            payload = _exact_payload(payload, {"correlation_id", "text"}, control_type)
+            control = DirectResponse(**payload)
+        elif control_type == "BeginAnswer":
+            payload = _exact_payload(payload, {"correlation_id"}, control_type)
+            control = BeginAnswer(**payload)
+        elif control_type == "ClarificationRequest":
+            payload = _exact_payload(
+                payload,
+                {
+                    "correlation_id",
+                    "question",
+                    "boundary_code",
+                    "missing_fields",
+                    "safe_assumptions",
+                },
+                control_type,
+            )
+            control = ClarificationRequest(
+                correlation_id=_payload_string(payload["correlation_id"], "correlation_id"),
+                question=_payload_string(payload["question"], "question"),
+                boundary_code=_payload_string(payload["boundary_code"], "boundary_code"),
+                missing_fields=tuple(payload["missing_fields"]),
+                safe_assumptions=tuple(payload["safe_assumptions"]),
+            )
+        elif control_type == "GoalDraftProposal":
+            payload = _exact_payload(
+                payload,
+                {
+                    "correlation_id",
+                    "user_outcome",
+                    "beneficiary",
+                    "targets",
+                    "scope",
+                    "non_goals",
+                    "assumptions",
+                    "proposed_criteria",
+                    "next_step",
+                    "requires_public_web",
+                    "requires_local_process",
+                },
+                control_type,
+            )
+            criteria = payload["proposed_criteria"]
+            if not isinstance(criteria, list):
+                raise ValueError("proposed_criteria must be an array")
+            decoded_criteria: list[ProposedCriterion] = []
+            for index, raw_criterion in enumerate(criteria):
+                criterion = _exact_payload(
+                    raw_criterion,
+                    {
+                        "criterion_id",
+                        "description",
+                        "oracle_kind",
+                        "artifact_path",
+                    },
+                    f"proposed_criteria[{index}]",
+                )
+                raw_oracle = criterion["oracle_kind"]
+                if raw_oracle is None:
+                    oracle_kind = None
+                else:
+                    try:
+                        oracle_kind = EvidenceOracleKind(
+                            _payload_string(raw_oracle, "oracle_kind")
+                        )
+                    except ValueError as error:
+                        raise ValueError("oracle_kind is not closed") from error
+                artifact_path = criterion["artifact_path"]
+                if artifact_path is not None:
+                    artifact_path = _payload_string(artifact_path, "artifact_path")
+                decoded_criteria.append(
+                    ProposedCriterion(
+                        criterion_id=_payload_string(
+                            criterion["criterion_id"], "criterion_id"
+                        ),
+                        description=_payload_string(
+                            criterion["description"], "description"
+                        ),
+                        oracle_kind=oracle_kind,
+                        artifact_path=artifact_path,
+                    )
+                )
+            control = GoalDraftProposal(
+                correlation_id=_payload_string(payload["correlation_id"], "correlation_id"),
+                user_outcome=_payload_string(payload["user_outcome"], "user_outcome"),
+                beneficiary=_payload_string(payload["beneficiary"], "beneficiary"),
+                targets=tuple(payload["targets"]),
+                scope=tuple(payload["scope"]),
+                non_goals=tuple(payload["non_goals"]),
+                assumptions=tuple(payload["assumptions"]),
+                proposed_criteria=tuple(decoded_criteria),
+                next_step=payload["next_step"],
+                requires_public_web=payload["requires_public_web"],
+                requires_local_process=payload["requires_local_process"],
+            )
+        elif control_type == "GoalProgress":
+            payload = _exact_payload(
+                payload,
+                {"correlation_id", "goal_id", "goal_revision", "summary", "next_step"},
+                control_type,
+            )
+            control = GoalProgress(**payload)
+        elif control_type == "GoalDeltaProposal":
+            payload = _exact_payload(payload, {"correlation_id", "delta"}, control_type)
+            delta = payload["delta"]
+            if not isinstance(delta, dict):
+                raise ValueError("goal delta must be an object")
+            delta = _exact_payload(
+                delta,
+                {"goal_id", "expected_revision", "reason", "updates", "updated_at"},
+                "GoalDelta",
+            )
+            control = GoalDeltaProposal(
+                correlation_id=_payload_string(payload["correlation_id"], "correlation_id"),
+                delta=GoalDelta(**delta),
+            )
+        elif control_type == "CompletionClaim":
+            payload = _exact_payload(
+                payload,
+                {"correlation_id", "goal_id", "goal_revision", "criterion_evidence_refs"},
+                control_type,
+            )
+            control = CompletionClaim(
+                correlation_id=_payload_string(payload["correlation_id"], "correlation_id"),
+                goal_id=_payload_string(payload["goal_id"], "goal_id"),
+                goal_revision=_payload_int(payload["goal_revision"], "goal_revision"),
+                criterion_evidence_refs=tuple(payload["criterion_evidence_refs"]),
+            )
+        elif control_type == "BlockedClaim":
+            payload = _exact_payload(
+                payload,
+                {
+                    "correlation_id",
+                    "goal_id",
+                    "goal_revision",
+                    "blocker",
+                    "safe_attempts",
+                    "resume_condition",
+                },
+                control_type,
+            )
+            control = BlockedClaim(
+                correlation_id=_payload_string(payload["correlation_id"], "correlation_id"),
+                goal_id=_payload_string(payload["goal_id"], "goal_id"),
+                goal_revision=_payload_int(payload["goal_revision"], "goal_revision"),
+                blocker=_payload_string(payload["blocker"], "blocker"),
+                safe_attempts=tuple(payload["safe_attempts"]),
+                resume_condition=_payload_string(
+                    payload["resume_condition"], "resume_condition"
+                ),
+            )
+        else:
+            raise ValueError("model control type is unknown")
+
+    def optional_int(item: object, label: str) -> int | None:
+        return None if item is None else _payload_int(item, label)
+
+    stop_reason = raw["stop_reason"]
+    if stop_reason is not None and not isinstance(stop_reason, str):
+        raise ValueError("stop_reason must be a string or null")
+    return ModelResponse(
+        blocks=tuple(blocks),
+        control=control,
+        stop_reason=stop_reason,
+        input_tokens=optional_int(raw["input_tokens"], "input_tokens"),
+        output_tokens=optional_int(raw["output_tokens"], "output_tokens"),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class PersistedModelResponseV1:
+    request_digest: str
+    response: ModelResponse
+    response_digest: str
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        request_digest: str,
+        response: ModelResponse,
+    ) -> PersistedModelResponseV1:
+        return cls(
+            request_digest=request_digest,
+            response=response,
+            response_digest=canonical_json_digest(model_response_payload(response)),
+        )
+
+    def __post_init__(self) -> None:
+        if not _is_lower_hex(self.request_digest, length=64):
+            raise ValueError("persisted response request_digest must be 64 lowercase hex")
+        if not isinstance(self.response, ModelResponse):
+            raise TypeError("persisted response must contain one normalized ModelResponse")
+        if (
+            not _is_lower_hex(self.response_digest, length=64)
+            or canonical_json_digest(model_response_payload(self.response))
+            != self.response_digest
+        ):
+            raise ValueError("persisted model response digest mismatch")
+
+
 @dataclass(frozen=True, slots=True)
 class ToolCall:
     tool_call_id: str
@@ -3442,6 +5269,12 @@ class ToolPrepareContext:
     source_authority: SourceAuthorityBinding | None = None
     # 015：prepare 时可见的 active process authority lease，用于 exact reuse 匹配（F2）。
     process_leases: tuple[ProcessAuthorityLeaseV1, ...] = ()
+    # 017：sandbox durable leases（revision/terminal transition 失效，state 层执行）。
+    sandbox_leases: tuple[SandboxAuthorityLeaseV1, ...] = ()
+    # 018：browser durable leases 与 pending takeover（goal terminal 失效；
+    # takeover 只携带 opaque identity，永不携带 credential/storage-state）。
+    browser_leases: tuple[BrowserAuthorityLeaseV1, ...] = ()
+    browser_takeover_pending: BrowserTakeoverRequestV1 | None = None
     # 当前 Goal 的结构化 proposed criteria；process prepare 只消费
     # FILESYSTEM_DIGEST artifact obligation，不从自由文本/argv 猜测。
     proposed_criteria: tuple[ProposedCriterion, ...] = ()
@@ -3461,6 +5294,12 @@ class ToolPrepareContext:
     citation_manifest_content_digests: tuple[str, ...] = ()
     public_web_requirement_pending: bool = False
     goal_correction_pending: bool = False
+    # 019：raw claim capability 仅存在于当前 pre-bound composition；checkpoint
+    # 与 ExecutionIntent 只保存其 digest 和 action authority。
+    background_execution_authority: BackgroundExecutionAuthorityV1 | None = None
+    background_tool_calls_used: int = 0
+    background_sandbox_commands_used: int = 0
+    background_browser_actions_used: int = 0
 
     def __post_init__(self) -> None:
         if self.approval_basis_revision is None:
@@ -3587,6 +5426,24 @@ class ToolPrepareContext:
             raise TypeError("tool context public Web requirement state must be boolean")
         if not isinstance(self.goal_correction_pending, bool):
             raise TypeError("tool context Goal correction state must be boolean")
+        if self.background_execution_authority is not None and not isinstance(
+            self.background_execution_authority,
+            BackgroundExecutionAuthorityV1,
+        ):
+            raise TypeError("tool context background authority must use the closed v1 contract")
+        for name in (
+            "background_tool_calls_used",
+            "background_sandbox_commands_used",
+            "background_browser_actions_used",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"tool context {name} must be non-negative")
+        if (
+            self.background_execution_authority is not None
+            and not self.background_execution_authority.occurrence_binding.binding_digest
+        ):
+            raise ValueError("tool context background binding must not be empty")
         if self.fact_admission is not None and (
             self.goal_id is None
             or not self.fact_admission.matches(
@@ -3648,6 +5505,15 @@ class ExecutionIntent:
     # 015：reuse 路径在 prepare 时绑定的 exact 匹配 lease，供 invoke 铸造 receipt 的
     # lease identity / use_ordinal。非 process intent 一律为 None。
     process_lease: ProcessAuthorityLeaseV1 | None = None
+    # 017：reuse 路径绑定的 exact 匹配 sandbox lease；非 sandbox intent 一律 None。
+    sandbox_lease: SandboxAuthorityLeaseV1 | None = None
+    # 018：非 OBSERVE browser action 绑定的 exact single-use lease。
+    browser_lease: BrowserAuthorityLeaseV1 | None = None
+    # 018：takeover headed transition 的 Runtime-owned durable binding。
+    # AgentRuntime 必须先持久化它，ToolRuntime 才能调用 adapter 显示窗口。
+    browser_takeover_request: BrowserTakeoverRequestV1 | None = None
+    # 019：只携带 action-scoped digest authority，绝不持久化 raw claim capability。
+    background_action_authority: BackgroundActionAuthorityV1 | None = None
 
     def __post_init__(self) -> None:
         if not self.conversation_id or not self.run_id:
@@ -3667,6 +5533,18 @@ class ExecutionIntent:
             or self.approval_basis_revision is None
         ):
             raise ValueError("PUBLIC_NETWORK intent identity must be complete")
+        if self.background_action_authority is not None:
+            if not isinstance(
+                self.background_action_authority,
+                BackgroundActionAuthorityV1,
+            ):
+                raise TypeError("background action authority must use the closed v1 contract")
+            expected_execution_authority = {
+                "sandbox_confined": ExecutionAuthorityClass.ISOLATED_SANDBOX,
+                "browser_public_observe": ExecutionAuthorityClass.BROWSER_SESSION,
+            }[self.background_action_authority.action_class]
+            if self.execution_authority is not expected_execution_authority:
+                raise ValueError("background action class does not match execution authority")
 
 
 @dataclass(frozen=True, slots=True)
@@ -3681,6 +5559,9 @@ class ToolResult:
     is_error: bool = False
     executed: bool = True
     metadata: dict[str, JSONValue] = field(default_factory=dict)
+    # 018：browser tool 请求 user takeover 的 typed 通道；唯一 AgentRuntime
+    # 在持久化 pending 之前不得把该结果作为完成返回。
+    browser_takeover_request: BrowserTakeoverRequestV1 | None = None
 
     def __post_init__(self) -> None:
         _assert_json_compatible(self.metadata, path="tool_result.metadata")

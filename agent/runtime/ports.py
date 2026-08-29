@@ -7,6 +7,8 @@ from typing import Protocol, runtime_checkable
 from agent.runtime.contracts import (
     Action,
     ApprovalGrant,
+    BackgroundClaimCheckV1,
+    BackgroundClaimVerdictV1,
     ContextPack,
     ContextQuery,
     ContextSourceSnapshot,
@@ -87,6 +89,12 @@ class ToolRuntime(Protocol):
 
     def invoke(self, intent: ExecutionIntent) -> ToolResult:
         """只执行与已持久化记录完全一致的意图。"""
+
+
+@runtime_checkable
+class BackgroundClaimVerifier(Protocol):
+    def verify(self, check: BackgroundClaimCheckV1) -> BackgroundClaimVerdictV1:
+        """只读核对 active occurrence claim；不得批准工具或修改任一 store。"""
 
 
 @runtime_checkable

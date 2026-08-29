@@ -1,0 +1,8 @@
+{
+  "base_manifest_sha256": "4da6fe1f158bf0c57ef6c2160ce9076a90b1125404e32f5ee2d81fd86460e74f",
+  "entry_count": 309,
+  "overlay_root_sha256": "a32e575cbe248618d3c1468cbcb64e38b4d0dde0e026c15406ae966a4a052363",
+  "parent_seal_sha256": "527f47ce26a9eb2f8311fa4a78684dd6854f0e9dfe81dac91a31bc89817989d1",
+  "schema": "my-first-agent/delivery-overlay-seal/v7",
+  "verifier_sha256": "5b10ae6d053ee09d4775bc8886fc84d15841b17e2825a377fe396569b01d0a21"
+}

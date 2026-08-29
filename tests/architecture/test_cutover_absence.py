@@ -9,6 +9,47 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_product_tree_contains_only_kernel_packages() -> None:
     expected = {
         "agent/__init__.py",
+        "agent/automation/__init__.py",
+        "agent/automation/child.py",
+        "agent/automation/claim_verifier.py",
+        "agent/automation/cli.py",
+        "agent/automation/composition.py",
+        "agent/automation/contracts.py",
+        "agent/automation/controller.py",
+        "agent/automation/management.py",
+        "agent/automation/reconcile.py",
+        "agent/automation/schedule.py",
+        "agent/automation/store.py",
+        "agent/automation/supervisor.py",
+        "agent/automation/wake.py",
+        "agent/automation/workspace.py",
+        "agent/automation_hosts/__init__.py",
+        "agent/automation_hosts/_posix_fs.py",
+        "agent/automation_hosts/_posix_workspace_codec.py",
+        "agent/automation_hosts/_posix_workspace_files.py",
+        "agent/automation_hosts/launchd.py",
+        "agent/automation_hosts/macos_cli.py",
+        "agent/automation_hosts/macos_profile.py",
+        "agent/automation_hosts/macos_runtime.py",
+        "agent/automation_hosts/occurrence_child.py",
+        "agent/automation_hosts/posix_repository.py",
+        "agent/automation_hosts/posix_storage.py",
+        "agent/automation_hosts/posix_supervisor.py",
+        "agent/automation_hosts/posix_workspace.py",
+        "agent/automation_hosts/runtime_executor.py",
+        "agent/browser/__init__.py",
+        "agent/browser/action_policy.py",
+        "agent/browser/contracts.py",
+        "agent/browser/observation.py",
+        "agent/browser/playwright_adapter.py",
+        "agent/browser/ports.py",
+        "agent/browser/profile_store.py",
+        "agent/browser/quarantine.py",
+        "agent/browser/session_store.py",
+        "agent/browser/staging.py",
+        "agent/browser/takeover.py",
+        "agent/browser/tools.py",
+        "agent/browser/url_policy.py",
         "agent/cli/__init__.py",
         "agent/cli/actions.py",
         "agent/cli/app.py",
@@ -38,6 +79,8 @@ def test_product_tree_contains_only_kernel_packages() -> None:
         "agent/process/__init__.py",
         "agent/process/admission.py",
         "agent/process/contracts.py",
+        "agent/process/preparation.py",
+        "agent/process/group.py",
         "agent/process/runner.py",
         "agent/process/tools.py",
         "agent/provider/__init__.py",
@@ -63,8 +106,18 @@ def test_product_tree_contains_only_kernel_packages() -> None:
         "agent/runtime/loop.py",
         "agent/runtime/ports.py",
         "agent/runtime/state.py",
+        "agent/runtime/tool_governance.py",
         "agent/runtime/tools.py",
         "agent/runtime/views.py",
+        "agent/sandbox/__init__.py",
+        "agent/sandbox/authority.py",
+        "agent/sandbox/contracts.py",
+        "agent/sandbox/executor.py",
+        "agent/sandbox/policy.py",
+        "agent/sandbox/ports.py",
+        "agent/sandbox/qualification.py",
+        "agent/sandbox/seatbelt.py",
+        "agent/sandbox/tools.py",
         "agent/scheduler/__init__.py",
         "agent/scheduler/caller.py",
         "agent/scheduler/contracts.py",
@@ -110,6 +163,9 @@ def test_product_tree_contains_only_kernel_packages() -> None:
     }
     assert packages == {
         "agent",
+        "agent.automation",
+        "agent.automation_hosts",
+        "agent.browser",
         "agent.cli",
         "agent.continuity",
         "agent.history",
@@ -119,6 +175,7 @@ def test_product_tree_contains_only_kernel_packages() -> None:
         "agent.provider",
         "agent.research",
         "agent.runtime",
+        "agent.sandbox",
         "agent.scheduler",
         "agent.skill",
         "agent.subagent",
@@ -166,7 +223,14 @@ def test_effect_owners_are_unique_in_production_sources() -> None:
 
     assert set(provider_callers) == {"agent/runtime/loop.py"}
     assert set(tool_callers) == {"agent/runtime/loop.py"}
-    assert set(checkpoint_callers) == {"agent/runtime/loop.py"}
+    # conversation checkpoint CAS 的唯一 owner 仍是 loop。browser tools 与
+    # automation controller 分别只推进自己独立的 session / definition ledger；
+    # 都不推进 ConversationState，也不是第二个 model/tool loop。
+    assert set(checkpoint_callers) == {
+        "agent/automation/controller.py",
+        "agent/runtime/loop.py",
+        "agent/browser/tools.py",
+    }
 
 
 def test_subagent_package_does_not_import_provider_or_loop() -> None:

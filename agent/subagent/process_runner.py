@@ -8,10 +8,12 @@ hard deadline：socket/read timeout 不能证明 provider 已终止，只有进�
 receipt 语义（确定性，无 race）：
 
 - ``TERMINATED``：child exit 0 且 stdout 是合法结果 JSON（child 已 terminally 报告了它的
-  ``RunStatus``——无论 COMPLETED 还是被 run_turn 分类为 FAILED_*）。
+  ``RunStatus``——无论 COMPLETED 还是被 run_turn 分类为 FAILED_*），且 process group
+  消失已由共享 group-liveness oracle 确认。
 - ``UNCONFIRMED``：parent 在 deadline 前 child 未自行退出（被 parent kill），或 child 非 0
-  退出/未写出合法结果。此时 provider call 可能已发生，parent 必须进入 unknown-outcome
-  recovery——``UNCONFIRMED`` 覆盖一切 child normalization。
+  退出/未写出合法结果，或 group 终止/清理无法确认。此时 provider call 可能已发生，
+  parent 必须进入 unknown-outcome recovery——``UNCONFIRMED`` 覆盖一切 child normalization；
+  绝不把 unknown 当 terminated。
 
 credential 永不跨进程序列化：``ChildProviderSpec`` 只带 env name，子进程从自身 env 读取值；
 config 文件不含 credential。config 是 bounded、owner-only、no-follow 的临时 JSON。
@@ -21,14 +23,20 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import subprocess
 import sys
 import tempfile
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent.process.group import (
+    ProcessCleanupError,
+    group_alive,
+    terminate_group,
+    verified_group_identity,
+)
 from agent.runtime.contracts import RunStatus
 from agent.subagent.contracts import (
     ChildProfile,
@@ -85,10 +93,11 @@ class ChildProcessRunner:
 
     @property
     def deadline_contract(self) -> ProviderDeadlineCapability:
-        """本 runner 诚实声明的 hard-deadline capability：进程边界提供，receipt 经 exit 确认。
+        """本 runner 诚实声明的 hard-deadline capability：进程边界提供。
 
-        与同步 provider 的 ``synchronous`` receipt 区分：本路径的 receipt 来自 parent 对子进程
-        group 的可证明终止，而非 provider 的 socket timeout。
+        与同步 provider 的 ``synchronous`` receipt 区分：本路径的 receipt 来自 parent 对
+        子进程 group 的可证明终止（共享 group-liveness oracle 确认消失；无法确认时
+        fail closed 为 UNCONFIRMED），而非 provider 的 socket timeout。
         """
         return ProviderDeadlineCapability(
             hard_deadline_seconds=self._hard_deadline,
@@ -107,8 +116,13 @@ class ChildProcessRunner:
         config_path = self._write_config(config)
         config_dir = config_path.parent
         cleanup_succeeded = False
+        termination_unconfirmed = False
         try:
             outcome = self._run_child(config_path)
+        except ProcessCleanupError:
+            # group identity/终止/清理无法确认：不解析任何 child 输出，fail closed。
+            outcome = None
+            termination_unconfirmed = True
         finally:
             # F-G8-2：安全移除 per-run 目录（先删 config.json 再 rmdir 空目录），不跟随 symlink、
             # 不删除宽泛/未解析路径。任何失败都不得影响 receipt 分类——但单次 unlink/rmdir
@@ -116,7 +130,21 @@ class ChildProcessRunner:
             # 故有界重试到目录真正消失或预算耗尽。
             cleanup_succeeded = _remove_run_dir(config_path, config_dir)
 
+        if termination_unconfirmed:
+            return ChildRunResult(
+                status=RunStatus.FAILED_FATAL,
+                run_id=child_run_id,
+                message="",
+                reason="termination_unconfirmed",
+                model_calls=0,
+                tool_calls=0,
+                receipt_state=TerminationReceiptState.UNCONFIRMED,
+            )
+
         if not cleanup_succeeded:
+            # receipt 语义要求 child terminally 报告过结果才能 TERMINATED；outcome
+            # 未知（deadline kill 等）叠加 cleanup 失败只能 UNCONFIRMED，不得把
+            # unknown 当 terminated。
             return ChildRunResult(
                 status=RunStatus.FAILED_FATAL,
                 run_id=child_run_id,
@@ -124,7 +152,11 @@ class ChildProcessRunner:
                 reason="cleanup_failed",
                 model_calls=1 if outcome is not None else 0,
                 tool_calls=0,
-                receipt_state=TerminationReceiptState.TERMINATED,
+                receipt_state=(
+                    TerminationReceiptState.TERMINATED
+                    if outcome is not None
+                    else TerminationReceiptState.UNCONFIRMED
+                ),
             )
 
         if outcome is not None:
@@ -162,6 +194,18 @@ class ChildProcessRunner:
             start_new_session=True,
         )
         try:
+            try:
+                pgid = verified_group_identity(proc.pid)
+            except ProcessCleanupError:
+                # 无法验证 group identity：不退化为单进程信号并照常收尾。有界
+                # best-effort 清理 leader 只是止损，不构成任何 termination 证明；
+                # ProcessCleanupError 继续上抛，由 run() fail closed 为
+                # termination_unconfirmed。
+                with suppress(OSError):
+                    proc.kill()
+                with suppress(subprocess.TimeoutExpired):
+                    proc.wait(timeout=_KILL_GRACE_SECONDS)
+                raise
             deadline = time.monotonic() + self._hard_deadline
             timed_out = False
             while True:
@@ -173,14 +217,24 @@ class ChildProcessRunner:
                 time.sleep(self._poll_interval)
 
             if proc.poll() is None:
-                # child 未自行退出：hard kill 整个 process group 并确认退出。
-                self._kill_group(proc.pid)
-                try:
-                    proc.wait(timeout=_KILL_GRACE_SECONDS)
-                except subprocess.TimeoutExpired:
-                    # 再次 SIGKILL 兜底；最终以 wait 收尸，避免僵尸。
-                    self._kill_group(proc.pid, sig=signal.SIGKILL)
-                    proc.wait()
+                # child 未自行退出：verified TERM→KILL→confirm 整个 process group
+                # （有界，unconfirmable → ProcessCleanupError → fail closed）。
+                terminate_group(
+                    proc,
+                    pgid,
+                    term_grace_seconds=_KILL_GRACE_SECONDS,
+                    kill_grace_seconds=_KILL_GRACE_SECONDS,
+                )
+            elif group_alive(pgid):
+                # leader 自行退出但同 group descendant 仍存活：同样必须治理并
+                # 确认消失，否则 process_terminated 是未验证的声称。
+                terminate_group(
+                    proc,
+                    pgid,
+                    term_grace_seconds=_KILL_GRACE_SECONDS,
+                    kill_grace_seconds=_KILL_GRACE_SECONDS,
+                )
+            # group 消失已确认 → stdout 的所有写端都已关闭，read 不会无限阻塞。
             stdout = _read_bounded(proc.stdout, _MAX_RESULT_BYTES)
             if timed_out or proc.returncode != 0:
                 return None
@@ -194,17 +248,6 @@ class ChildProcessRunner:
             # stdin 未用 PIPE、stderr 为 DEVNULL，均无需显式关闭。
             if proc.stdout is not None:
                 proc.stdout.close()
-
-    def _kill_group(self, pid: int, *, sig: int = signal.SIGTERM) -> None:
-        try:
-            pgid = os.getpgid(pid)
-            os.killpg(pgid, sig)
-        except ProcessLookupError:
-            return
-        except OSError:
-            # 退回到单进程信号。
-            with __import__("contextlib").suppress(ProcessLookupError, OSError):
-                os.kill(pid, sig)
 
     def _child_env(self) -> dict:
         # 子进程必须 import 同一份 agent：用 parent 自身的 agent 源根作为 PYTHONPATH，

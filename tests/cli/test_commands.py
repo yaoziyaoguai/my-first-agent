@@ -7,7 +7,10 @@ from agent.runtime.contracts import (
     ActiveRun,
     ActiveRunStatus,
     ApprovalRequest,
+    BrowserTakeoverRequestV1,
+    CancelBrowserTakeover,
     CancelGoal,
+    CompleteBrowserTakeover,
     ContinuationPhase,
     ConversationState,
     ExecutingIntentRecord,
@@ -25,6 +28,7 @@ from agent.runtime.contracts import (
     RunStatus,
     ToolCall,
 )
+from agent.runtime.state import begin_browser_takeover
 from tests.kernel.fakes import conversation_with_active_goal
 
 
@@ -169,3 +173,82 @@ def test_goal_controls_map_to_exact_typed_actions() -> None:
 
     runtime, _, _ = _run_once(ready, "/cancel")
     assert isinstance(runtime.actions[0], CancelGoal)
+
+
+def test_browser_takeover_commands_reach_runtime_as_typed_actions() -> None:
+    ready = conversation_with_active_goal()
+    request = BrowserTakeoverRequestV1(
+        request_id="takeover-1",
+        session_ref="session-0123456789abcdef",
+        profile_ref="profile-0123456789abcdef",
+        profile_revision=3,
+        browser_identity_digest="a" * 64,
+        goal_id=ready.goal.goal_id,
+        goal_revision=ready.goal.revision,
+        requested_at="2026-08-28T10:00:00+00:00",
+    )
+    waiting = begin_browser_takeover(ready, request)
+
+    runtime = RecordingRuntime()
+    inputs = iter(("/browser-done", "/exit"))
+    assert run_repl(
+        runtime,
+        StaticStore(waiting),
+        input_fn=lambda _: next(inputs),
+    ) == 0
+    assert isinstance(runtime.actions[0], CompleteBrowserTakeover)
+    assert runtime.actions[0].request_id == request.request_id
+
+    runtime, _, _ = _run_once(waiting, "/browser-cancel")
+    assert isinstance(runtime.actions[0], CancelBrowserTakeover)
+    assert runtime.actions[0].request_id == request.request_id
+
+    runtime, _, _ = _run_once(waiting, "/cancel")
+    assert isinstance(runtime.actions[0], CancelBrowserTakeover)
+
+
+def test_browser_done_submits_only_typed_runtime_action() -> None:
+    ready = conversation_with_active_goal()
+    request = BrowserTakeoverRequestV1(
+        request_id="takeover-1",
+        session_ref="session-0123456789abcdef",
+        profile_ref="profile-0123456789abcdef",
+        profile_revision=3,
+        browser_identity_digest="a" * 64,
+        goal_id=ready.goal.goal_id,
+        goal_revision=ready.goal.revision,
+        requested_at="2026-08-28T10:00:00+00:00",
+    )
+    waiting = begin_browser_takeover(ready, request)
+    runtime = RecordingRuntime()
+    inputs = iter(("/browser-done", "/exit"))
+
+    assert run_repl(
+        runtime,
+        StaticStore(waiting),
+        input_fn=lambda _: next(inputs),
+    ) == 0
+
+    assert len(runtime.actions) == 1
+    assert isinstance(runtime.actions[0], CompleteBrowserTakeover)
+
+
+def test_browser_profile_command_is_reachable_without_runtime_mutation() -> None:
+    state = conversation_with_active_goal()
+    runtime = RecordingRuntime()
+    inputs = iter(("/browser-profiles list", "/exit"))
+    output: list[str] = []
+    commands: list[str] = []
+
+    assert run_repl(
+        runtime,
+        StaticStore(state),
+        input_fn=lambda _: next(inputs),
+        write_fn=output.append,
+        browser_profile_command=lambda command: (
+            commands.append(command) or "Browser profiles:\nprofile-0123456789abcdef"
+        ),
+    ) == 0
+    assert commands == ["list"]
+    assert output == ["Browser profiles:\nprofile-0123456789abcdef"]
+    assert runtime.actions == []

@@ -1738,3 +1738,91 @@ U2 闭合改写，ordinary root 保持 `25e81097…` 不变。
 因此本节记录时的准确状态：U0/U1/U2 在 identity `25e81097…` 上 Green；唯一未满足项仍是 U3 fresh
 independent Standards/Spec review（须由未参与实现的新 review context 绑定本 identity 执行，本
 executor 不自封 accepted/delivered）。
+
+## 27. 2026-08-26 第七任 executor：架构深化后重新绑定 016 delivery identity
+
+### 27.1 事实基线
+
+§26.2 的 `25e81097…` identity 之后，工作树叠加了两个经独立审计的架构深化计划
+（`docs/plans/2026-08-26-001` evidence closure、`docs/plans/2026-08-26-002` tool governance /
+POSIX process group / scheduler teardown，外加两份计划文档），全部未提交。旧 seal 对当前树
+正确报告 entry count drift（expected 216 / actual 225）与 root drift；旧 receipt 不得复用。
+
+本轮 executor 启动时五个 `FIRST_AGENT_016_E3_*` 变量未注入进程环境，因此先闭合全部离线身份。
+
+### 27.2 新 identity 的离线闭合
+
+顺序执行，无多余全量重跑：
+
+- final source gate：`git diff --check` Green、全树 ruff Green、`1503 passed in 203.42s`（exit 0）；
+- 用 `scripts/verify_016_materialized_tree.py` 自身函数（`derive_overlay`/`overlay_root`）重算并
+  原子改写 `016_DELIVERY_SEAL.json`：225 exact entries，root
+  `3a58a16f540d034f236b91a2300959c5fcf24d60dbcae8ec92f3f7a5e932801d`；base/parent/verifier
+  digest 不变（`4da6fe1f…`/`8c4e309e…`/`d9c13de5…`）；derivation 断言零 `tui/` 与零 denied
+  path 进入 overlay；
+- `--check-membership`：`016 overlay membership ok: 225 exact entries`；
+- `--control-seal`：Green；
+- `--content`：clean venv + wheel 构建 + base/test 依赖安装 + 沙箱禁网下 materialized
+  `1503 passed in 196.95s`，`ALL CHECKS PASSED`（exit 0）；
+- `--attestation`：对旧 receipt 精确 fail closed，唯一错误为
+  `receipt delivery identity does not match the current seal`（预期行为）。
+
+### 27.3 记录时的准确状态
+
+- U0/U1 与 final materialized delivery 在 identity `3a58a16f…` 上 Green；
+- U2：本 root 的真实 3×12 journeys + 25 claims receipt 尚未生成，等待五个
+  `FIRST_AGENT_016_E3_*` 凭据注入后由正式 runner 绑定本 seal 执行；连续三轮从本 root 重新计数；
+- U3：U2 闭合后由父级 Codex 独立执行，本轮 executor 不自封 independent PASS；
+- 未做任何 commit/push/tag/branch；`tui/` 与 private/runtime/credential 未进入 seal 或文档。
+
+### 27.4 当前 identity 的真实三连与 U2 闭合
+
+五个 `FIRST_AGENT_016_E3_*` 变量注入后（仅核对变量名存在，未读值；
+`FIRST_AGENT_016_E3_REQUEST_PATH` 未设置），同一会话恢复，正式
+`.venv/bin/python scripts/run_016_e3.py` 单次前台保持至自然返回（§26.2 注记），
+输出 `016_E3_REAL_PASS attempts=3`（exit 0）。Runner 在同一 invocation 内完成：
+
+- focused claim gates 与全树 ruff Green；source full `1503 passed in 196.23s`；
+- membership `225 exact entries`；materialized clean-room `1503 passed in 192.49s`，
+  `ALL CHECKS PASSED`；
+- 从本 seal（`3a58a16f…`）单一 materialized source 构建的三个独立 wheel
+  （install digest `2f2393ab…`/`9b5d7ab2…`/`a282a3d4…`），openai_compatible
+  `deepseek-v4-flash` + Tavily 三轮全部 12 journeys / 25 claims / ux / workspace /
+  recovery verdicts 为 True；计数：model send attempts 61/61/73、web send attempts
+  13/10/11、web receipts 55/49/57、file effects 8/8/11、process receipts 3/3/3；
+- 轮后复核 ordinary tree 与 identity 无漂移，写 receipt v2
+  （`docs/acceptance/016_FIRST_AGENT_1_0_E3_RECEIPTS.json`，detached control）。
+
+随后 detached 复核：`--attestation` Green（`3 x 12 journeys + 25 true claims`），
+`--control-seal`、`--check-membership`（225）、`git diff --check` 均 Green。
+
+凭据只存在于 runner/产品子进程环境，未进入 argv、profile、checkpoint、receipt、
+文档或输出。记录时的准确状态：U0/U1/U2 在 identity `3a58a16f…` 上 Green
+（U2_COMPLETE）；唯一剩余项为 U3 fresh independent Standards/Spec review，按
+分工由父级 Codex 绑定本 identity 执行，本 executor 不自封 accepted/delivered。
+
+### 27.5 Fresh U3 独立审查与交付闭环
+
+父级 Codex 在 Claude Code executor 结束后，从冻结 016 design/E3/plan 重新审查当前 diff、
+架构深化边界、巨石文件裁决、receipt 与公开声明，不继承 executor 的 U2 PASS 结论。
+
+reviewer 亲自复跑并观察到：
+
+- `--check-membership`：`225 exact entries`，exit 0；
+- `--control-seal`：Green，exit 0；
+- `--attestation`：`3 x 12 journeys + 25 true claims`，exit 0；
+- `git diff --check` 与全树 ruff：Green；
+- receipt 的 seal `9b05e552…`、overlay `3a58a16f…`、verifier `d9c13de5…`、
+  entry count `225` 与三个独立 wheel digest逐字闭合；tracked diff 无 `tui/`，
+  diff-only credential pattern 无命中。
+
+独立架构审读确认唯一 `provider.generate` / `ToolRuntime.invoke` owner 未漂移；evidence closure、
+tool governance 与 POSIX group seam 都只隐藏现有 owner 内的领域知识，scheduler 只修正 teardown
+顺序，没有第二套 loop、service locator、自授权 capability 或未知结果冒充成功。巨石文件按
+cohesion/information-hiding/deletion test 裁决；`checkpoint.py` codec 作为下一轮候选不阻塞本轮。
+
+最终 fresh U3 无未闭合 P0/P1/P2，detached review
+`docs/acceptance/016_FIRST_AGENT_1_0_INDEPENDENT_REVIEW.md` 绑定当前 identity 明确记录 PASS。
+因此 U0/U1/U2/U3 全部闭合，identity `3a58a16f…` 晋级为 First Agent 1.0 的
+`accepted/delivered` bounded reference delivery；不扩大为 production-ready、浏览器/整机控制、
+任意 shell、后台 daemon、自主改写或第二套 Agent loop。

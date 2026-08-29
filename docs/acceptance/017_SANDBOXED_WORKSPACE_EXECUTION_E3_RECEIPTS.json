@@ -1,0 +1,86 @@
+{
+  "schema": "first-agent-017-native-e3-receipt-v1",
+  "observed_at": "2026-08-27T11:05:18Z",
+  "stage": "U2_PASS",
+  "delivery_identity": {
+    "seal_sha256": "527f47ce26a9eb2f8311fa4a78684dd6854f0e9dfe81dac91a31bc89817989d1",
+    "entry_count": 261,
+    "overlay_root_sha256": "0c261e7f3d38a782ccbe880693614e9bd218ea1d979f2a17fb79432fbac4d6a1",
+    "verifier_sha256": "420617c05052374a511375a70193c7075ce66293a1e66a6f0f7610a798a7b203",
+    "runner_sha256": "91e38340414f48809d023b446da3e5e3da04dfe771c3d69fe403572228f73184",
+    "wheel_sha256": "0ddb10f4bdef4949b9afa395232a626015840e20a9285e46a8aaf428fdf2c3a1"
+  },
+  "backend_identity": {
+    "executable_path": "/usr/bin/sandbox-exec",
+    "platform_system": "Darwin",
+    "platform_release": "24.5.0",
+    "functional_probe_digest": "e39a3398a097c8e5729997859261611d638a69fb13f78132eec3db23b9952cec",
+    "probe_profile_digest": "5c358b8d847211333e7ba22df82d84f796b5f30a41a2682209a949d783adbd08",
+    "backend_identity_digest": "ce9f27c161d386d703fca10e466350c627cbc4a4b1d2a188a8099d9a0bb5c244"
+  },
+  "attempts": [
+    {
+      "attempt_id": "attempt-1",
+      "journeys": {
+        "backend_unavailable_confined_zero_execution": true,
+        "bypass_authority_exact": true,
+        "credential_sentinel_unreadable": true,
+        "git_metadata_readable_write_denied": true,
+        "host_toolchain_works": true,
+        "network_off_denied": true,
+        "outside_write_denied": true,
+        "process_tree_inheritance": true,
+        "read_back_completion": true,
+        "timeout_cleanup_capped": true,
+        "workspace_write_succeeds": true
+      },
+      "sentinel_sha256": "9aedecb5f56d0f384a169398cd9d2752c16075dd8c8de762f4564201eef295d8",
+      "temp_root_sha256": "13538fb3653107a77910c717d0448cd53e80ef31d45d0f4556355769816a9109",
+      "wheel_sha256": "0ddb10f4bdef4949b9afa395232a626015840e20a9285e46a8aaf428fdf2c3a1",
+      "workspace_root_sha256": "08859f8aef2135cb0e8e0ac081a788cb8a89345b1c377b87958a2cdca2104f00",
+      "attempt_record_sha256": "40bdb314471d183c41ee93b464f2bb8d866ec7c1646fa1721c8f8267de89d7ff"
+    },
+    {
+      "attempt_id": "attempt-2",
+      "journeys": {
+        "backend_unavailable_confined_zero_execution": true,
+        "bypass_authority_exact": true,
+        "credential_sentinel_unreadable": true,
+        "git_metadata_readable_write_denied": true,
+        "host_toolchain_works": true,
+        "network_off_denied": true,
+        "outside_write_denied": true,
+        "process_tree_inheritance": true,
+        "read_back_completion": true,
+        "timeout_cleanup_capped": true,
+        "workspace_write_succeeds": true
+      },
+      "sentinel_sha256": "570399f301080fe990c54dd3bce8be9099561e2c78218def75f3447ced93923f",
+      "temp_root_sha256": "29b4ab493cadbd3e906dc86e4e74b0e1f1b313c57c7e07411d896887c67a4d78",
+      "wheel_sha256": "0ddb10f4bdef4949b9afa395232a626015840e20a9285e46a8aaf428fdf2c3a1",
+      "workspace_root_sha256": "3a094da8ea3be167bcd46c89e4f255a8bb512eba3f8fb5281b6b7228017ee64d",
+      "attempt_record_sha256": "71f222746b8d4abc1de3365746073001b332e7b2bd9fb6dc472bc9e3ee94048b"
+    },
+    {
+      "attempt_id": "attempt-3",
+      "journeys": {
+        "backend_unavailable_confined_zero_execution": true,
+        "bypass_authority_exact": true,
+        "credential_sentinel_unreadable": true,
+        "git_metadata_readable_write_denied": true,
+        "host_toolchain_works": true,
+        "network_off_denied": true,
+        "outside_write_denied": true,
+        "process_tree_inheritance": true,
+        "read_back_completion": true,
+        "timeout_cleanup_capped": true,
+        "workspace_write_succeeds": true
+      },
+      "sentinel_sha256": "3524781e12c3c5e0eaaad66f6709d6cd0945a7bfce261a82dc95d3f2a56778f7",
+      "temp_root_sha256": "9ba8f96aa14f491ff14e06c5bb12bee5b7abe2ff05ab64d113051fd91156919d",
+      "wheel_sha256": "0ddb10f4bdef4949b9afa395232a626015840e20a9285e46a8aaf428fdf2c3a1",
+      "workspace_root_sha256": "fb321f0a4b5bd4562799cc50c89612d4131761b1998ff10e5a8532a8a3fe85b3",
+      "attempt_record_sha256": "105708efed744f14f1a70c40a7b9331a0aecaff7bb2c71bbb112d26c63701675"
+    }
+  ]
+}

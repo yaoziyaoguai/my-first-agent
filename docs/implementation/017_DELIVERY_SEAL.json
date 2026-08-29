@@ -1,0 +1,8 @@
+{
+  "schema": "my-first-agent/delivery-overlay-seal/v6",
+  "base_manifest_sha256": "4da6fe1f158bf0c57ef6c2160ce9076a90b1125404e32f5ee2d81fd86460e74f",
+  "parent_seal_sha256": "9b05e5523d2dafc4486b0f5394961e4846b5eacacb4e8aca400d59ca3bce612b",
+  "verifier_sha256": "420617c05052374a511375a70193c7075ce66293a1e66a6f0f7610a798a7b203",
+  "entry_count": 261,
+  "overlay_root_sha256": "0c261e7f3d38a782ccbe880693614e9bd218ea1d979f2a17fb79432fbac4d6a1"
+}

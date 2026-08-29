@@ -1,0 +1,158 @@
+"""017 SeatbeltConfiner.confine 合同：pure wrapping，绝不 spawn。
+
+confined modes 包装为 ``sandbox-exec -p <profile> <exact command>`` 并携带
+seatbelt/confined facts；danger-full-access 是 unconfined bypass（不探测
+backend）；backend unavailable ⇒ KnownNotExecuted（fail closed）。
+"""
+
+from __future__ import annotations
+
+import hashlib
+
+from agent.process.contracts import ExecutableIdentityV1
+from agent.runtime.contracts import KnownNotExecuted
+from agent.sandbox.contracts import (
+    ConfinedInvocationV1,
+    SandboxMode,
+    SandboxNetworkMode,
+)
+from agent.sandbox.policy import build_sandbox_policy, compile_seatbelt_profile
+from agent.sandbox.qualification import ProbeResult
+from agent.sandbox.seatbelt import SeatbeltConfiner
+from tests.sandbox.test_backend_qualification import FakeRunner
+
+CLOSED_ENV = {"HOME": "/tmp/sbx-home", "PATH": "/usr/bin:/bin", "TMPDIR": "/tmp/sbx-tmp"}
+
+
+def _identity(resolved: str = "/bin/true") -> ExecutableIdentityV1:
+    return ExecutableIdentityV1(
+        token=resolved,
+        resolved_path=resolved,
+        symlink_chain=(),
+        st_dev=1,
+        st_ino=2,
+        file_type="regular",
+        mode=0o755,
+        size=1000,
+        mtime_ns=1,
+        content_digest="a" * 64,
+        is_regular_executable=True,
+        identity_digest="b" * 64,
+    )
+
+
+def _command(argv=("-lc", "true"), resolved: str = "/bin/sh"):
+    from agent.process.contracts import ProcessCommandV1, ResourceProfile
+
+    return ProcessCommandV1(
+        executable_token=resolved,
+        argv=argv,
+        cwd="/tmp",
+        profile=ResourceProfile.SHORT,
+        executable_identity=_identity(resolved),
+    )
+
+
+def _policy(tmp_path, mode=SandboxMode.WORKSPACE_WRITE):
+    for name in ("work", "tmp", "state", "home"):
+        (tmp_path / name).mkdir(parents=True, exist_ok=True)
+    return build_sandbox_policy(
+        mode=mode,
+        network=SandboxNetworkMode.OFF,
+        workspace=tmp_path / "work",
+        temp_root=tmp_path / "tmp",
+        state_root=tmp_path / "state",
+        home=tmp_path / "home",
+        private_roots=(),
+    )
+
+
+def _qualified_confiner() -> tuple[SeatbeltConfiner, FakeRunner]:
+    fake = FakeRunner()
+    confiner = SeatbeltConfiner(runner=fake, platform_system="Darwin")
+    return confiner, fake
+
+
+def test_workspace_write_wraps_exact_command_and_records_facts(tmp_path):
+    confiner, _fake = _qualified_confiner()
+    command = _command()
+    policy = _policy(tmp_path)
+    invocation = confiner.confine(command, policy, CLOSED_ENV)
+    assert isinstance(invocation, ConfinedInvocationV1)
+    assert invocation.wrapped_executable == "/usr/bin/sandbox-exec"
+    tail = (command.executable_identity.resolved_path, *command.argv)
+    assert invocation.wrapped_argv[-len(tail):] == tail
+    assert invocation.wrapped_argv[:3] == ("/usr/bin/sandbox-exec", "-p", invocation.profile)
+    assert invocation.enforcement.backend == "seatbelt"
+    assert invocation.enforcement.enforcement == "confined"
+    assert invocation.enforcement.policy_digest == policy.policy_digest
+    expected_profile = compile_seatbelt_profile(policy)
+    assert invocation.profile == expected_profile
+    assert invocation.enforcement.profile_digest == hashlib.sha256(
+        expected_profile.encode(),
+    ).hexdigest()
+
+
+def test_read_only_confine_compiles_read_only_profile(tmp_path):
+    confiner, _fake = _qualified_confiner()
+    policy = _policy(tmp_path, mode=SandboxMode.READ_ONLY)
+    invocation = confiner.confine(_command(), policy, CLOSED_ENV)
+    assert "(deny network*)" in invocation.profile
+
+
+def test_danger_bypass_does_not_probe_backend_and_records_unconfined(tmp_path):
+    fake = FakeRunner(
+        result=ProbeResult(1, b"", b"would fail", False),
+    )
+    confiner = SeatbeltConfiner(runner=fake, platform_system="Linux")
+    policy = _policy(tmp_path, mode=SandboxMode.DANGER_FULL_ACCESS)
+    invocation = confiner.confine(_command(), policy, CLOSED_ENV)
+    assert invocation.wrapped_executable == "/bin/sh"
+    assert invocation.wrapped_argv == ("/bin/sh", "-lc", "true")
+    assert invocation.profile is None
+    assert invocation.enforcement.backend == "none"
+    assert invocation.enforcement.enforcement == "unconfined"
+    assert invocation.enforcement.policy_digest == policy.policy_digest
+    # bypass 不探测 backend：fake 零调用（即便 platform 不支持）
+    assert fake.calls == []
+
+
+def test_confined_backend_unavailable_fails_closed_without_spawn(tmp_path):
+    fake = FakeRunner()
+    confiner = SeatbeltConfiner(runner=fake, platform_system="Linux")
+    policy = _policy(tmp_path)
+    outcome = confiner.confine(_command(), policy, CLOSED_ENV)
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "unsupported_platform"
+    assert fake.calls == []
+
+
+def test_confined_missing_binary_fails_closed(tmp_path):
+    confiner = SeatbeltConfiner(
+        binary="/definitely/not/sandbox-exec",
+        runner=FakeRunner(),
+        platform_system="Darwin",
+    )
+    outcome = confiner.confine(_command(), _policy(tmp_path), CLOSED_ENV)
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "sandbox_exec_missing"
+
+
+def test_environment_is_copied_not_aliased(tmp_path):
+    confiner, _fake = _qualified_confiner()
+    env = dict(CLOSED_ENV)
+    invocation = confiner.confine(_command(), _policy(tmp_path), env)
+    env["HOME"] = "/mutated"
+    assert invocation.environment["HOME"] == "/tmp/sbx-home"
+
+
+def test_wrapped_argv_is_argument_vector_only(tmp_path):
+    confiner, _fake = _qualified_confiner()
+    command = _command(argv=("-c", "echo 'quoted; string'"))
+    invocation = confiner.confine(command, _policy(tmp_path), CLOSED_ENV)
+    assert isinstance(invocation, ConfinedInvocationV1)
+    # profile 内联经 -p 传递（不落盘、不进 shell）；命令以独立 argv 元素出现
+    assert invocation.wrapped_argv[2] == invocation.profile
+    assert invocation.wrapped_argv[-3:] == (
+        "/bin/sh", "-c", "echo 'quoted; string'",
+    )

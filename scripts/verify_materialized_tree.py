@@ -541,7 +541,7 @@ def assert_console_entrypoint_origin(
     *,
     python: str | None = None,
     neutral_cwd: Path | None = None,
-    entrypoints: tuple[tuple[str, str], ...] = CONSOLE_ENTRYPOINTS,
+    entrypoints: tuple[tuple[str, str] | tuple[str, str, str], ...] = CONSOLE_ENTRYPOINTS,
 ) -> tuple[bool, str]:
     """显式验证 console entrypoint 来自 prefix 安装而非 dirty tree（N1）。
 
@@ -565,7 +565,12 @@ def assert_console_entrypoint_origin(
     env = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "PYTHONHOME"}}
     env["PYTHONPATH"] = str(site_dir)
     prefix_resolved = prefix.resolve()
-    for name, target in entrypoints:
+    for entrypoint in entrypoints:
+        if len(entrypoint) == 2:
+            name, target = entrypoint
+            module = "main"
+        else:
+            name, module, target = entrypoint
         ep = bin_dir / name
         if not ep.is_file():
             return False, f"console entrypoint missing in prefix/bin: {name}"
@@ -581,8 +586,8 @@ def assert_console_entrypoint_origin(
         if not resolved.is_relative_to(prefix_resolved):
             return False, f"console entrypoint {name} escapes prefix"
         body = ep.read_text()
-        if f"from main import {target}" not in body:
-            return False, f"console entrypoint {name} does not target main:{target}"
+        if f"from {module} import {target}" not in body:
+            return False, f"console entrypoint {name} does not target {module}:{target}"
         # 端到端：prefix-first 环境、neutral cwd 下 --help 加载 wrapper（main + 传递导入）。
         try:
             result = subprocess.run(

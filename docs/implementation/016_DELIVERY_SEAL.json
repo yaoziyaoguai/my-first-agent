@@ -3,6 +3,6 @@
   "base_manifest_sha256": "4da6fe1f158bf0c57ef6c2160ce9076a90b1125404e32f5ee2d81fd86460e74f",
   "parent_seal_sha256": "8c4e309e5866616e7aea1ac261d14d8b9d7bfa06c2c2bfef312592cfb01e8095",
   "verifier_sha256": "d9c13de5fb35a34c94362946ec66aa536eb7aa6135dce1e412edd84d8a3ce8a9",
-  "entry_count": 216,
-  "overlay_root_sha256": "25e8109724caa41ca726a3b6be9a6368d2627645a26516a8b55ba50f582fd9c2"
+  "entry_count": 225,
+  "overlay_root_sha256": "3a58a16f540d034f236b91a2300959c5fcf24d60dbcae8ec92f3f7a5e932801d"
 }

@@ -1,0 +1,332 @@
+{
+  "attempts": [
+    {
+      "attempt_id": "attempt-1",
+      "claim_gate": {
+        "exit_code": 0,
+        "node_count": 68,
+        "pass_count": 68
+      },
+      "counters": {
+        "browser_calls": 0,
+        "credential_resolutions": 0,
+        "executor_initialize_calls": 1,
+        "executor_run_calls": 1,
+        "host_workspace_mutations": 0,
+        "purge_objects_confirmed": 1,
+        "sandbox_calls": 0,
+        "supervisor_run_calls": 1
+      },
+      "executor_identity_sha256": "02c2f439341583b5f0a4f0eb2c07ea9bee7ccc14074f4c59cda99ee04399c6ad",
+      "journey_subchecks": {
+        "J1": {
+          "closed_config_result": true,
+          "one_next_action": true,
+          "zero_effect": true
+        },
+        "J10": {
+          "automation_stays_paused": true,
+          "drift_zero_runtime": true,
+          "exact_open_handoff": true
+        },
+        "J11": {
+          "abandon_only": true,
+          "model_outcome_unknown": true,
+          "provider_replay_zero": true
+        },
+        "J12": {
+          "cleanup_unknown_pauses": true,
+          "deadline_not_completion": true,
+          "ownership_retained": true
+        },
+        "J13": {
+          "manifest_digest_bound": true,
+          "partial_purge_retains_record": true,
+          "tombstone_after_convergence": true
+        },
+        "J2": {
+          "preview_complete": true,
+          "preview_secret_path_free": true,
+          "proposal_inactive": true
+        },
+        "J3": {
+          "exact_preview_activated": true,
+          "list_read_only": true,
+          "show_current": true
+        },
+        "J4": {
+          "host_resolution_zero": true,
+          "not_due": true,
+          "provider_zero": true
+        },
+        "J5": {
+          "ready_before_start": true,
+          "runtime_caller_gate": true,
+          "terminal_result_once": true
+        },
+        "J6": {
+          "duplicate_replays_state": true,
+          "effect_zero": true,
+          "provider_tool_zero": true
+        },
+        "J7": {
+          "active_old_unchanged": true,
+          "future_cutover_exact": true,
+          "old_revision_active_until_approval": true
+        },
+        "J8": {
+          "blocked_runtime_not_repaired": true,
+          "pause_blocks_claim": true,
+          "resume_explicit": true
+        },
+        "J9": {
+          "cancel_pending": true,
+          "future_work_blocked": true,
+          "safe_terminal_only": true
+        }
+      },
+      "repository_identity_sha256": "fa933de3844761c1c631aaa7fce7407cf1179126b0a3e45e36195175cba5418c",
+      "runtime_gate": {
+        "exit_code": 0,
+        "node_count": 4,
+        "pass_count": 4
+      },
+      "supervisor_identity_sha256": "41f6307893382c4ee9141cb366286f7cc289c30c9e019bdd75797cf5f0ac6bf9",
+      "workspace_identity_sha256": "d4609115c30d7601fd2e0dff9f26465f249f91c478d2830ec934a41c2684d192"
+    },
+    {
+      "attempt_id": "attempt-2",
+      "claim_gate": {
+        "exit_code": 0,
+        "node_count": 68,
+        "pass_count": 68
+      },
+      "counters": {
+        "browser_calls": 0,
+        "credential_resolutions": 0,
+        "executor_initialize_calls": 1,
+        "executor_run_calls": 1,
+        "host_workspace_mutations": 0,
+        "purge_objects_confirmed": 1,
+        "sandbox_calls": 0,
+        "supervisor_run_calls": 1
+      },
+      "executor_identity_sha256": "0baf3285e4070f4969979689dc02379c6cb62dd6b4dab65dc13da78c5b96cdd1",
+      "journey_subchecks": {
+        "J1": {
+          "closed_config_result": true,
+          "one_next_action": true,
+          "zero_effect": true
+        },
+        "J10": {
+          "automation_stays_paused": true,
+          "drift_zero_runtime": true,
+          "exact_open_handoff": true
+        },
+        "J11": {
+          "abandon_only": true,
+          "model_outcome_unknown": true,
+          "provider_replay_zero": true
+        },
+        "J12": {
+          "cleanup_unknown_pauses": true,
+          "deadline_not_completion": true,
+          "ownership_retained": true
+        },
+        "J13": {
+          "manifest_digest_bound": true,
+          "partial_purge_retains_record": true,
+          "tombstone_after_convergence": true
+        },
+        "J2": {
+          "preview_complete": true,
+          "preview_secret_path_free": true,
+          "proposal_inactive": true
+        },
+        "J3": {
+          "exact_preview_activated": true,
+          "list_read_only": true,
+          "show_current": true
+        },
+        "J4": {
+          "host_resolution_zero": true,
+          "not_due": true,
+          "provider_zero": true
+        },
+        "J5": {
+          "ready_before_start": true,
+          "runtime_caller_gate": true,
+          "terminal_result_once": true
+        },
+        "J6": {
+          "duplicate_replays_state": true,
+          "effect_zero": true,
+          "provider_tool_zero": true
+        },
+        "J7": {
+          "active_old_unchanged": true,
+          "future_cutover_exact": true,
+          "old_revision_active_until_approval": true
+        },
+        "J8": {
+          "blocked_runtime_not_repaired": true,
+          "pause_blocks_claim": true,
+          "resume_explicit": true
+        },
+        "J9": {
+          "cancel_pending": true,
+          "future_work_blocked": true,
+          "safe_terminal_only": true
+        }
+      },
+      "repository_identity_sha256": "b66e78dada270748fb604972720091b9751a98af612c14f18145ee5d17796f3c",
+      "runtime_gate": {
+        "exit_code": 0,
+        "node_count": 4,
+        "pass_count": 4
+      },
+      "supervisor_identity_sha256": "fa387f50690c221c47dcf56aa50c7745c081f2eea521aa3d678e63de36ae7b85",
+      "workspace_identity_sha256": "d501f78d5c30b85590bdbbc581a15e85d8feb71e5ef5f31e1d5151e94ac8657b"
+    },
+    {
+      "attempt_id": "attempt-3",
+      "claim_gate": {
+        "exit_code": 0,
+        "node_count": 68,
+        "pass_count": 68
+      },
+      "counters": {
+        "browser_calls": 0,
+        "credential_resolutions": 0,
+        "executor_initialize_calls": 1,
+        "executor_run_calls": 1,
+        "host_workspace_mutations": 0,
+        "purge_objects_confirmed": 1,
+        "sandbox_calls": 0,
+        "supervisor_run_calls": 1
+      },
+      "executor_identity_sha256": "c42f99c9e0d3c7c8230cb01b8b016549e0097df476fdfbbae500a35419a38ce2",
+      "journey_subchecks": {
+        "J1": {
+          "closed_config_result": true,
+          "one_next_action": true,
+          "zero_effect": true
+        },
+        "J10": {
+          "automation_stays_paused": true,
+          "drift_zero_runtime": true,
+          "exact_open_handoff": true
+        },
+        "J11": {
+          "abandon_only": true,
+          "model_outcome_unknown": true,
+          "provider_replay_zero": true
+        },
+        "J12": {
+          "cleanup_unknown_pauses": true,
+          "deadline_not_completion": true,
+          "ownership_retained": true
+        },
+        "J13": {
+          "manifest_digest_bound": true,
+          "partial_purge_retains_record": true,
+          "tombstone_after_convergence": true
+        },
+        "J2": {
+          "preview_complete": true,
+          "preview_secret_path_free": true,
+          "proposal_inactive": true
+        },
+        "J3": {
+          "exact_preview_activated": true,
+          "list_read_only": true,
+          "show_current": true
+        },
+        "J4": {
+          "host_resolution_zero": true,
+          "not_due": true,
+          "provider_zero": true
+        },
+        "J5": {
+          "ready_before_start": true,
+          "runtime_caller_gate": true,
+          "terminal_result_once": true
+        },
+        "J6": {
+          "duplicate_replays_state": true,
+          "effect_zero": true,
+          "provider_tool_zero": true
+        },
+        "J7": {
+          "active_old_unchanged": true,
+          "future_cutover_exact": true,
+          "old_revision_active_until_approval": true
+        },
+        "J8": {
+          "blocked_runtime_not_repaired": true,
+          "pause_blocks_claim": true,
+          "resume_explicit": true
+        },
+        "J9": {
+          "cancel_pending": true,
+          "future_work_blocked": true,
+          "safe_terminal_only": true
+        }
+      },
+      "repository_identity_sha256": "01fdb704bdde37abdf2fbb8dad1c2dc30590967024d5f735ff041b4b8a728df4",
+      "runtime_gate": {
+        "exit_code": 0,
+        "node_count": 4,
+        "pass_count": 4
+      },
+      "supervisor_identity_sha256": "283e55da30429aa4ad0e83e4d827c81b715a95490cecc76529e5bba404716094",
+      "workspace_identity_sha256": "d48f766029ed5afc23f162bbb37175a49914223c36bda8bfc4640ba194ed7403"
+    }
+  ],
+  "claims": {
+    "C1": true,
+    "C10": true,
+    "C11": true,
+    "C12": true,
+    "C13": true,
+    "C14": true,
+    "C15": true,
+    "C16": true,
+    "C17": true,
+    "C18": true,
+    "C19": true,
+    "C2": true,
+    "C20": true,
+    "C21": true,
+    "C22": true,
+    "C23": true,
+    "C24": true,
+    "C25": true,
+    "C3": true,
+    "C4": true,
+    "C5": true,
+    "C6": true,
+    "C7": true,
+    "C8": true,
+    "C9": true
+  },
+  "materialized_full_gate": {
+    "exit_code": 0,
+    "node_count": 2650,
+    "pass_count": 2650
+  },
+  "materialized_root_sha256": "05ba50896ea1e40af28407e9e2593e367b50fb1eccfd12626cccf2f7cb6940a4",
+  "runner_sha256": "f42bcd99ec522876a247420a5e3aee106a64913a2281cff5d568b3c1132e90de",
+  "schema": "my-first-agent/portable-automation-core-e3-receipt/v1",
+  "seal_sha256": "f9bf90ad0df0ced05ff4394acef04b563ae136669569a994bf6f3c38a83e68d1",
+  "source_full_gate": {
+    "exit_code": 0,
+    "node_count": 2654,
+    "pass_count": 2654
+  },
+  "spec_product_review_sha256": "9ddaf3d124e4c818d80794818f9b416fcc1d5c65d51852d00a6c771ecbc6b526",
+  "standards_architecture_review_sha256": "b9759b76a59c3e055f7e49ace5ea595730fa2fee2e5870c405ceb8637aa9e07e",
+  "status": "accepted/delivered",
+  "verifier_sha256": "2308298b35123022490cbc2034a315fbc1b02e5b6868b7d4b56c1501b0acc8fe",
+  "wheel_sha256": "d1b20b328bfa4d828332c26d94a8083056d895f5361e790a1ebc63973719b5e5"
+}

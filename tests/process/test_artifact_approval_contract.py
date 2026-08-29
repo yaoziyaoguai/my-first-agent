@@ -806,6 +806,24 @@ def test_015_v5_retargeted_pending_candidate_is_revoked_not_resigned(
     criterion, request = _prepare_artifact_request(tmp_path)
     document = json.loads(_encode_state(_awaiting_state(request, criterion)))
     document["schema_version"] = 5
+    document["state"].pop("background_occurrence_binding")
+    for field in (
+        "provider_call_intent",
+        "persisted_model_response",
+        "model_calls_used",
+        "tool_calls_used",
+        "sandbox_commands_used",
+        "browser_actions_used",
+        "input_tokens_used",
+        "output_tokens_used",
+    ):
+        document["state"]["active_run"].pop(field)
+    document["state"]["active_run"]["pending_request"].pop(
+        "sandbox_authority_candidate"
+    )
+    document["state"]["active_run"]["pending_request"].pop(
+        "browser_action_candidate"
+    )
     candidate = document["state"]["active_run"]["pending_request"][
         "process_authority_candidate"
     ]

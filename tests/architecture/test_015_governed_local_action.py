@@ -108,7 +108,16 @@ def test_015_has_closed_execution_authority_class() -> None:
 
     authority = getattr(contracts, "ExecutionAuthorityClass", None)
     assert authority is not None, "015 requires a closed ExecutionAuthorityClass contract"
-    assert {item.value for item in authority} == {"in_process", "local_same_uid_process"}
+    # 017 合法扩展：ISOLATED_SANDBOX——命令只在 qualified Docker 隔离
+    # environment 内执行（sandbox_exec 系列）；不授予 same-UID host process。
+    # 018 合法扩展：BROWSER_SESSION——动作只在专属 governed browser session
+    # 内执行，不授予 host process 或任意 desktop authority。
+    assert {item.value for item in authority} == {
+        "in_process",
+        "local_same_uid_process",
+        "isolated_sandbox",
+        "browser_session",
+    }
 
 
 def test_015_tool_identity_carries_explicit_execution_authority() -> None:

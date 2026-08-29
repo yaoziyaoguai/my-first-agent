@@ -40,6 +40,54 @@ U3 的 authoritative 状态只由 detached `docs/acceptance/016_FIRST_AGENT_1_0_
 `016_FIRST_AGENT_1_0_EXPERIENCE_DESIGN.md` 与
 `docs/acceptance/016_FIRST_AGENT_1_0_E3.md`。
 
+## 017 native sandbox status
+
+017 只扩展受治理的结构化本机执行，不新增 model/tool loop owner。唯一 `sandbox_exec` 继续经过
+`KernelToolRuntime` 的 policy/approval、`EXECUTING` checkpoint、one-shot authority lease 与 durable result；
+`read-only` / `workspace-write` 由 macOS Seatbelt confined，backend 不可用时零执行且无 `local_process`
+fallback。`danger-full-access` 仅在 exact approval 后作为 unconfined bypass，并在 receipt 中明确记录
+`backend=none / enforcement=unconfined`。
+
+当前 sealed identity 已通过 source gates、clean materialized deny-network gate（3 个需要建立本地 listener 的
+closed loopback controls 在同一 clean interpreter 下单独执行）和三次真实 Seatbelt E3，每次 11 条 journey
+全部为 true。最终 claim 由 detached
+`docs/acceptance/017_SANDBOXED_WORKSPACE_EXECUTION_INDEPENDENT_REVIEW.md` fail-closed 派生：只有它绑定当前 seal、
+verifier、runner、wheel 与 backend identity 并明确 PASS，017 才是 `accepted/delivered`；否则保持
+`implemented-candidate`。范围不包括任意 shell、浏览器自动化、后台 daemon、整机控制或跨平台 sandbox 保证。
+
+## 018 governed browser tasks status
+
+018 的专属隔离 Chromium（public-read 与 site-bound profile）、唯一 Runtime/ToolRuntime authority、
+exact approval、显式 user takeover、SSRF/prompt-injection 边界、download quarantine 与 closed browser
+readback evidence oracle 已实现。source、materialized tree 与真实 Chromium 3×13 E3 只能由同一
+delivery identity 的 seal/receipt/attestation 证明，旧 receipt 不得复用。
+
+018 的 authoritative promotion 状态只由 detached
+`docs/acceptance/018_GOVERNED_BROWSER_TASKS_INDEPENDENT_REVIEW.md` 决定：只有它绑定当前 seal、verifier、
+runner、wheel、Chromium identity 与三轮 receipt，并明确记录 `PASS` 时，018 才是
+`accepted/delivered`；文件缺失、pending、FAIL 或 identity 不匹配时均保持
+`implemented-candidate`。范围不包括个人 Chrome/桌面控制、任意网站兼容、后台 autonomy 或
+production-ready 第三方集成声明。
+
+## 019 portable durable automations status
+
+019 分成两个独立交付身份。`019-portable-control-core` 只包含 immutable definition、UTC
+schedule resolution、CAS lifecycle、READY/start/result protocol、Runtime/ToolRuntime authority、
+owned-workspace port、recovery/open 与 digest-bound purge。它只依赖 typed ports；不 import 或选择
+launchd/systemd/Cron、POSIX/Windows process/filesystem、Seatbelt、Playwright 或任何具体 host backend。
+
+portable core 的 authoritative promotion 状态只由 detached
+`docs/acceptance/019_CORE_INDEPENDENT_REVIEW.md` 决定：只有它绑定当前 019 seal、verifier、runner、
+wheel、materialized full suite 与三轮 13-journey receipt，并在 Spec/Product 和
+Standards/Architecture 两轴都记录 `PASS` 时，才是 `accepted/delivered`；否则保持
+`implemented-candidate`。即使 portable core accepted，也只表示控制协议可移植且闭合，不表示任一
+OS 已具备可运行的无人值守调度。
+
+`019-macos-host-profile` 是后续独立 qualification。只有其真实 owner-only/no-follow persistence、
+launchd wake、hard-deadline process cleanup、017 sandbox composition 和 U2B receipt 全部通过，才能
+声明“bounded background execution on macOS”。它的缺失或失败不降级 portable core；Linux、Windows、
+cloud 仍保持 `not_qualified`，不得从 macOS 证据外推。
+
 ## Current matrix
 
 | Capability | Current claim | Trusted evidence | Blocking closure | Permitted wording |

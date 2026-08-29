@@ -1,9 +1,15 @@
-"""Runtime-owned closed evidence oracles built only from durable raw facts."""
+"""Runtime-owned closed evidence oracles built only from durable raw facts.
+
+derive 失败后的缺口修复知识（未完成义务、可修工具、有界修复指引）也归本模块：
+reason 字符串由本模块 raise，修复分发与 raise 同文件维护，Runtime 只消费评估
+结果，不持有 evidence closure 知识。
+"""
 
 from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 from datetime import datetime
 
 from agent.runtime.contracts import (
@@ -17,15 +23,228 @@ from agent.runtime.contracts import (
     EvidenceRecord,
     FactKind,
     ProcessReceiptV1,
+    SandboxReceiptV1,
     SourceKind,
     SourceReceiptV1,
     canonical_json_digest,
     closed_evidence_id,
 )
+from agent.runtime.state import (
+    authoritative_process_entrypoints,
+    normalize_process_entrypoint,
+)
 
 
 class EvidenceVerificationError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class EvidenceGapAssessment:
+    """单个 derive 失败原因的统一修复评估。
+
+    ``repairable_tools`` 是「缺口候选修复工具 ∩ 当前可用工具」的投影；
+    ``repair_instruction`` 是缺口自身的有界修复指引，与工具可用性无关，
+    因此没有工具上下文的调用方也能取得指引。
+    """
+
+    reason: str
+    repairable_tools: tuple[str, ...]
+    repair_instruction: str
+
+
+_GENERIC_GAP_INSTRUCTION = (
+    "Do not repeat completion. Call the concrete tools needed to create the "
+    "missing evidence, or send blocked_claim if no safe action can advance the Goal."
+)
+
+
+@dataclass(frozen=True)
+class _GapRepairKnowledge:
+    """一个已知缺口族的修复知识：候选工具与专属指引必须同源维护。
+
+    ``instruction`` 为 ``None`` 表示该缺口没有专属程序，落入通用兜底指引；
+    ``tools`` 为空表示该缺口没有可映射的安全修复工具（指引仍可能存在）。
+    """
+
+    tools: tuple[str, ...] = ()
+    instruction: str | None = None
+
+
+# 键必须是 derive 实际 raise 的 reason 字面量；工具与指引在同一条目里成对
+# 演进，避免 Runtime 侧两个平行字符串分发器各自漂移。
+#
+# 单一保留的旧 asymmetry：旧 Runtime `_evidence_repair_instruction` 对该家族
+# 用 substring 匹配而 `_repairable_evidence_tools` 始终精确匹配。带额外上下文
+# 的 reason 仍取得专属指引，但不凭 substring 取得修复工具。
+_WEB_CONTENT_KIND_SUBSTRING = "required source kind must contain extracted web content"
+_WEB_CONTENT_KIND_REASON = (
+    "required source kind must contain extracted web content, not a search snippet"
+)
+_GAP_REPAIRS: dict[str, _GapRepairKnowledge] = {
+    "no exact read-back fact proves the filesystem criterion": _GapRepairKnowledge(
+        tools=("read_file",),
+    ),
+    "no exact read-back fact proves the research artifact": _GapRepairKnowledge(
+        tools=("read_file",),
+        instruction=(
+            "Do not repeat completion. Call read_file for the artifact, pass that "
+            "exact read-back text to build_citation_manifest with the existing source "
+            "refs, rewrite the citation sidecar with its canonical JSON, then read "
+            "both files back before a new completion claim."
+        ),
+    ),
+    # 第 74/82/88/90 轮 J8 最后一公里:canonical sidecar 已存在但 artifact 被
+    # 再次编辑或 manifest 绑定过期;重建是确定性程序(重读原文 → 重建 manifest
+    # → 重写 sidecar → 双 read-back → 重新 claim),不得把 blocked_claim 作出路。
+    "citation manifest is not bound to the exact artifact": _GapRepairKnowledge(
+        tools=("read_file", "build_citation_manifest", "write_file", "edit_file"),
+        instruction=(
+            "Do not repeat completion and do not report this Goal as blocked: the "
+            "current-Goal sources already exist. The citation sidecar no longer "
+            "matches the current artifact text. Call read_file for the artifact, "
+            "pass that exact read-back text to build_citation_manifest with the "
+            "existing current-Goal source refs and citation markers that occur in "
+            "that exact text, write the returned canonical JSON to the exact "
+            ".citations.json target with approval, read both files back, then "
+            "resend completion_claim."
+        ),
+    ),
+    "citation manifest is not bound to the current Goal": _GapRepairKnowledge(
+        tools=("read_file", "build_citation_manifest", "write_file", "edit_file"),
+        instruction=(
+            "Do not repeat completion and do not report this Goal as blocked: the "
+            "current-Goal sources already exist. The citation sidecar no longer "
+            "matches the current artifact text. Call read_file for the artifact, "
+            "pass that exact read-back text to build_citation_manifest with the "
+            "existing current-Goal source refs and citation markers that occur in "
+            "that exact text, write the returned canonical JSON to the exact "
+            ".citations.json target with approval, read both files back, then "
+            "resend completion_claim."
+        ),
+    ),
+    "citation manifest read-back is invalid": _GapRepairKnowledge(
+        tools=("read_file", "build_citation_manifest", "write_file", "edit_file"),
+        instruction=(
+            "Do not repeat completion and do not report this Goal as blocked: the "
+            "current-Goal sources already exist. The citation sidecar no longer "
+            "matches the current artifact text. Call read_file for the artifact, "
+            "pass that exact read-back text to build_citation_manifest with the "
+            "existing current-Goal source refs and citation markers that occur in "
+            "that exact text, write the returned canonical JSON to the exact "
+            ".citations.json target with approval, read both files back, then "
+            "resend completion_claim."
+        ),
+    ),
+    "each citation marker must occur in the artifact": _GapRepairKnowledge(
+        tools=("read_file", "build_citation_manifest", "write_file", "edit_file"),
+        instruction=(
+            "Do not repeat completion and do not report this Goal as blocked: the "
+            "current-Goal sources already exist. The citation sidecar no longer "
+            "matches the current artifact text. Call read_file for the artifact, "
+            "pass that exact read-back text to build_citation_manifest with the "
+            "existing current-Goal source refs and citation markers that occur in "
+            "that exact text, write the returned canonical JSON to the exact "
+            ".citations.json target with approval, read both files back, then "
+            "resend completion_claim."
+        ),
+    ),
+    "citation sidecar target requires admitted research provenance": (
+        _GapRepairKnowledge(
+            tools=("build_citation_manifest", "write_file", "edit_file"),
+            instruction=(
+                "Do not repeat completion. Rebuild the citation manifest from "
+                "current-Goal source refs, write its canonical JSON to the exact "
+                ".citations.json target with approval, and read both artifact and "
+                "sidecar back before retrying."
+            ),
+        )
+    ),
+    "required source kind must contain extracted web content, not a search snippet": (
+        _GapRepairKnowledge(
+            tools=("web_fetch",),
+            instruction=(
+                "Do not repeat completion. Fetch an unattempted source_ref from the "
+                "current Web Search, then rebuild and rewrite the citation sidecar "
+                "using the extracted receipt before retrying."
+            ),
+        )
+    ),
+    "truncated source receipt cannot prove research": _GapRepairKnowledge(
+        tools=("web_fetch",),
+        instruction=(
+            "Do not repeat completion or cite the truncated receipt. Call web_fetch "
+            "with a different unattempted source_ref from "
+            "FIRST_AGENT_RUNTIME_WEB_FETCH_REFS until the returned source is not "
+            "truncated, then rewrite the artifact and citation sidecar from that "
+            "receipt, read both back, and retry completion."
+        ),
+    ),
+    "artifact contains an invented URL": _GapRepairKnowledge(
+        tools=("edit_file", "read_file"),
+        instruction=(
+            "Do not repeat completion or fetch unrelated sources. Use edit_file on "
+            "the artifact to remove every literal URL that is not exactly a cited "
+            "current-Goal web_extracted_content origin_locator. Then read_file the "
+            "changed artifact, rebuild and rewrite the citation sidecar from that "
+            "exact text and existing source refs, read both targets back, and "
+            "retry completion."
+        ),
+    ),
+    "source receipt is not bound to the current Goal": _GapRepairKnowledge(
+        instruction=(
+            "Do not repeat completion. Some cited retrieval happened before this "
+            "Goal. Run materially different history, workspace, and Web source "
+            "queries now under trusted_goal, rebuild the report and citation "
+            "manifest only from those current-Goal source refs, rewrite both "
+            "targets, and read both back."
+        ),
+    ),
+    "required source class is not cited": _GapRepairKnowledge(
+        instruction=(
+            "Do not repeat completion. If the needed current-Goal source class "
+            "already exists in FIRST_AGENT_RUNTIME_SOURCE_REFS, do not retrieve it "
+            "again: remap each valid marker to a distinct source of the required "
+            "source class. Only retrieve a new source when that class is genuinely "
+            "absent; then retrieve a new history or workspace source and use its "
+            "new source ref. Rebuild the report and citation manifest, rewrite "
+            "both targets, and read both back before retrying."
+        ),
+    ),
+    "required source kind is not cited": _GapRepairKnowledge(
+        instruction=(
+            "Do not repeat completion. If the needed current-Goal source class "
+            "already exists in FIRST_AGENT_RUNTIME_SOURCE_REFS, do not retrieve it "
+            "again: remap each valid marker to a distinct source of the required "
+            "source class. Only retrieve a new source when that class is genuinely "
+            "absent; then retrieve a new history or workspace source and use its "
+            "new source ref. Rebuild the report and citation manifest, rewrite "
+            "both targets, and read both back before retrying."
+        ),
+    ),
+    # 第 65/70 轮 J11 实测:refs 抄错(复制了 revision 变更前的旧 trusted_goal
+    # 投影块)并无"缺失 evidence"可创建;此语境的唯一正确修复是逐字复制当前投影。
+    "completion claim is stale": _GapRepairKnowledge(
+        instruction=(
+            "Do not resend the same claim and do not report this Goal as blocked: "
+            "the required evidence already exists. The Goal revision or criterion "
+            "set changed since an earlier trusted_goal block. Copy goal_id, "
+            "goal_revision, and criterion_evidence_refs exactly, element for "
+            "element and in order, from the CURRENT trusted_goal block's "
+            "expected_completion_evidence_refs, then resend completion_claim."
+        ),
+    ),
+    "completion claim evidence refs are not exact": _GapRepairKnowledge(
+        instruction=(
+            "Do not resend the same claim and do not report this Goal as blocked: "
+            "the required evidence already exists. The Goal revision or criterion "
+            "set changed since an earlier trusted_goal block. Copy goal_id, "
+            "goal_revision, and criterion_evidence_refs exactly, element for "
+            "element and in order, from the CURRENT trusted_goal block's "
+            "expected_completion_evidence_refs, then resend completion_claim."
+        ),
+    ),
+}
 
 
 class ClosedEvidenceRegistry:
@@ -132,12 +351,166 @@ class ClosedEvidenceRegistry:
                     evidence_id=evidence_id,
                     observed_at=evidence_observed_at,
                 )
+            elif criterion.oracle_kind is EvidenceOracleKind.BROWSER_READBACK:
+                derived = self._browser_readback(
+                    state.facts,
+                    goal_id=goal.goal_id,
+                    goal_revision=goal.revision,
+                    criterion=criterion,
+                    evidence_id=evidence_id,
+                    observed_at=evidence_observed_at,
+                )
             else:
                 raise EvidenceVerificationError("criterion uses an unsupported oracle")
             if existing_record is not None and existing_record != derived:
                 raise EvidenceVerificationError("stored evidence does not match raw durable facts")
             records.append(derived)
         return tuple(records)
+
+    def assess_gap(
+        self,
+        reason: str,
+        *,
+        available_tools: tuple[str, ...] = (),
+    ) -> EvidenceGapAssessment:
+        """把 derive 失败原因评估为「可修工具 + 有界修复指引」。
+
+        Runtime 在 blocked/completion 修复路径消费该评估；未知原因落入
+        通用兜底指引且没有可修工具，保持原 fail-closed 语义。
+        """
+
+        knowledge = _GAP_REPAIRS.get(reason)
+        if knowledge is None:
+            return EvidenceGapAssessment(
+                reason=reason,
+                repairable_tools=(),
+                repair_instruction=(
+                    # 仅此一个家族保留旧 substring 指引语义；工具仍只走精确键。
+                    _GAP_REPAIRS[_WEB_CONTENT_KIND_REASON].instruction
+                    if _WEB_CONTENT_KIND_SUBSTRING in reason
+                    else _GENERIC_GAP_INSTRUCTION
+                ),
+            )
+        available = set(available_tools)
+        return EvidenceGapAssessment(
+            reason=reason,
+            repairable_tools=tuple(
+                name for name in knowledge.tools if name in available
+            ),
+            repair_instruction=(
+                knowledge.instruction
+                if knowledge.instruction is not None
+                else _GENERIC_GAP_INSTRUCTION
+            ),
+        )
+
+    def pending_obligation_tools(
+        self,
+        state: ConversationState,
+        *,
+        available_tools: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        """返回仍未准入或未被相关 attempt 支撑的 Goal 义务工具。"""
+
+        active = state.active_run
+        goal = state.goal
+        if active is None or goal is None:
+            return ()
+        admitted_ids = {
+            criterion.criterion_id
+            for criterion in goal.admitted_criteria
+            if criterion.mandatory
+        }
+        run_prefix = f"run:{active.run_id}:"
+        attempted_names: set[str] = set()
+        attempted_process_entrypoints: set[str] = set()
+        attempted_workspace_entrypoints: set[str] = set()
+        path_action_by_call_id: dict[str, tuple[str, str]] = {}
+        for fact in state.facts:
+            if fact.kind is not FactKind.TOOL_CALLS or not fact.fact_id.startswith(
+                run_prefix
+            ):
+                continue
+            for raw in fact.content.get("calls", ()):
+                if not isinstance(raw, dict):
+                    continue
+                call_id = raw.get("tool_call_id")
+                name = raw.get("name")
+                arguments = raw.get("arguments")
+                if isinstance(name, str):
+                    attempted_names.add(name)
+                if (
+                    name == "local_process"
+                    and isinstance(arguments, dict)
+                    and isinstance(arguments.get("executable"), str)
+                ):
+                    executable = arguments["executable"]
+                    normalized = normalize_process_entrypoint(executable)
+                    attempted_process_entrypoints.add(normalized)
+                    if executable.strip().strip("'\"").startswith("./"):
+                        attempted_workspace_entrypoints.add(normalized)
+                if (
+                    isinstance(call_id, str)
+                    and isinstance(name, str)
+                    and name in {"read_file", "write_file", "edit_file"}
+                    and isinstance(arguments, dict)
+                    and isinstance(arguments.get("path"), str)
+                ):
+                    path_action_by_call_id[call_id] = (name, arguments["path"])
+        successful_file_paths = {
+            path_action_by_call_id[call_id]
+            for fact in state.facts
+            if fact.kind is FactKind.TOOL_RESULT
+            and fact.fact_id.startswith(run_prefix)
+            and fact.content.get("executed") is True
+            and fact.content.get("is_error") is False
+            and isinstance((call_id := fact.content.get("tool_call_id")), str)
+            and call_id in path_action_by_call_id
+        }
+        available = set(available_tools)
+        requested_process_entrypoints = authoritative_process_entrypoints(state)
+        process_attempt_is_relevant = bool(attempted_process_entrypoints) and (
+            requested_process_entrypoints.issubset(
+                attempted_process_entrypoints
+            )
+            if requested_process_entrypoints
+            else bool(attempted_workspace_entrypoints)
+        )
+        required: list[str] = []
+        for criterion in goal.proposed_criteria:
+            if criterion.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST:
+                path = criterion.artifact_path
+                if criterion.criterion_id in admitted_ids and any(
+                    successful_path == path
+                    for _name, successful_path in successful_file_paths
+                ):
+                    # 成功的 exact write/edit/read 已把下一步收敛为 evidence
+                    # read-back 或 completion；失败的预读则不能替代仍可执行的写入。
+                    continue
+                for name in ("write_file", "edit_file"):
+                    if name in available:
+                        required.append(name)
+                        break
+                continue
+            if criterion.criterion_id in admitted_ids:
+                continue
+            elif (
+                criterion.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+                and criterion.criterion_id.startswith("criterion:required-public-web:")
+                and not attempted_names.intersection({"web_search", "web_fetch"})
+            ):
+                for name in ("web_search", "web_fetch"):
+                    if name in available:
+                        required.append(name)
+                        break
+            elif (
+                criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+                and criterion.criterion_id.startswith("criterion:required-local-process:")
+                and "local_process" in available
+                and not process_attempt_is_relevant
+            ):
+                required.append("local_process")
+        return tuple(dict.fromkeys(required))
 
     def _web_source_receipt(
         self,
@@ -647,6 +1020,130 @@ class ClosedEvidenceRegistry:
             observed_at=observed_at,
         )
 
+    def _browser_readback(
+        self,
+        facts: tuple[ConversationFact, ...],
+        *,
+        goal_id: str,
+        goal_revision: int,
+        criterion: AdmittedCriterion,
+        evidence_id: str,
+        observed_at: str,
+    ) -> EvidenceRecord:
+        """018 closed oracle：durable receipt + 同 session 之后的 fresh readback。
+
+        predicate 必须是 exact closed 形状（receipt_kind=browser_readback_v1 +
+        receipt_digest + session_ref + readback_observation_digest +
+        profile_revision + browser_identity_digest）。证据要求两条 durable
+        facts：非 error、executed、非 fake、outcome=effect_applied、
+        session/profile/browser identity 与 predicate 全等的 browser_action_v1
+        receipt，以及同一 session/profile/browser identity 在 receipt **之后**
+        产生的 digest 精确匹配的 browser_observe。identity 不用相邻顺序替代；
+        页面成功文案/prose 不是证据；本 oracle 是纯推导，不调用 browser/tools。
+        """
+        predicate = criterion.predicate
+        expected_keys = {
+            "receipt_kind",
+            "receipt_digest",
+            "session_ref",
+            "readback_observation_digest",
+            "profile_revision",
+            "browser_identity_digest",
+        }
+        if (
+            predicate.get("receipt_kind") != "browser_readback_v1"
+            or set(predicate) != expected_keys
+            or not isinstance(predicate.get("receipt_digest"), str)
+            or not isinstance(predicate.get("session_ref"), str)
+            or not isinstance(predicate.get("readback_observation_digest"), str)
+            or (
+                predicate.get("profile_revision") is not None
+                and type(predicate.get("profile_revision")) is not int
+            )
+            or not isinstance(predicate.get("browser_identity_digest"), str)
+        ):
+            raise EvidenceVerificationError(
+                "browser readback predicate must be exact"
+            )
+        receipt_digest = predicate["receipt_digest"]
+        session_ref = predicate["session_ref"]
+        readback_digest = predicate["readback_observation_digest"]
+        profile_revision = predicate["profile_revision"]
+        browser_identity_digest = predicate["browser_identity_digest"]
+        receipt_index = -1
+        receipt_fact: ConversationFact | None = None
+        for index, fact in enumerate(facts):
+            if fact.kind is not FactKind.TOOL_RESULT:
+                continue
+            metadata = fact.content.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("browser_receipt_kind") != "browser_action_v1":
+                continue
+            if fact.content.get("is_error") is True:
+                continue
+            if fact.content.get("executed") is False:
+                continue
+            if metadata.get("receipt_digest") != receipt_digest:
+                continue
+            if metadata.get("fake") or metadata.get("mock"):
+                continue
+            if metadata.get("outcome") != "effect_applied":
+                continue
+            if metadata.get("session_ref") != session_ref:
+                continue
+            if metadata.get("profile_revision") != profile_revision:
+                continue
+            if metadata.get("browser_identity_digest") != browser_identity_digest:
+                continue
+            # trusted Goal 绑定：receipt 必须属于当前 derive(goal_id, goal_revision)；
+            # 旧 Goal 的 internally-consistent 证据不得满足当前 completion。
+            if metadata.get("goal_id") != goal_id:
+                continue
+            if metadata.get("goal_revision") != goal_revision:
+                continue
+            receipt_fact = fact
+            receipt_index = index
+            break
+        if receipt_fact is None:
+            raise EvidenceVerificationError(
+                "no durable governed browser receipt proves the criterion"
+            )
+        # fresh readback：同 session 的 browser_observe，且严格在 receipt 之后。
+        readback_fact: ConversationFact | None = None
+        for fact in facts[receipt_index + 1 :]:
+            if fact.kind is not FactKind.TOOL_RESULT:
+                continue
+            metadata = fact.content.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            if (
+                metadata.get("browser_result_kind") == "browser_observe"
+                and metadata.get("session_ref") == session_ref
+                and metadata.get("observation_digest") == readback_digest
+                and metadata.get("profile_revision") == profile_revision
+                and metadata.get("browser_identity_digest") == browser_identity_digest
+                and metadata.get("goal_id") == goal_id
+                and metadata.get("goal_revision") == goal_revision
+                and fact.content.get("is_error") is not True
+                and fact.content.get("executed") is not False
+            ):
+                readback_fact = fact
+                break
+        if readback_fact is None:
+            raise EvidenceVerificationError(
+                "no fresh browser readback observation follows the receipt"
+            )
+        return self._record(
+            [receipt_fact, readback_fact],
+            goal_id=goal_id,
+            goal_revision=goal_revision,
+            criterion=criterion,
+            evidence_id=evidence_id,
+            oracle_identity="browser-readback:v1",
+            observed_at=observed_at,
+        )
+
     def _tool_receipt(
         self,
         facts: tuple[ConversationFact, ...],
@@ -659,6 +1156,15 @@ class ClosedEvidenceRegistry:
     ) -> EvidenceRecord:
         if criterion.predicate.get("receipt_kind") == "process_v1":
             return self._process_tool_receipt(
+                facts,
+                criterion=criterion,
+                goal_id=goal_id,
+                goal_revision=goal_revision,
+                evidence_id=evidence_id,
+                observed_at=observed_at,
+            )
+        if criterion.predicate.get("receipt_kind") == "native_sandbox_v1":
+            return self._native_sandbox_tool_receipt(
                 facts,
                 criterion=criterion,
                 goal_id=goal_id,
@@ -831,6 +1337,102 @@ class ClosedEvidenceRegistry:
             criterion=criterion,
             evidence_id=evidence_id,
             oracle_identity="process-receipt:v1",
+            observed_at=observed_at,
+        )
+
+    def _native_sandbox_tool_receipt(
+        self,
+        facts: tuple[ConversationFact, ...],
+        *,
+        criterion: AdmittedCriterion,
+        goal_id: str,
+        goal_revision: int,
+        evidence_id: str,
+        observed_at: str,
+    ) -> EvidenceRecord:
+        """017 native receipt oracle；host artifact 仍需独立 read-back。"""
+        predicate = criterion.predicate
+        required = {
+            "receipt_kind",
+            "receipt_digest",
+            "command_fingerprint",
+            "policy_digest",
+            "mode",
+            "network",
+            "backend",
+            "enforcement",
+            "outcome",
+        }
+        if set(predicate) != required:
+            raise EvidenceVerificationError("native sandbox receipt predicate must be exact")
+        if predicate.get("receipt_kind") != "native_sandbox_v1":
+            raise EvidenceVerificationError("native sandbox receipt kind mismatch")
+        expected_digest = predicate.get("receipt_digest")
+        if (
+            not isinstance(expected_digest, str)
+            or len(expected_digest) != 64
+            or any(c not in "0123456789abcdef" for c in expected_digest)
+        ):
+            raise EvidenceVerificationError("native sandbox receipt digest is malformed")
+        source: list[ConversationFact] = []
+        for fact in facts:
+            metadata = fact.content.get("metadata")
+            if (
+                fact.kind is not FactKind.TOOL_RESULT
+                or fact.content.get("is_error") is not False
+                or fact.content.get("executed") is not True
+                or not isinstance(metadata, dict)
+                or metadata.get("fake")
+                or metadata.get("mock")
+                or metadata.get("synthetic")
+            ):
+                continue
+            try:
+                receipt = SandboxReceiptV1.from_json(metadata.get("sandbox_receipt"))
+            except ValueError:
+                continue
+            projection = {
+                "sandbox_receipt_kind": "native_sandbox_v1",
+                "receipt_digest": receipt.receipt_digest,
+                "execution_authority": "isolated_sandbox",
+                "outcome": receipt.outcome,
+                "original_command_fingerprint": receipt.original_command_fingerprint,
+                "policy_digest": receipt.policy_digest,
+                "mode": receipt.mode,
+                "network": receipt.network,
+                "backend": receipt.backend,
+                "enforcement": receipt.enforcement,
+                "profile_digest": receipt.profile_digest,
+                "lease_id": receipt.lease_id,
+            }
+            if any(metadata.get(key) != value for key, value in projection.items()):
+                continue
+            if (
+                receipt.goal_id != goal_id
+                or receipt.goal_revision != goal_revision
+                or receipt.receipt_digest != expected_digest
+                or receipt.original_command_fingerprint
+                != predicate["command_fingerprint"]
+                or receipt.policy_digest != predicate["policy_digest"]
+                or receipt.mode != predicate["mode"]
+                or receipt.network != predicate["network"]
+                or receipt.backend != predicate["backend"]
+                or receipt.enforcement != predicate["enforcement"]
+                or receipt.outcome != predicate["outcome"]
+                or receipt.outcome != "exited"
+                or metadata.get("exit_code") != 0
+            ):
+                continue
+            source.append(fact)
+        if not source:
+            raise EvidenceVerificationError("no exact native sandbox receipt proves the criterion")
+        return self._record(
+            source[:1],
+            goal_id=goal_id,
+            goal_revision=goal_revision,
+            criterion=criterion,
+            evidence_id=evidence_id,
+            oracle_identity="native-sandbox-receipt:v1",
             observed_at=observed_at,
         )
 

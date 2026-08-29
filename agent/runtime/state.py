@@ -8,10 +8,12 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Mapping
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 from agent.runtime.contracts import (
+    SANDBOX_EXPIRY_MINUTES,
+    AbandonUnknownModelOutcome,
     AcknowledgeProviderDisclosure,
     Action,
     ActionDisposition,
@@ -20,12 +22,17 @@ from agent.runtime.contracts import (
     ActiveRunStatus,
     ApprovalGrant,
     ApprovalRequest,
+    BackgroundActionAuthorityV1,
     BeginAnswer,
     BlockedClaim,
+    BrowserAuthorityLeaseV1,
+    BrowserTakeoverRequestV1,
+    CancelBrowserTakeover,
     CancelGoal,
     CancelRun,
     CitationManifestV1,
     ClarificationRequest,
+    CompleteBrowserTakeover,
     CompletionClaim,
     ConfirmCriterion,
     ContinuationPhase,
@@ -51,8 +58,10 @@ from agent.runtime.contracts import (
     GoalStatus,
     InteractionState,
     PauseGoal,
+    PersistedModelResponseV1,
     ProcessAuthorityLeaseV1,
     ProposedCriterion,
+    ProviderCallIntentV1,
     ProviderDisclosureRequest,
     RecordedRunResult,
     RecoverUnknownObservation,
@@ -64,6 +73,7 @@ from agent.runtime.contracts import (
     ResumeGoal,
     RevokeProcessAuthority,
     RunStatus,
+    SandboxAuthorityLeaseV1,
     SideEffectClass,
     SourceKind,
     SourceReceiptV1,
@@ -925,6 +935,7 @@ def apply_goal_delta(state: ConversationState, delta: GoalDelta) -> Conversation
         evidence_records=(),
         completion_claim=None,
         process_leases=(),
+        sandbox_leases=(),
     )
 
 
@@ -1193,6 +1204,7 @@ def pause_goal(
         active_run=active_run,
         last_safe_result=result,
         process_leases=(),
+        sandbox_leases=(),
     )
 
 
@@ -1248,6 +1260,8 @@ def cancel_goal(
         active_run=active_run,
         last_safe_result=result,
         process_leases=(),
+        sandbox_leases=(),
+        browser_leases=(),
     )
 
 
@@ -1310,6 +1324,7 @@ def apply_control_request(
             completion_claim=None,
             interaction_state=InteractionState.CLARIFYING,
             active_run=None,
+            browser_leases=(),
             last_safe_result=RecordedRunResult(
                 status=RunStatus.COMPLETED,
                 run_id=active.run_id,
@@ -1530,6 +1545,7 @@ def verify_goal_completion(state: ConversationState) -> ConversationState:
         revision=state.revision + 1,
         goal=replace(goal, status=GoalStatus.VERIFIED_DONE, next_step=None),
         process_leases=(),
+        sandbox_leases=(),
     )
 
 
@@ -1639,11 +1655,41 @@ def _action_is_legal(state: ConversationState, action: Action) -> tuple[bool, st
             return False, "illegal_action_for_state"
         return True, None
 
+    if isinstance(action, (CompleteBrowserTakeover, CancelBrowserTakeover)):
+        # 018：takeover controls 是独立 user-only authority action；pending
+        # 必须存在且 identity exact 匹配，否则 fail closed。
+        pending_takeover = state.browser_takeover_pending
+        if pending_takeover is None:
+            return False, "illegal_action_for_state"
+        if action.request_id != pending_takeover.request_id:
+            return False, "browser_takeover_mismatch"
+        if isinstance(action, CompleteBrowserTakeover) and (
+            action.session_ref != pending_takeover.session_ref
+            or action.expected_profile_revision != pending_takeover.profile_revision
+        ):
+            return False, "browser_takeover_mismatch"
+        return True, None
+
     if isinstance(action, RevokeProcessAuthority):
         # revoke 是独立 authority action；expected_revision CAS 由 accept_action 通用处理。
         # unknown-effect recovery 优先，revoke 不假装取消已可能的 in-flight effect。
         if _has_unknown_effect(state):
             return False, "unknown_effect_recovery_required"
+        return True, None
+
+    if isinstance(action, AbandonUnknownModelOutcome):
+        binding = state.background_occurrence_binding
+        intent = active.provider_call_intent if active is not None else None
+        if (
+            binding is None
+            or active is None
+            or active.status is not ActiveRunStatus.MODEL_OUTCOME_UNKNOWN
+            or intent is None
+            or action.occurrence_id != binding.occurrence_id
+            or action.background_binding_digest != binding.binding_digest
+            or action.provider_call_intent_digest != intent.intent_digest
+        ):
+            return False, "model_outcome_abandonment_mismatch"
         return True, None
 
     if active is None:
@@ -1784,6 +1830,178 @@ def _mint_process_authority_lease(
     return replace(state, process_leases=(*state.process_leases, lease))
 
 
+def _mint_browser_authority_lease(
+    state: ConversationState,
+    pending: ApprovalRequest,
+    *,
+    approved_at: str | None = None,
+) -> ConversationState:
+    """ResolveApproval(approved=True) 对 browser candidate 铸造 durable lease。
+
+    lease 的 durable expiry 锚定 candidate 的 RFC3339 ``expires_at``（用户
+    在 exact approval 中确认的时限）；approval 等待不静默延长租期。
+    """
+
+    candidate = pending.browser_action_candidate
+    if candidate is None:
+        return state
+    if approved_at is None:
+        raise ValueError("approved_at is required for browser approval")
+    _require_zoned_rfc3339(approved_at)
+    lease = BrowserAuthorityLeaseV1.create(
+        lease_id=f"browser-lease:{candidate.candidate_id}",
+        candidate_digest=candidate.candidate_digest,
+        goal_id=candidate.goal_id,
+        goal_revision=candidate.goal_revision,
+        session_ref=candidate.session_ref,
+        browser_identity_digest=candidate.browser_identity_digest,
+        profile_ref=candidate.profile_ref,
+        profile_revision=candidate.profile_revision,
+        allowed_origins=candidate.allowed_origins,
+        mode=candidate.mode,
+        page_id=candidate.page_id,
+        frame_id=candidate.frame_id,
+        observation_digest=candidate.observation_digest,
+        action_digest=candidate.action_digest,
+        consequence=candidate.consequence,
+        approved_request_identity=pending.request_id,
+        issued_at=approved_at,
+        expires_at=candidate.expires_at,
+    )
+    return replace(state, browser_leases=(*state.browser_leases, lease))
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserTakeoverCompletion:
+    """complete takeover 的 closed 结果：期望 revision 递增 + 强制 fresh observe。
+
+    它不是 commit approval——不铸造任何 browser lease。
+    """
+
+    expected_profile_revision: int
+    requires_observe: bool
+
+
+def begin_browser_takeover(
+    state: ConversationState,
+    request: BrowserTakeoverRequestV1,
+) -> ConversationState:
+    """在 user-facing 暴露之前持久化 pending takeover（spec §7）。
+
+    已有 pending 时 fail closed；期间不产生任何 provider/tool 活动。
+    """
+    if state.browser_takeover_pending is not None:
+        raise ValueError("browser takeover already pending")
+    goal = state.goal
+    if (
+        goal is None
+        or goal.goal_id != request.goal_id
+        or goal.revision != request.goal_revision
+    ):
+        raise ValueError("browser takeover goal identity mismatch")
+    active = state.active_run
+    return replace(
+        state,
+        revision=state.revision + 1,
+        # takeover 可能改变页面与 profile；旧 action lease 立即失效。正在
+        # 运行的唯一 invocation 同时释放 ownership，typed complete/cancel
+        # 才能在后续 run_turn 重新 claim 并恢复同一 run。
+        browser_leases=(),
+        browser_takeover_pending=request,
+        active_run=(
+            replace(active, owner_invocation_id=None)
+            if active is not None
+            else None
+        ),
+    )
+
+
+def complete_browser_takeover(
+    state: ConversationState,
+    *,
+    request_id: str,
+    session_ref: str,
+    expected_profile_revision: int,
+) -> tuple[ConversationState, BrowserTakeoverCompletion]:
+    """校验 exact request/session/profile 后完成 takeover。
+
+    清 pending、期望 profile revision 递增、要求 fresh browser_observe；
+    不铸造任何 commit approval（browser_leases 原样不动）。
+    """
+    pending = state.browser_takeover_pending
+    if pending is None:
+        raise ValueError("browser takeover is not pending")
+    if (
+        request_id != pending.request_id
+        or session_ref != pending.session_ref
+        or expected_profile_revision != pending.profile_revision
+    ):
+        raise ValueError("browser takeover identity mismatch")
+    completion = BrowserTakeoverCompletion(
+        expected_profile_revision=pending.profile_revision + 1,
+        requires_observe=True,
+    )
+    cleared = replace(
+        state,
+        revision=state.revision + 1,
+        browser_takeover_pending=None,
+    )
+    return cleared, completion
+
+
+def cancel_browser_takeover(
+    state: ConversationState,
+    *,
+    request_id: str,
+) -> ConversationState:
+    pending = state.browser_takeover_pending
+    if pending is None or pending.request_id != request_id:
+        raise ValueError("browser takeover is not pending")
+    return replace(
+        state,
+        revision=state.revision + 1,
+        browser_takeover_pending=None,
+    )
+
+
+def _mint_sandbox_authority_lease(
+    state: ConversationState,
+    pending: ApprovalRequest,
+    *,
+    approved_at: str | None = None,
+) -> ConversationState:
+    """ResolveApproval(approved=True) 对 sandbox candidate 铸造 durable lease。
+
+    对齐 process lease 语义：时效锚定批准时刻（zoned RFC3339，缺失/malformed/
+    naive 一律 fail closed）；非 sandbox approval（无 candidate）不铸造。
+    """
+
+    candidate = pending.sandbox_authority_candidate
+    if candidate is None:
+        return state
+    if approved_at is None:
+        raise ValueError("approved_at is required for sandbox approval")
+    lease_issued_at = _require_zoned_rfc3339(approved_at)
+    lease = SandboxAuthorityLeaseV1.create(
+        lease_id=f"sandbox-lease:{candidate.candidate_id}",
+        candidate_digest=candidate.candidate_digest,
+        goal_id=candidate.goal_id,
+        goal_revision=candidate.goal_revision,
+        workspace_identity_digest=candidate.workspace_identity_digest,
+        original_command_fingerprint=candidate.original_command_fingerprint,
+        policy_digest=candidate.policy_digest,
+        mode=candidate.mode,
+        network=candidate.network,
+        readable_command=candidate.readable_command,
+        trust_notice_id=candidate.trust_notice_id,
+        trust_notice_digest=candidate.trust_notice_digest,
+        approved_request_identity=pending.request_id,
+        issued_at=lease_issued_at,
+        expires_at=_add_minutes_rfc3339(lease_issued_at, SANDBOX_EXPIRY_MINUTES),
+    )
+    return replace(state, sandbox_leases=(*state.sandbox_leases, lease))
+
+
 def _apply_action(state: ConversationState, action: Action) -> ConversationState:
     if isinstance(action, AcknowledgeProviderDisclosure):
         return acknowledge_provider_disclosure(state, action)
@@ -1906,6 +2124,16 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
             expected_revision=action.goal_revision,
         )
 
+    if isinstance(action, CompleteBrowserTakeover):
+        completed, _outcome = complete_browser_takeover(
+            state,
+            request_id=action.request_id,
+            session_ref=action.session_ref,
+            expected_profile_revision=action.expected_profile_revision,
+        )
+        return completed
+    if isinstance(action, CancelBrowserTakeover):
+        return cancel_browser_takeover(state, request_id=action.request_id)
     if isinstance(action, RevokeProcessAuthority):
         if action.lease_id is None:
             retained: tuple[ProcessAuthorityLeaseV1, ...] = ()
@@ -1916,6 +2144,13 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                 if lease.lease_id != action.lease_id
             )
         return replace(state, process_leases=retained)
+    if isinstance(action, AbandonUnknownModelOutcome):
+        return end_run(
+            state,
+            status=RunStatus.FAILED_FATAL,
+            code="model_outcome_abandoned",
+            message="Unknown provider outcome was abandoned for this occurrence.",
+        )
 
     active = state.active_run
     if active is None:
@@ -1942,6 +2177,12 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
             updated_state = _mint_process_authority_lease(
                 updated_state, pending, approved_at=action.approved_at
             )
+            updated_state = _mint_sandbox_authority_lease(
+                updated_state, pending, approved_at=action.approved_at
+            )
+            updated_state = _mint_browser_authority_lease(
+                updated_state, pending, approved_at=action.approved_at
+            )
             updated_state = _admit_process_artifact_criterion(
                 updated_state, pending, action=action,
             )
@@ -1960,13 +2201,21 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                 action=action,
                 active=active,
             )
+        browser_candidate = pending.browser_action_candidate
+        rejection_text = "User rejected the requested tool action."
+        if browser_candidate is not None:
+            rejection_text = (
+                f"The requested browser {browser_candidate.consequence} action was not "
+                "run because you declined approval. No browser effect was executed."
+            )
         rejection = ConversationFact(
             fact_id=f"action:{action.action_seq}:rejection",
             kind=FactKind.TOOL_RESULT,
             content={
                 "tool_call_id": pending.tool_call_id,
-                "text": "User rejected the requested tool action.",
+                "text": rejection_text,
                 "is_error": True,
+                "executed": False,
                 "rejected": True,
             },
         )
@@ -2872,6 +3121,129 @@ def claim_run(state: ConversationState, invocation_id: str) -> ConversationState
     )
 
 
+def begin_provider_call(
+    state: ConversationState,
+    intent: ProviderCallIntentV1,
+    *,
+    input_tokens: int,
+) -> ConversationState:
+    active = state.active_run
+    binding = state.background_occurrence_binding
+    if (
+        active is None
+        or binding is None
+        or active.status is not ActiveRunStatus.RUNNABLE
+        or active.phase is not ContinuationPhase.MODEL
+        or active.owner_invocation_id is None
+        or intent.occurrence_binding_digest != binding.binding_digest
+        or intent.provider_call_index != active.model_calls_used + 1
+        or not isinstance(input_tokens, int)
+        or isinstance(input_tokens, bool)
+        or input_tokens < 0
+    ):
+        raise ValueError("background provider intent does not bind the active run")
+    return replace(
+        state,
+        revision=state.revision + 1,
+        active_run=replace(
+            active,
+            status=ActiveRunStatus.MODEL_EXECUTING,
+            provider_call_intent=intent,
+            persisted_model_response=None,
+            model_calls_used=intent.provider_call_index,
+            input_tokens_used=active.input_tokens_used + input_tokens,
+        ),
+    )
+
+
+def record_provider_response(
+    state: ConversationState,
+    response: PersistedModelResponseV1,
+) -> ConversationState:
+    active = state.active_run
+    intent = active.provider_call_intent if active is not None else None
+    if (
+        active is None
+        or active.status is not ActiveRunStatus.MODEL_EXECUTING
+        or intent is None
+        or active.persisted_model_response is not None
+        or response.request_digest != intent.request_digest
+    ):
+        raise ValueError("persisted response does not bind the active provider call")
+    return replace(
+        state,
+        revision=state.revision + 1,
+        # normalized response 先 durable，再由 loop 执行任何 control/tool reduction。
+        # output usage 同 response 一起入账，restart 不会重新计费或漏计。
+        active_run=replace(
+            active,
+            persisted_model_response=response,
+            output_tokens_used=(
+                active.output_tokens_used + response.response.bounded_output_tokens
+            ),
+        ),
+    )
+
+
+def consume_provider_response(state: ConversationState) -> ConversationState:
+    """仅构造待 CAS 的逻辑状态；调用者须与首个 response reduction 原子保存。"""
+
+    active = state.active_run
+    if (
+        active is None
+        or active.status is not ActiveRunStatus.MODEL_EXECUTING
+        or active.persisted_model_response is None
+    ):
+        raise ValueError("durable provider response required")
+    return replace(
+        state,
+        active_run=replace(
+            active,
+            status=ActiveRunStatus.RUNNABLE,
+            provider_call_intent=None,
+            persisted_model_response=None,
+        ),
+    )
+
+
+def reclaim_background_run(state: ConversationState, invocation_id: str) -> ConversationState:
+    active = state.active_run
+    if active is None or state.background_occurrence_binding is None:
+        raise ValueError("background active run required")
+    if active.phase is not ContinuationPhase.MODEL or active.status not in {
+        ActiveRunStatus.RUNNABLE,
+        ActiveRunStatus.MODEL_EXECUTING,
+    }:
+        raise ValueError("background run is not safely reclaimable")
+    if not invocation_id:
+        raise ValueError("invocation_id must not be empty")
+    return replace(
+        state,
+        revision=state.revision + 1,
+        active_run=replace(active, owner_invocation_id=invocation_id),
+    )
+
+
+def mark_model_outcome_unknown(state: ConversationState) -> ConversationState:
+    active = state.active_run
+    if (
+        active is None
+        or active.status is not ActiveRunStatus.MODEL_EXECUTING
+        or active.provider_call_intent is None
+        or active.persisted_model_response is not None
+    ):
+        raise ValueError("unresolved provider call intent required")
+    return replace(
+        state,
+        revision=state.revision + 1,
+        active_run=replace(
+            active,
+            status=ActiveRunStatus.MODEL_OUTCOME_UNKNOWN,
+            owner_invocation_id=None,
+        ),
+    )
+
+
 def start_tool_batch(
     state: ConversationState,
     calls: tuple[ToolCall, ...],
@@ -3056,6 +3428,9 @@ def mark_executing(
     request_identity: str | None = None,
     execution_authority: ExecutionAuthorityClass = ExecutionAuthorityClass.IN_PROCESS,
     process_lease_id: str | None = None,
+    sandbox_lease_id: str | None = None,
+    browser_lease_id: str | None = None,
+    background_action_authority: BackgroundActionAuthorityV1 | None = None,
 ) -> ConversationState:
     active = state.active_run
     if (
@@ -3069,6 +3444,35 @@ def mark_executing(
     current_call = active.tool_calls[active.batch_cursor]
     if current_call.tool_call_id != tool_call_id:
         raise ValueError("executing intent must bind the current tool call")
+    background_binding = state.background_occurrence_binding
+    if background_binding is None:
+        if background_action_authority is not None:
+            raise ValueError("ordinary run cannot consume background action authority")
+    else:
+        if active.tool_calls_used >= background_binding.tool_call_limit:
+            raise ValueError("background tool-call budget is exhausted")
+        class_counter: int | None = None
+        class_limit: int | None = None
+        expected_class: str | None = None
+        if execution_authority is ExecutionAuthorityClass.ISOLATED_SANDBOX:
+            class_counter = active.sandbox_commands_used
+            class_limit = background_binding.sandbox_command_limit
+            expected_class = "sandbox_confined"
+        elif execution_authority is ExecutionAuthorityClass.BROWSER_SESSION:
+            class_counter = active.browser_actions_used
+            class_limit = background_binding.browser_action_limit
+            expected_class = "browser_public_observe"
+        if class_counter is not None and class_counter >= class_limit:
+            raise ValueError(f"background {expected_class} budget is exhausted")
+        if background_action_authority is not None and (
+                expected_class is None
+                or class_counter is None
+                or background_action_authority.occurrence_binding_digest
+                != background_binding.binding_digest
+                or background_action_authority.action_class != expected_class
+                or background_action_authority.budget_ordinal != class_counter + 1
+        ):
+            raise ValueError("background action authority does not bind this transition")
     record = ExecutingIntentRecord(
         tool_call_id=tool_call_id,
         intent_digest=intent_digest,
@@ -3106,15 +3510,75 @@ def mark_executing(
         if not consumed:
             raise ValueError("process lease use could not bind the executing intent")
         process_leases = tuple(incremented)
+    if (
+        execution_authority is ExecutionAuthorityClass.ISOLATED_SANDBOX
+        and sandbox_lease_id is None
+        and (
+            background_action_authority is None
+            or background_action_authority.action_class != "sandbox_confined"
+        )
+    ):
+        raise ValueError(
+            "sandbox executing intent must consume an exact durable lease"
+        )
+    sandbox_leases = state.sandbox_leases
+    if sandbox_lease_id is not None:
+        incremented_sandbox: list[SandboxAuthorityLeaseV1] = []
+        consumed_sandbox = False
+        for lease in sandbox_leases:
+            if lease.lease_id == sandbox_lease_id and not consumed_sandbox:
+                incremented_sandbox.append(
+                    lease.with_use_consumed(lease.uses_consumed + 1)
+                )
+                consumed_sandbox = True
+            else:
+                incremented_sandbox.append(lease)
+        if not consumed_sandbox:
+            raise ValueError("sandbox lease use could not bind the executing intent")
+        sandbox_leases = tuple(incremented_sandbox)
+    browser_leases = state.browser_leases
+    if browser_lease_id is not None:
+        incremented_browser: list[BrowserAuthorityLeaseV1] = []
+        consumed_browser = False
+        for lease in browser_leases:
+            if lease.lease_id == browser_lease_id and not consumed_browser:
+                incremented_browser.append(
+                    lease.with_use_consumed(lease.uses_consumed + 1)
+                )
+                consumed_browser = True
+            else:
+                incremented_browser.append(lease)
+        if not consumed_browser:
+            raise ValueError("browser lease use could not bind the executing intent")
+        browser_leases = tuple(incremented_browser)
     return replace(
         state,
         revision=state.revision + 1,
         process_leases=process_leases,
+        sandbox_leases=sandbox_leases,
+        browser_leases=browser_leases,
         active_run=replace(
             active,
             phase=ContinuationPhase.EXECUTING,
             executing_intent=record,
             approval_grant=None,
+            tool_calls_used=(
+                active.tool_calls_used + 1
+                if background_binding is not None
+                else active.tool_calls_used
+            ),
+            sandbox_commands_used=(
+                active.sandbox_commands_used + 1
+                if background_binding is not None
+                and execution_authority is ExecutionAuthorityClass.ISOLATED_SANDBOX
+                else active.sandbox_commands_used
+            ),
+            browser_actions_used=(
+                active.browser_actions_used + 1
+                if background_binding is not None
+                and execution_authority is ExecutionAuthorityClass.BROWSER_SESSION
+                else active.browser_actions_used
+            ),
         ),
     )
 

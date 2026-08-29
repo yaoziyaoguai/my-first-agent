@@ -195,6 +195,48 @@ def test_scheduler_startup_failure_after_closeable_construction_reverse_closes_o
     assert closes == [1], f"closeable must be closed exactly once, got {closes}"
 
 
+def test_scheduler_close_stack_unwinds_in_reverse_construction_order(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """生命周期合同：close_stack 按构造逆序关闭，且每个只关一次。
+
+    ExitStack 按注册逆序 unwind；因此必须按构造正序注册才能得到逆序关闭。
+    单 closeable 的 once-ness 测试无法暴露方向错误，这里用两个有序 closeable
+    钉住顺序（与 main() 的注册模式对齐）。
+    """
+
+    import dataclasses
+
+    closes: list[str] = []
+
+    real_build = entrypoint.build_composition
+
+    def patched(*args, **kwargs):
+        composition = real_build(*args, **kwargs)
+        return dataclasses.replace(
+            composition,
+            close_stack=(
+                lambda: closes.append("constructed-first"),
+                lambda: closes.append("constructed-second"),
+                *composition.close_stack,
+            ),
+        )
+
+    monkeypatch.setattr(entrypoint, "build_composition", patched)
+
+    def boom(self):
+        raise ValueError("scheduler startup failure after closeable construction")
+
+    monkeypatch.setattr(entrypoint.ScheduledOccurrenceCaller, "run_once", boom)
+
+    output: list[str] = []
+    code = entrypoint.run_schedule(_argv(tmp_path), write_fn=output.append)
+    assert code == 2
+    assert closes == ["constructed-second", "constructed-first"], (
+        f"close_stack must unwind in reverse construction order, got {closes}"
+    )
+
+
 # --- scheduler state-root usability: it must be as usable as `--state` ---
 # `--state` auto-creates a locked 0700 parent dir on first use; the scheduler
 # state-root must do the same so the documented invocation works without a

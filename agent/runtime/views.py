@@ -49,6 +49,54 @@ class GoalView:
 
 
 @dataclass(frozen=True, slots=True)
+class BackgroundRecoveryView:
+    automation_id: str
+    automation_revision: int
+    occurrence_id: str
+    checkpoint_identity_digest: str
+    goal: GoalView
+
+
+def project_background_recovery(
+    state: ConversationState,
+    *,
+    automation_id: str,
+    automation_revision: int,
+    occurrence_id: str,
+    checkpoint_identity_digest: str,
+    definition_digest: str,
+) -> BackgroundRecoveryView:
+    """校验 automation handoff 后，只从精确 Runtime checkpoint 投影恢复状态。"""
+
+    binding = state.background_occurrence_binding
+    if binding is None:
+        raise ValueError("Runtime checkpoint has no background occurrence binding")
+    expected = (
+        automation_id,
+        automation_revision,
+        occurrence_id,
+        checkpoint_identity_digest,
+        definition_digest,
+    )
+    actual = (
+        binding.automation_id,
+        binding.automation_revision,
+        binding.occurrence_id,
+        binding.checkpoint_identity_digest,
+        binding.definition_digest,
+    )
+    if actual != expected:
+        raise ValueError("Runtime checkpoint does not match the automation handoff")
+    return BackgroundRecoveryView(
+        automation_id=automation_id,
+        automation_revision=automation_revision,
+        occurrence_id=occurrence_id,
+        checkpoint_identity_digest=checkpoint_identity_digest,
+        goal=project_goal_view(state),
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class ProcessLeaseView:
     """active process authority lease 的 readable 投影（design §12.2）。
 
@@ -434,3 +482,32 @@ def _blocked_details(
             resume if isinstance(resume, str) else None,
         )
     return None, (), None
+
+
+_TAKEOVER_SESSION_UNSET = object()
+
+
+def project_browser_takeover_status(
+    state: ConversationState,
+    *,
+    current_session_ref: object = _TAKEOVER_SESSION_UNSET,
+) -> str | None:
+    """restart/空闲投影：pending takeover 的准确状态与控件（spec §7）。
+
+    session 丢失或漂移 → needs-human；正常 pending → 等待用户完成浏览器
+    接管（/browser-done、/cancel），绝不投影成 "resuming"。
+    """
+    pending = state.browser_takeover_pending
+    if pending is None:
+        return None
+    if current_session_ref is _TAKEOVER_SESSION_UNSET or (
+        current_session_ref is None or current_session_ref != pending.session_ref
+    ):
+        return (
+            "Browser takeover session is missing or drifted; "
+            "needs human decision before any browser action resumes."
+        )
+    return (
+        "Browser takeover waiting: complete the sign-in in the dedicated browser "
+        "window, then run /browser-done or /cancel to return control."
+    )

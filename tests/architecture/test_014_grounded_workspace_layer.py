@@ -12,7 +12,13 @@ def test_014_closed_source_and_egress_contracts_are_materialized() -> None:
 
     egress_class = getattr(contracts, "EgressClass", None)
     assert egress_class is not None, "014 requires the closed EgressClass contract"
-    assert tuple(item.value for item in egress_class) == ("none", "public_network")
+    # 017 合法扩展：GOVERNED_NETWORK 是 sandbox 受治理出口（internal-only
+    # network + project-owned CONNECT proxy），仍需各自 exact approval。
+    assert tuple(item.value for item in egress_class) == (
+        "none",
+        "public_network",
+        "governed_network",
+    )
 
     source_kind = getattr(contracts, "SourceKind", None)
     assert source_kind is not None, "014 requires the closed SourceKind contract"

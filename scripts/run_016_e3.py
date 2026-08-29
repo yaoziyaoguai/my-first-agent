@@ -541,6 +541,7 @@ class InteractiveSession:
         deadline = time.monotonic() + timeout
         start = len(self._output)
         fd = self.process.stdout.fileno()
+        eof_observed = False
         while time.monotonic() < deadline:
             readable, _, _ = select.select([fd], [], [], min(1.0, deadline - time.monotonic()))
             if not readable:
@@ -549,6 +550,7 @@ class InteractiveSession:
                 continue
             chunk = os.read(fd, 4096)
             if not chunk:
+                eof_observed = True
                 break
             self._output.extend(chunk)
             if self._output.endswith(b"> "):
@@ -557,6 +559,13 @@ class InteractiveSession:
                 )
                 return self.latest_prompt
         returncode = self.process.poll()
+        if returncode is None and eof_observed:
+            remaining = max(0.0, deadline - time.monotonic())
+            if remaining:
+                try:
+                    returncode = self.process.wait(timeout=remaining)
+                except subprocess.TimeoutExpired:
+                    returncode = None
         if returncode is not None:
             raise InstalledConsoleTerminatedError(
                 CommandResult(

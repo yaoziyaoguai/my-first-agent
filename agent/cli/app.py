@@ -21,7 +21,9 @@ from agent.runtime.contracts import (
     Action,
     ActiveRunStatus,
     ApprovalRequest,
+    CancelBrowserTakeover,
     CancelRun,
+    CompleteBrowserTakeover,
     ConversationState,
     EgressClass,
     GoalStatus,
@@ -96,6 +98,7 @@ def run_repl(
     run_id_factory: Callable[[], str] | None = None,
     renderer: TerminalRenderer | None = None,
     approval_time_factory: Callable[[], str] = utc_now_rfc3339,
+    browser_profile_command: Callable[[str], str] | None = None,
 ) -> int:
     make_run_id = run_id_factory or (lambda: str(uuid4()))
     renderer = renderer or TerminalRenderer(write_fn)
@@ -107,6 +110,18 @@ def run_repl(
         if raw == "/exit":
             return 0
         if not raw.strip():
+            continue
+        if raw.strip().startswith("/browser-profiles"):
+            if browser_profile_command is None:
+                write_fn("Browser profiles are unavailable in this session.")
+                continue
+            suffix = raw.strip()[len("/browser-profiles"):].strip() or "list"
+            try:
+                write_fn(browser_profile_command(suffix))
+            except ValueError as error:
+                write_fn(str(error))
+            except OSError:
+                write_fn("Browser profile store is unavailable.")
             continue
 
         snapshot = store.load()
@@ -355,9 +370,41 @@ def _parse_action(
             return None, "No goal is active."
         return build_pause_goal(state), None
 
+    if command == "/browser-done":
+        if separator:
+            return None, "/browser-done does not accept arguments."
+        pending = state.browser_takeover_pending
+        if pending is None:
+            return None, "No browser takeover is pending."
+        return (
+            CompleteBrowserTakeover(
+                **common,
+                request_id=pending.request_id,
+                session_ref=pending.session_ref,
+                expected_profile_revision=pending.profile_revision,
+            ),
+            None,
+        )
+
+    if command == "/browser-cancel":
+        if separator:
+            return None, "/browser-cancel does not accept arguments."
+        pending = state.browser_takeover_pending
+        if pending is None:
+            return None, "No browser takeover is pending."
+        return CancelBrowserTakeover(**common, request_id=pending.request_id), None
+
     if command == "/cancel":
         if separator:
             return None, "/cancel does not accept arguments."
+        if state.browser_takeover_pending is not None:
+            return (
+                CancelBrowserTakeover(
+                    **common,
+                    request_id=state.browser_takeover_pending.request_id,
+                ),
+                None,
+            )
         if state.goal is not None and state.goal.status not in {
             GoalStatus.CANCELLED,
             GoalStatus.VERIFIED_DONE,

@@ -1,94 +1,19 @@
 {
   "schema": "first-agent-016-e3-receipt-v2",
-  "observed_at": "2026-08-25T16:02:17Z",
+  "observed_at": "2026-08-26T04:24:03Z",
   "provider_family": "openai_compatible",
   "model": "deepseek-v4-flash",
   "destination_digest": "a34e2a4708ed1c61008a151688838dcf1c44d4e7f08054633e72ba7c0b16cfc1",
   "delivery_identity": {
-    "seal_sha256": "80d23e4b3a8cf00a88b08ffc943d0fc7067f55a6bfc4762bdb7cedb7644b8f3a",
-    "entry_count": 216,
-    "overlay_root_sha256": "25e8109724caa41ca726a3b6be9a6368d2627645a26516a8b55ba50f582fd9c2",
+    "seal_sha256": "9b05e5523d2dafc4486b0f5394961e4846b5eacacb4e8aca400d59ca3bce612b",
+    "entry_count": 225,
+    "overlay_root_sha256": "3a58a16f540d034f236b91a2300959c5fcf24d60dbcae8ec92f3f7a5e932801d",
     "verifier_sha256": "d9c13de5fb35a34c94362946ec66aa536eb7aa6135dce1e412edd84d8a3ce8a9"
   },
   "attempts": [
     {
       "attempt_id": "attempt-1",
-      "install_artifact_sha256": "1b328e2899b969f1dda144b0d78f97d79645edb7b60b032c562a521691327abc",
-      "journey_verdicts": {
-        "J1": true,
-        "J2": true,
-        "J3": true,
-        "J4": true,
-        "J5": true,
-        "J6": true,
-        "J7": true,
-        "J8": true,
-        "J9": true,
-        "J10": true,
-        "J11": true,
-        "J12": true
-      },
-      "claims": {
-        "clean_install_exposes_console_entry_point": true,
-        "installed_version_matches_promoted_release": true,
-        "first_unconfigured_launch_has_one_action_and_zero_effects": true,
-        "guided_setup_persists_no_secret_and_sends_nothing": true,
-        "web_setup_uses_product_entry_point_and_persists_no_secret": true,
-        "configured_start_needs_no_provider_flags": true,
-        "startup_projection_is_readable_and_protocol_free": true,
-        "web_absence_or_missing_credential_preserves_local_use": true,
-        "simple_question_creates_no_goal_or_tool_effect": true,
-        "empty_workspace_artifact_is_goal_first_and_read_back": true,
-        "existing_project_change_is_surgical_and_test_verified": true,
-        "web_research_has_approved_sends_and_durable_sources": true,
-        "mixed_task_uses_one_goal_and_one_runtime_path": true,
-        "rejected_process_has_zero_spawns_and_no_false_completion": true,
-        "correction_invalidates_old_intent_without_replaying_web": true,
-        "restart_resumes_without_duplicate_send_or_effect": true,
-        "owner_preference_control_is_scoped_and_restart_safe": true,
-        "pause_resume_cancel_project_readable_state_without_replay": true,
-        "multiple_candidates_and_unknown_outcome_need_no_internal_id": true,
-        "provider_failure_preserves_goal_and_has_no_false_completion": true,
-        "web_failure_preserves_local_use_and_source_truthfulness": true,
-        "successful_journeys_need_no_continue_mode_or_internal_id": true,
-        "all_completion_claims_are_rederived_from_durable_facts": true,
-        "receipts_outputs_and_profiles_are_secret_free": true,
-        "no_progress_watchdog_pauses_without_send_effect_or_false_completion": true
-      },
-      "counts": {
-        "model_responses": 7,
-        "model_send_attempts": 57,
-        "web_receipts": 49,
-        "web_send_attempts": 12,
-        "file_effects": 7,
-        "process_receipts": 3
-      },
-      "workspace_verdicts": {
-        "empty_artifact_exact": true,
-        "existing_edit_surgical": true,
-        "research_artifact_linked": true,
-        "mixed_artifact_exact": true,
-        "rejected_process_tree_unchanged": true,
-        "corrected_path_exact": true,
-        "restart_artifact_exact": true
-      },
-      "recovery_verdicts": {
-        "restart_no_replay": true,
-        "unknown_no_replay": true
-      },
-      "ux_verdicts": {
-        "file_approval_exact": true,
-        "web_approval_exact": true,
-        "simple_answer_relevant": true,
-        "process_approval_exact": true,
-        "provider_disclosure_exact": true,
-        "refusal_result_accurate": true,
-        "process_trust_notice_exact": true
-      }
-    },
-    {
-      "attempt_id": "attempt-2",
-      "install_artifact_sha256": "04cbd1e10a66bab451e67065ceea4213f653ea8fa9136c498abd454b836fc951",
+      "install_artifact_sha256": "2f2393ab5d9624bcb948b120b4d6a73cec432a9be92a898f82aacbec00e5ed22",
       "journey_verdicts": {
         "J1": true,
         "J2": true,
@@ -133,9 +58,9 @@
       "counts": {
         "model_responses": 7,
         "model_send_attempts": 61,
-        "web_receipts": 42,
-        "web_send_attempts": 9,
-        "file_effects": 7,
+        "web_receipts": 55,
+        "web_send_attempts": 13,
+        "file_effects": 8,
         "process_receipts": 3
       },
       "workspace_verdicts": {
@@ -152,18 +77,18 @@
         "unknown_no_replay": true
       },
       "ux_verdicts": {
-        "file_approval_exact": true,
         "web_approval_exact": true,
-        "simple_answer_relevant": true,
-        "process_approval_exact": true,
-        "provider_disclosure_exact": true,
         "refusal_result_accurate": true,
-        "process_trust_notice_exact": true
+        "process_trust_notice_exact": true,
+        "file_approval_exact": true,
+        "provider_disclosure_exact": true,
+        "process_approval_exact": true,
+        "simple_answer_relevant": true
       }
     },
     {
-      "attempt_id": "attempt-3",
-      "install_artifact_sha256": "32932c307b1144fda45ec607b4be2e474f491f4ef7a0a019db0b2f810137b631",
+      "attempt_id": "attempt-2",
+      "install_artifact_sha256": "9b5d7ab282bbceb03dfe0dc66d9266e6129aaf5e75f36205ea370eebf7fbec27",
       "journey_verdicts": {
         "J1": true,
         "J2": true,
@@ -207,10 +132,10 @@
       },
       "counts": {
         "model_responses": 7,
-        "model_send_attempts": 74,
-        "web_receipts": 58,
-        "web_send_attempts": 11,
-        "file_effects": 10,
+        "model_send_attempts": 61,
+        "web_receipts": 49,
+        "web_send_attempts": 10,
+        "file_effects": 8,
         "process_receipts": 3
       },
       "workspace_verdicts": {
@@ -227,13 +152,88 @@
         "unknown_no_replay": true
       },
       "ux_verdicts": {
-        "file_approval_exact": true,
         "web_approval_exact": true,
-        "simple_answer_relevant": true,
-        "process_approval_exact": true,
-        "provider_disclosure_exact": true,
         "refusal_result_accurate": true,
-        "process_trust_notice_exact": true
+        "process_trust_notice_exact": true,
+        "file_approval_exact": true,
+        "provider_disclosure_exact": true,
+        "process_approval_exact": true,
+        "simple_answer_relevant": true
+      }
+    },
+    {
+      "attempt_id": "attempt-3",
+      "install_artifact_sha256": "a282a3d44ca96acf8d15b7d09d978ee186dad8f474ab4601f375f36ba61c3f75",
+      "journey_verdicts": {
+        "J1": true,
+        "J2": true,
+        "J3": true,
+        "J4": true,
+        "J5": true,
+        "J6": true,
+        "J7": true,
+        "J8": true,
+        "J9": true,
+        "J10": true,
+        "J11": true,
+        "J12": true
+      },
+      "claims": {
+        "clean_install_exposes_console_entry_point": true,
+        "installed_version_matches_promoted_release": true,
+        "first_unconfigured_launch_has_one_action_and_zero_effects": true,
+        "guided_setup_persists_no_secret_and_sends_nothing": true,
+        "web_setup_uses_product_entry_point_and_persists_no_secret": true,
+        "configured_start_needs_no_provider_flags": true,
+        "startup_projection_is_readable_and_protocol_free": true,
+        "web_absence_or_missing_credential_preserves_local_use": true,
+        "simple_question_creates_no_goal_or_tool_effect": true,
+        "empty_workspace_artifact_is_goal_first_and_read_back": true,
+        "existing_project_change_is_surgical_and_test_verified": true,
+        "web_research_has_approved_sends_and_durable_sources": true,
+        "mixed_task_uses_one_goal_and_one_runtime_path": true,
+        "rejected_process_has_zero_spawns_and_no_false_completion": true,
+        "correction_invalidates_old_intent_without_replaying_web": true,
+        "restart_resumes_without_duplicate_send_or_effect": true,
+        "owner_preference_control_is_scoped_and_restart_safe": true,
+        "pause_resume_cancel_project_readable_state_without_replay": true,
+        "multiple_candidates_and_unknown_outcome_need_no_internal_id": true,
+        "provider_failure_preserves_goal_and_has_no_false_completion": true,
+        "web_failure_preserves_local_use_and_source_truthfulness": true,
+        "successful_journeys_need_no_continue_mode_or_internal_id": true,
+        "all_completion_claims_are_rederived_from_durable_facts": true,
+        "receipts_outputs_and_profiles_are_secret_free": true,
+        "no_progress_watchdog_pauses_without_send_effect_or_false_completion": true
+      },
+      "counts": {
+        "model_responses": 7,
+        "model_send_attempts": 73,
+        "web_receipts": 57,
+        "web_send_attempts": 11,
+        "file_effects": 11,
+        "process_receipts": 3
+      },
+      "workspace_verdicts": {
+        "empty_artifact_exact": true,
+        "existing_edit_surgical": true,
+        "research_artifact_linked": true,
+        "mixed_artifact_exact": true,
+        "rejected_process_tree_unchanged": true,
+        "corrected_path_exact": true,
+        "restart_artifact_exact": true
+      },
+      "recovery_verdicts": {
+        "restart_no_replay": true,
+        "unknown_no_replay": true
+      },
+      "ux_verdicts": {
+        "web_approval_exact": true,
+        "refusal_result_accurate": true,
+        "process_trust_notice_exact": true,
+        "file_approval_exact": true,
+        "provider_disclosure_exact": true,
+        "process_approval_exact": true,
+        "simple_answer_relevant": true
       }
     }
   ]

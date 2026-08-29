@@ -12,7 +12,7 @@ import json
 import re
 from dataclasses import dataclass
 
-from agent.runtime.contracts import RunStatus
+from agent.runtime.contracts import BackgroundOccurrenceBindingV1, RunStatus
 
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 _MAX_MESSAGE = 4_000
@@ -32,6 +32,7 @@ class ScheduledOccurrence:
     scheduled_for_utc: str
     message: str
     workspace_scope_digest: str
+    background_binding: BackgroundOccurrenceBindingV1 | None = None
 
     def __post_init__(self) -> None:
         for label, value in (
@@ -48,6 +49,14 @@ class ScheduledOccurrence:
             raise SchedulerError("message must be bounded non-empty text")
         if not self.workspace_scope_digest:
             raise SchedulerError("workspace_scope_digest must not be empty")
+        if self.background_binding is not None:
+            if not isinstance(self.background_binding, BackgroundOccurrenceBindingV1):
+                raise SchedulerError("background_binding must use the closed v1 contract")
+            if (
+                self.background_binding.occurrence_id != self.occurrence_id
+                or self.background_binding.scheduled_for_utc != self.scheduled_for_utc
+            ):
+                raise SchedulerError("background_binding must bind the exact occurrence")
 
     @property
     def message_digest(self) -> str:
@@ -61,29 +70,31 @@ class ScheduledOccurrence:
 
     @property
     def conversation_id(self) -> str:
-        return _digest(
-            {
-                "kind": "scheduled-conversation",
-                "schedule_id": self.schedule_id,
-                "occurrence_id": self.occurrence_id,
-                "scheduled_for": self.scheduled_for_utc,
-                "message_digest": self.message_digest,
-                "workspace_scope_digest": self.workspace_scope_digest,
-            }
-        )
+        payload = {
+            "kind": "scheduled-conversation",
+            "schedule_id": self.schedule_id,
+            "occurrence_id": self.occurrence_id,
+            "scheduled_for": self.scheduled_for_utc,
+            "message_digest": self.message_digest,
+            "workspace_scope_digest": self.workspace_scope_digest,
+        }
+        if self.background_binding is not None:
+            payload["background_binding_digest"] = self.background_binding.binding_digest
+        return _digest(payload)
 
     @property
     def run_id(self) -> str:
-        return _digest(
-            {
-                "kind": "scheduled-run",
-                "schedule_id": self.schedule_id,
-                "occurrence_id": self.occurrence_id,
-                "scheduled_for": self.scheduled_for_utc,
-                "message_digest": self.message_digest,
-                "workspace_scope_digest": self.workspace_scope_digest,
-            }
-        )
+        payload = {
+            "kind": "scheduled-run",
+            "schedule_id": self.schedule_id,
+            "occurrence_id": self.occurrence_id,
+            "scheduled_for": self.scheduled_for_utc,
+            "message_digest": self.message_digest,
+            "workspace_scope_digest": self.workspace_scope_digest,
+        }
+        if self.background_binding is not None:
+            payload["background_binding_digest"] = self.background_binding.binding_digest
+        return _digest(payload)
 
 
 @dataclass(frozen=True, slots=True)

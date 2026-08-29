@@ -22,6 +22,10 @@ from agent.runtime.contracts import (
     ApprovalRequest,
     ArtifactConfirmationRequirementV1,
     AuthoritySourceKind,
+    BackgroundOccurrenceBindingV1,
+    BrowserActionCandidateV1,
+    BrowserAuthorityLeaseV1,
+    BrowserTakeoverRequestV1,
     CompletionClaim,
     ContinuationPhase,
     ControlReceipt,
@@ -39,27 +43,35 @@ from agent.runtime.contracts import (
     GoalStatus,
     InteractionState,
     LoadedSnapshot,
+    PersistedModelResponseV1,
     ProcessAuthorityCandidateV1,
     ProcessAuthorityLeaseV1,
     ProposedCriterion,
+    ProviderCallIntentV1,
     ProviderDisclosureReceipt,
     ProviderDisclosureRequest,
     RecordedRunResult,
     RecoveryRequest,
     ReplayRecord,
     RunStatus,
+    SandboxAuthorityCandidateV1,
+    SandboxAuthorityLeaseV1,
     SideEffectClass,
     ToolCall,
+    model_response_from_payload,
+    model_response_payload,
 )
 from agent.runtime.ports import CheckpointCASConflictError
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 # v3 是 process-authority migration source；v4 是旧 strict process schema；v5 加入
 # artifact confirmation。v6 绑定 candidate/lease 全部 immutable authority 字段，并把
 # readable command 持久化到 lease。旧版本显式重算收窄后的 digest；v6 漂移 fail closed。
 PROCESS_MIGRATION_VERSION = 3
 PREVIOUS_SCHEMA_VERSION = 4
 ARTIFACT_SCHEMA_VERSION = 5
+PROCESS_SCHEMA_VERSION = 6
+BROWSER_SCHEMA_VERSION = 7
 LEGACY_SCHEMA_VERSION = 2
 DEFAULT_MAX_STATE_BYTES = 2_000_000
 
@@ -434,6 +446,10 @@ def _encode_state(state: ConversationState) -> bytes:
             state.workspace_binding is not None
             or state.active_run is not None
             or state.process_leases
+            or state.sandbox_leases
+            or state.browser_leases
+            or state.browser_takeover_pending is not None
+            or state.background_occurrence_binding is not None
             or has_structured_proposal
         )
         else LEGACY_SCHEMA_VERSION
@@ -444,6 +460,7 @@ def _encode_state(state: ConversationState) -> bytes:
             state,
             include_workspace_binding=version == SCHEMA_VERSION,
             include_proposed_contract=version == SCHEMA_VERSION,
+            include_background_binding=version == SCHEMA_VERSION,
         ),
     }
     return (
@@ -465,6 +482,8 @@ def _decode_state(data: bytes) -> ConversationState:
         PROCESS_MIGRATION_VERSION,
         PREVIOUS_SCHEMA_VERSION,
         ARTIFACT_SCHEMA_VERSION,
+        PROCESS_SCHEMA_VERSION,
+        BROWSER_SCHEMA_VERSION,
         SCHEMA_VERSION,
     }:
         raise CheckpointVersionError(f"unsupported checkpoint schema version: {version}")
@@ -473,8 +492,17 @@ def _decode_state(data: bytes) -> ConversationState:
             _object(document["state"], "state"),
             include_workspace_binding=version != LEGACY_SCHEMA_VERSION,
             process_migration=version == PROCESS_MIGRATION_VERSION,
-            proposed_contract_current=version in {ARTIFACT_SCHEMA_VERSION, SCHEMA_VERSION},
-            process_contract_current=version == SCHEMA_VERSION,
+            proposed_contract_current=version
+            in {
+                ARTIFACT_SCHEMA_VERSION,
+                PROCESS_SCHEMA_VERSION,
+                BROWSER_SCHEMA_VERSION,
+                SCHEMA_VERSION,
+            },
+            process_contract_current=version
+            in {PROCESS_SCHEMA_VERSION, BROWSER_SCHEMA_VERSION, SCHEMA_VERSION},
+            sandbox_contract_current=version in {BROWSER_SCHEMA_VERSION, SCHEMA_VERSION},
+            background_contract_current=version == SCHEMA_VERSION,
         )
     except CheckpointVersionError:
         raise
@@ -487,6 +515,7 @@ def _state_to_dict(
     *,
     include_workspace_binding: bool,
     include_proposed_contract: bool,
+    include_background_binding: bool,
 ) -> dict:
     value = {
         "conversation_id": state.conversation_id,
@@ -520,10 +549,23 @@ def _state_to_dict(
             _control_receipt_to_dict(receipt) for receipt in state.control_receipts
         ],
         "process_leases": [_process_lease_to_dict(lease) for lease in state.process_leases],
+        "sandbox_leases": [
+            _sandbox_lease_to_dict(lease) for lease in state.sandbox_leases
+        ],
+        "browser_leases": [
+            _browser_lease_to_dict(lease) for lease in state.browser_leases
+        ],
+        "browser_takeover_pending": _browser_takeover_to_dict(
+            state.browser_takeover_pending
+        ),
     }
     if include_workspace_binding:
         value["workspace_binding"] = _workspace_binding_to_dict(
             state.workspace_binding
+        )
+    if include_background_binding:
+        value["background_occurrence_binding"] = _background_binding_to_dict(
+            state.background_occurrence_binding
         )
     return value
 
@@ -535,6 +577,8 @@ def _state_from_dict(
     process_migration: bool = False,
     proposed_contract_current: bool = False,
     process_contract_current: bool = False,
+    sandbox_contract_current: bool = False,
+    background_contract_current: bool = False,
 ) -> ConversationState:
     keys = {
         "conversation_id",
@@ -559,15 +603,32 @@ def _state_from_dict(
         if not process_migration:
             # v4/v5：process_leases 必备（缺失 → version error，fail closed）。
             keys.add("process_leases")
+        if process_contract_current:
+            # 017（v6 同代）：sandbox_leases 必备；旧版本缺失按空迁移。
+            keys.add("sandbox_leases")
     # migration（v3）：process_leases 缺失按空迁移；v2 legacy 同样允许缺失。
     if "process_leases" in value:
         keys.add("process_leases")
+    if "sandbox_leases" in value:
+        keys.add("sandbox_leases")
+    # 018：browser_leases/pending takeover 缺失按空迁移（旧 checkpoint）。
+    if "browser_leases" in value:
+        keys.add("browser_leases")
+    if "browser_takeover_pending" in value:
+        keys.add("browser_takeover_pending")
+    if background_contract_current:
+        keys.add("background_occurrence_binding")
     _expect_keys(value, keys, "state")
     return ConversationState(
         conversation_id=_string(value["conversation_id"], "conversation_id"),
         workspace_binding=(
             _workspace_binding_from_dict(value["workspace_binding"])
             if include_workspace_binding
+            else None
+        ),
+        background_occurrence_binding=(
+            _background_binding_from_dict(value["background_occurrence_binding"])
+            if background_contract_current
             else None
         ),
         revision=_integer(value["revision"], "revision"),
@@ -586,6 +647,8 @@ def _state_from_dict(
             strict_current=include_workspace_binding and not process_migration,
             strict_artifact_contract=proposed_contract_current,
             process_contract_current=process_contract_current,
+            sandbox_contract_current=sandbox_contract_current,
+            background_contract_current=background_contract_current,
         ),
         last_safe_result=_result_from_dict(value["last_safe_result"]),
         goal=_goal_from_dict(
@@ -627,6 +690,23 @@ def _state_from_dict(
             if process_contract_current
             else ()
         ),
+        # 017：sandbox_leases 仅在当前合同版本解码（携带 digest 直接构造，
+        # __post_init__ 校验重算一致——伪造/篡改一律 CheckpointInvariantError）。
+        sandbox_leases=(
+            tuple(
+                _sandbox_lease_from_dict(_object(item, "sandbox_lease"))
+                for item in _array(value.get("sandbox_leases", []), "sandbox_leases")
+            )
+            if sandbox_contract_current
+            else ()
+        ),
+        browser_leases=tuple(
+            _browser_lease_from_dict(_object(item, "browser_lease"))
+            for item in _array(value.get("browser_leases", []), "browser_leases")
+        ),
+        browser_takeover_pending=_browser_takeover_from_dict(
+            value.get("browser_takeover_pending")
+        ),
     )
 
 
@@ -667,6 +747,118 @@ def _workspace_binding_from_dict(value) -> ConversationWorkspaceBindingV1 | None
         binding_digest=_string(
             value["binding_digest"],
             "workspace_binding.binding_digest",
+        ),
+    )
+
+
+def _background_binding_to_dict(
+    binding: BackgroundOccurrenceBindingV1 | None,
+) -> dict | None:
+    if binding is None:
+        return None
+    return {
+        name: getattr(binding, name)
+        for name in binding.__dataclass_fields__
+    }
+
+
+def _background_binding_from_dict(value) -> BackgroundOccurrenceBindingV1 | None:
+    if value is None:
+        return None
+    value = _object(value, "background_occurrence_binding")
+    keys = {
+        "automation_id",
+        "automation_revision",
+        "occurrence_id",
+        "occurrence_index",
+        "scheduled_for_utc",
+        "definition_digest",
+        "grant_digest",
+        "claim_authority_digest",
+        "claim_capability_digest",
+        "checkpoint_identity_digest",
+        "deadline_utc",
+        "model_call_limit",
+        "tool_call_limit",
+        "sandbox_command_limit",
+        "browser_action_limit",
+        "max_input_tokens",
+        "max_output_tokens",
+        "binding_digest",
+    }
+    _expect_keys(value, keys, "background_occurrence_binding")
+    return BackgroundOccurrenceBindingV1(
+        automation_id=_string(
+            value["automation_id"],
+            "background_occurrence_binding.automation_id",
+        ),
+        automation_revision=_integer(
+            value["automation_revision"],
+            "background_occurrence_binding.automation_revision",
+        ),
+        occurrence_id=_string(
+            value["occurrence_id"],
+            "background_occurrence_binding.occurrence_id",
+        ),
+        occurrence_index=_integer(
+            value["occurrence_index"],
+            "background_occurrence_binding.occurrence_index",
+        ),
+        scheduled_for_utc=_string(
+            value["scheduled_for_utc"],
+            "background_occurrence_binding.scheduled_for_utc",
+        ),
+        definition_digest=_string(
+            value["definition_digest"],
+            "background_occurrence_binding.definition_digest",
+        ),
+        grant_digest=_string(
+            value["grant_digest"],
+            "background_occurrence_binding.grant_digest",
+        ),
+        claim_authority_digest=_string(
+            value["claim_authority_digest"],
+            "background_occurrence_binding.claim_authority_digest",
+        ),
+        claim_capability_digest=_string(
+            value["claim_capability_digest"],
+            "background_occurrence_binding.claim_capability_digest",
+        ),
+        checkpoint_identity_digest=_string(
+            value["checkpoint_identity_digest"],
+            "background_occurrence_binding.checkpoint_identity_digest",
+        ),
+        deadline_utc=_string(
+            value["deadline_utc"],
+            "background_occurrence_binding.deadline_utc",
+        ),
+        model_call_limit=_integer(
+            value["model_call_limit"],
+            "background_occurrence_binding.model_call_limit",
+        ),
+        tool_call_limit=_integer(
+            value["tool_call_limit"],
+            "background_occurrence_binding.tool_call_limit",
+        ),
+        sandbox_command_limit=_integer(
+            value["sandbox_command_limit"],
+            "background_occurrence_binding.sandbox_command_limit",
+        ),
+        browser_action_limit=_integer(
+            value["browser_action_limit"],
+            "background_occurrence_binding.browser_action_limit",
+        ),
+        max_input_tokens=_integer(
+            value["max_input_tokens"],
+            "background_occurrence_binding.max_input_tokens",
+        ),
+        max_output_tokens=_integer(
+            value["max_output_tokens"],
+            "background_occurrence_binding.max_output_tokens",
+        ),
+        binding_digest=_string(
+            value["binding_digest"],
+            "background_occurrence_binding.binding_digest",
         ),
     )
 
@@ -1179,6 +1371,18 @@ def _active_to_dict(active: ActiveRun | None) -> dict | None:
         "approval_grant": _approval_grant_to_dict(active.approval_grant),
         "approved_request_ids": list(active.approved_request_ids),
         "rejected_request_ids": list(active.rejected_request_ids),
+        "provider_call_intent": _provider_call_intent_to_dict(
+            active.provider_call_intent
+        ),
+        "persisted_model_response": _persisted_model_response_to_dict(
+            active.persisted_model_response
+        ),
+        "model_calls_used": active.model_calls_used,
+        "tool_calls_used": active.tool_calls_used,
+        "sandbox_commands_used": active.sandbox_commands_used,
+        "browser_actions_used": active.browser_actions_used,
+        "input_tokens_used": active.input_tokens_used,
+        "output_tokens_used": active.output_tokens_used,
     }
 
 
@@ -1188,6 +1392,8 @@ def _active_from_dict(
     strict_current: bool = False,
     strict_artifact_contract: bool = False,
     process_contract_current: bool = False,
+    sandbox_contract_current: bool = False,
+    background_contract_current: bool = False,
 ) -> ActiveRun | None:
     if value is None:
         return None
@@ -1205,6 +1411,19 @@ def _active_from_dict(
         "approved_request_ids",
         "rejected_request_ids",
     }
+    if background_contract_current:
+        keys.update(
+            {
+                "provider_call_intent",
+                "persisted_model_response",
+                "model_calls_used",
+                "tool_calls_used",
+                "sandbox_commands_used",
+                "browser_actions_used",
+                "input_tokens_used",
+                "output_tokens_used",
+            }
+        )
     _expect_keys(value, keys, "active_run")
     return ActiveRun(
         run_id=_string(value["run_id"], "active_run.run_id"),
@@ -1219,6 +1438,7 @@ def _active_from_dict(
             value["pending_request"],
             strict_artifact_contract=strict_artifact_contract,
             process_contract_current=process_contract_current,
+            sandbox_contract_current=sandbox_contract_current,
         ),
         executing_intent=_executing_from_dict(
             value["executing_intent"], strict_current=strict_current
@@ -1235,6 +1455,137 @@ def _active_from_dict(
         rejected_request_ids=tuple(
             _string(item, "rejected_request_id")
             for item in _array(value["rejected_request_ids"], "rejected_request_ids")
+        ),
+        provider_call_intent=(
+            _provider_call_intent_from_dict(value["provider_call_intent"])
+            if background_contract_current
+            else None
+        ),
+        persisted_model_response=(
+            _persisted_model_response_from_dict(value["persisted_model_response"])
+            if background_contract_current
+            else None
+        ),
+        model_calls_used=(
+            _integer(value["model_calls_used"], "active_run.model_calls_used")
+            if background_contract_current
+            else 0
+        ),
+        tool_calls_used=(
+            _integer(value["tool_calls_used"], "active_run.tool_calls_used")
+            if background_contract_current
+            else 0
+        ),
+        sandbox_commands_used=(
+            _integer(
+                value["sandbox_commands_used"],
+                "active_run.sandbox_commands_used",
+            )
+            if background_contract_current
+            else 0
+        ),
+        browser_actions_used=(
+            _integer(
+                value["browser_actions_used"],
+                "active_run.browser_actions_used",
+            )
+            if background_contract_current
+            else 0
+        ),
+        input_tokens_used=(
+            _integer(value["input_tokens_used"], "active_run.input_tokens_used")
+            if background_contract_current
+            else 0
+        ),
+        output_tokens_used=(
+            _integer(value["output_tokens_used"], "active_run.output_tokens_used")
+            if background_contract_current
+            else 0
+        ),
+    )
+
+
+def _provider_call_intent_to_dict(value: ProviderCallIntentV1 | None) -> dict | None:
+    if value is None:
+        return None
+    return {
+        "action_seq": value.action_seq,
+        "provider_call_index": value.provider_call_index,
+        "context_digest": value.context_digest,
+        "request_digest": value.request_digest,
+        "disclosure_digest": value.disclosure_digest,
+        "occurrence_binding_digest": value.occurrence_binding_digest,
+        "intent_digest": value.intent_digest,
+    }
+
+
+def _provider_call_intent_from_dict(value) -> ProviderCallIntentV1 | None:
+    if value is None:
+        return None
+    value = _object(value, "provider_call_intent")
+    keys = {
+        "action_seq",
+        "provider_call_index",
+        "context_digest",
+        "request_digest",
+        "disclosure_digest",
+        "occurrence_binding_digest",
+        "intent_digest",
+    }
+    _expect_keys(value, keys, "provider_call_intent")
+    return ProviderCallIntentV1(
+        action_seq=_integer(value["action_seq"], "provider_call_intent.action_seq"),
+        provider_call_index=_integer(
+            value["provider_call_index"],
+            "provider_call_intent.provider_call_index",
+        ),
+        context_digest=_string(
+            value["context_digest"], "provider_call_intent.context_digest"
+        ),
+        request_digest=_string(
+            value["request_digest"], "provider_call_intent.request_digest"
+        ),
+        disclosure_digest=_optional_string(
+            value["disclosure_digest"], "provider_call_intent.disclosure_digest"
+        ),
+        occurrence_binding_digest=_string(
+            value["occurrence_binding_digest"],
+            "provider_call_intent.occurrence_binding_digest",
+        ),
+        intent_digest=_string(
+            value["intent_digest"], "provider_call_intent.intent_digest"
+        ),
+    )
+
+
+def _persisted_model_response_to_dict(
+    value: PersistedModelResponseV1 | None,
+) -> dict | None:
+    if value is None:
+        return None
+    return {
+        "request_digest": value.request_digest,
+        "response": model_response_payload(value.response),
+        "response_digest": value.response_digest,
+    }
+
+
+def _persisted_model_response_from_dict(value) -> PersistedModelResponseV1 | None:
+    if value is None:
+        return None
+    value = _object(value, "persisted_model_response")
+    _expect_keys(
+        value,
+        {"request_digest", "response", "response_digest"},
+        "persisted_model_response",
+    )
+    return PersistedModelResponseV1(
+        request_digest=_string(
+            value["request_digest"], "persisted_model_response.request_digest"
+        ),
+        response=model_response_from_payload(value["response"]),
+        response_digest=_string(
+            value["response_digest"], "persisted_model_response.response_digest"
         ),
     )
 
@@ -1267,6 +1618,12 @@ def _pending_to_dict(pending) -> dict | None:
             "cost_class": pending.cost_class,
             "trust_notice_id": pending.trust_notice_id,
             "trust_notice_digest": pending.trust_notice_digest,
+            "sandbox_authority_candidate": _sandbox_authority_candidate_to_dict(
+                pending.sandbox_authority_candidate
+            ),
+            "browser_action_candidate": _browser_candidate_to_dict(
+                pending.browser_action_candidate
+            ),
             "process_authority_candidate": _process_authority_candidate_to_dict(
                 pending.process_authority_candidate
             ),
@@ -1291,6 +1648,7 @@ def _pending_from_dict(
     *,
     strict_artifact_contract: bool = False,
     process_contract_current: bool = True,
+    sandbox_contract_current: bool = False,
 ):
     if value is None:
         return None
@@ -1329,14 +1687,28 @@ def _pending_from_dict(
         basis_keys = {*legacy_keys, "approval_basis_revision"}
         process_keys = {*keys, "process_authority_candidate"}
         artifact_keys = {*process_keys, "artifact_confirmation_requirement"}
+        sandbox_keys = {*artifact_keys, "sandbox_authority_candidate"}
+        browser_keys = {*sandbox_keys, "browser_action_candidate"}
         known_key_sets = {
             frozenset(legacy_keys),
             frozenset(basis_keys),
             frozenset(keys),
             frozenset(process_keys),
             frozenset(artifact_keys),
+            frozenset(sandbox_keys),
+            frozenset(browser_keys),
+            frozenset(sandbox_keys),
         }
-        if strict_artifact_contract or actual_keys not in known_key_sets:
+        if sandbox_contract_current:
+            # 018 在现有 v7 中增加一个只会收窄权限的 optional candidate。
+            # 接受 017 已写出的 exact sandbox shape，并把缺失项迁移为 None；
+            # 当前 writer 始终物化 browser key，未知/部分字段仍 fail closed。
+            if actual_keys not in {
+                frozenset(sandbox_keys),
+                frozenset(browser_keys),
+            }:
+                _expect_keys(value, browser_keys, "approval_request")
+        elif strict_artifact_contract or actual_keys not in known_key_sets:
             _expect_keys(value, artifact_keys, "approval_request")
         state_revision = value["state_revision"]
         approval_basis_revision = value.get("approval_basis_revision")
@@ -1383,6 +1755,13 @@ def _pending_from_dict(
             trust_notice_digest=_optional_string(
                 value.get("trust_notice_digest"), "trust_notice_digest"
             ),
+            sandbox_authority_candidate=(
+                _sandbox_authority_candidate_from_dict(
+                    value.get("sandbox_authority_candidate")
+                )
+                if sandbox_contract_current
+                else None
+            ),
             # pre-v6 candidate 同样没有可验证的 immutable digest：恢复后
             # 丢弃并要求重新 prepare/approval，绝不为旧数据重签。
             process_authority_candidate=(
@@ -1392,6 +1771,9 @@ def _pending_from_dict(
                 )
                 if process_contract_current
                 else None
+            ),
+            browser_action_candidate=_browser_candidate_from_dict(
+                value.get("browser_action_candidate")
             ),
             artifact_confirmation_requirement=(
                 _artifact_confirmation_requirement_from_dict(
@@ -1612,6 +1994,336 @@ def _artifact_confirmation_requirement_from_dict(
     return ArtifactConfirmationRequirementV1(
         criterion_id=_string(value["criterion_id"], "criterion_id"),
         artifact_path=_string(value["artifact_path"], "artifact_path"),
+    )
+
+
+def _sandbox_authority_candidate_to_dict(
+    value: SandboxAuthorityCandidateV1 | None,
+) -> dict | None:
+    if value is None:
+        return None
+    return {
+        "candidate_id": value.candidate_id,
+        "candidate_digest": value.candidate_digest,
+        "goal_id": value.goal_id,
+        "goal_revision": value.goal_revision,
+        "workspace_identity_digest": value.workspace_identity_digest,
+        "original_command_fingerprint": value.original_command_fingerprint,
+        "policy_digest": value.policy_digest,
+        "mode": value.mode,
+        "network": value.network,
+        "readable_command": value.readable_command,
+        "trust_notice_id": value.trust_notice_id,
+        "trust_notice_digest": value.trust_notice_digest,
+        "issued_at": value.issued_at,
+        "execution_authority": value.execution_authority.value,
+    }
+
+
+def _sandbox_authority_candidate_from_dict(
+    value,
+) -> SandboxAuthorityCandidateV1 | None:
+    if value is None:
+        return None
+    value = _object(value, "sandbox_authority_candidate")
+    keys = {
+        "candidate_id",
+        "candidate_digest",
+        "goal_id",
+        "goal_revision",
+        "workspace_identity_digest",
+        "original_command_fingerprint",
+        "policy_digest",
+        "mode",
+        "network",
+        "readable_command",
+        "trust_notice_id",
+        "trust_notice_digest",
+        "issued_at",
+        "execution_authority",
+    }
+    _expect_keys(value, keys, "sandbox_authority_candidate")
+    return SandboxAuthorityCandidateV1(
+        candidate_id=_string(value["candidate_id"], "candidate_id"),
+        candidate_digest=_string(value["candidate_digest"], "candidate_digest"),
+        goal_id=_string(value["goal_id"], "goal_id"),
+        goal_revision=_integer(value["goal_revision"], "goal_revision"),
+        workspace_identity_digest=_string(
+            value["workspace_identity_digest"], "workspace_identity_digest"
+        ),
+        original_command_fingerprint=_string(
+            value["original_command_fingerprint"], "original_command_fingerprint"
+        ),
+        policy_digest=_string(value["policy_digest"], "policy_digest"),
+        mode=_string(value["mode"], "mode"),
+        network=_string(value["network"], "network"),
+        readable_command=_string(value["readable_command"], "readable_command"),
+        trust_notice_id=_string(value["trust_notice_id"], "trust_notice_id"),
+        trust_notice_digest=_string(
+            value["trust_notice_digest"], "trust_notice_digest"
+        ),
+        issued_at=_string(value["issued_at"], "issued_at"),
+        execution_authority=ExecutionAuthorityClass(
+            _string(value["execution_authority"], "execution_authority")
+        ),
+    )
+
+
+def _sandbox_lease_to_dict(value: SandboxAuthorityLeaseV1) -> dict:
+    return {
+        "lease_id": value.lease_id,
+        "lease_digest": value.lease_digest,
+        "candidate_digest": value.candidate_digest,
+        "goal_id": value.goal_id,
+        "goal_revision": value.goal_revision,
+        "workspace_identity_digest": value.workspace_identity_digest,
+        "original_command_fingerprint": value.original_command_fingerprint,
+        "policy_digest": value.policy_digest,
+        "mode": value.mode,
+        "network": value.network,
+        "readable_command": value.readable_command,
+        "trust_notice_id": value.trust_notice_id,
+        "trust_notice_digest": value.trust_notice_digest,
+        "approved_request_identity": value.approved_request_identity,
+        "issued_at": value.issued_at,
+        "expires_at": value.expires_at,
+        "max_uses": value.max_uses,
+        "uses_consumed": value.uses_consumed,
+    }
+
+
+def _sandbox_lease_from_dict(value) -> SandboxAuthorityLeaseV1:
+    value = _object(value, "sandbox_lease")
+    keys = {
+        "lease_id",
+        "lease_digest",
+        "candidate_digest",
+        "goal_id",
+        "goal_revision",
+        "workspace_identity_digest",
+        "original_command_fingerprint",
+        "policy_digest",
+        "mode",
+        "network",
+        "readable_command",
+        "trust_notice_id",
+        "trust_notice_digest",
+        "approved_request_identity",
+        "issued_at",
+        "expires_at",
+        "max_uses",
+        "uses_consumed",
+    }
+    _expect_keys(value, keys, "sandbox_lease")
+    # 直接构造（携带 digest）：__post_init__ 重算比对，伪造/篡改即失败
+    return SandboxAuthorityLeaseV1(
+        lease_id=_string(value["lease_id"], "lease_id"),
+        lease_digest=_string(value["lease_digest"], "lease_digest"),
+        candidate_digest=_string(value["candidate_digest"], "candidate_digest"),
+        goal_id=_string(value["goal_id"], "goal_id"),
+        goal_revision=_integer(value["goal_revision"], "goal_revision"),
+        workspace_identity_digest=_string(
+            value["workspace_identity_digest"], "workspace_identity_digest",
+        ),
+        original_command_fingerprint=_string(
+            value["original_command_fingerprint"], "original_command_fingerprint"
+        ),
+        policy_digest=_string(value["policy_digest"], "policy_digest"),
+        mode=_string(value["mode"], "mode"),
+        network=_string(value["network"], "network"),
+        readable_command=_string(value["readable_command"], "readable_command"),
+        trust_notice_id=_string(value["trust_notice_id"], "trust_notice_id"),
+        trust_notice_digest=_string(
+            value["trust_notice_digest"], "trust_notice_digest"
+        ),
+        approved_request_identity=_string(
+            value["approved_request_identity"], "approved_request_identity",
+        ),
+        issued_at=_string(value["issued_at"], "issued_at"),
+        expires_at=_string(value["expires_at"], "expires_at"),
+        max_uses=_integer(value["max_uses"], "max_uses"),
+        uses_consumed=_integer(value["uses_consumed"], "uses_consumed"),
+    )
+
+
+def _browser_candidate_to_dict(value: BrowserActionCandidateV1 | None) -> dict | None:
+    if value is None:
+        return None
+    return {
+        "candidate_id": value.candidate_id,
+        "candidate_digest": value.candidate_digest,
+        "goal_id": value.goal_id,
+        "goal_revision": value.goal_revision,
+        "session_ref": value.session_ref,
+        "browser_identity_digest": value.browser_identity_digest,
+        "profile_ref": value.profile_ref,
+        "profile_revision": value.profile_revision,
+        "allowed_origins": list(value.allowed_origins),
+        "mode": value.mode,
+        "page_id": value.page_id,
+        "frame_id": value.frame_id,
+        "observation_digest": value.observation_digest,
+        "action_digest": value.action_digest,
+        "consequence": value.consequence,
+        "preview": value.preview,
+        "issued_at": value.issued_at,
+        "expires_at": value.expires_at,
+        "max_uses": value.max_uses,
+    }
+
+
+def _browser_candidate_from_dict(value) -> BrowserActionCandidateV1 | None:
+    if value is None:
+        return None
+    value = _object(value, "browser_candidate")
+    keys = {
+        "candidate_id", "candidate_digest", "goal_id", "goal_revision",
+        "session_ref", "browser_identity_digest", "profile_ref",
+        "profile_revision", "allowed_origins", "mode", "page_id", "frame_id",
+        "observation_digest", "action_digest", "consequence", "preview",
+        "issued_at", "expires_at", "max_uses",
+    }
+    _expect_keys(value, keys, "browser_candidate")
+    return BrowserActionCandidateV1(
+        candidate_id=_string(value["candidate_id"], "candidate_id"),
+        candidate_digest=_string(value["candidate_digest"], "candidate_digest"),
+        goal_id=_string(value["goal_id"], "goal_id"),
+        goal_revision=_integer(value["goal_revision"], "goal_revision"),
+        session_ref=_string(value["session_ref"], "session_ref"),
+        browser_identity_digest=_string(
+            value["browser_identity_digest"], "browser_identity_digest"
+        ),
+        profile_ref=_optional_string(value["profile_ref"], "profile_ref"),
+        profile_revision=(
+            _integer(value["profile_revision"], "profile_revision")
+            if value["profile_revision"] is not None
+            else None
+        ),
+        allowed_origins=tuple(
+            _string(item, "allowed_origin")
+            for item in _array(value["allowed_origins"], "allowed_origins")
+        ),
+        mode=_string(value["mode"], "mode"),
+        page_id=_string(value["page_id"], "page_id"),
+        frame_id=_string(value["frame_id"], "frame_id"),
+        observation_digest=_string(value["observation_digest"], "observation_digest"),
+        action_digest=_string(value["action_digest"], "action_digest"),
+        consequence=_string(value["consequence"], "consequence"),
+        preview=_string(value["preview"], "preview"),
+        issued_at=_string(value["issued_at"], "issued_at"),
+        expires_at=_string(value["expires_at"], "expires_at"),
+        max_uses=_integer(value["max_uses"], "max_uses"),
+    )
+
+
+def _browser_lease_to_dict(value: BrowserAuthorityLeaseV1) -> dict:
+    return {
+        "lease_id": value.lease_id,
+        "lease_digest": value.lease_digest,
+        "candidate_digest": value.candidate_digest,
+        "goal_id": value.goal_id,
+        "goal_revision": value.goal_revision,
+        "session_ref": value.session_ref,
+        "browser_identity_digest": value.browser_identity_digest,
+        "profile_ref": value.profile_ref,
+        "profile_revision": value.profile_revision,
+        "allowed_origins": list(value.allowed_origins),
+        "mode": value.mode,
+        "page_id": value.page_id,
+        "frame_id": value.frame_id,
+        "observation_digest": value.observation_digest,
+        "action_digest": value.action_digest,
+        "consequence": value.consequence,
+        "approved_request_identity": value.approved_request_identity,
+        "issued_at": value.issued_at,
+        "expires_at": value.expires_at,
+        "max_uses": value.max_uses,
+        "uses_consumed": value.uses_consumed,
+    }
+
+
+def _browser_lease_from_dict(value) -> BrowserAuthorityLeaseV1:
+    value = _object(value, "browser_lease")
+    keys = {
+        "lease_id", "lease_digest", "candidate_digest", "goal_id",
+        "goal_revision", "session_ref", "browser_identity_digest",
+        "profile_ref", "profile_revision", "allowed_origins", "mode",
+        "page_id", "frame_id", "observation_digest", "action_digest",
+        "consequence", "approved_request_identity", "issued_at",
+        "expires_at", "max_uses", "uses_consumed",
+    }
+    _expect_keys(value, keys, "browser_lease")
+    return BrowserAuthorityLeaseV1(
+        lease_id=_string(value["lease_id"], "lease_id"),
+        lease_digest=_string(value["lease_digest"], "lease_digest"),
+        candidate_digest=_string(value["candidate_digest"], "candidate_digest"),
+        goal_id=_string(value["goal_id"], "goal_id"),
+        goal_revision=_integer(value["goal_revision"], "goal_revision"),
+        session_ref=_string(value["session_ref"], "session_ref"),
+        browser_identity_digest=_string(
+            value["browser_identity_digest"], "browser_identity_digest"
+        ),
+        profile_ref=_optional_string(value["profile_ref"], "profile_ref"),
+        profile_revision=(
+            _integer(value["profile_revision"], "profile_revision")
+            if value["profile_revision"] is not None
+            else None
+        ),
+        allowed_origins=tuple(
+            _string(item, "allowed_origin")
+            for item in _array(value["allowed_origins"], "allowed_origins")
+        ),
+        mode=_string(value["mode"], "mode"),
+        page_id=_string(value["page_id"], "page_id"),
+        frame_id=_string(value["frame_id"], "frame_id"),
+        observation_digest=_string(value["observation_digest"], "observation_digest"),
+        action_digest=_string(value["action_digest"], "action_digest"),
+        consequence=_string(value["consequence"], "consequence"),
+        approved_request_identity=_string(
+            value["approved_request_identity"], "approved_request_identity"
+        ),
+        issued_at=_string(value["issued_at"], "issued_at"),
+        expires_at=_string(value["expires_at"], "expires_at"),
+        max_uses=_integer(value["max_uses"], "max_uses"),
+        uses_consumed=_integer(value["uses_consumed"], "uses_consumed"),
+    )
+
+
+def _browser_takeover_to_dict(value: BrowserTakeoverRequestV1 | None) -> dict | None:
+    if value is None:
+        return None
+    return {
+        "request_id": value.request_id,
+        "session_ref": value.session_ref,
+        "profile_ref": value.profile_ref,
+        "profile_revision": value.profile_revision,
+        "browser_identity_digest": value.browser_identity_digest,
+        "goal_id": value.goal_id,
+        "goal_revision": value.goal_revision,
+        "requested_at": value.requested_at,
+    }
+
+
+def _browser_takeover_from_dict(value) -> BrowserTakeoverRequestV1 | None:
+    if value is None:
+        return None
+    value = _object(value, "browser_takeover")
+    keys = {
+        "request_id", "session_ref", "profile_ref", "profile_revision",
+        "browser_identity_digest", "goal_id", "goal_revision", "requested_at",
+    }
+    _expect_keys(value, keys, "browser_takeover")
+    return BrowserTakeoverRequestV1(
+        request_id=_string(value["request_id"], "request_id"),
+        session_ref=_string(value["session_ref"], "session_ref"),
+        profile_ref=_string(value["profile_ref"], "profile_ref"),
+        profile_revision=_integer(value["profile_revision"], "profile_revision"),
+        browser_identity_digest=_string(
+            value["browser_identity_digest"], "browser_identity_digest"
+        ),
+        goal_id=_string(value["goal_id"], "goal_id"),
+        goal_revision=_integer(value["goal_revision"], "goal_revision"),
+        requested_at=_string(value["requested_at"], "requested_at"),
     )
 
 

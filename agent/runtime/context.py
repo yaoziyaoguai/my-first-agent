@@ -220,6 +220,19 @@ class KernelContextManager:
         if action.conversation_id != state.conversation_id:
             raise ValueError("action and state conversation must match")
 
+        # 018：pending takeover 期间 system policy 只投影 complete/cancel
+        # controls——不广告任何产品能力。
+        takeover_controls = advertised_browser_controls(state)
+        if takeover_controls:
+            system_policy = (
+                self._system_policy
+                + " Browser takeover waiting: return control via "
+                + " or ".join(takeover_controls)
+                + ". No other actions are available until then."
+            )
+        else:
+            system_policy = self._system_policy
+
         # no-Goal 的首次模型调用是 intent gate：在 Runtime 接受问答或 Goal
         # 选择前，不让任何 product tool/context source 参与语义分类。这样外部内容
         # 只能支持已经选定的 ANSWERING，不能反向铸造任务 authority。
@@ -446,7 +459,7 @@ class KernelContextManager:
             )
         )
         fixed_cost = (
-            self._estimate(self._system_policy)
+            self._estimate(system_policy)
             + (0 if control_schema is None else self._estimate_json(control_schema))
             + sum(
                 self._estimate_json(_receipt_continuity_payload(receipt))
@@ -502,7 +515,7 @@ class KernelContextManager:
         if state.control_receipts:
             data_classes.add("control_receipts")
         return ContextPack(
-            system=self._system_policy,
+            system=system_policy,
             messages=messages,
             tools=exposed_tools,
             control_schema=control_schema,
@@ -1109,3 +1122,10 @@ class KernelContextManager:
                 is_pinned = True
             pinned.append(replace(group, pinned=is_pinned))
         return tuple(pinned)
+
+
+def advertised_browser_controls(state: ConversationState) -> tuple[str, ...]:
+    """pending takeover 期间 context 只 advertise complete/cancel 控件。"""
+    if state.browser_takeover_pending is None:
+        return ()
+    return ("/browser-done", "/cancel")

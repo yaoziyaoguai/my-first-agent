@@ -50,6 +50,8 @@ from agent.runtime.contracts import (
     ToolPrepareContext,
     canonical_action_digest,
     canonical_json_digest,
+    model_response_from_payload,
+    model_response_payload,
 )
 from agent.runtime.loop import AgentRuntime
 from agent.runtime.state import (
@@ -79,6 +81,34 @@ def _criterion() -> AdmittedCriterion:
         required_evidence_class="workspace_file",
         admission_digest="b" * 64,
     )
+
+
+def test_goal_draft_model_response_round_trips_typed_evidence_oracles() -> None:
+    response = ModelResponse(
+        (),
+        control=GoalDraftProposal(
+            correlation_id="draft:round-trip",
+            user_outcome="Run the bounded command.",
+            beneficiary="owner",
+            targets=("workspace",),
+            scope=("one occurrence",),
+            non_goals=(),
+            assumptions=(),
+            proposed_criteria=(
+                ProposedCriterion(
+                    criterion_id="criterion:receipt",
+                    description="receipt exists",
+                    oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+                ),
+            ),
+            next_step="run the command",
+            requires_local_process=True,
+        ),
+    )
+
+    restored = model_response_from_payload(model_response_payload(response))
+
+    assert restored == response
 
 
 def _goal(**overrides) -> GoalFrame:

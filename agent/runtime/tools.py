@@ -21,7 +21,14 @@ from agent.runtime.contracts import (
     ApprovalRequest,
     ApprovalRequired,
     ArtifactConfirmationRequirementV1,
-    CitationManifestV1,
+    BackgroundActionAuthorityV1,
+    BackgroundClaimCheckV1,
+    BackgroundClaimVerdictV1,
+    BackgroundExecutionAuthorityV1,
+    BackgroundSandboxReceiptV1,
+    BrowserActionCandidateV1,
+    BrowserAuthorityLeaseV1,
+    BrowserTakeoverRequestV1,
     EgressClass,
     EvidenceOracleKind,
     ExecutionAuthorityClass,
@@ -34,9 +41,11 @@ from agent.runtime.contracts import (
     ProcessAuthorityLeaseV1,
     ProcessOutcome,
     ProcessReceiptV1,
+    SandboxAuthorityCandidateV1,
+    SandboxAuthorityLeaseV1,
+    SandboxReceiptV1,
     SideEffectClass,
     SourceAuthorityBinding,
-    SourceReceiptV1,
     ToolCall,
     ToolDefinition,
     ToolExecutionOutput,
@@ -44,7 +53,15 @@ from agent.runtime.contracts import (
     ToolPrepareContext,
     ToolResult,
     ToolSpec,
+    canonical_json_digest,
 )
+from agent.runtime.ports import BackgroundClaimVerifier
+from agent.runtime.tool_governance import (
+    BrowserGovernance,
+    CitationGovernance,
+    SourceGovernance,
+)
+from agent.sandbox.contracts import SandboxDraftOutcome, SandboxExecutionDraftV1
 
 
 def _default_utc_now() -> str:
@@ -126,6 +143,8 @@ class KernelToolRuntime:
         *,
         policy: ToolPolicy | None = None,
         clock: Callable[[], str] | None = None,
+        sandbox_receipt_book=None,
+        background_claim_verifier: BackgroundClaimVerifier | None = None,
     ) -> None:
         self._tools: dict[str, RegisteredTool] = {}
         for registration in registrations:
@@ -135,6 +154,21 @@ class KernelToolRuntime:
         self._default_policy = policy or DefaultToolPolicy()
         self._invoked_keys: set[str] = set()
         self._clock = clock or _default_utc_now
+        # 017：Runtime 铸造的 sandbox 执行 receipt 记录进 composition 注入的
+        # session book——capture 的 producing receipts 只能源自这里（design
+        # receipt lineage seam 的 Runtime 侧）。
+        self._sandbox_receipt_book = sandbox_receipt_book
+        self._background_claim_verifier = background_claim_verifier
+        # raw capability 从不进入 ExecutionIntent；prepare→invoke 的同进程短窗
+        # 只按完整 intent digest 暂存，restart 后不存在就 fail closed。
+        self._background_prepared_authorities: dict[
+            str, BackgroundExecutionAuthorityV1
+        ] = {}
+        # capability 治理知识归内部 governance 模块;本类只消费裁决并保持
+        # 唯一外部接口与最终权限/effect gate。
+        self._citation_governance = CitationGovernance()
+        self._source_governance = SourceGovernance()
+        self._browser_governance = BrowserGovernance()
 
     def _policy_for(self, registration: RegisteredTool) -> ToolPolicy:
         # 每个 registration 可绑定自己的 policy identity；未绑定则回退到 runtime 默认策略。
@@ -186,160 +220,35 @@ class KernelToolRuntime:
                 ),
             )
 
-        if (
-            call.name == "write_file"
-            and registration.spec.side_effect is SideEffectClass.WRITE
-            and isinstance(arguments.get("path"), str)
-            and arguments["path"].endswith(".citations.json")
-        ):
-            canonical_manifest = self._canonical_citation_sidecar_content(
-                call.name,
-                arguments,
-                context,
-            )
-            if canonical_manifest is None:
-                exact_pairs = "; ".join(
-                    f"{source_ref} -> {source_id}"
-                    for source_ref, source_id in context.citable_citation_sources
-                ) or "none"
-                return self._error(
-                    call.tool_call_id,
-                    "citation_manifest_required",
-                    (
-                        "Do not hand-write this sidecar. Follow these exact steps in order: "
-                        "(1) read_file the artifact you just wrote (for example "
-                        "research.md) so its exact content digest enters this run; "
-                        "(2) call build_citation_manifest with the artifact path, the "
-                        "exact artifact content you read back, and one citation pair "
-                        "chosen from these exact citable pairs: "
-                        f"{exact_pairs}; (3) write_file the sidecar by copying that "
-                        "build_citation_manifest ToolResult byte-for-byte as content — "
-                        "one transport-added final newline is accepted and removed. Any "
-                        "other JSON is rejected before the effect."
-                    ),
-                )
-            arguments = dict(arguments)
-            arguments["content"] = canonical_manifest
-
-        if registration.spec.safety_policy.get("kind") == "citation_manifest_builder":
-            if not context.citation_manifest_allowed:
-                return self._error(
-                    call.tool_call_id,
-                    "citation_manifest_not_required",
-                    (
-                        "build_citation_manifest is available only when the active Goal "
-                        "explicitly targets a .citations.json sidecar. Do not build a "
-                        "manifest for this Goal; after the required file read-back, use "
-                        "completion_claim with the advertised evidence refs."
-                    ),
-                )
-
-            artifact_path = arguments.get("artifact_path")
-            if artifact_path not in context.citation_artifact_paths:
-                allowed_paths = ", ".join(context.citation_artifact_paths) or "none"
-                return self._error(
-                    call.tool_call_id,
-                    "citation_artifact_not_authorized",
-                    (
-                        "The citation manifest must describe a non-sidecar artifact target "
-                        f"from the active Goal. Allowed artifact_path values: {allowed_paths}. "
-                        "Read that artifact and pass its exact content; never cite the "
-                        ".citations.json sidecar itself."
-                    ),
-                )
-            if context.goal_id is not None and (
-                arguments.get("goal_id") != context.goal_id
-                or arguments.get("goal_revision") != context.goal_revision
-            ):
-                return self._error(
-                    call.tool_call_id,
-                    "citation_goal_identity_mismatch",
-                    (
-                        "The citation manifest must copy goal_id and goal_revision exactly "
-                        "from the current trusted_goal block. Do not use an earlier revision "
-                        "or another identity; rebuild the manifest with the current "
-                        "Runtime-owned identity and retry."
-                    ),
-                )
-            citations = arguments.get("citations")
-            requested_refs = (
-                tuple(
-                    citation.get("source_ref")
-                    for citation in citations
-                    if isinstance(citation, dict)
-                )
-                if isinstance(citations, list)
-                else ()
-            )
-            requested_pairs = (
-                tuple(
-                    (citation.get("source_ref"), citation.get("source_id"))
-                    for citation in citations
-                    if isinstance(citation, dict)
-                )
-                if isinstance(citations, list)
-                else ()
-            )
-            allowed_pairs = set(context.citable_citation_sources)
-            if (
-                not requested_refs
-                or len(requested_refs) != len(citations)
-                or len(requested_pairs) != len(citations)
-                or any(pair not in allowed_pairs for pair in requested_pairs)
-            ):
-                exact_pairs = "; ".join(
-                    f"{source_ref} -> {source_id}"
-                    for source_ref, source_id in context.citable_citation_sources
-                ) or "none"
-                return self._error(
-                    call.tool_call_id,
-                    "citation_source_not_citable",
-                    (
-                        "The only permitted citations are Runtime-verified non-truncated "
-                        "source_ref/source_id pairs from the active Goal. Copy one of these "
-                        f"exact pairs: {exact_pairs}. Remove denied citations; fetch another "
-                        "complete source only when this list is empty; then rebuild the "
-                        "manifest and rewrite its sidecar."
-                    ),
-                )
-            markers = tuple(
-                citation.get("marker")
-                for citation in citations
-                if isinstance(citation, dict)
-            )
-            if (
-                len(set(requested_pairs)) != len(requested_pairs)
-                or len(set(markers)) != len(markers)
-            ):
-                return self._error(
-                    call.tool_call_id,
-                    "citation_entries_not_one_to_one",
-                    (
-                        "Citation manifest entries must be one-to-one. Use each exact source "
-                        "pair once with one unique bracketed marker. If the same source "
-                        "supports multiple statements, reuse its one marker in the artifact "
-                        "instead of duplicating the manifest entry; then rebuild the sidecar."
-                    ),
-                )
-
-        source_authority_required = (
-            registration.spec.safety_policy.get("source_authority_required") is True
+        citation_ruling = self._citation_governance.assess_intent(
+            tool_name=call.name,
+            side_effect=registration.spec.side_effect,
+            safety_policy=registration.spec.safety_policy,
+            arguments=arguments,
+            context=context,
         )
-        requested_source_ref = arguments.get("source_ref")
-        if source_authority_required and (
-            context.source_authority is None
-            or requested_source_ref not in context.web_fetch_source_refs
-        ):
-            exact_refs = ", ".join(context.web_fetch_source_refs) or "none"
+        if citation_ruling.rejection is not None:
             return self._error(
                 call.tool_call_id,
-                "source_authority_required",
-                (
-                    "This tool requires a Runtime-verified, currently unattempted Web "
-                    f"Search source reference. Exact permitted refs: {exact_refs}. Copy "
-                    "one unchanged from FIRST_AGENT_RUNTIME_WEB_FETCH_REFS; do not use "
-                    "a web_extracted_content or citation ref."
-                ),
+                citation_ruling.rejection.code,
+                citation_ruling.rejection.message,
+            )
+        if citation_ruling.canonical_arguments is not None:
+            arguments = citation_ruling.canonical_arguments
+
+        source_rejection = self._source_governance.assess_authority(
+            authority_required=(
+                registration.spec.safety_policy.get("source_authority_required")
+                is True
+            ),
+            arguments=arguments,
+            context=context,
+        )
+        if source_rejection is not None:
+            return self._error(
+                call.tool_call_id,
+                source_rejection.code,
+                source_rejection.message,
             )
         try:
             binding = self._prepare_binding(
@@ -349,17 +258,14 @@ class KernelToolRuntime:
             )
             _canonical_json(binding)
         except Exception:
-            if registration.spec.safety_policy.get("kind") == "citation_manifest_builder":
+            citation_rejection = self._citation_governance.binding_failure(
+                registration.spec.safety_policy
+            )
+            if citation_rejection is not None:
                 return self._error(
                     call.tool_call_id,
-                    "citation_manifest_invalid",
-                    (
-                        "The citation manifest arguments are structurally invalid. Use the "
-                        "current trusted_goal identity, exact artifact read-back text, one "
-                        "unique bracketed marker that occurs in that text, and each "
-                        "Runtime-advertised source_ref/source_id pair at most once. No effect "
-                        "occurred; correct the arguments and retry."
-                    ),
+                    citation_rejection.code,
+                    citation_rejection.message,
                 )
             return self._error(
                 call.tool_call_id,
@@ -391,6 +297,25 @@ class KernelToolRuntime:
                     ),
                 )
             return self._error(call.tool_call_id, "policy_denied", "Tool policy denied the call.")
+        background_action, background_error = self._prepare_background_action(
+            registration=registration,
+            arguments=arguments,
+            binding=binding,
+            context=context,
+        )
+        if background_error is not None:
+            return self._error(
+                call.tool_call_id,
+                background_error,
+                "Background occurrence authority is unavailable or exhausted.",
+            )
+        if background_action is not None:
+            decision = PolicyDecision.ALLOW
+        elif context.background_execution_authority is not None:
+            # Background activation admits only the two frozen unattended classes.
+            # Everything else retains the ordinary approval path; the grant never
+            # broadens an existing policy decision.
+            decision = PolicyDecision.REQUIRE_APPROVAL
         if registration.spec.egress is EgressClass.PUBLIC_NETWORK:
             # PUBLIC_NETWORK 的用户可见外发不能被 registration 自定义 policy
             # 或 Goal authorization 降级；首次 prepare 必须形成 durable approval。
@@ -441,6 +366,53 @@ class KernelToolRuntime:
                 if process_lease is not None:
                     decision = PolicyDecision.ALLOW
 
+        sandbox_candidate: SandboxAuthorityCandidateV1 | None = None
+        sandbox_lease: SandboxAuthorityLeaseV1 | None = None
+        if registration.spec.execution_authority is ExecutionAuthorityClass.ISOLATED_SANDBOX:
+            if not (
+                context.goal_id
+                and context.goal_revision
+                and context.workspace_identity_digest
+            ):
+                return self._error(
+                    call.tool_call_id,
+                    "sandbox_requires_goal",
+                    "sandbox_exec requires a durable Goal before any execution.",
+                )
+            sandbox_candidate = self._build_sandbox_candidate(binding, context)
+            if decision is PolicyDecision.REQUIRE_APPROVAL:
+                sandbox_lease = self._match_sandbox_lease(
+                    sandbox_candidate, context,
+                )
+                if sandbox_lease is not None:
+                    decision = PolicyDecision.ALLOW
+
+        browser_candidate: BrowserActionCandidateV1 | None = None
+        browser_lease: BrowserAuthorityLeaseV1 | None = None
+        if (
+            registration.spec.execution_authority
+            is ExecutionAuthorityClass.BROWSER_SESSION
+            and registration.spec.safety_policy.get("kind") == "browser_action"
+        ):
+            if not (context.goal_id and context.goal_revision):
+                return self._error(
+                    call.tool_call_id,
+                    "browser_requires_goal",
+                    "browser actions require a durable Goal before execution.",
+                )
+            try:
+                browser_candidate = self._build_browser_candidate(binding, context)
+            except (KeyError, TypeError, ValueError):
+                return self._error(
+                    call.tool_call_id,
+                    "browser_binding_invalid",
+                    "Browser action safety binding is incomplete or invalid.",
+                )
+            if decision is PolicyDecision.REQUIRE_APPROVAL:
+                browser_lease = self._match_browser_lease(browser_candidate, context)
+                if browser_lease is not None:
+                    decision = PolicyDecision.ALLOW
+
         intent = self._make_intent(
             call,
             context,
@@ -449,9 +421,30 @@ class KernelToolRuntime:
             binding,
             self._policy_for(registration).identity,
             process_lease=process_lease,
+            sandbox_lease=sandbox_lease,
+            browser_lease=browser_lease,
+            background_action_authority=background_action,
         )
+        if background_action is not None:
+            authority = context.background_execution_authority
+            assert authority is not None
+            self._background_prepared_authorities[intent.intent_digest] = authority
         if decision is PolicyDecision.REQUIRE_APPROVAL:
             request = self._approval_request(intent, registration.spec, context)
+            if browser_candidate is not None:
+                return ApprovalRequired(
+                    replace(request, browser_action_candidate=browser_candidate)
+                )
+            if sandbox_candidate is not None:
+                # 017：ISOLATED_SANDBOX authority 只能来自 exact active durable
+                # lease（ResolveApproval 铸造）；approval 绑定全 environment
+                # identity（goal/revision/workspace/image/snapshot/spec）。
+                return ApprovalRequired(
+                    replace(
+                        request,
+                        sandbox_authority_candidate=sandbox_candidate,
+                    )
+                )
             if process_candidate is not None:
                 # F1（P1 review finding 2026-08-16）：LOCAL_SAME_UID_PROCESS 的
                 # authority 只能来自 exact active durable lease（ResolveApproval 铸造）。
@@ -504,39 +497,6 @@ class KernelToolRuntime:
                     "Approval does not match the current tool intent.",
                 )
         return intent
-
-    @staticmethod
-    def _canonical_citation_sidecar_content(
-        tool_name: str,
-        arguments: dict[str, JSONValue],
-        context: ToolPrepareContext,
-    ) -> str | None:
-        path = arguments.get("path")
-        content = arguments.get("content")
-        if (
-            tool_name != "write_file"
-            or not context.citation_manifest_allowed
-            or path not in context.citation_sidecar_paths
-            or not isinstance(content, str)
-        ):
-            return None
-        canonical = content[:-1] if content.endswith("\n") else content
-        if (
-            hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-            not in context.citation_manifest_content_digests
-        ):
-            return None
-        try:
-            manifest = CitationManifestV1.from_json(canonical)
-        except ValueError:
-            return None
-        if (
-            manifest.goal_id != context.goal_id
-            or manifest.goal_revision != context.goal_revision
-            or manifest.artifact_path not in context.citation_artifact_paths
-        ):
-            return None
-        return canonical
 
     @staticmethod
     def _artifact_confirmation_requirement(
@@ -601,12 +561,54 @@ class KernelToolRuntime:
             intent.process_lease
         ):
             raise IntentConflictError("process authority lease expired before invocation")
+        if (
+            registration.spec.execution_authority
+            is ExecutionAuthorityClass.ISOLATED_SANDBOX
+            and intent.sandbox_lease is None
+            and (
+                intent.background_action_authority is None
+                or intent.background_action_authority.action_class != "sandbox_confined"
+            )
+        ):
+            # 017（F1 对齐）：无 exact durable lease 的 sandbox intent 一律拒绝。
+            raise IntentConflictError(
+                "sandbox authority intent requires an exact active durable lease"
+            )
+        if intent.sandbox_lease is not None and not self._sandbox_lease_is_active_now(
+            intent.sandbox_lease
+        ):
+            raise IntentConflictError("sandbox authority lease expired before invocation")
+        if intent.browser_lease is not None and not self._browser_lease_authorizes_intent(
+            intent.browser_lease, intent
+        ):
+            raise IntentConflictError("browser authority lease expired before invocation")
+        if (
+            registration.spec.execution_authority
+            is ExecutionAuthorityClass.BROWSER_SESSION
+            and registration.spec.safety_policy.get("kind") == "browser_action"
+            and intent.safety_binding.get("consequence") != "observe"
+            and intent.browser_lease is None
+        ):
+            raise IntentConflictError(
+                "browser action requires an exact active durable lease"
+            )
+        if intent.browser_lease is not None and not self._browser_lease_authorizes_intent(
+            intent.browser_lease, intent
+        ):
+            raise IntentConflictError("browser authority lease changed before invocation")
+        if intent.background_action_authority is not None:
+            self._verify_background_action_for_invoke(intent, registration)
 
-        current_binding = self._prepare_binding(
-            registration,
-            intent.arguments,
-            source_authority=intent.source_authority,
-        )
+        try:
+            current_binding = self._prepare_binding(
+                registration,
+                intent.arguments,
+                source_authority=intent.source_authority,
+            )
+        except Exception as error:
+            raise IntentConflictError(
+                "tool safety preconditions could not be revalidated"
+            ) from error
         if current_binding != intent.safety_binding:
             raise IntentConflictError("tool safety preconditions changed after preparation")
         if self._intent_digest(intent) != intent.intent_digest:
@@ -649,14 +651,61 @@ class KernelToolRuntime:
             intent.process_lease
         ):
             raise IntentConflictError("process authority lease expired before invocation")
+        if intent.sandbox_lease is not None and not self._sandbox_lease_is_active_now(
+            intent.sandbox_lease
+        ):
+            raise IntentConflictError("sandbox authority lease expired before invocation")
 
         self._invoked_keys.add(intent.idempotency_key)
+        self._background_prepared_authorities.pop(intent.intent_digest, None)
         try:
             raw_result = registration.func(intent)
+            if isinstance(raw_result, BrowserTakeoverRequestV1):
+                if (
+                    registration.spec.execution_authority
+                    is not ExecutionAuthorityClass.BROWSER_SESSION
+                    or registration.spec.name != "browser_begin_takeover"
+                    or intent.goal_id != raw_result.goal_id
+                    or intent.goal_revision != raw_result.goal_revision
+                    or intent.browser_takeover_request != raw_result
+                ):
+                    raise IntentConflictError(
+                        "browser takeover request does not bind the governed browser intent"
+                    )
+                return ToolResult(
+                    tool_call_id=intent.tool_call_id,
+                    content="Browser takeover is waiting for the user.",
+                    executed=False,
+                    metadata={
+                        "code": "browser_takeover_pending",
+                        "tool_identity": registration.spec.identity_digest,
+                    },
+                    browser_takeover_request=raw_result,
+                )
             if isinstance(raw_result, ProcessExecutionDraftV1):
                 return self._process_outcome(intent, registration.spec, raw_result)
+            if isinstance(raw_result, SandboxExecutionDraftV1):
+                return self._sandbox_outcome(intent, registration.spec, raw_result)
+            if (
+                registration.spec.execution_authority
+                is ExecutionAuthorityClass.BROWSER_SESSION
+                and isinstance(raw_result, ToolExecutionOutput)
+            ):
+                return self._browser_governance.normalize_result(
+                    intent, registration.spec, raw_result
+                )
+            if (
+                registration.spec.execution_authority
+                is ExecutionAuthorityClass.ISOLATED_SANDBOX
+                and not isinstance(raw_result, KnownNotExecuted)
+            ):
+                raise IntentConflictError(
+                    "sandbox callable must return a verifiable execution draft"
+                )
             if registration.spec.source_kinds:
-                return self._source_result(intent, registration.spec, raw_result)
+                return self._source_governance.normalize_result(
+                    intent, registration.spec, raw_result
+                )
             if isinstance(raw_result, ToolExecutionOutput | ToolResult):
                 return ToolResult(
                     tool_call_id=intent.tool_call_id,
@@ -745,7 +794,28 @@ class KernelToolRuntime:
         policy_identity: str,
         *,
         process_lease: ProcessAuthorityLeaseV1 | None = None,
+        sandbox_lease: SandboxAuthorityLeaseV1 | None = None,
+        browser_lease: BrowserAuthorityLeaseV1 | None = None,
+        background_action_authority: BackgroundActionAuthorityV1 | None = None,
     ) -> ExecutionIntent:
+        browser_takeover_request: BrowserTakeoverRequestV1 | None = None
+        if spec.safety_policy.get("kind") == "browser_takeover":
+            if (
+                spec.execution_authority is not ExecutionAuthorityClass.BROWSER_SESSION
+                or not context.goal_id
+                or context.goal_revision is None
+            ):
+                raise ValueError("browser takeover requires an active Goal")
+            browser_takeover_request = BrowserTakeoverRequestV1(
+                request_id=f"browser-takeover:{binding['session_ref']}",
+                session_ref=str(binding["session_ref"]),
+                profile_ref=str(binding["profile_ref"]),
+                profile_revision=int(binding["profile_revision"]),
+                browser_identity_digest=str(binding["browser_identity_digest"]),
+                goal_id=context.goal_id,
+                goal_revision=context.goal_revision,
+                requested_at=self._clock(),
+            )
         intent = ExecutionIntent(
             tool_call_id=call.tool_call_id,
             tool_name=call.name,
@@ -784,10 +854,164 @@ class KernelToolRuntime:
             fact_admission=context.fact_admission,
             preference_admission=context.preference_admission,
             process_lease=process_lease,
+            sandbox_lease=sandbox_lease,
+            browser_lease=browser_lease,
+            browser_takeover_request=browser_takeover_request,
+            background_action_authority=background_action_authority,
         )
         return replace(
             intent,
             intent_digest=self._intent_digest(intent),
+        )
+
+    def _build_sandbox_candidate(
+        self,
+        binding: dict[str, JSONValue],
+        context: ToolPrepareContext,
+    ) -> SandboxAuthorityCandidateV1:
+        command_fingerprint = str(binding["command_fingerprint"])
+        candidate_id = f"sandbox-candidate:{command_fingerprint[:16]}"
+        return SandboxAuthorityCandidateV1.create(
+            candidate_id=candidate_id,
+            goal_id=context.goal_id,
+            goal_revision=context.goal_revision,
+            workspace_identity_digest=context.workspace_identity_digest,
+            original_command_fingerprint=command_fingerprint,
+            policy_digest=str(binding["policy_digest"]),
+            mode=str(binding["sandbox_mode"]),
+            network=str(binding["sandbox_network"]),
+            readable_command=str(binding["effect_preview"]),
+            trust_notice_id=str(binding["trust_notice_id"]),
+            trust_notice_digest=str(binding["trust_notice_digest"]),
+            issued_at=self._clock(),
+        )
+
+    def _match_sandbox_lease(
+        self,
+        candidate: SandboxAuthorityCandidateV1,
+        context: ToolPrepareContext,
+    ) -> SandboxAuthorityLeaseV1 | None:
+        # 与 process lease 相同的 fail-closed 时效判定：zoned RFC3339 数值比较。
+        now_dt = _parse_zoned_rfc3339(self._clock())
+        if now_dt is None:
+            return None
+        for lease in context.sandbox_leases:
+            issued_dt = _parse_zoned_rfc3339(lease.issued_at)
+            expires_dt = _parse_zoned_rfc3339(lease.expires_at)
+            if (
+                lease.verify()
+                and issued_dt is not None
+                and expires_dt is not None
+                and lease.matches(
+                    goal_id=candidate.goal_id,
+                    goal_revision=candidate.goal_revision,
+                    workspace_identity_digest=candidate.workspace_identity_digest,
+                    original_command_fingerprint=(
+                        candidate.original_command_fingerprint
+                    ),
+                    policy_digest=candidate.policy_digest,
+                    mode=candidate.mode,
+                    network=candidate.network,
+                )
+                and lease.candidate_digest == candidate.candidate_digest
+                and lease.uses_consumed < lease.max_uses
+                and issued_dt <= now_dt < expires_dt
+            ):
+                return lease
+        return None
+
+    def _build_browser_candidate(
+        self,
+        binding: dict[str, JSONValue],
+        context: ToolPrepareContext,
+    ) -> BrowserActionCandidateV1:
+        action_digest = str(binding["action_digest"])
+        return BrowserActionCandidateV1.create(
+            candidate_id=f"browser-candidate:{action_digest[:16]}",
+            goal_id=context.goal_id,
+            goal_revision=context.goal_revision,
+            session_ref=str(binding["session_ref"]),
+            browser_identity_digest=str(binding["browser_identity_digest"]),
+            profile_ref=binding.get("profile_ref"),
+            profile_revision=binding.get("profile_revision"),
+            allowed_origins=tuple(binding["allowed_origins"]),
+            mode=str(binding["mode"]),
+            page_id=str(binding["page_id"]),
+            frame_id=str(binding["frame_id"]),
+            observation_digest=str(binding["observation_digest"]),
+            action_digest=action_digest,
+            consequence=str(binding["consequence"]),
+            preview=str(binding["effect_preview"]),
+            issued_at=str(binding["issued_at"]),
+            expires_at=str(binding["expires_at"]),
+        )
+
+    def _match_browser_lease(
+        self,
+        candidate: BrowserActionCandidateV1,
+        context: ToolPrepareContext,
+    ) -> BrowserAuthorityLeaseV1 | None:
+        for lease in context.browser_leases:
+            if (
+                lease.candidate_digest == candidate.candidate_digest
+                and lease.authorizes(
+                    goal_id=candidate.goal_id,
+                    goal_revision=candidate.goal_revision,
+                    session_ref=candidate.session_ref,
+                    browser_identity_digest=candidate.browser_identity_digest,
+                    profile_ref=candidate.profile_ref,
+                    profile_revision=candidate.profile_revision,
+                    allowed_origins=candidate.allowed_origins,
+                    mode=candidate.mode,
+                    page_id=candidate.page_id,
+                    frame_id=candidate.frame_id,
+                    observation_digest=candidate.observation_digest,
+                    action_digest=candidate.action_digest,
+                    consequence=candidate.consequence,
+                    now=self._clock(),
+                )
+            ):
+                return lease
+        return None
+
+    def _browser_lease_authorizes_intent(
+        self,
+        lease: BrowserAuthorityLeaseV1,
+        intent: ExecutionIntent,
+    ) -> bool:
+        binding = intent.safety_binding
+        try:
+            return lease.authorizes(
+                goal_id=intent.goal_id or "",
+                goal_revision=intent.goal_revision or 0,
+                session_ref=str(binding["session_ref"]),
+                browser_identity_digest=str(binding["browser_identity_digest"]),
+                profile_ref=binding.get("profile_ref"),
+                profile_revision=binding.get("profile_revision"),
+                allowed_origins=tuple(binding["allowed_origins"]),
+                mode=str(binding["mode"]),
+                page_id=str(binding["page_id"]),
+                frame_id=str(binding["frame_id"]),
+                observation_digest=str(binding["observation_digest"]),
+                action_digest=str(binding["action_digest"]),
+                consequence=str(binding["consequence"]),
+                now=self._clock(),
+            )
+        except (KeyError, TypeError, ValueError):
+            return False
+
+    def _sandbox_lease_is_active_now(self, lease: SandboxAuthorityLeaseV1) -> bool:
+        now_dt = _parse_zoned_rfc3339(self._clock())
+        if now_dt is None:
+            return False
+        issued_dt = _parse_zoned_rfc3339(lease.issued_at)
+        expires_dt = _parse_zoned_rfc3339(lease.expires_at)
+        return (
+            lease.verify()
+            and issued_dt is not None
+            and expires_dt is not None
+            and lease.uses_consumed < lease.max_uses
+            and issued_dt <= now_dt < expires_dt
         )
 
     def _lease_is_active_now(self, lease: ProcessAuthorityLeaseV1) -> bool:
@@ -848,8 +1072,211 @@ class KernelToolRuntime:
                     if intent.process_lease is not None
                     else None
                 ),
+                "sandbox_lease_digest": (
+                    intent.sandbox_lease.lease_digest
+                    if intent.sandbox_lease is not None
+                    else None
+                ),
+                "browser_lease_digest": (
+                    intent.browser_lease.lease_digest
+                    if intent.browser_lease is not None
+                    else None
+                ),
+                "browser_takeover_request": (
+                    asdict(intent.browser_takeover_request)
+                    if intent.browser_takeover_request is not None
+                    else None
+                ),
+                "background_action_authority_digest": (
+                    intent.background_action_authority.authority_digest
+                    if intent.background_action_authority is not None
+                    else None
+                ),
             }
         )
+
+    def _prepare_background_action(
+        self,
+        *,
+        registration: RegisteredTool,
+        arguments: dict[str, JSONValue],
+        binding: dict[str, JSONValue],
+        context: ToolPrepareContext,
+    ) -> tuple[BackgroundActionAuthorityV1 | None, str | None]:
+        authority = context.background_execution_authority
+        if authority is None:
+            return None, None
+        verifier = self._background_claim_verifier
+        if verifier is None:
+            return None, "background_claim_unavailable"
+        check = BackgroundClaimCheckV1.create(
+            execution_authority=authority,
+            observed_at_utc=self._clock(),
+        )
+        try:
+            verdict = verifier.verify(check)
+        except Exception:
+            return None, "background_claim_unavailable"
+        if not isinstance(verdict, BackgroundClaimVerdictV1):
+            return None, "background_claim_unavailable"
+        if not verdict.allowed:
+            return None, f"background_claim_{verdict.reason}"
+        classification = self._background_action_class(
+            registration.spec,
+            binding,
+            context.workspace_identity_digest,
+            authority,
+            verdict,
+        )
+        if classification is None:
+            return None, None
+        action_class, policy_digest, class_limit = classification
+        binding_contract = authority.occurrence_binding
+        class_used = (
+            context.background_sandbox_commands_used
+            if action_class == "sandbox_confined"
+            else context.background_browser_actions_used
+        )
+        if context.background_tool_calls_used >= binding_contract.tool_call_limit:
+            return None, "background_tool_budget_exhausted"
+        if class_used >= class_limit:
+            return None, f"background_{action_class}_budget_exhausted"
+        action_fingerprint = canonical_json_digest(
+            {
+                "tool_name": registration.spec.name,
+                "tool_identity": registration.spec.identity_digest,
+                "arguments_digest": _digest_json(arguments),
+                "safety_binding": binding,
+                "policy_identity": self._policy_for(registration).identity,
+                "occurrence_binding_digest": binding_contract.binding_digest,
+                "action_class": action_class,
+                "budget_ordinal": class_used + 1,
+            }
+        )
+        return (
+            BackgroundActionAuthorityV1(
+                action_class=action_class,
+                action_fingerprint=action_fingerprint,
+                occurrence_binding_digest=binding_contract.binding_digest,
+                claim_verdict_digest=verdict.verdict_digest,
+                budget_ordinal=class_used + 1,
+                policy_digest=policy_digest,
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _background_action_class(
+        spec: ToolSpec,
+        binding: dict[str, JSONValue],
+        workspace_identity_digest: str | None,
+        authority: BackgroundExecutionAuthorityV1,
+        verdict,
+    ) -> tuple[str, str, int] | None:  # noqa: ANN001
+        occurrence = authority.occurrence_binding
+        kind = spec.safety_policy.get("kind")
+        if (
+            verdict.sandbox_confined
+            and spec.execution_authority is ExecutionAuthorityClass.ISOLATED_SANDBOX
+            and kind == "sandbox_exec"
+            and spec.safety_policy.get("shell") is False
+            and spec.safety_policy.get("background") is False
+            and workspace_identity_digest
+            == authority.isolated_workspace_identity_digest
+            and binding.get("sandbox_mode") in {"read-only", "workspace-write"}
+            and binding.get("sandbox_network") == "off"
+            and binding.get("policy_digest")
+            == verdict.background_environment_policy_digest
+            and authority.background_environment_policy_digest
+            == verdict.background_environment_policy_digest
+        ):
+            return (
+                "sandbox_confined",
+                str(binding["policy_digest"]),
+                occurrence.sandbox_command_limit,
+            )
+        if (
+            verdict.browser_public_observe
+            and spec.execution_authority is ExecutionAuthorityClass.BROWSER_SESSION
+            and verdict.browser_origin_policy_digest is not None
+            and authority.browser_origin_policy_digest
+            == verdict.browser_origin_policy_digest
+            and binding.get("mode") == "public_read_ephemeral"
+            and (
+                (
+                    kind == "browser_open"
+                    and binding.get("profile_ref") is None
+                    and binding.get("profile_revision") is None
+                    and binding.get("allowed_origins") == []
+                )
+                or kind == "browser_observe"
+                or (kind == "browser_action" and binding.get("consequence") == "observe")
+            )
+        ):
+            return (
+                "browser_public_observe",
+                authority.browser_origin_policy_digest,
+                occurrence.browser_action_limit,
+            )
+        return None
+
+    def _verify_background_action_for_invoke(
+        self,
+        intent: ExecutionIntent,
+        registration: RegisteredTool,
+    ) -> None:
+        action = intent.background_action_authority
+        assert action is not None
+        authority = self._background_prepared_authorities.get(intent.intent_digest)
+        verifier = self._background_claim_verifier
+        if authority is None or verifier is None:
+            raise IntentConflictError("background claim capability is unavailable")
+        try:
+            verdict = verifier.verify(
+                BackgroundClaimCheckV1.create(
+                    execution_authority=authority,
+                    observed_at_utc=self._clock(),
+                )
+            )
+        except Exception as error:
+            raise IntentConflictError("background claim verification failed") from error
+        if not isinstance(verdict, BackgroundClaimVerdictV1):
+            raise IntentConflictError("background claim verifier returned an invalid verdict")
+        if not verdict.allowed:
+            raise IntentConflictError("background claim is no longer active")
+        classification = self._background_action_class(
+            registration.spec,
+            intent.safety_binding,
+            intent.workspace_identity_digest,
+            authority,
+            verdict,
+        )
+        if classification is None:
+            raise IntentConflictError("background action classification changed")
+        action_class, policy_digest, limit = classification
+        if (
+            action.action_class != action_class
+            or action.policy_digest != policy_digest
+            or action.occurrence_binding_digest
+            != authority.occurrence_binding.binding_digest
+            or action.claim_verdict_digest != verdict.verdict_digest
+            or action.budget_ordinal > limit
+        ):
+            raise IntentConflictError("background action authority changed")
+        expected_fingerprint = canonical_json_digest(
+            {
+                "tool_name": registration.spec.name,
+                "tool_identity": registration.spec.identity_digest,
+                "arguments_digest": intent.arguments_digest,
+                "safety_binding": intent.safety_binding,
+                "policy_identity": intent.policy_identity,
+                "occurrence_binding_digest": authority.occurrence_binding.binding_digest,
+                "action_class": action.action_class,
+                "budget_ordinal": action.budget_ordinal,
+            }
+        )
+        if action.action_fingerprint != expected_fingerprint:
+            raise IntentConflictError("background action fingerprint changed")
 
     @staticmethod
     def _goal_authorizes(
@@ -1043,6 +1470,167 @@ class KernelToolRuntime:
             },
         )
 
+    def _sandbox_outcome(
+        self,
+        intent: ExecutionIntent,
+        spec: ToolSpec,
+        draft: SandboxExecutionDraftV1,
+    ) -> ToolResult:
+        if spec.execution_authority is not ExecutionAuthorityClass.ISOLATED_SANDBOX:
+            return ToolResult(
+                tool_call_id=intent.tool_call_id,
+                content="Ordinary tool returned a sandbox draft it is not authorized to use.",
+                is_error=True,
+                executed=True,
+                metadata={
+                    "code": "sandbox_draft_forgery",
+                    "tool_identity": spec.identity_digest,
+                },
+            )
+        if canonical_json_digest(draft.identity_values()) != draft.draft_digest:
+            raise IntentConflictError("sandbox draft digest does not match its facts")
+        if draft.outcome is SandboxDraftOutcome.SPAWN_FAILED:
+            return ToolResult(
+                tool_call_id=intent.tool_call_id,
+                content="sandbox_exec failed before spawn.",
+                is_error=True,
+                executed=False,
+                metadata={
+                    "code": "spawn_failed",
+                    "tool_identity": spec.identity_digest,
+                },
+            )
+        binding = intent.safety_binding
+        facts = draft.enforcement
+        expected = {
+            "command": binding.get("command_fingerprint"),
+            "policy": binding.get(
+                "policy_instance_digest",
+                binding.get("policy_digest"),
+            ),
+            "mode": binding.get("sandbox_mode"),
+            "network": binding.get("sandbox_network"),
+        }
+        actual = {
+            "command": draft.original_command_fingerprint,
+            "policy": facts.policy_digest,
+            "mode": facts.mode.value,
+            "network": facts.network.value,
+        }
+        if actual != expected:
+            raise IntentConflictError(
+                "sandbox draft does not bind the approved command and policy"
+            )
+        danger = facts.mode.value == "danger-full-access"
+        if danger != (facts.backend == "none" and facts.enforcement == "unconfined"):
+            raise IntentConflictError("sandbox enforcement facts contradict the policy mode")
+        lease = intent.sandbox_lease
+        background_action = intent.background_action_authority
+        if lease is not None:
+            if not lease.matches(
+                goal_id=intent.goal_id or "",
+                goal_revision=intent.goal_revision or 0,
+                workspace_identity_digest=intent.workspace_identity_digest or "",
+                original_command_fingerprint=draft.original_command_fingerprint,
+                policy_digest=facts.policy_digest,
+                mode=facts.mode.value,
+                network=facts.network.value,
+            ):
+                raise IntentConflictError("sandbox lease does not match the execution draft")
+            receipt = SandboxReceiptV1.create(
+                receipt_id=f"sandbox-receipt:{draft.draft_digest[:24]}",
+                lease_id=lease.lease_id,
+                lease_digest=lease.lease_digest,
+                candidate_digest=lease.candidate_digest,
+                goal_id=intent.goal_id or "",
+                goal_revision=intent.goal_revision or 0,
+                workspace_identity_digest=intent.workspace_identity_digest or "",
+                original_command_fingerprint=draft.original_command_fingerprint,
+                policy_digest=facts.policy_digest,
+                mode=facts.mode.value,
+                network=facts.network.value,
+                backend=facts.backend,
+                enforcement=facts.enforcement,
+                profile_digest=facts.profile_digest,
+                outcome=draft.outcome.value,
+                draft_digest=draft.draft_digest,
+                issued_at=self._clock(),
+            )
+            receipt_kind = "native_sandbox_v1"
+            authority_metadata = {"lease_id": lease.lease_id}
+        elif (
+            background_action is not None
+            and background_action.action_class == "sandbox_confined"
+        ):
+            receipt = BackgroundSandboxReceiptV1.create(
+                receipt_id=f"background-sandbox-receipt:{draft.draft_digest[:24]}",
+                background_action_authority_digest=background_action.authority_digest,
+                occurrence_binding_digest=background_action.occurrence_binding_digest,
+                goal_id=intent.goal_id or "",
+                goal_revision=intent.goal_revision or 0,
+                workspace_identity_digest=intent.workspace_identity_digest or "",
+                original_command_fingerprint=draft.original_command_fingerprint,
+                policy_digest=facts.policy_digest,
+                mode=facts.mode.value,
+                network=facts.network.value,
+                backend=facts.backend,
+                enforcement=facts.enforcement,
+                profile_digest=facts.profile_digest,
+                outcome=draft.outcome.value,
+                draft_digest=draft.draft_digest,
+                issued_at=self._clock(),
+            )
+            receipt_kind = "background_sandbox_v1"
+            authority_metadata = {
+                "background_action_authority_digest": background_action.authority_digest
+            }
+        else:
+            raise IntentConflictError(
+                "sandbox receipt requires an exact durable authority identity"
+            )
+        success = draft.outcome is SandboxDraftOutcome.EXITED and draft.exit_code == 0
+        projections = [draft.stdout_projection]
+        if draft.stderr_projection:
+            if draft.stdout_projection:
+                projections.append("\n[stderr]\n")
+            projections.append(draft.stderr_projection)
+        rendered = "".join(projections)
+        return ToolResult(
+            tool_call_id=intent.tool_call_id,
+            content=(
+                rendered[: spec.output_limit_chars]
+                if rendered
+                else f"sandbox_exec {draft.outcome.value}"
+            ),
+            is_error=not success,
+            executed=True,
+            metadata={
+                "sandbox_receipt_kind": receipt_kind,
+                "sandbox_receipt": receipt.to_json(),
+                "receipt_digest": receipt.receipt_digest,
+                "execution_authority": spec.execution_authority.value,
+                "outcome": draft.outcome.value,
+                "exit_code": draft.exit_code,
+                "original_command_fingerprint": (
+                    draft.original_command_fingerprint
+                ),
+                "policy_digest": facts.policy_digest,
+                "mode": facts.mode.value,
+                "network": facts.network.value,
+                "backend": facts.backend,
+                "enforcement": facts.enforcement,
+                "profile_digest": facts.profile_digest,
+                "stdout_truncated": draft.stdout_truncated,
+                "stderr_truncated": draft.stderr_truncated,
+                "duration_seconds": draft.duration_seconds,
+                "stdout_digest": draft.stdout_digest,
+                "stderr_digest": draft.stderr_digest,
+                **authority_metadata,
+                "tool_identity": spec.identity_digest,
+                "untrusted_output": True,
+            },
+        )
+
     @staticmethod
     def _validate_process_draft(
         draft: ProcessExecutionDraftV1, intent: ExecutionIntent
@@ -1158,117 +1746,6 @@ class KernelToolRuntime:
             group_cleanup_claim="reaped" if draft.group_reaped else "unconfirmed",
             command_fingerprint=str(binding["command_fingerprint"]),
             duration_seconds=draft.duration_seconds,
-        )
-
-    @staticmethod
-    def _source_result(
-        intent: ExecutionIntent,
-        spec: ToolSpec,
-        raw_result: object,
-    ) -> ToolResult:
-        if not isinstance(raw_result, ToolExecutionOutput):
-            return ToolResult(
-                tool_call_id=intent.tool_call_id,
-                content="Source tool returned an invalid output contract.",
-                is_error=True,
-                executed=True,
-                metadata={"code": "source_output_required"},
-            )
-        if len(raw_result.content) > spec.output_limit_chars:
-            return ToolResult(
-                tool_call_id=intent.tool_call_id,
-                content="Source tool output exceeded the configured limit.",
-                is_error=True,
-                executed=True,
-                metadata={"code": "source_output_oversized"},
-            )
-        allowed_metadata = spec.safety_policy.get("source_metadata_keys", [])
-        if not isinstance(allowed_metadata, list) or any(
-            not isinstance(key, str) for key in allowed_metadata
-        ):
-            return ToolResult(
-                tool_call_id=intent.tool_call_id,
-                content="Source tool metadata policy is malformed.",
-                is_error=True,
-                executed=True,
-                metadata={"code": "source_metadata_policy_invalid"},
-            )
-        if set(raw_result.metadata) - set(allowed_metadata):
-            return ToolResult(
-                tool_call_id=intent.tool_call_id,
-                content="Source tool returned unauthorized metadata.",
-                is_error=True,
-                executed=True,
-                metadata={"code": "source_metadata_invalid"},
-            )
-        metadata_bytes = _canonical_json(raw_result.metadata).encode("utf-8")
-        if len(metadata_bytes) > min(spec.output_limit_chars, 8_192):
-            return ToolResult(
-                tool_call_id=intent.tool_call_id,
-                content="Source tool metadata exceeded the configured limit.",
-                is_error=True,
-                executed=True,
-                metadata={"code": "source_metadata_oversized"},
-            )
-        if len(raw_result.source_receipts) > 16:
-            return ToolResult(
-                tool_call_id=intent.tool_call_id,
-                content="Source tool returned too many receipts.",
-                is_error=True,
-                executed=True,
-                metadata={"code": "source_receipts_oversized"},
-            )
-        receipts: list[SourceReceiptV1] = []
-        for draft in raw_result.source_receipts:
-            if draft.source_kind not in spec.source_kinds:
-                return ToolResult(
-                    tool_call_id=intent.tool_call_id,
-                    content="Source tool returned an unauthorized source kind.",
-                    is_error=True,
-                    executed=True,
-                    metadata={"code": "source_kind_invalid"},
-                )
-            bounded_strings = (
-                draft.origin_locator,
-                draft.observed_at,
-                draft.title or "",
-                draft.content,
-            )
-            if any(len(value) > spec.output_limit_chars for value in bounded_strings):
-                return ToolResult(
-                    tool_call_id=intent.tool_call_id,
-                    content="Source receipt draft exceeded the configured limit.",
-                    is_error=True,
-                    executed=True,
-                    metadata={"code": "source_receipt_oversized"},
-                )
-            receipts.append(SourceReceiptV1.create(draft, intent))
-        metadata = {
-            **raw_result.metadata,
-            "tool_identity": spec.identity_digest,
-            "source_receipts": [
-                {
-                    **asdict(receipt),
-                    "source_kind": receipt.source_kind.value,
-                }
-                for receipt in receipts
-            ],
-            "data_classes": sorted({receipt.data_class for receipt in receipts}),
-            "source_refs": [
-                {
-                    "source_ref": f"source-ref:v1:{receipt.receipt_digest}",
-                    "receipt_digest": receipt.receipt_digest,
-                }
-                for receipt in receipts
-            ],
-            "truncated": any(receipt.truncated for receipt in receipts),
-        }
-        return ToolResult(
-            tool_call_id=intent.tool_call_id,
-            content=raw_result.content,
-            is_error=raw_result.is_error,
-            executed=raw_result.executed,
-            metadata=metadata,
         )
 
     @staticmethod

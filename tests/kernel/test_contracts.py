@@ -101,7 +101,11 @@ def test_015_execution_authority_class_is_closed_and_requires_projection() -> No
 
     authority = getattr(runtime_contracts, "ExecutionAuthorityClass", None)
     assert authority is not None, "015 requires closed ExecutionAuthorityClass"
-    assert {item.value for item in authority} == {"in_process", "local_same_uid_process"}
+    # 017 合法扩展：isolated_sandbox（命令只在 qualified Docker 隔离 environment 内）
+    assert {item.value for item in authority} == {
+        "in_process", "local_same_uid_process", "isolated_sandbox",
+        "browser_session",
+    }
 
     # ToolSpec/ToolDefinition/ExecutionIntent/ExecutingIntentRecord 都携带
     # execution_authority，且没有 default（遗漏在构造时即失败）。

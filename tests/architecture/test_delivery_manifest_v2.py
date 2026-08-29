@@ -276,6 +276,12 @@ def test_console_entrypoint_origin_verifies_install_generated_wrappers_resolve_t
     tree = tmp_path / "tinyagent"
     (tree / "agent").mkdir(parents=True)
     (tree / "agent" / "__init__.py").write_text('MARKER = "tiny"\n', encoding="utf-8")
+    (tree / "agent" / "cli.py").write_text(
+        "import argparse\n"
+        "def main():\n"
+        "    argparse.ArgumentParser(prog='portable-schedule').parse_args(['--help'])\n",
+        encoding="utf-8",
+    )
     # main 暴露 main()/run_schedule()；--help 经 argparse 在任何真实工作前 SystemExit(0)，
     # 故 wrapper 的 `from main import <fn>` 必须从安装处成功解析 main 及其全部传递导入。
     (tree / "main.py").write_text(
@@ -293,6 +299,7 @@ def test_console_entrypoint_origin_verifies_install_generated_wrappers_resolve_t
         "[project.scripts]\n"
         "first-agent = \"main:main\"\n"
         "first-agent-schedule = \"main:run_schedule\"\n"
+        "portable-schedule = \"agent.cli:main\"\n"
         "[tool.setuptools]\npy-modules = [\"main\"]\n"
         "[tool.setuptools.packages.find]\ninclude = [\"agent\"]\n",
         encoding="utf-8",
@@ -305,6 +312,12 @@ def test_console_entrypoint_origin_verifies_install_generated_wrappers_resolve_t
     # 生成文件、target 为 main:<fn>、且 prefix-first 环境下 --help 端到端加载。
     ok, msg = verifier.assert_console_entrypoint_origin(prefix, dirty_root=tree)
     assert ok, msg
+    portable_ok, portable_msg = verifier.assert_console_entrypoint_origin(
+        prefix,
+        dirty_root=tree,
+        entrypoints=(("portable-schedule", "agent.cli", "main"),),
+    )
+    assert portable_ok, portable_msg
 
     # 反向：未安装 entrypoint 的空 prefix → 缺失失败（不静默通过）。
     empty_prefix = tmp_path / "empty-prefix"

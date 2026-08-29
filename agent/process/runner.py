@@ -19,20 +19,17 @@ import subprocess
 import time
 from contextlib import suppress
 
+from agent.process import group as process_group
 from agent.process.contracts import (
     ProcessDraftOutcome,
     ProcessExecutionDraftV1,
     ResourceProfileV1,
 )
+from agent.process.group import ProcessCleanupError
 
 _CHUNK = 65_536
 _SELECT_SLICE = 0.2
 _HARD_DRAIN_MARGIN = 2.0  # pipe drain 宽限（秒），在 deadline+grace 之外
-_POST_KILL_VERIFY_BUDGET = 6.0
-
-
-class ProcessCleanupError(RuntimeError):
-    """process group 在 TERM+KILL 后仍无法确认消失 → unknown outcome（不伪造 receipt）。"""
 
 
 def run_local_process(
@@ -64,11 +61,11 @@ def run_local_process(
         return _draft_failed(started, "spawn_failed", str(exc))
 
     # start_new_session=True → group identity == proc.pid（内核保证，与 leader 是否
-    # 存活无关）。probe 仅验证 observed PGID == pid；mismatch/EPERM → fail-closed。
+    # 存活无关）。verified identity/TERM→KILL/liveness 归共享 process_group seam；
+    # ESRCH race 时该函数保留 expected PGID identity——同 group descendant 仍存活
+    # 时必须可治理，绝不能把「无 observed pgid」当「group 已消失」。
     # probe 在 try/finally 内执行（Codex 预审 §11.4：probe 失败不得遗留已启动
-    # child/pipe）。ESRCH（leader 在 Popen 与 probe 之间退出的实测 race）→ 保留
-    # expected PGID identity：同 group descendant 仍存活时必须可治理——绝不能把
-    # 「无 observed pgid」当「group 已消失」（Codex 终审 P1 false group-reaped）。
+    # child/pipe）。
     pgid: int
     stdout: bytearray = bytearray()
     stderr: bytearray = bytearray()
@@ -88,17 +85,20 @@ def run_local_process(
     group_confirmed_gone = False
 
     try:
-        observed_pgid = _verified_pgid(proc.pid)
-        # ESRCH：leader 已退出，但 group identity 仍由 start_new_session 钉死为
-        # proc.pid；killpg(pgid) 可达存活 descendant，清理与确认都按真实 group 进行。
-        pgid = proc.pid if observed_pgid is None else observed_pgid
+        # ESRCH：函数返回 pid（group identity 仍由 start_new_session 钉死），
+        # killpg(pgid) 可达存活 descendant，清理与确认都按真实 group 进行。
+        pgid = process_group.verified_group_identity(proc.pid)
         while not (out_done and err_done):
             now = time.monotonic()
             if not timed_out and now >= deadline:
                 timed_out = True
-                term_sent, kill_sent, group_confirmed_gone = _terminate_group(
-                    proc, pgid, profile
+                term_sent, kill_sent = process_group.terminate_group(
+                    proc,
+                    pgid,
+                    term_grace_seconds=profile.term_grace_seconds,
+                    kill_grace_seconds=profile.kill_grace_seconds,
                 )
+                group_confirmed_gone = True
             if now > hard_drain_deadline:
                 break
             watch = []
@@ -147,18 +147,22 @@ def run_local_process(
         needs_cleanup = False
         if not timed_out:
             try:
-                needs_cleanup = _group_alive(pgid)
+                needs_cleanup = process_group.group_alive(pgid)
             except ProcessCleanupError:
                 needs_cleanup = True
         if needs_cleanup:
             timed_out = True
-            term_sent, kill_sent, group_confirmed_gone = _terminate_group(
-                proc, pgid, profile
+            term_sent, kill_sent = process_group.terminate_group(
+                proc,
+                pgid,
+                term_grace_seconds=profile.term_grace_seconds,
+                kill_grace_seconds=profile.kill_grace_seconds,
             )
+            group_confirmed_gone = True
         # 正常退出：确认 observed group 已消失。
         if not timed_out:
             try:
-                group_confirmed_gone = not _group_alive(pgid)
+                group_confirmed_gone = not process_group.group_alive(pgid)
             except ProcessCleanupError:
                 group_confirmed_gone = False
     finally:
@@ -207,117 +211,12 @@ def _append_capped(
     return len(buf) >= stream_cap or (combined_used + len(buf)) >= combined_cap
 
 
-def _terminate_group(proc: subprocess.Popen, pgid: int, profile: ResourceProfileV1):
-    """TERM→KILL→verify on observed process group。
-
-    Pre-KILL probe EPERM → conservative：proceed to KILL（cannot confirm gone, but
-    TERM may not have been enough）。Post-KILL verification EPERCH/unknown → fail-closed。
-    """
-
-    term_sent = _signal_group(pgid, signal.SIGTERM)
-    with suppress(subprocess.TimeoutExpired):
-        proc.wait(timeout=profile.term_grace_seconds)
-    # Pre-KILL probe：if group gone → done。EPERM → cannot confirm → proceed to KILL。
-    try:
-        group_gone = not _group_alive(pgid)
-    except ProcessCleanupError:
-        group_gone = False
-    if group_gone:
-        return term_sent, False, True
-    kill_sent = _signal_group(pgid, signal.SIGKILL)
-    with suppress(subprocess.TimeoutExpired):
-        proc.wait(timeout=profile.kill_grace_seconds)
-    # Post-KILL verification：must confirm group gone。Any failure → ProcessCleanupError。
-    # 循环内机会性收尸 leader：SIGKILL 后 leader 僵尸未 reap 时 killpg(0) 会持续报告
-    # 存活（慢/负载机器上 proc.wait(kill_grace) 可能超时错过退出窗口）→ 纯探测循环
-    # 偶发耗尽 → 诚实 ProcessCleanupError（E3 content 门 j3 flake 实测）。按
-    # monotonic 给予完整 6s，而不是固定 30 次：leader 已先 reap 时旧循环每次只
-    # sleep 0.1s，实际仅给 orphan/zombie 约 3s。TERM grace + 该预算仍满足冻结的
-    # bounded-cleanup <10s；KILL 未送达（EPERM）也不会无限阻塞。
-    verification_deadline = time.monotonic() + _POST_KILL_VERIFY_BUDGET
-    while time.monotonic() < verification_deadline:
-        remaining = verification_deadline - time.monotonic()
-        with suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=min(0.1, max(0.0, remaining)))
-        if not _group_alive(pgid):
-            return term_sent, kill_sent, True
-        remaining = verification_deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        time.sleep(min(0.1, remaining))
-    raise ProcessCleanupError(
-        "process group survived TERM+KILL; cannot confirm cleanup"
-    )
-
-
-def _group_alive(pgid: int) -> bool:
-    """signal 0 probe。只有 ProcessLookupError/ESRCH 表示 gone；其他 OSError → fail-closed。
-
-    pgid 缺失（None）不是「group 已消失」的证据——无可治理 identity 就无法确认
-    清理，必须 fail closed 进 unknown，不得据此报告 reaped。
-    """
-
-    if pgid is None:
-        raise ProcessCleanupError(
-            "no verified process group identity; cannot confirm cleanup"
-        )
-    try:
-        os.killpg(pgid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except OSError as exc:
-        raise ProcessCleanupError(
-            f"cannot determine process group liveness: {exc}"
-        ) from exc
-
-
 def _reap(proc: subprocess.Popen, profile: ResourceProfileV1) -> None:
     if proc.poll() is None:
         with suppress(OSError):
             proc.kill()
         with suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=profile.kill_grace_seconds)
-
-
-def _signal_group(pgid: int, sig: int) -> bool:
-    """Send signal to observed group. Returns True if delivered, False if not.
-
-    Signal delivery failure does not prove cleanup. ``_group_alive`` remains the
-    only confirmation oracle and fails closed on every result other than ESRCH.
-    """
-
-    try:
-        os.killpg(pgid, sig)
-        return True
-    except (ProcessLookupError, PermissionError):
-        return False
-    except OSError:
-        return False
-
-
-def _verified_pgid(pid: int) -> int | None:
-    """start_new_session=True 后 PGID 必须等于 pid。mismatch → fail-closed。
-
-    ESRCH → None：leader 已退出且消失（超快进程在 Popen 与本 probe 之间退出的
-    实测负载 race）。这只表示「无法观察」，不表示「group 不存在」——调用方保留
-    expected identity（pid）继续治理/确认；其余 OSError（EPERM 等）与 identity
-    mismatch 仍 fail-closed。
-    """
-
-    try:
-        observed = os.getpgid(pid)
-    except ProcessLookupError:
-        return None
-    except OSError as exc:
-        raise ProcessCleanupError(
-            f"cannot verify process group identity for pid {pid}: {exc}"
-        ) from exc
-    if observed != pid:
-        raise ProcessCleanupError(
-            f"observed PGID {observed} != expected {pid}; session identity mismatch"
-        )
-    return observed
 
 
 def _classify(

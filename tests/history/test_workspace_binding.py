@@ -78,8 +78,8 @@ def test_new_workspace_session_is_bound_and_written_as_v4(tmp_path) -> None:
     assert binding.bound_at == "2026-08-04T01:00:00Z"
     assert opened.workspace_binding == binding
     document = json.loads(opened.checkpoint_path.read_text())
-    # 015 review hardening：current process contract 使用 v6 immutable digests。
-    assert document["schema_version"] == 6
+    # 019：current writer 统一写 v8；v6/v7 继续作为 migration source。
+    assert document["schema_version"] == 8
 
 
 def test_goal_bound_v2_is_lazily_migrated_inside_runtime_lease(tmp_path) -> None:
@@ -142,7 +142,7 @@ def test_goal_bound_v2_is_lazily_migrated_inside_runtime_lease(tmp_path) -> None
     assert result.status is RunStatus.COMPLETED
     restored = opened.store.load().state
     assert restored.workspace_binding == opened.workspace_binding
-    assert json.loads(path.read_text())["schema_version"] == 6
+    assert json.loads(path.read_text())["schema_version"] == 8
 
 
 def test_goal_less_v2_is_excluded_without_mutation_and_new_bound_session_is_created(

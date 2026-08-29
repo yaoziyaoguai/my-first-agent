@@ -133,7 +133,7 @@ def test_cancel_clears_pending():
 # --------------------------------------------------------------------------- #
 
 
-def _takeover_runtime(state=None, *, responses=()):
+def _takeover_runtime(state=None, *, responses=(), browser_takeover_complete=None):
     from agent.runtime.context import ContextLimits, KernelContextManager
     from agent.runtime.loop import AgentRuntime, InvocationLimits
     from tests.kernel.fakes import (
@@ -155,7 +155,10 @@ def _takeover_runtime(state=None, *, responses=()):
         event_sink=CollectingSink(),
         limits=InvocationLimits(),
         invocation_id_factory=lambda: "invocation-1",
-        browser_takeover_complete=lambda request: request.profile_revision + 1,
+        browser_takeover_complete=(
+            browser_takeover_complete
+            or (lambda request: request.profile_revision + 1)
+        ),
     )
     return runtime, provider, store
 
@@ -227,6 +230,54 @@ def test_run_turn_cancels_pending_takeover():
     result = runtime.run_turn(_cancel_action(state, REQUEST), _store.load())
     assert result.status is RunStatus.COMPLETED
     assert result.state.browser_takeover_pending is None
+
+
+def test_unknown_effect_blocks_takeover_completion_before_browser_adapter_call():
+    from dataclasses import replace
+
+    from agent.runtime.contracts import (
+        ActiveRun,
+        ContinuationPhase,
+        ExecutingIntentRecord,
+        ExecutionAuthorityClass,
+        RunStatus,
+        ToolCall,
+    )
+
+    pending = begin_browser_takeover(conversation_with_active_goal(), REQUEST)
+    state = replace(
+        pending,
+        active_run=ActiveRun(
+            run_id="run-takeover",
+            phase=ContinuationPhase.EXECUTING,
+            executing_intent=ExecutingIntentRecord(
+                tool_call_id="call-takeover",
+                intent_digest="intent-takeover",
+                idempotency_key="idempotency-takeover",
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+                operation="browser_begin_takeover",
+            ),
+            tool_calls=(ToolCall("call-takeover", "browser_begin_takeover", {}),),
+        ),
+    )
+    completion_calls = 0
+
+    def complete_browser(_request):  # noqa: ANN001, ANN202
+        nonlocal completion_calls
+        completion_calls += 1
+        return REQUEST.profile_revision + 1
+
+    runtime, _provider, store = _takeover_runtime(
+        state,
+        browser_takeover_complete=complete_browser,
+    )
+
+    result = runtime.run_turn(_complete_action(state, REQUEST), store.load())
+
+    assert result.status is RunStatus.CONFLICT
+    assert result.error_code == "unknown_effect_recovery_required"
+    assert result.state == state
+    assert completion_calls == 0
 
 
 def test_pending_period_zero_provider_and_tool_calls():

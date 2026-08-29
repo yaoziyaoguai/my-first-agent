@@ -58,6 +58,7 @@ def run_posix_occurrence_child(
             "type": "started",
         },
     )
+    _decode_execution_permit(_read_frame(source), permit)
 
     executor = executor_factory()
     if not callable(getattr(executor, "run_once", None)):
@@ -103,6 +104,25 @@ def _decode_permit(frame: bytes) -> dict[str, str]:
     if not isinstance(identity, str) or not _HEX64.fullmatch(identity):
         raise ValueError("occurrence process identity is malformed")
     return {"permit": permit, "process_identity_digest": identity}
+
+
+def _decode_execution_permit(frame: bytes, start_permit: dict[str, str]) -> None:
+    try:
+        value = json.loads(frame.decode("utf-8"), object_pairs_hook=_strict_object)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("occurrence execution permit is malformed JSON") from error
+    if not isinstance(value, dict) or set(value) != {
+        "permit",
+        "process_identity_digest",
+        "type",
+    }:
+        raise ValueError("occurrence execution permit fields must be exact")
+    if (
+        value["type"] != "execute"
+        or value["permit"] != start_permit["permit"]
+        or value["process_identity_digest"] != start_permit["process_identity_digest"]
+    ):
+        raise ValueError("occurrence execution permit mismatch")
 
 
 def _result_payload(result: OccurrenceExecutionResultV1) -> dict[str, object]:

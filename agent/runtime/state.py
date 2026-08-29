@@ -1658,6 +1658,8 @@ def _action_is_legal(state: ConversationState, action: Action) -> tuple[bool, st
     if isinstance(action, (CompleteBrowserTakeover, CancelBrowserTakeover)):
         # 018：takeover controls 是独立 user-only authority action；pending
         # 必须存在且 identity exact 匹配，否则 fail closed。
+        if _has_unknown_effect(state):
+            return False, "unknown_effect_recovery_required"
         pending_takeover = state.browser_takeover_pending
         if pending_takeover is None:
             return False, "illegal_action_for_state"

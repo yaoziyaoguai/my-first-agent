@@ -59,6 +59,13 @@ def main() -> int:
             "permit": permit["permit"],
         }
     )
+    execution_permit = json.loads(sys.stdin.buffer.readline())
+    if execution_permit != {
+        "type": "execute",
+        "process_identity_digest": permit["process_identity_digest"],
+        "permit": permit["permit"],
+    }:
+        return 27
     if mode == "hang-after-start":
         time.sleep(30)
         return 26

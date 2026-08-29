@@ -30,6 +30,21 @@ def _permit(identity: str = "8" * 64) -> bytes:
     ).encode()
 
 
+def _execution_permit(identity: str = "8" * 64) -> bytes:
+    return (
+        json.dumps(
+            {
+                "permit": "permit:exact",
+                "process_identity_digest": identity,
+                "type": "execute",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode()
+
+
 def _completed() -> OccurrenceExecutionResultV1:
     return OccurrenceExecutionResultV1(
         status=OccurrenceControlStatus.COMPLETED,
@@ -41,11 +56,12 @@ def _completed() -> OccurrenceExecutionResultV1:
     )
 
 
-def test_child_constructs_executor_only_after_exact_started_ack() -> None:
+def test_child_constructs_executor_only_after_exact_execution_permit() -> None:
     prepared = _prepared()
     input_stream = io.BytesIO(
         encode_occurrence_spec_frame(SupervisedOccurrenceSpecV1.from_prepared(prepared))
         + _permit()
+        + _execution_permit()
     )
     output_stream = io.BytesIO()
     events: list[str] = []
@@ -86,6 +102,31 @@ def test_child_constructs_executor_only_after_exact_started_ack() -> None:
     assert frames[2]["result"]["status"] == "completed"
     assert result == 0
     assert events == ["factory", "execute"]
+
+
+def test_child_waits_for_execution_permit_before_executor_construction() -> None:
+    called = False
+
+    def factory():  # noqa: ANN202
+        nonlocal called
+        called = True
+        raise AssertionError("executor must wait for the execution permit")
+
+    with pytest.raises(ValueError, match="occurrence child frame"):
+        run_posix_occurrence_child(
+            executor_factory=factory,
+            input_stream=io.BytesIO(
+                encode_occurrence_spec_frame(
+                    SupervisedOccurrenceSpecV1.from_prepared(_prepared())
+                )
+                + _permit()
+            ),
+            output_stream=io.BytesIO(),
+            leader_pid=321,
+            process_group_id=321,
+        )
+
+    assert called is False
 
 
 @pytest.mark.parametrize(
@@ -148,6 +189,7 @@ def test_child_rejects_executor_result_for_another_checkpoint() -> None:
                     SupervisedOccurrenceSpecV1.from_prepared(_prepared())
                 )
                 + _permit()
+                + _execution_permit()
             ),
             output_stream=io.BytesIO(),
             leader_pid=321,

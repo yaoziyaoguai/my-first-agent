@@ -82,7 +82,7 @@ class _FrameReader:
 
 
 class PosixOccurrenceSupervisor:
-    """Own one child process group and a strict READY/start/result handshake."""
+    """Own one child process group and a strict READY/start/execute/result handshake."""
 
     def __init__(
         self,
@@ -227,6 +227,27 @@ class PosixOccurrenceSupervisor:
                 )
             self._decode_started(started_frame, process_identity_digest, permit)
             callbacks.on_started(process_identity_digest, permit)
+            try:
+                self._write(
+                    proc.stdin.fileno(),
+                    self._encode_frame(
+                        {
+                            "type": "execute",
+                            "process_identity_digest": process_identity_digest,
+                            "permit": permit,
+                        }
+                    ),
+                )
+            except (BrokenPipeError, OSError):
+                return self._terminal_unknown(
+                    proc,
+                    pgid,
+                    spec,
+                    process_identity_digest,
+                    OccurrenceControlStatus.START_OUTCOME_UNKNOWN,
+                    "execution_permit_unknown",
+                    start_acknowledged=True,
+                )
 
             try:
                 result_frame = reader.read(self._result_timeout_seconds)

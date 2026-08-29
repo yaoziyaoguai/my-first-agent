@@ -241,3 +241,68 @@ leader：无 verified PGID、无 group-liveness oracle、getpgid OSError 退化
   测试。tool_governance + source_contracts 共 29 passed。既有 prepare/invoke
   穿透测试（test_source_contracts.py）不变且通过——唯一外部接口与最终
   gate 未移动。
+
+---
+
+## Stage D — occurrence execution authority（已实现）
+
+### 选择依据
+
+本轮重新执行 deletion test 后，没有直接提取 checkpoint codec。该迁移会移动
+约 1400 行 schema/codec 代码，但当前没有独立消费者或版本变化频率证明它是
+真实 seam；删除新模块只会把同一批代码移回 `checkpoint.py`。相比之下，
+automation restart 与 POSIX supervisor 暴露了两个会改变 effect safety 语义的
+高置信缺口，因此先收紧 execution authority 边界。
+
+### 已实现的边界
+
+- `RuntimeOccurrenceExecutor.recover()` 只允许 revision 大于 0 的 durable
+  checkpoint 进入 `AgentRuntime.run_turn`。initialize-only 的 revision 0
+  checkpoint 表示 child 尚未留下任何 Runtime 状态变更；恢复时返回未知结果，
+  由 reconciler 转为 `EFFECT_OUTCOME_UNKNOWN`，不得在 supervisor 外首次调用
+  provider/tool。
+- revision 大于 0 不等于可安全重放：checkpoint lease 持续 busy 表示旧 child
+  的 cleanup/liveness 未确认，host 将它投影为 `CLEANUP_UNKNOWN`；若 durable
+  state 已停在 exact background `EXECUTING`，`AgentRuntime` 会先持久化
+  `AWAITING_RECOVERY` 与 exact `RecoveryRequest`，而不是把 unfinished replay
+  降级为 `action_in_progress`/`FAILED`。
+- `PosixOccurrenceSupervisor` 一旦已发送 execute permit，等待结果超时、EOF、
+  截断 frame、畸形 schema 或 typed result 校验失败都分类为
+  `EFFECT_OUTCOME_UNKNOWN`。进程组清理只能证明 execution 已停止，不能证明
+  effect 未发生；cleanup 也无法确认时继续升级为 `CLEANUP_UNKNOWN`，因此不能
+  再降级为可安全清 claim 的 `WORKER_DEADLINE` 或传播 parser exception。
+- `mark_executing()` 的 effect metadata 与 `execution_authority` 全部改为显式
+  keyword-only 输入；状态 reducer 不再替 caller 猜测 WRITE/NONE、operation、
+  request identity 或 IN_PROCESS authority。旧 checkpoint 的 schema migration
+  仍只留在 versioned codec 边界。
+
+### Red/Green 证据
+
+- pristine recovery Red：initialize 后直接 recover 会首次调用 provider
+  （1 call）；Green：provider calls 保持 0，返回 `result=None`。
+- held-lease Red：revision 1 checkpoint 在旧 holder 持 lease 时被映射为安全
+  `FAILED/conversation_busy`；Green：provider calls 保持 0，返回
+  `CLEANUP_UNKNOWN/conversation_busy`。
+- unfinished EXECUTING Red：revision 3 background checkpoint recover 返回安全
+  `FAILED/action_in_progress`；Green：provider/tool calls 保持 0，checkpoint
+  durable 进入 `AWAITING_RECOVERY`，host 返回 `NEEDS_HUMAN`。
+- supervisor timeout Red：execute permit 后结果超时仍返回
+  `WORKER_DEADLINE`；Green：返回 `EFFECT_OUTCOME_UNKNOWN`，且 cleanup 继续被
+  独立验证。
+- supervisor malformed-result Red：partial EOF 与 malformed RESULT 的
+  `ValueError` 逃逸，cleanup uncertainty 被丢弃；Green：统一进入 effect unknown，
+  cleanup 不确定时升级为 cleanup unknown。
+- explicit metadata Red：`mark_executing` 的五个 effect/authority 参数仍有
+  默认值；Green：签名合同要求全部为无默认的 keyword-only 参数，所有 tracked
+  caller 显式投影元数据。
+- focused integration：automation hosts、controller/reconcile、kernel recovery/
+  process/sandbox/browser、TUI projection 与 architecture suites 共 218 passed。
+
+### 保留与拒绝
+
+- browser takeover completion callback 保留：018 合同要求 lifecycle port 以
+  exact profile revision 做幂等 CAS，重复 completion 已有合同测试；它不是一条
+  可重放的普通 ToolRuntime effect 路径。
+- checkpoint codec extraction 继续 deferred。触发条件是出现第二个真实 codec
+  consumer，或 schema/version migration 的独立变化频率足以形成 information-
+  hiding 边界，而不是文件行数继续增长。

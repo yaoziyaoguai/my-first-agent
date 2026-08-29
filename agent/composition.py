@@ -1,9 +1,12 @@
 """显式静态组合根。
 
 只构造一个 `KernelToolRuntime`、一个 `KernelContextManager` 与一个 `AgentRuntime`。
-不提供 global getter、动态 registry、ContextSource tuple 或 closeable stack：
-这些分别留给真实消费者引入（Memory 定义 ContextSource、MCP 出现首个 closeable 时
-扩展为 ordered close stack）。任何阶段都不得演变成 service locator 或第二套 Runtime。
+不提供 global getter 或动态 registry。`ContextSource` tuple 与 ordered closeable
+stack 是 composition root 已有的显式静态组合点：sources 由 composition root 注入
+`KernelContextManager`，source 的调用、排序、预算与投影仅由后者拥有；closeables
+仅由 lifecycle owner 在 teardown 时按逆序关闭。二者都不是 capability 可在运行时
+查询、调用或绕过既有 owner 的 registry。任何阶段都不得演变成 service locator、动态
+capability registry 或第二套 Runtime。
 """
 
 from __future__ import annotations

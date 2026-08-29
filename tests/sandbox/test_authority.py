@@ -12,6 +12,7 @@ from agent.runtime.contracts import (
     ApprovalRequest,
     ContinuationPhase,
     ConversationState,
+    EgressClass,
     ExecutionAuthorityClass,
     GoalStatus,
     ResolveApproval,
@@ -182,6 +183,9 @@ def test_mark_executing_consumes_sandbox_lease_once() -> None:
         intent_digest=HEX_B,
         idempotency_key="conversation-1:run-one:call-one",
         side_effect=SideEffectClass.EXTERNAL,
+        egress=EgressClass.NONE,
+        operation="sandbox_exec",
+        request_identity="conversation-1:run-one:call-one",
         execution_authority=ExecutionAuthorityClass.ISOLATED_SANDBOX,
         sandbox_lease_id=approved.sandbox_leases[0].lease_id,
     )
@@ -193,6 +197,9 @@ def test_mark_executing_consumes_sandbox_lease_once() -> None:
             intent_digest=HEX_B,
             idempotency_key="conversation-1:run-one:call-one",
             side_effect=SideEffectClass.EXTERNAL,
+            egress=EgressClass.NONE,
+            operation="sandbox_exec",
+            request_identity="conversation-1:run-one:call-one",
             execution_authority=ExecutionAuthorityClass.ISOLATED_SANDBOX,
             sandbox_lease_id="missing",
         )

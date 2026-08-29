@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from agent.runtime.contracts import (
@@ -7,10 +9,13 @@ from agent.runtime.contracts import (
     ActiveRunStatus,
     ContinuationPhase,
     ConversationFact,
+    EgressClass,
+    ExecutionAuthorityClass,
     FactKind,
     RecoveryRequest,
     RecoveryResolution,
     ResolveUnknownToolOutcome,
+    SideEffectClass,
     SubmitMessage,
     ToolCall,
 )
@@ -40,12 +45,73 @@ def _started_state():
     )
 
 
+def test_mark_executing_requires_explicit_effect_metadata() -> None:
+    parameters = inspect.signature(mark_executing).parameters
+
+    for name in (
+        "side_effect",
+        "egress",
+        "operation",
+        "request_identity",
+        "execution_authority",
+    ):
+        parameter = parameters[name]
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        assert parameter.default is inspect.Parameter.empty
+
+
+@pytest.mark.parametrize("request_identity", (None, ""))
+def test_mark_executing_rejects_missing_request_identity(
+    request_identity: str | None,
+) -> None:
+    with pytest.raises(ValueError, match="request identity"):
+        mark_executing(
+            _started_state(),
+            tool_call_id="tool-call-1",
+            intent_digest="intent-1",
+            idempotency_key="conversation-1:run-1:tool-call-1",
+            side_effect=SideEffectClass.WRITE,
+            egress=EgressClass.NONE,
+            operation="write_file",
+            request_identity=request_identity,
+            execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        )
+
+
+def test_mark_executing_records_explicit_effect_metadata() -> None:
+    state = mark_executing(
+        _started_state(),
+        tool_call_id="tool-call-1",
+        intent_digest="intent-1",
+        idempotency_key="conversation-1:run-1:tool-call-1",
+        side_effect=SideEffectClass.WRITE,
+        egress=EgressClass.NONE,
+        operation="write_file",
+        request_identity="request:conversation-1:run-1:tool-call-1",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+    )
+
+    assert state.active_run is not None
+    intent = state.active_run.executing_intent
+    assert intent is not None
+    assert intent.side_effect is SideEffectClass.WRITE
+    assert intent.egress is EgressClass.NONE
+    assert intent.operation == "write_file"
+    assert intent.request_identity == "request:conversation-1:run-1:tool-call-1"
+    assert intent.execution_authority is ExecutionAuthorityClass.IN_PROCESS
+
+
 def test_executing_continuation_has_only_bound_result_or_recovery_paths() -> None:
     state = mark_executing(
         _started_state(),
         tool_call_id="tool-call-1",
         intent_digest="intent-1",
         idempotency_key="conversation-1:run-1:tool-call-1",
+        side_effect=SideEffectClass.WRITE,
+        egress=EgressClass.NONE,
+        operation="write_file",
+        request_identity="conversation-1:run-1:tool-call-1",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
     )
 
     assert state.active_run is not None
@@ -71,6 +137,11 @@ def test_unknown_outcome_requires_exact_human_classification() -> None:
         tool_call_id="tool-call-1",
         intent_digest="intent-1",
         idempotency_key="key-1",
+        side_effect=SideEffectClass.WRITE,
+        egress=EgressClass.NONE,
+        operation="write_file",
+        request_identity="key-1",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
     )
     recovering = pause_for_recovery(
         executing,

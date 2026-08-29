@@ -8,11 +8,14 @@ from agent.runtime.contracts import (
     ApprovalRequest,
     CancelRun,
     ContinuationPhase,
+    EgressClass,
+    ExecutionAuthorityClass,
     RecordedRunResult,
     RecoveryRequest,
     ResolveApproval,
     Resume,
     RunStatus,
+    SideEffectClass,
     SubmitMessage,
     ToolCall,
 )
@@ -264,6 +267,11 @@ def _executing_run_state():
         tool_call_id="tool-call-1",
         intent_digest="intent-1",
         idempotency_key="conversation-1:run-1:tool-call-1",
+        side_effect=SideEffectClass.WRITE,
+        egress=EgressClass.NONE,
+        operation="write_file",
+        request_identity="conversation-1:run-1:tool-call-1",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
     )
 
 

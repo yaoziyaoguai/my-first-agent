@@ -15,8 +15,11 @@ from agent.provider.protocol import ProviderAuthError, ProviderProtocolError
 from agent.runtime.contracts import (
     ContinuationPhase,
     ConversationState,
+    EgressClass,
+    ExecutionAuthorityClass,
     RecordedRunResult,
     RunStatus,
+    SideEffectClass,
     SubmitMessage,
     ToolCall,
 )
@@ -180,6 +183,11 @@ def test_014_e3_crash_hook_persists_executing_before_process_interrupt(tmp_path)
         tool_call_id="write-crash",
         intent_digest="intent-crash",
         idempotency_key="idempotency-crash",
+        side_effect=SideEffectClass.WRITE,
+        egress=EgressClass.NONE,
+        operation="write_file",
+        request_identity="idempotency-crash",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
     )
     lease = opened.store.try_acquire(state.conversation_id)
     assert lease is not None

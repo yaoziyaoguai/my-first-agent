@@ -12,6 +12,8 @@ from agent.runtime.contracts import (
     ActiveRunStatus,
     ApprovalRequest,
     ConversationState,
+    EgressClass,
+    ExecutionAuthorityClass,
     LoadedSnapshot,
     ModelResponse,
     ModelTextBlock,
@@ -19,6 +21,7 @@ from agent.runtime.contracts import (
     Resume,
     RunResult,
     RunStatus,
+    SideEffectClass,
     ToolCall,
 )
 from agent.runtime.loop import AgentRuntime, InvocationLimits
@@ -99,7 +102,15 @@ def _recovery_state() -> ConversationState:
     started = accept_action(None, _submit("c2", "r2", "hi")).state
     batched = start_tool_batch(started, (ToolCall("call-2", "write_file", {}),))
     executing = mark_executing(
-        batched, tool_call_id="call-2", intent_digest="d", idempotency_key="k"
+        batched,
+        tool_call_id="call-2",
+        intent_digest="d",
+        idempotency_key="k",
+        side_effect=SideEffectClass.WRITE,
+        egress=EgressClass.NONE,
+        operation="write_file",
+        request_identity="k",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
     )
     return pause_for_recovery(
         executing,
@@ -117,7 +128,15 @@ def _executing_state() -> ConversationState:
     started = accept_action(None, _submit("c3", "r3", "hi")).state
     batched = start_tool_batch(started, (ToolCall("call-3", "write_file", {}),))
     return mark_executing(
-        batched, tool_call_id="call-3", intent_digest="d3", idempotency_key="k3"
+        batched,
+        tool_call_id="call-3",
+        intent_digest="d3",
+        idempotency_key="k3",
+        side_effect=SideEffectClass.WRITE,
+        egress=EgressClass.NONE,
+        operation="write_file",
+        request_identity="k3",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
     )
 
 

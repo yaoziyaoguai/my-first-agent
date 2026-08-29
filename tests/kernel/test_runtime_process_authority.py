@@ -322,6 +322,9 @@ def test_015_mark_executing_consumes_process_lease_use_once() -> None:
         intent_digest="i" * 64,
         idempotency_key="conversation-u7:run-u7:call-u7",
         side_effect=contracts.SideEffectClass.EXTERNAL,
+        egress=contracts.EgressClass.NONE,
+        operation="local_process",
+        request_identity="conversation-u7:run-u7:call-u7",
         execution_authority=contracts.ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS,
         process_lease_id=lease.lease_id,
     )
@@ -337,6 +340,9 @@ def test_015_mark_executing_consumes_process_lease_use_once() -> None:
             intent_digest="i" * 64,
             idempotency_key="conversation-u7:run-u7:call-u7",
             side_effect=contracts.SideEffectClass.EXTERNAL,
+            egress=contracts.EgressClass.NONE,
+            operation="local_process",
+            request_identity="conversation-u7:run-u7:call-u7",
             execution_authority=contracts.ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS,
             process_lease_id="process-lease:nonexistent",
         )
@@ -468,6 +474,9 @@ def test_015_crash_after_executing_does_not_duplicate_spawn_or_lease_use() -> No
         intent_digest="i" * 64,
         idempotency_key="conversation-crash:run-crash:call-crash",
         side_effect=contracts.SideEffectClass.EXTERNAL,
+        egress=contracts.EgressClass.NONE,
+        operation="local_process",
+        request_identity="conversation-crash:run-crash:call-crash",
         execution_authority=contracts.ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS,
         process_lease_id=lease.lease_id,
     )
@@ -481,6 +490,9 @@ def test_015_crash_after_executing_does_not_duplicate_spawn_or_lease_use() -> No
             intent_digest="i" * 64,
             idempotency_key="conversation-crash:run-crash:call-crash",
             side_effect=contracts.SideEffectClass.EXTERNAL,
+            egress=contracts.EgressClass.NONE,
+            operation="local_process",
+            request_identity="conversation-crash:run-crash:call-crash",
             execution_authority=contracts.ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS,
             process_lease_id=lease.lease_id,
         )

@@ -174,6 +174,8 @@ def test_browser_lease_use_is_consumed_in_executing_checkpoint():
         idempotency_key="key-1",
         side_effect=SideEffectClass.EXTERNAL,
         egress=EgressClass.GOVERNED_NETWORK,
+        operation="browser_act",
+        request_identity="key-1",
         execution_authority=ExecutionAuthorityClass.BROWSER_SESSION,
         browser_lease_id=lease.lease_id,
     )

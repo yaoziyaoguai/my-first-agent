@@ -3424,16 +3424,18 @@ def mark_executing(
     tool_call_id: str,
     intent_digest: str,
     idempotency_key: str,
-    side_effect: SideEffectClass = SideEffectClass.WRITE,
-    egress: EgressClass = EgressClass.NONE,
-    operation: str = "legacy_effect",
-    request_identity: str | None = None,
-    execution_authority: ExecutionAuthorityClass = ExecutionAuthorityClass.IN_PROCESS,
+    side_effect: SideEffectClass,
+    egress: EgressClass,
+    operation: str,
+    request_identity: str,
+    execution_authority: ExecutionAuthorityClass,
     process_lease_id: str | None = None,
     sandbox_lease_id: str | None = None,
     browser_lease_id: str | None = None,
     background_action_authority: BackgroundActionAuthorityV1 | None = None,
 ) -> ConversationState:
+    if not isinstance(request_identity, str) or not request_identity:
+        raise ValueError("executing intent request identity must be a non-empty string")
     active = state.active_run
     if (
         active is None
@@ -3483,7 +3485,7 @@ def mark_executing(
         egress=egress,
         execution_authority=execution_authority,
         operation=operation,
-        request_identity=request_identity or idempotency_key,
+        request_identity=request_identity,
     )
     if (
         execution_authority is ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS

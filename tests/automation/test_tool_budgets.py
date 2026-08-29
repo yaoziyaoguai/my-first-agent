@@ -62,6 +62,7 @@ def _mark(state: ConversationState, *, ordinal: int) -> ConversationState:
         side_effect=SideEffectClass.EXTERNAL,
         egress=EgressClass.NONE,
         operation="sandbox_exec",
+        request_identity="background-budget:call",
         execution_authority=ExecutionAuthorityClass.ISOLATED_SANDBOX,
         background_action_authority=_action(ordinal=ordinal),
     )

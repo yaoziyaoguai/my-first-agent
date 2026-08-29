@@ -349,6 +349,9 @@ def test_015_mark_executing_requires_lease_for_process_authority(journey) -> Non
             intent_digest="i" * 64,
             idempotency_key=f"{CONVERSATION}:run-f1:{call.tool_call_id}",
             side_effect=runtime._tools["local_process"].spec.side_effect,
+            egress=runtime._tools["local_process"].spec.egress,
+            operation="local_process",
+            request_identity=f"{CONVERSATION}:run-f1:{call.tool_call_id}",
             execution_authority=ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS,
             process_lease_id=None,
         )

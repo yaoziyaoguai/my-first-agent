@@ -6,6 +6,7 @@ from agent.runtime.contracts import (
     ApprovalRequest,
     ConversationState,
     EgressClass,
+    ExecutionAuthorityClass,
     RecordedRunResult,
     RecoveryRequest,
     RunStatus,
@@ -51,7 +52,15 @@ def _recovery_state():
     ).state
     batched = start_tool_batch(started, (ToolCall("call-2", "write_file", {}),))
     executing = mark_executing(
-        batched, tool_call_id="call-2", intent_digest="d", idempotency_key="k"
+        batched,
+        tool_call_id="call-2",
+        intent_digest="d",
+        idempotency_key="k",
+        side_effect=SideEffectClass.WRITE,
+        egress=EgressClass.NONE,
+        operation="write_file",
+        request_identity="k",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
     )
     return pause_for_recovery(
         executing,
@@ -148,7 +157,15 @@ def test_projection_reopened_executing_is_unknown_effect_resume_only() -> None:
     ).state
     batched = start_tool_batch(started, (ToolCall("call-3", "write_file", {}),))
     executing = mark_executing(
-        batched, tool_call_id="call-3", intent_digest="d3", idempotency_key="k3"
+        batched,
+        tool_call_id="call-3",
+        intent_digest="d3",
+        idempotency_key="k3",
+        side_effect=SideEffectClass.WRITE,
+        egress=EgressClass.NONE,
+        operation="write_file",
+        request_identity="k3",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
     )
     view = project(executing)
     assert "interrupted unknown effect" in view.main_text

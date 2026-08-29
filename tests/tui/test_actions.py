@@ -15,6 +15,7 @@ from agent.runtime.contracts import (
     ApprovalRequest,
     ConversationState,
     EgressClass,
+    ExecutionAuthorityClass,
     RecoverUnknownObservation,
     RecoveryRequest,
     RecoveryResolution,
@@ -75,7 +76,15 @@ def test_cancel_on_executing_is_unchanged_conflict_via_shared_reducer() -> None:
     started = accept_action(None, build_submit(_ready(), message="hi", run_id="run-1")).state
     batched = start_tool_batch(started, (ToolCall("call-1", "write_file", {}),))
     executing = mark_executing(
-        batched, tool_call_id="call-1", intent_digest="d", idempotency_key="k"
+        batched,
+        tool_call_id="call-1",
+        intent_digest="d",
+        idempotency_key="k",
+        side_effect=SideEffectClass.WRITE,
+        egress=EgressClass.NONE,
+        operation="write_file",
+        request_identity="k",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
     )
     cancel = build_cancel(executing)
     transition = accept_action(executing, cancel)
@@ -87,7 +96,15 @@ def test_resume_into_recovery_then_only_exact_resolution_progresses() -> None:
     started = accept_action(None, build_submit(_ready(), message="hi", run_id="run-1")).state
     batched = start_tool_batch(started, (ToolCall("call-1", "write_file", {}),))
     executing = mark_executing(
-        batched, tool_call_id="call-1", intent_digest="d", idempotency_key="k"
+        batched,
+        tool_call_id="call-1",
+        intent_digest="d",
+        idempotency_key="k",
+        side_effect=SideEffectClass.WRITE,
+        egress=EgressClass.NONE,
+        operation="write_file",
+        request_identity="k",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
     )
     recovering = pause_for_recovery(
         executing,
@@ -125,6 +142,7 @@ def test_public_observation_recovery_builder_binds_persisted_executing_intent() 
         egress=EgressClass.PUBLIC_NETWORK,
         operation="search",
         request_identity="request-1",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
     )
     recovering = pause_for_recovery(
         executing,

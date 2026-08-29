@@ -6,7 +6,10 @@ from agent.runtime.checkpoint import LocalCheckpointStore
 from agent.runtime.contracts import (
     ActiveRunStatus,
     ConversationState,
+    EgressClass,
+    ExecutionAuthorityClass,
     RecoveryRequest,
+    SideEffectClass,
     SubmitMessage,
     ToolCall,
 )
@@ -33,6 +36,11 @@ def test_executing_recovery_round_trips_without_live_dependencies(tmp_path: Path
         tool_call_id="call-1",
         intent_digest="intent-1",
         idempotency_key="key-1",
+        side_effect=SideEffectClass.WRITE,
+        egress=EgressClass.NONE,
+        operation="write_file",
+        request_identity="key-1",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
     )
     state = pause_for_recovery(
         state,

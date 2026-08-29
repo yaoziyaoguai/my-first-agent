@@ -265,20 +265,20 @@ owner preference poisoning/correct/forget 和 false-completion mutation oracle�
 
 ## Scheduler（external caller）
 
-`first-agent-schedule` 是无内置时钟的 occurrence adapter，供 cron/launchd/CI 调用。每次 occurrence 映射为独立 conversation/checkpoint，提交一次确定性 `SubmitMessage`，并输出 machine-readable JSON report：
+`first-agent-schedule` 是 019 的 typed management/reconcile surface，不含内置时钟，也不
+从 CLI 参数发现 workspace、state root、task text、provider 或 credential。控制平面将定义、
+UTC due-time、CAS lifecycle 和 one-shot reconciliation 保持为 portable core；合格的本机 host
+composition 才能在固定 owner root 上构造它并提供可选 cold wake。
 
 ```bash
-first-agent-schedule \
-  --workspace "$PWD" \
-  --state-root /tmp/first-agent-schedule \
-  --schedule-id nightly-build \
-  --occurrence-id '2026-07-19T00:00:00Z' \
-  --scheduled-for '2026-07-19T00:00:00Z' \
-  --message 'run the benign nightly check' \
-  --provider fake
+first-agent-schedule reconcile --delivery-id delivery:one
 ```
 
-exit class 只有 `completed`(0) / `needs_human`(1) / `fatal_conflict`(2)。duplicate fire 走 action replay（provider/effect 不重复）；approval/recovery/limit/retryable 一律报告 `needs_human`，交还人类。`--state-root` 必须在 workspace 之外。
+未配置受信任 host profile 时，该入口 fail closed 为 `needs_019_config`，而不是接受任意路径
+或凭据来拼装 Runtime。具备 host composition 时，命令只接收 closed typed actions：`create`、
+`preview`、`approve`、`list`、`show`、`open`、`update`、`pause`、`resume`、`cancel`、`purge`、
+`wake enable/disable` 与 `reconcile`。重复 reconciliation 重放 authoritative result，不会重复
+provider/effect；approval、recovery 和 host qualification 始终交还人类。
 
 ## TUI（optional Textual adapter）
 

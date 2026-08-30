@@ -12,9 +12,11 @@ from dataclasses import dataclass
 
 from agent.process.contracts import ExecutableIdentityV1
 from agent.runtime.contracts import KnownNotExecuted
+from agent.sandbox import seatbelt as seatbelt_module
 from agent.sandbox.contracts import (
     ConfinedInvocationV1,
     PackagedSkillResourceLimitsV1,
+    PackagedSkillSandboxPolicyV1,
     SandboxMode,
     SandboxNetworkMode,
 )
@@ -278,3 +280,62 @@ def test_mismatched_registered_policy_type_fails_closed_without_compiler(tmp_pat
     assert isinstance(outcome, KnownNotExecuted)
     assert outcome.code == "sandbox_policy_type_unknown"
     assert calls == 0
+
+
+def test_forged_direct_packaged_policy_is_rejected_before_compiler_or_qualification(
+    tmp_path, monkeypatch
+):
+    roots = {
+        name: tmp_path / name
+        for name in ("runtime", "package", "temp", "system", "work", "state", "home")
+    }
+    for path in roots.values():
+        path.mkdir()
+    for name in ("runtime", "package"):
+        roots[name].chmod(0o555)
+    interpreter = roots["system"] / "python"
+    interpreter.write_text("fixture", encoding="utf-8")
+    interpreter.chmod(0o555)
+    session = roots["temp"] / "session"
+    session.mkdir()
+    policy = PackagedSkillSandboxPolicyV1(
+        interpreter_path=str(interpreter),
+        runtime_roots=("/",),
+        package_root=str(roots["package"]),
+        temp_root=str(roots["temp"]),
+        system_runtime_roots=(str(roots["system"]),),
+        workspace_root=str(roots["work"]),
+        home_root=str(roots["home"]),
+        state_root=str(roots["state"]),
+        private_roots=(),
+        runtime_closure_digest="a" * 64,
+        system_runtime_digest="b" * 64,
+        resource_limits=PackagedSkillResourceLimitsV1.for_profile("skill-standard-v1"),
+    )
+    compiler_calls = 0
+
+    def packaged_compiler(active_policy, environment):
+        nonlocal compiler_calls
+        compiler_calls += 1
+        return "(version 1)\n(deny default)\n"
+
+    monkeypatch.setattr(
+        seatbelt_module, "compile_packaged_skill_profile", packaged_compiler
+    )
+    fake = FakeRunner()
+    confiner = SeatbeltConfiner(
+        runner=fake,
+        platform_system="Darwin",
+        profile_compiler=lambda active_policy: "(version 1)\n(allow default)\n",
+    )
+
+    outcome = confiner.confine(
+        _command(argv=(), resolved=str(interpreter)),
+        policy,
+        {"TMPDIR": str(session)},
+    )
+
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "sandbox_policy_type_unknown"
+    assert compiler_calls == 0
+    assert fake.calls == []

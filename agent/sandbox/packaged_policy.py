@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from pathlib import Path
 
+from agent.runtime.contracts import canonical_json_digest
 from agent.sandbox.contracts import (
     PackagedSkillResourceLimitsV1,
     PackagedSkillSandboxPolicyV1,
+    SandboxMode,
+    SandboxNetworkMode,
 )
 from agent.sandbox.policy import escape_seatbelt_path
 
@@ -36,10 +40,15 @@ def _canonical_existing(path: object, name: str, *, directory: bool) -> str:
     return str(resolved)
 
 
-def _canonical_roots(value: object, name: str) -> tuple[str, ...]:
-    if not isinstance(value, tuple) or not value:
+def _canonical_roots(
+    value: object, name: str, *, allow_empty: bool = False
+) -> tuple[str, ...]:
+    if not isinstance(value, tuple) or (not value and not allow_empty):
         raise ValueError(f"{name} must be a non-empty tuple of roots")
-    return tuple(sorted(_canonical_existing(item, name, directory=True) for item in value))
+    roots = tuple(_canonical_existing(item, name, directory=True) for item in value)
+    if roots != tuple(sorted(roots)):
+        raise ValueError(f"{name} must be sorted canonical roots")
+    return roots
 
 
 def _require_no_overlap(roots: tuple[str, ...]) -> None:
@@ -61,6 +70,72 @@ def _is_within(child: str, parent: str) -> bool:
     return child_path == parent_path or parent_path in child_path.parents
 
 
+def _path_string(value: object) -> object:
+    return str(value) if isinstance(value, Path) else value
+
+
+def _path_tuple(value: object) -> object:
+    if not isinstance(value, tuple):
+        return value
+    return tuple(_path_string(item) for item in value)
+
+
+def _validate_resource_limits(limits: object) -> None:
+    if type(limits) is not PackagedSkillResourceLimitsV1:
+        raise ValueError("resource_limits must use a closed packaged profile")
+    expected = PackagedSkillResourceLimitsV1.for_profile(limits.profile)
+    if limits != expected:
+        raise ValueError("packaged resource limits do not match their closed profile")
+
+
+def _validate_digest(value: object, name: str) -> None:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ValueError(f"{name} must be bare hex64")
+
+
+def validate_packaged_skill_policy(policy: PackagedSkillSandboxPolicyV1) -> None:
+    """在每次 profile emit 前重验 strict policy 的全部 authority。"""
+
+    if type(policy) is not PackagedSkillSandboxPolicyV1:
+        raise ValueError("packaged policy type is required")
+    if policy.mode is not SandboxMode.READ_ONLY or policy.network is not SandboxNetworkMode.OFF:
+        raise ValueError("packaged policy mode/network must remain closed")
+    _validate_resource_limits(policy.resource_limits)
+    _validate_digest(policy.runtime_closure_digest, "runtime_closure_digest")
+    _validate_digest(policy.system_runtime_digest, "system_runtime_digest")
+    expected_digest = canonical_json_digest(policy.identity_values())
+    if policy.policy_digest != expected_digest:
+        raise ValueError("packaged sandbox policy digest mismatch")
+
+    interpreter = _canonical_existing(policy.interpreter_path, "interpreter_path", directory=False)
+    if not os.stat(interpreter, follow_symlinks=False).st_mode & 0o111:
+        raise ValueError("interpreter_path must be executable")
+    runtime = _canonical_roots(policy.runtime_roots, "runtime_roots")
+    package = _canonical_existing(policy.package_root, "package_root", directory=True)
+    temp = _canonical_existing(policy.temp_root, "temp_root", directory=True)
+    system = _canonical_roots(policy.system_runtime_roots, "system_runtime_roots")
+    workspace = _canonical_existing(policy.workspace_root, "workspace_root", directory=True)
+    home = _canonical_existing(policy.home_root, "home_root", directory=True)
+    state = _canonical_existing(policy.state_root, "state_root", directory=True)
+    private = _canonical_roots(
+        policy.private_roots, "private_roots", allow_empty=True
+    )
+    read_roots = (*runtime, package, *system)
+    if any(root == "/" for root in read_roots):
+        raise ValueError("runtime_roots must not admit filesystem root")
+    _require_no_overlap((*runtime, package, temp, *system, workspace, home, state, *private))
+    if any(_is_within(package, denied) for denied in (workspace, home, state)):
+        raise ValueError("package_root must not be under a denied root")
+    if not any(_is_within(interpreter, root) for root in (*runtime, *system)):
+        raise ValueError(
+            "interpreter_path must be under a qualified runtime/system root"
+        )
+    if any(_is_within(root, str(_PRODUCT_ROOT)) for root in runtime):
+        raise ValueError("runtime_roots must not be under the product tree")
+    for root in (*runtime, package):
+        _require_read_only(root, "runtime/package root")
+
+
 def build_packaged_skill_policy(
     *,
     interpreter_path: object,
@@ -78,44 +153,22 @@ def build_packaged_skill_policy(
 ) -> PackagedSkillSandboxPolicyV1:
     """构造唯一 strict packaged policy；任一 root identity 不确定即拒绝。"""
 
-    interpreter = _canonical_existing(interpreter_path, "interpreter_path", directory=False)
-    if not os.stat(interpreter, follow_symlinks=False).st_mode & 0o111:
-        raise ValueError("interpreter_path must be executable")
-    runtime = _canonical_roots(runtime_roots, "runtime_roots")
-    package = _canonical_existing(package_root, "package_root", directory=True)
-    temp = _canonical_existing(temp_root, "temp_root", directory=True)
-    system = _canonical_roots(system_runtime_roots, "system_runtime_roots")
-    workspace = _canonical_existing(workspace_root, "workspace_root", directory=True)
-    home = _canonical_existing(home_root, "home_root", directory=True)
-    state = _canonical_existing(state_root, "state_root", directory=True)
-    private = _canonical_roots(private_roots, "private_roots") if private_roots else ()
-    _require_no_overlap(
-        (*runtime, package, temp, *system, workspace, home, state, *private)
-    )
-    if any(_is_within(package, denied) for denied in (workspace, home, state)):
-        raise ValueError("package_root must not be under a denied root")
-    if not any(_is_within(interpreter, root) for root in (*runtime, *system)):
-        raise ValueError(
-            "interpreter_path must be under a qualified runtime/system root"
-        )
-    if any(_is_within(root, str(_PRODUCT_ROOT)) for root in runtime):
-        raise ValueError("runtime_roots must not be under the product tree")
-    for root in (*runtime, package):
-        _require_read_only(root, "runtime/package root")
-    return PackagedSkillSandboxPolicyV1(
-        interpreter_path=interpreter,
-        runtime_roots=runtime,
-        package_root=package,
-        temp_root=temp,
-        system_runtime_roots=system,
-        workspace_root=workspace,
-        home_root=home,
-        state_root=state,
-        private_roots=private,
+    policy = PackagedSkillSandboxPolicyV1(
+        interpreter_path=_path_string(interpreter_path),  # type: ignore[arg-type]
+        runtime_roots=_path_tuple(runtime_roots),  # type: ignore[arg-type]
+        package_root=_path_string(package_root),  # type: ignore[arg-type]
+        temp_root=_path_string(temp_root),  # type: ignore[arg-type]
+        system_runtime_roots=_path_tuple(system_runtime_roots),  # type: ignore[arg-type]
+        workspace_root=_path_string(workspace_root),  # type: ignore[arg-type]
+        home_root=_path_string(home_root),  # type: ignore[arg-type]
+        state_root=_path_string(state_root),  # type: ignore[arg-type]
+        private_roots=_path_tuple(private_roots),  # type: ignore[arg-type]
         runtime_closure_digest=runtime_closure_digest,
         system_runtime_digest=system_runtime_digest,
         resource_limits=resource_limits,
     )
+    validate_packaged_skill_policy(policy)
+    return policy
 
 
 def _session_root(policy: PackagedSkillSandboxPolicyV1, environment: Mapping[str, str]) -> str:
@@ -134,8 +187,7 @@ def compile_packaged_skill_profile(
 ) -> str:
     """编译无默认许可、仅两个 literal 输出文件的 Seatbelt profile。"""
 
-    if not isinstance(policy, PackagedSkillSandboxPolicyV1):
-        raise TypeError("packaged policy type is required")
+    validate_packaged_skill_policy(policy)
     session = _session_root(policy, environment)
     clauses = [
         "(version 1)",

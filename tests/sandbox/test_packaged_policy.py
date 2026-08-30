@@ -10,6 +10,7 @@ import pytest
 from agent.runtime.contracts import canonical_json_digest
 from agent.sandbox.contracts import (
     PackagedSkillResourceLimitsV1,
+    PackagedSkillSandboxPolicyV1,
     SandboxMode,
     SandboxNetworkMode,
 )
@@ -70,6 +71,27 @@ def _policy(roots: Roots):
             "skill-standard-v1"
         ),
     )
+
+
+def _direct_policy(roots: Roots, **overrides: object) -> PackagedSkillSandboxPolicyV1:
+    values: dict[str, object] = {
+        "interpreter_path": str(roots.interpreter),
+        "runtime_roots": (str(roots.runtime),),
+        "package_root": str(roots.package),
+        "temp_root": str(roots.temp),
+        "system_runtime_roots": (str(roots.system),),
+        "workspace_root": str(roots.workspace),
+        "home_root": str(roots.home),
+        "state_root": str(roots.state),
+        "private_roots": (str(roots.private),),
+        "runtime_closure_digest": "a" * 64,
+        "system_runtime_digest": "b" * 64,
+        "resource_limits": PackagedSkillResourceLimitsV1.for_profile(
+            "skill-standard-v1"
+        ),
+    }
+    values.update(overrides)
+    return PackagedSkillSandboxPolicyV1(**values)  # type: ignore[arg-type]
 
 
 def test_packaged_profile_is_deny_default_and_exact_allowlist(tmp_path: Path) -> None:
@@ -236,3 +258,44 @@ def test_profile_requires_existing_canonical_direct_temp_child(tmp_path: Path) -
 
     with pytest.raises(ValueError, match="direct child"):
         compile_packaged_skill_profile(policy, {"TMPDIR": str(nested)})
+
+
+@pytest.mark.parametrize(
+    ("forgery", "message"),
+    [
+        ("root_runtime", "runtime_roots"),
+        ("workspace_runtime", "overlap"),
+        ("noncanonical_runtime", "canonical"),
+        ("symlink_runtime", "canonical"),
+        ("writable_runtime", "writable"),
+        ("interpreter_outside_roots", "qualified runtime/system root"),
+    ],
+)
+def test_directly_constructed_forged_policy_cannot_emit_profile(
+    tmp_path: Path, forgery: str, message: str
+) -> None:
+    roots = _roots(tmp_path)
+    session = roots.temp / "session"
+    session.mkdir()
+    overrides: dict[str, object] = {}
+    if forgery == "root_runtime":
+        overrides["runtime_roots"] = ("/",)
+    elif forgery == "workspace_runtime":
+        overrides["runtime_roots"] = (str(roots.workspace),)
+    elif forgery == "noncanonical_runtime":
+        overrides["runtime_roots"] = (f"{roots.runtime}/../runtime",)
+    elif forgery == "symlink_runtime":
+        alias = tmp_path / "runtime-alias"
+        alias.symlink_to(roots.runtime)
+        overrides["runtime_roots"] = (str(alias),)
+    elif forgery == "writable_runtime":
+        roots.runtime.chmod(0o755)
+    else:
+        outside = tmp_path / "outside-python"
+        outside.write_text("fixture", encoding="utf-8")
+        outside.chmod(0o555)
+        overrides["interpreter_path"] = str(outside)
+    policy = _direct_policy(roots, **overrides)
+
+    with pytest.raises(ValueError, match=message):
+        compile_packaged_skill_profile(policy, {"TMPDIR": str(session)})

@@ -24,7 +24,10 @@ from agent.sandbox.contracts import (
     SandboxPolicyV1,
     SandboxQualificationV1,
 )
-from agent.sandbox.packaged_policy import compile_packaged_skill_profile
+from agent.sandbox.packaged_policy import (
+    compile_packaged_skill_profile,
+    validate_packaged_skill_policy,
+)
 from agent.sandbox.policy import compile_seatbelt_profile
 from agent.sandbox.qualification import (
     MINIMAL_PROBE_PROFILE,
@@ -123,6 +126,14 @@ class SeatbeltConfiner:
                 code="sandbox_policy_type_unknown",
                 message="sandbox policy type is not admitted",
             )
+        if type(policy) is PackagedSkillSandboxPolicyV1:
+            try:
+                validate_packaged_skill_policy(policy)
+            except ValueError:
+                return KnownNotExecuted(
+                    code="sandbox_policy_type_unknown",
+                    message="packaged sandbox policy is not admitted",
+                )
         if command.executable_identity is None:
             return KnownNotExecuted(
                 code="executable_identity_missing",

@@ -11,7 +11,10 @@ from agent.automation.wake import (
     WakeReadbackOutcome,
     WakeRemoveOutcome,
 )
-from agent.automation_hosts.macos_profile import compile_background_seatbelt_profile
+from agent.automation_hosts.macos_profile import (
+    BackgroundSeatbeltPolicyV1,
+    compile_background_seatbelt_profile,
+)
 from agent.sandbox.contracts import (
     SandboxBackendIdentityV1,
     SandboxQualificationV1,
@@ -243,15 +246,19 @@ def test_u2b_host_binds_the_strict_background_profile_compiler(
         def qualify(self):  # noqa: ANN201
             return qualification
 
-    def build_confiner(*, profile_compiler=None):  # noqa: ANN001, ANN202
-        captured.append(profile_compiler)
+    def build_confiner(  # noqa: ANN001, ANN202
+        *, profile_compiler=None, legacy_policy_type=None
+    ):
+        captured.append((profile_compiler, legacy_policy_type))
         return _Confiner()
 
     monkeypatch.setattr(runner.u2b_host, "SeatbeltConfiner", build_confiner)
 
     runner.u2b_host.build_u2b_host(tmp_path)
 
-    assert captured == [compile_background_seatbelt_profile]
+    assert captured == [
+        (compile_background_seatbelt_profile, BackgroundSeatbeltPolicyV1)
+    ]
 
 
 def test_failed_u2b_with_confirmed_process_cleanup_removes_test_wake() -> None:

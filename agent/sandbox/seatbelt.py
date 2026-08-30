@@ -17,12 +17,14 @@ from agent.process.contracts import ProcessCommandV1
 from agent.runtime.contracts import KnownNotExecuted, canonical_json_digest
 from agent.sandbox.contracts import (
     ConfinedInvocationV1,
+    PackagedSkillSandboxPolicyV1,
     SandboxBackendIdentityV1,
     SandboxEnforcementFactsV1,
     SandboxMode,
     SandboxPolicyV1,
     SandboxQualificationV1,
 )
+from agent.sandbox.packaged_policy import compile_packaged_skill_profile
 from agent.sandbox.policy import compile_seatbelt_profile
 from agent.sandbox.qualification import (
     MINIMAL_PROBE_PROFILE,
@@ -42,12 +44,14 @@ class SeatbeltConfiner:
         platform_system: str | None = None,
         platform_release: str | None = None,
         profile_compiler: Callable[[object], str] = compile_seatbelt_profile,
+        legacy_policy_type: type = SandboxPolicyV1,
     ) -> None:
         self._binary = binary
         self._runner = runner
         self._platform_system = platform_system or platform_module.system()
         self._platform_release = platform_release or platform_module.release()
         self._profile_compiler = profile_compiler
+        self._legacy_policy_type = legacy_policy_type
         self._qualification: SandboxQualificationV1 | None = None
 
     # ------------------------------------------------------------------ #
@@ -106,18 +110,29 @@ class SeatbeltConfiner:
     def confine(
         self,
         command: ProcessCommandV1,
-        policy: SandboxPolicyV1,
+        policy: SandboxPolicyV1 | PackagedSkillSandboxPolicyV1,
         environment: Mapping[str, str],
     ) -> ConfinedInvocationV1 | KnownNotExecuted:
         """pure wrapping：confined 编译 profile；danger 直接 bypass。"""
 
+        if type(policy) not in (
+            PackagedSkillSandboxPolicyV1,
+            self._legacy_policy_type,
+        ):
+            return KnownNotExecuted(
+                code="sandbox_policy_type_unknown",
+                message="sandbox policy type is not admitted",
+            )
         if command.executable_identity is None:
             return KnownNotExecuted(
                 code="executable_identity_missing",
                 message="exact command carries no resolved executable identity",
             )
         resolved = command.executable_identity.resolved_path
-        if policy.mode is SandboxMode.DANGER_FULL_ACCESS:
+        if (
+            type(policy) is SandboxPolicyV1
+            and policy.mode is SandboxMode.DANGER_FULL_ACCESS
+        ):
             # bypass 不依赖 backend qualification（spec §2/§4）
             return ConfinedInvocationV1(
                 wrapped_executable=resolved,
@@ -140,7 +155,10 @@ class SeatbeltConfiner:
                     "sandbox backend unavailable; confined command not executed"
                 ),
             )
-        profile = self._profile_compiler(policy)
+        if type(policy) is PackagedSkillSandboxPolicyV1:
+            profile = compile_packaged_skill_profile(policy, environment)
+        else:
+            profile = self._profile_compiler(policy)
         return ConfinedInvocationV1(
             wrapped_executable=self._binary,
             wrapped_argv=(self._binary, "-p", profile, resolved, *command.argv),

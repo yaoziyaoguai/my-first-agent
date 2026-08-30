@@ -120,6 +120,7 @@ def test_existing_sandbox_registration_and_confiner_accept_exact_background_poli
         runner=FakeRunner(),
         platform_system="Darwin",
         profile_compiler=compile_background_seatbelt_profile,
+        legacy_policy_type=BackgroundSeatbeltPolicyV1,
     )
     registration = build_sandbox_exec_registration(
         workspace=Path(policy.workspace_root),
@@ -188,6 +189,7 @@ def test_background_registration_rejects_instance_root_drift_with_same_template(
         runner=FakeRunner(),
         platform_system="Darwin",
         profile_compiler=compile_background_seatbelt_profile,
+        legacy_policy_type=BackgroundSeatbeltPolicyV1,
     )
     state_root = tmp_path / "state"
     state_root.mkdir(mode=0o700)

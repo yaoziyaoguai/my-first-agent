@@ -241,6 +241,7 @@ def build_u2b_host(root: Path) -> U2BHostCompositionV1:
     workspaces = PosixOwnedWorkspaceRepository(paths.owned_root, {binding: paths.source_root})
     confiner = SeatbeltConfiner(
         profile_compiler=compile_background_seatbelt_profile,
+        legacy_policy_type=BackgroundSeatbeltPolicyV1,
     )
     qualification = confiner.qualify()
     if not qualification.available or qualification.backend_identity is None:

@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from types import MappingProxyType
 
 from agent.runtime.contracts import KnownNotExecuted, canonical_json_digest  # noqa: F401  re-export
 
@@ -38,6 +39,30 @@ STRUCTURED_MAGIC_MAX_ITEMS = 16
 STRUCTURED_MAGIC_MAX_BYTES = 64
 
 
+PACKAGED_LIMIT_PROFILE_VALUES = MappingProxyType(
+    {
+        "skill-standard-v1": MappingProxyType(
+            {
+                "cpu_seconds": 60,
+                "address_space_bytes": 1024 * 1024 * 1024,
+                "file_size_bytes": 64 * 1024 * 1024,
+                "open_files": 64,
+                "core_bytes": 0,
+            }
+        ),
+        "artifact-standard-v1": MappingProxyType(
+            {
+                "cpu_seconds": 120,
+                "address_space_bytes": 2 * 1024 * 1024 * 1024,
+                "file_size_bytes": 64 * 1024 * 1024,
+                "open_files": 128,
+                "core_bytes": 0,
+            }
+        ),
+    }
+)
+
+
 class SandboxMode(StrEnum):
     """closed 三值 policy mode（spec §4）。"""
 
@@ -51,6 +76,49 @@ class SandboxNetworkMode(StrEnum):
 
     OFF = "off"
     FULL = "full"
+
+
+@dataclass(frozen=True, slots=True)
+class PackagedSkillResourceLimitsV1:
+    """packaged Skill 只能使用冻结的资源档位。"""
+
+    profile: str
+    cpu_seconds: int
+    address_space_bytes: int
+    file_size_bytes: int
+    open_files: int
+    core_bytes: int
+    limits_digest: str = ""
+
+    @classmethod
+    def for_profile(cls, profile: str) -> PackagedSkillResourceLimitsV1:
+        try:
+            values = PACKAGED_LIMIT_PROFILE_VALUES[profile]
+        except KeyError as error:
+            raise ValueError("packaged resource profile is not closed") from error
+        return cls(profile=profile, **values)
+
+    def __post_init__(self) -> None:
+        values = {
+            "profile": self.profile,
+            "cpu_seconds": self.cpu_seconds,
+            "address_space_bytes": self.address_space_bytes,
+            "file_size_bytes": self.file_size_bytes,
+            "open_files": self.open_files,
+            "core_bytes": self.core_bytes,
+        }
+        expected = PACKAGED_LIMIT_PROFILE_VALUES.get(self.profile)
+        if expected is None or any(
+            not isinstance(getattr(self, name), int)
+            or isinstance(getattr(self, name), bool)
+            or getattr(self, name) != value
+            for name, value in expected.items()
+        ):
+            raise ValueError("packaged resource limits do not match their closed profile")
+        digest = canonical_json_digest(values)
+        if self.limits_digest and self.limits_digest != digest:
+            raise ValueError("packaged resource limit digest mismatch")
+        object.__setattr__(self, "limits_digest", digest)
 
 
 def _require_hex64(value: object, name: str) -> str:
@@ -126,6 +194,78 @@ class SandboxPolicyV1:
         digest = canonical_json_digest(self.identity_values())
         if self.policy_digest and self.policy_digest != digest:
             raise ValueError("sandbox policy digest mismatch")
+        object.__setattr__(self, "policy_digest", digest)
+
+
+@dataclass(frozen=True, slots=True)
+class PackagedSkillSandboxPolicyV1:
+    """strict packaged-Skill policy identity；无 full-network 或 danger 分支。"""
+
+    interpreter_path: str
+    runtime_roots: tuple[str, ...]
+    package_root: str
+    temp_root: str
+    system_runtime_roots: tuple[str, ...]
+    workspace_root: str
+    home_root: str
+    state_root: str
+    private_roots: tuple[str, ...]
+    runtime_closure_digest: str
+    system_runtime_digest: str
+    resource_limits: PackagedSkillResourceLimitsV1
+    policy_digest: str = ""
+    mode: SandboxMode = field(init=False, default=SandboxMode.READ_ONLY)
+    network: SandboxNetworkMode = field(init=False, default=SandboxNetworkMode.OFF)
+
+    def identity_values(self) -> dict[str, object]:
+        return {
+            "profile": "packaged-skill-v1",
+            "interpreter_path": self.interpreter_path,
+            "runtime_roots": list(self.runtime_roots),
+            "package_root": self.package_root,
+            "temp_root": self.temp_root,
+            "system_runtime_roots": list(self.system_runtime_roots),
+            "workspace_root": self.workspace_root,
+            "home_root": self.home_root,
+            "state_root": self.state_root,
+            "private_roots": list(self.private_roots),
+            "runtime_closure_digest": self.runtime_closure_digest,
+            "system_runtime_digest": self.system_runtime_digest,
+            "resource_limits_digest": self.resource_limits.limits_digest,
+            "mode": self.mode.value,
+            "network": self.network.value,
+        }
+
+    def __post_init__(self) -> None:
+        for name in (
+            "interpreter_path",
+            "package_root",
+            "temp_root",
+            "workspace_root",
+            "home_root",
+            "state_root",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.startswith("/"):
+                raise ValueError(f"{name} must be an absolute canonical path")
+        object.__setattr__(
+            self, "runtime_roots", _string_roots(self.runtime_roots, "runtime_roots")
+        )
+        object.__setattr__(
+            self,
+            "system_runtime_roots",
+            _string_roots(self.system_runtime_roots, "system_runtime_roots"),
+        )
+        object.__setattr__(
+            self, "private_roots", _string_roots(self.private_roots, "private_roots")
+        )
+        if not isinstance(self.resource_limits, PackagedSkillResourceLimitsV1):
+            raise TypeError("resource_limits must be a packaged resource profile")
+        _require_hex64(self.runtime_closure_digest, "runtime_closure_digest")
+        _require_hex64(self.system_runtime_digest, "system_runtime_digest")
+        digest = canonical_json_digest(self.identity_values())
+        if self.policy_digest and self.policy_digest != digest:
+            raise ValueError("packaged sandbox policy digest mismatch")
         object.__setattr__(self, "policy_digest", digest)
 
 

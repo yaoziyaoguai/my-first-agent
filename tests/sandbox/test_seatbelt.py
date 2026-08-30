@@ -8,20 +8,30 @@ backend）；backend unavailable ⇒ KnownNotExecuted（fail closed）。
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 
 from agent.process.contracts import ExecutableIdentityV1
 from agent.runtime.contracts import KnownNotExecuted
 from agent.sandbox.contracts import (
     ConfinedInvocationV1,
+    PackagedSkillResourceLimitsV1,
     SandboxMode,
     SandboxNetworkMode,
 )
+from agent.sandbox.packaged_policy import build_packaged_skill_policy
 from agent.sandbox.policy import build_sandbox_policy, compile_seatbelt_profile
 from agent.sandbox.qualification import ProbeResult
 from agent.sandbox.seatbelt import SeatbeltConfiner
 from tests.sandbox.test_backend_qualification import FakeRunner
 
 CLOSED_ENV = {"HOME": "/tmp/sbx-home", "PATH": "/usr/bin:/bin", "TMPDIR": "/tmp/sbx-tmp"}
+
+
+@dataclass(frozen=True)
+class RegisteredLegacyPolicy:
+    mode: SandboxMode = SandboxMode.READ_ONLY
+    network: SandboxNetworkMode = SandboxNetworkMode.OFF
+    policy_digest: str = "c" * 64
 
 
 def _identity(resolved: str = "/bin/true") -> ExecutableIdentityV1:
@@ -156,3 +166,115 @@ def test_wrapped_argv_is_argument_vector_only(tmp_path):
     assert invocation.wrapped_argv[-3:] == (
         "/bin/sh", "-c", "echo 'quoted; string'",
     )
+
+
+def test_packaged_policy_uses_closed_compiler_not_legacy_injected_compiler(tmp_path):
+    roots = {
+        name: tmp_path / name
+        for name in ("runtime", "package", "temp", "system", "work", "state", "home")
+    }
+    for path in roots.values():
+        path.mkdir()
+    for name in ("runtime", "package"):
+        roots[name].chmod(0o555)
+    interpreter = roots["system"] / "python"
+    interpreter.write_text("fixture", encoding="utf-8")
+    interpreter.chmod(0o555)
+    policy = build_packaged_skill_policy(
+        interpreter_path=interpreter,
+        runtime_roots=(roots["runtime"],),
+        package_root=roots["package"],
+        temp_root=roots["temp"],
+        system_runtime_roots=(roots["system"],),
+        workspace_root=roots["work"],
+        home_root=roots["home"],
+        state_root=roots["state"],
+        private_roots=(),
+        runtime_closure_digest="a" * 64,
+        system_runtime_digest="b" * 64,
+        resource_limits=PackagedSkillResourceLimitsV1.for_profile("skill-standard-v1"),
+    )
+    session = roots["temp"] / "session"
+    session.mkdir()
+    calls = 0
+
+    def legacy_compiler(active_policy):
+        nonlocal calls
+        calls += 1
+        return "(version 1)\n(allow default)\n"
+
+    confiner = SeatbeltConfiner(
+        runner=FakeRunner(),
+        platform_system="Darwin",
+        profile_compiler=legacy_compiler,
+    )
+    invocation = confiner.confine(
+        _command(argv=(), resolved=str(interpreter)),
+        policy,
+        {"TMPDIR": str(session)},
+    )
+
+    assert isinstance(invocation, ConfinedInvocationV1)
+    assert calls == 0
+    assert invocation.profile.startswith("(version 1)\n(deny default)\n")
+
+
+def test_unknown_policy_type_is_rejected_closed_before_profile_compilation():
+    calls = 0
+
+    def legacy_compiler(active_policy):
+        nonlocal calls
+        calls += 1
+        return "(version 1)\n(allow default)\n"
+
+    confiner = SeatbeltConfiner(
+        runner=FakeRunner(),
+        platform_system="Darwin",
+        profile_compiler=legacy_compiler,
+    )
+    outcome = confiner.confine(_command(), object(), CLOSED_ENV)
+
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "sandbox_policy_type_unknown"
+    assert calls == 0
+
+
+def test_registered_legacy_policy_type_uses_injected_compiler():
+    policy = RegisteredLegacyPolicy()
+    calls = []
+
+    def legacy_compiler(active_policy):
+        calls.append(active_policy)
+        return "(version 1)\n(allow default)\n"
+
+    confiner = SeatbeltConfiner(
+        runner=FakeRunner(),
+        platform_system="Darwin",
+        profile_compiler=legacy_compiler,
+        legacy_policy_type=RegisteredLegacyPolicy,
+    )
+    invocation = confiner.confine(_command(), policy, CLOSED_ENV)
+
+    assert isinstance(invocation, ConfinedInvocationV1)
+    assert calls == [policy]
+
+
+def test_mismatched_registered_policy_type_fails_closed_without_compiler(tmp_path):
+    calls = 0
+
+    def legacy_compiler(active_policy):
+        nonlocal calls
+        calls += 1
+        return "(version 1)\n(allow default)\n"
+
+    confiner = SeatbeltConfiner(
+        runner=FakeRunner(),
+        platform_system="Darwin",
+        profile_compiler=legacy_compiler,
+        legacy_policy_type=RegisteredLegacyPolicy,
+    )
+    outcome = confiner.confine(_command(), _policy(tmp_path), CLOSED_ENV)
+
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "sandbox_policy_type_unknown"
+    assert calls == 0

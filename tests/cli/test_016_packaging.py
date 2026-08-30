@@ -155,3 +155,24 @@ def test_built_wheel_exposes_installed_entry_point_from_neutral_directory(
     assert origin.returncode == 0
     assert str(site_packages) in origin.stdout
     assert str(ROOT) not in origin.stdout
+    runner_origin = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            "import json, sys\n"
+            "import first_agent_skill_runner.__main__ as runner\n"
+            "print(json.dumps({'origin': runner.__file__, 'agent': 'agent' in sys.modules}))\n",
+        ],
+        cwd=neutral,
+        env=clean_env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert runner_origin.returncode == 0, runner_origin.stdout + runner_origin.stderr
+    runner_data = json.loads(runner_origin.stdout)
+    assert Path(runner_data["origin"]).is_relative_to(site_packages)
+    assert str(ROOT) not in runner_data["origin"]
+    assert runner_data["agent"] is False

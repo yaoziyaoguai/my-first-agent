@@ -469,23 +469,48 @@ def _write_all(fd: int, content: bytes) -> None:
         offset += os.write(fd, content[offset:])
 
 
-def _replace_precreated(session: Path, name: str, content: bytes) -> None:
+def _pin_precreated_outputs(session: Path) -> dict[str, tuple[int, os.stat_result]]:
     session_fd = _open_session_directory(session)
+    pinned: dict[str, tuple[int, os.stat_result]] = {}
     try:
-        try:
-            fd = os.open(name, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW, dir_fd=session_fd)
-        except OSError as error:
-            raise RunnerProtocolError("precreated output inode is unavailable") from error
-        try:
+        for name in ("result.json", "artifact.bin"):
+            try:
+                fd = os.open(name, os.O_WRONLY | os.O_NOFOLLOW, dir_fd=session_fd)
+            except OSError as error:
+                raise RunnerProtocolError("precreated output inode is unavailable") from error
             info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1:
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_nlink != 1
+            ):
+                os.close(fd)
                 raise RunnerProtocolError("precreated output inode is unavailable")
-            _write_all(fd, content)
-            os.fsync(fd)
-        finally:
+            pinned[name] = (fd, info)
+    except BaseException:
+        for fd, _info in pinned.values():
             os.close(fd)
+        raise
     finally:
         os.close(session_fd)
+    return pinned
+
+
+def _write_pinned_precreated(
+    pinned: tuple[int, os.stat_result], content: bytes
+) -> None:
+    fd, before = pinned
+    after = os.fstat(fd)
+    if (
+        not _stable(before, after)
+        or not stat.S_ISREG(after.st_mode)
+        or after.st_uid != os.getuid()
+        or after.st_nlink != 1
+    ):
+        raise RunnerProtocolError("precreated output inode is unavailable")
+    os.ftruncate(fd, 0)
+    _write_all(fd, content)
+    os.fsync(fd)
 
 
 def _result_bytes(kind: str, payload: object) -> bytes:
@@ -513,42 +538,47 @@ def _execute_authenticated_request(
     assert isinstance(resource_limits_digest, str)
     apply_hard_limits(resource_limits_digest)
     session = request_path.parent
-    input_values = {
-        descriptor["slot"]: _read_exact_input(session, descriptor)
-        for descriptor in input_descriptors
-    }
-    script_bytes = _read_exact_script(Path.cwd(), descriptor)
-    namespace = execute_script(descriptor, script_bytes)
-    package_run = namespace.get("run")
-    if not callable(package_run):
-        raise RunnerProtocolError("entrypoint exports no callable run")
-    arguments = request["arguments"]
-    assert isinstance(arguments, dict)
+    outputs = _pin_precreated_outputs(session)
     try:
-        raw = package_run(arguments, MappingProxyType(input_values))
-    except BaseException as error:
-        raise RunnerProtocolError("entrypoint run failed") from error
-    if not isinstance(raw, dict) or set(raw) != {"kind", "payload", "artifact"}:
-        raise RunnerProtocolError("entrypoint result keys are not closed")
-    kind = raw["kind"]
-    if kind != request["expected_result_kind"] or kind not in _RESULT_KINDS:
-        raise RunnerProtocolError("entrypoint result kind mismatch")
-    _validate_json(raw["payload"])
-    artifact = raw["artifact"]
-    if artifact is not None and not isinstance(artifact, bytes):
-        raise RunnerProtocolError("artifact must be bytes or null")
-    result_bytes = _result_bytes(kind, raw["payload"])
-    artifact_size = len(artifact) if artifact is not None else 0
-    if (
-        len(result_bytes) > STRUCTURED_RESULT_MAX_BYTES
-        or artifact_size > STRUCTURED_ARTIFACT_MAX_BYTES
-        or len(result_bytes) + artifact_size > STRUCTURED_OUTPUT_AGGREGATE_MAX_BYTES
-    ):
-        raise RunnerProtocolError("entrypoint output exceeds fixed cap")
-    _replace_precreated(session, "result.json", result_bytes)
-    if artifact is not None:
-        _replace_precreated(session, "artifact.bin", artifact)
-    return raw
+        input_values = {
+            descriptor["slot"]: _read_exact_input(session, descriptor)
+            for descriptor in input_descriptors
+        }
+        script_bytes = _read_exact_script(Path.cwd(), descriptor)
+        namespace = execute_script(descriptor, script_bytes)
+        package_run = namespace.get("run")
+        if not callable(package_run):
+            raise RunnerProtocolError("entrypoint exports no callable run")
+        arguments = request["arguments"]
+        assert isinstance(arguments, dict)
+        try:
+            raw = package_run(arguments, MappingProxyType(input_values))
+        except BaseException as error:
+            raise RunnerProtocolError("entrypoint run failed") from error
+        if not isinstance(raw, dict) or set(raw) != {"kind", "payload", "artifact"}:
+            raise RunnerProtocolError("entrypoint result keys are not closed")
+        kind = raw["kind"]
+        if kind != request["expected_result_kind"] or kind not in _RESULT_KINDS:
+            raise RunnerProtocolError("entrypoint result kind mismatch")
+        _validate_json(raw["payload"])
+        artifact = raw["artifact"]
+        if artifact is not None and not isinstance(artifact, bytes):
+            raise RunnerProtocolError("artifact must be bytes or null")
+        result_bytes = _result_bytes(kind, raw["payload"])
+        artifact_size = len(artifact) if artifact is not None else 0
+        if (
+            len(result_bytes) > STRUCTURED_RESULT_MAX_BYTES
+            or artifact_size > STRUCTURED_ARTIFACT_MAX_BYTES
+            or len(result_bytes) + artifact_size > STRUCTURED_OUTPUT_AGGREGATE_MAX_BYTES
+        ):
+            raise RunnerProtocolError("entrypoint output exceeds fixed cap")
+        _write_pinned_precreated(outputs["result.json"], result_bytes)
+        if artifact is not None:
+            _write_pinned_precreated(outputs["artifact.bin"], artifact)
+        return raw
+    finally:
+        for fd, _info in outputs.values():
+            os.close(fd)
 
 
 def run_request(

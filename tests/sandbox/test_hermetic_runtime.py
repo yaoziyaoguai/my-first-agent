@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import pytest
 
+import agent.sandbox.hermetic_runtime as hermetic_runtime
 from agent.runtime.contracts import KnownNotExecuted
 from agent.sandbox.hermetic_runtime import (
     HermeticRuntimeFileV1,
@@ -97,6 +99,13 @@ def _make_runtime(root: Path) -> RuntimeFixture:
     return RuntimeFixture(root, root / "runtime-closure-v1.json")
 
 
+def _protected_roots(tmp_path: Path) -> tuple[Path, ...]:
+    roots = tuple(tmp_path / name for name in ("product", "workspace", "state"))
+    for root in roots:
+        root.mkdir(parents=True)
+    return roots
+
+
 @pytest.fixture
 def runtime_fixture(tmp_path: Path) -> RuntimeFixture:
     return _make_runtime(tmp_path / "skill-runtime-v1")
@@ -176,14 +185,175 @@ def test_materializer_requires_explicit_qualified_source_and_requalifies_copy(
 ) -> None:
     destination = tmp_path / "materialized-runtime"
 
-    copied = materialize_test_runtime(runtime_fixture.root, destination)
+    copied = materialize_test_runtime(
+        runtime_fixture.root,
+        destination,
+        protected_roots=_protected_roots(tmp_path),
+    )
 
     assert copied == qualify_hermetic_runtime_closure(destination)
     assert copied.runtime_root == str(destination.resolve())
     with pytest.raises(ValueError, match="qualified source"):
-        materialize_test_runtime(tmp_path / "ordinary-venv", tmp_path / "rejected")
+        materialize_test_runtime(
+            tmp_path / "ordinary-venv",
+            tmp_path / "rejected",
+            protected_roots=_protected_roots(tmp_path / "rejected-roots"),
+        )
 
 
-def test_materializer_rejects_overlapping_destination(runtime_fixture: RuntimeFixture) -> None:
+def test_materializer_rejects_overlapping_destination(
+    runtime_fixture: RuntimeFixture, tmp_path: Path
+) -> None:
     with pytest.raises(ValueError, match="overlap"):
-        materialize_test_runtime(runtime_fixture.root, runtime_fixture.root / "copy")
+        materialize_test_runtime(
+            runtime_fixture.root,
+            runtime_fixture.root / "copy",
+            protected_roots=_protected_roots(tmp_path),
+        )
+
+
+def test_closure_rejects_declared_root_missing_from_pinned_runtime_tree(
+    runtime_fixture: RuntimeFixture,
+) -> None:
+    manifest = json.loads(runtime_fixture.manifest_path.read_text(encoding="utf-8"))
+    manifest["dynload_roots"] = ["lib/dynload"]
+    runtime_fixture.manifest_path.chmod(0o600)
+    runtime_fixture.manifest_path.write_bytes(
+        json.dumps(manifest, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    )
+    runtime_fixture.manifest_path.chmod(0o444)
+
+    outcome = qualify_hermetic_runtime_closure(runtime_fixture.root)
+
+    assert isinstance(outcome, KnownNotExecuted)
+
+
+def test_closure_rejects_directory_replacement_after_entries_are_scanned(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = runtime_fixture.root / "lib/stdlib"
+    original_identity = original.stat()
+    replacement = tmp_path / "replacement"
+    _write_file(replacement / "os.py", b"# synthetic stdlib\n", 0o444)
+    _write_file(replacement / "evil.py", b"not inventoried\n", 0o444)
+    real_scandir = hermetic_runtime.os.scandir
+    swapped = False
+
+    def swap_after_scan(fd: int):
+        nonlocal swapped
+        entries = list(real_scandir(fd))
+        current = os.fstat(fd)
+        if not swapped and (current.st_dev, current.st_ino) == (
+            original_identity.st_dev,
+            original_identity.st_ino,
+        ):
+            original.rename(tmp_path / "pinned-original")
+            replacement.rename(original)
+            swapped = True
+        return entries
+
+    monkeypatch.setattr(hermetic_runtime.os, "scandir", swap_after_scan)
+
+    outcome = qualify_hermetic_runtime_closure(runtime_fixture.root)
+
+    assert swapped
+    assert isinstance(outcome, KnownNotExecuted)
+
+
+@pytest.mark.parametrize("through_intermediate", (False, True))
+def test_materializer_rejects_source_symlink_before_writing_destination(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+    through_intermediate: bool,
+) -> None:
+    if through_intermediate:
+        source_parent = tmp_path / "source-parent"
+        runtime_fixture.copy(source_parent / "runtime")
+        source_link = tmp_path / "source-link"
+        source_link.symlink_to(source_parent, target_is_directory=True)
+        source = source_link / "runtime"
+    else:
+        source = tmp_path / "source-link"
+        source.symlink_to(runtime_fixture.root, target_is_directory=True)
+    destination = tmp_path / "destination"
+
+    with pytest.raises(ValueError):
+        materialize_test_runtime(
+            source,
+            destination,
+            protected_roots=_protected_roots(tmp_path),
+        )
+
+    assert not destination.exists()
+
+
+def test_materializer_rejects_destination_parent_symlink_before_external_write(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    destination_parent = tmp_path / "destination-parent"
+    destination_parent.symlink_to(outside, target_is_directory=True)
+    destination = destination_parent / "runtime"
+
+    with pytest.raises(ValueError):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=_protected_roots(tmp_path),
+        )
+
+    assert not (outside / "runtime").exists()
+
+
+def test_materializer_rejects_destination_inside_explicit_protected_root(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+) -> None:
+    protected = tmp_path / "workspace"
+    protected.mkdir()
+    destination = protected / "runtime"
+
+    with pytest.raises(ValueError, match="protected"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=(protected,),
+        )
+
+    assert not destination.exists()
+
+
+def test_materializer_rejects_source_inside_explicit_protected_root(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "destination"
+
+    with pytest.raises(ValueError, match="protected"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=(runtime_fixture.root,),
+        )
+
+    assert not destination.exists()
+
+
+def test_materializer_requires_non_empty_explicit_protected_roots(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "destination"
+
+    with pytest.raises(ValueError, match="protected roots"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=(),
+        )
+
+    assert not destination.exists()

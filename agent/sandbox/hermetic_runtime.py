@@ -306,16 +306,74 @@ def _file_role(
     return matches[0]
 
 
+def _same_directory_identity(before: os.stat_result, after: os.stat_result) -> bool:
+    return (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+        before.st_uid,
+        before.st_nlink,
+    ) == (
+        after.st_dev,
+        after.st_ino,
+        after.st_mode,
+        after.st_uid,
+        after.st_nlink,
+    )
+
+
+def _read_pinned_file(
+    directory_fd: int,
+    name: str,
+    entry_info: os.stat_result,
+    *,
+    cap: int,
+) -> tuple[bytes, os.stat_result]:
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+    except OSError as error:
+        raise OSError("runtime file could not be opened from pinned directory") from error
+    try:
+        before = os.fstat(fd)
+        _require_regular_owned_single_link(before, cap=cap)
+        if not _stat_is_stable(entry_info, before):
+            raise OSError("runtime entry changed before pinned file open")
+        raw = _read_fd_bounded(fd, before.st_size, cap=cap)
+        after = os.fstat(fd)
+        if not _stat_is_stable(before, after):
+            raise OSError("runtime file changed while being read")
+        return raw, after
+    finally:
+        os.close(fd)
+
+
+@dataclass(slots=True)
+class _PinnedRuntimeTree:
+    directories: dict[str, os.stat_result]
+    entries: dict[str, tuple[str, ...]]
+    files: dict[str, os.stat_result]
+
+
 def _scan_runtime_tree(
     root_fd: int,
     *,
     interpreter: str,
     roots_by_role: dict[str, tuple[str, ...]],
-) -> tuple[HermeticRuntimeFileV1, ...]:
+) -> tuple[tuple[HermeticRuntimeFileV1, ...], _PinnedRuntimeTree]:
     inventory: list[HermeticRuntimeFileV1] = []
+    pinned = _PinnedRuntimeTree(directories={}, entries={}, files={})
 
     def scan(directory_fd: int, prefix: str) -> None:
-        entries = list(os.scandir(directory_fd))
+        directory_info = os.fstat(directory_fd)
+        if not stat.S_ISDIR(directory_info.st_mode) or directory_info.st_uid != os.getuid():
+            raise OSError("runtime directory is not owned and regular")
+        if prefix in pinned.directories:
+            raise OSError("runtime directory appears more than once")
+        pinned.directories[prefix] = directory_info
+        entries = tuple(
+            sorted(os.scandir(directory_fd), key=lambda entry: entry.name.encode("utf-8"))
+        )
+        pinned.entries[prefix] = tuple(entry.name for entry in entries)
         for entry in entries:
             if entry.name == _MANIFEST_NAME and not prefix:
                 continue
@@ -335,6 +393,9 @@ def _scan_runtime_tree(
                     dir_fd=directory_fd,
                 )
                 try:
+                    child_info = os.fstat(child_fd)
+                    if not _same_directory_identity(info, child_info):
+                        raise OSError("runtime directory changed before pinned open")
                     scan(child_fd, relative)
                 finally:
                     os.close(child_fd)
@@ -342,12 +403,17 @@ def _scan_runtime_tree(
             role = _file_role(relative, interpreter=interpreter, roots_by_role=roots_by_role)
             if role is None:
                 raise OSError("runtime tree contains an unknown file")
-            _require_regular_owned_single_link(info, cap=_RUNTIME_FILE_MAX_BYTES)
-            raw, stable = _read_relative_file(root_fd, relative, cap=_RUNTIME_FILE_MAX_BYTES)
+            raw, stable = _read_pinned_file(
+                directory_fd,
+                entry.name,
+                info,
+                cap=_RUNTIME_FILE_MAX_BYTES,
+            )
             mode = stat.S_IMODE(stable.st_mode)
             expected_mode = 0o555 if role == "interpreter" else 0o444
             if mode != expected_mode:
                 raise OSError("runtime file mode is not canonical")
+            pinned.files[relative] = stable
             inventory.append(
                 HermeticRuntimeFileV1(
                     path=relative,
@@ -359,7 +425,102 @@ def _scan_runtime_tree(
             )
 
     scan(root_fd, "")
-    return tuple(sorted(inventory, key=lambda item: item.path.encode("utf-8")))
+    return tuple(sorted(inventory, key=lambda item: item.path.encode("utf-8"))), pinned
+
+
+def _require_declared_roots(
+    root_fd: int, roots_by_role: dict[str, tuple[str, ...]]
+) -> None:
+    for roots in roots_by_role.values():
+        for root in roots:
+            directory_fd = _open_relative_parent(root_fd, tuple(root.split("/")))
+            os.close(directory_fd)
+
+
+def _reverify_runtime_tree(
+    root_fd: int,
+    *,
+    pinned: _PinnedRuntimeTree,
+    inventory: tuple[HermeticRuntimeFileV1, ...],
+) -> None:
+    inventory_by_path = {item.path: item for item in inventory}
+
+    def verify(directory_fd: int, prefix: str) -> None:
+        expected_directory = pinned.directories.get(prefix)
+        if expected_directory is None or not _same_directory_identity(
+            expected_directory, os.fstat(directory_fd)
+        ):
+            raise OSError("runtime directory identity drifted")
+        entries = tuple(
+            sorted(os.scandir(directory_fd), key=lambda entry: entry.name.encode("utf-8"))
+        )
+        if tuple(entry.name for entry in entries) != pinned.entries.get(prefix):
+            raise OSError("runtime directory entries drifted")
+        for entry in entries:
+            if entry.name == _MANIFEST_NAME and not prefix:
+                continue
+            relative = f"{prefix}/{entry.name}" if prefix else entry.name
+            entry_info = entry.stat(follow_symlinks=False)
+            if stat.S_ISLNK(entry_info.st_mode):
+                raise OSError("runtime tree contains a symlink")
+            if stat.S_ISDIR(entry_info.st_mode):
+                try:
+                    child_fd = os.open(
+                        entry.name,
+                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                        dir_fd=directory_fd,
+                    )
+                except OSError as error:
+                    raise OSError("runtime directory could not be reopened") from error
+                try:
+                    expected_child = pinned.directories.get(relative)
+                    if expected_child is None or not _same_directory_identity(
+                        entry_info, os.fstat(child_fd)
+                    ):
+                        raise OSError("runtime directory changed before reverify")
+                    verify(child_fd, relative)
+                finally:
+                    os.close(child_fd)
+                continue
+            expected_file = pinned.files.get(relative)
+            item = inventory_by_path.get(relative)
+            if expected_file is None or item is None:
+                raise OSError("runtime tree contains an unknown file")
+            raw, current_file = _read_pinned_file(
+                directory_fd,
+                entry.name,
+                entry_info,
+                cap=_RUNTIME_FILE_MAX_BYTES,
+            )
+            if not _stat_is_stable(expected_file, current_file):
+                raise OSError("runtime file identity drifted")
+            if (
+                stat.S_IMODE(current_file.st_mode) != item.mode
+                or len(raw) != item.size
+                or hashlib.sha256(raw).hexdigest() != item.sha256
+            ):
+                raise OSError("runtime file descriptor drifted")
+
+    verify(root_fd, "")
+
+
+def _reverify_manifest(
+    root_fd: int,
+    *,
+    initial_info: os.stat_result,
+    expected_digest: str,
+) -> None:
+    entry_info = os.stat(_MANIFEST_NAME, dir_fd=root_fd, follow_symlinks=False)
+    raw, current_info = _read_pinned_file(
+        root_fd,
+        _MANIFEST_NAME,
+        entry_info,
+        cap=_MANIFEST_MAX_BYTES,
+    )
+    if not _stat_is_stable(initial_info, current_info) or (
+        hashlib.sha256(raw).hexdigest() != expected_digest
+    ):
+        raise OSError("runtime manifest drifted")
 
 
 def qualify_hermetic_runtime_closure(
@@ -374,7 +535,15 @@ def qualify_hermetic_runtime_closure(
         runtime_root = supplied_root.resolve(strict=True)
         root_fd = _open_root(runtime_root)
         try:
-            raw_manifest, _ = _read_relative_file(root_fd, _MANIFEST_NAME, cap=_MANIFEST_MAX_BYTES)
+            manifest_entry = os.stat(
+                _MANIFEST_NAME, dir_fd=root_fd, follow_symlinks=False
+            )
+            raw_manifest, manifest_info = _read_pinned_file(
+                root_fd,
+                _MANIFEST_NAME,
+                manifest_entry,
+                cap=_MANIFEST_MAX_BYTES,
+            )
             manifest = _loads_canonical_json(raw_manifest, name="runtime closure manifest")
             if set(manifest) != {
                 "schema",
@@ -403,7 +572,8 @@ def qualify_hermetic_runtime_closure(
             for first in all_roots:
                 if any(first != second and _under(first, second) for second in all_roots):
                     raise ValueError("runtime closure roots overlap")
-            inventory = _scan_runtime_tree(
+            _require_declared_roots(root_fd, roots_by_role)
+            inventory, pinned_tree = _scan_runtime_tree(
                 root_fd,
                 interpreter=interpreter,
                 roots_by_role=roots_by_role,
@@ -425,6 +595,12 @@ def qualify_hermetic_runtime_closure(
             inventory_digest = canonical_json_digest([asdict(item) for item in inventory])
             if inventory_digest != _require_hex64(manifest["inventory_digest"], "inventory_digest"):
                 raise ValueError("runtime inventory digest drifted")
+            _reverify_runtime_tree(root_fd, pinned=pinned_tree, inventory=inventory)
+            _reverify_manifest(
+                root_fd,
+                initial_info=manifest_info,
+                expected_digest=hashlib.sha256(raw_manifest).hexdigest(),
+            )
             readable_roots = tuple(
                 sorted(
                     {

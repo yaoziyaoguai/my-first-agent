@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -438,8 +439,118 @@ def test_main_executes_the_single_request_instance_it_authenticated(
             b"    return {'kind': 'observation', 'payload': {}, 'artifact': None}\n"
         ),
     )
-    monkeypatch.setattr(skill_runner, "_replace_precreated", lambda *_args: None)
     monkeypatch.setenv("TMPDIR", str(session_fixture.session_root))
 
     assert skill_runner.main(["--package", "a" * 64, "--entrypoint", "inspect"]) == 0
     assert reads == 1
+
+
+def _observation_namespace() -> dict[str, object]:
+    return {
+        "run": lambda _arguments, _inputs: {
+            "kind": "observation",
+            "payload": {},
+            "artifact": None,
+        }
+    }
+
+
+def test_runner_rejects_hardlinked_result_before_loading_or_truncating_victim(
+    session_fixture: SessionFixture,
+    no_limit_syscalls: None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(session_fixture.package_root)
+    result_path = session_fixture.session_root / "result.json"
+    victim = tmp_path / "hardlink-victim"
+    victim.write_bytes(b"do not truncate")
+    result_path.unlink()
+    os.link(victim, result_path)
+    loaded: list[bytes] = []
+
+    with pytest.raises(RunnerProtocolError, match="precreated"):
+        run_request(
+            session_fixture.request,
+            execute_script=lambda _descriptor, content: (
+                loaded.append(content) or _observation_namespace()
+            ),
+        )
+
+    assert loaded == []
+    assert victim.read_bytes() == b"do not truncate"
+    assert (session_fixture.session_root / "artifact.bin").read_bytes() == b""
+
+
+def test_runner_rejects_symlinked_result_before_loading_or_touching_victim(
+    session_fixture: SessionFixture,
+    no_limit_syscalls: None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(session_fixture.package_root)
+    result_path = session_fixture.session_root / "result.json"
+    victim = tmp_path / "symlink-victim"
+    victim.write_bytes(b"do not touch")
+    result_path.unlink()
+    result_path.symlink_to(victim)
+    loaded: list[bytes] = []
+
+    with pytest.raises(RunnerProtocolError, match="precreated"):
+        run_request(
+            session_fixture.request,
+            execute_script=lambda _descriptor, content: (
+                loaded.append(content) or _observation_namespace()
+            ),
+        )
+
+    assert loaded == []
+    assert victim.read_bytes() == b"do not touch"
+    assert (session_fixture.session_root / "artifact.bin").read_bytes() == b""
+
+
+def test_runner_rejects_result_replacement_after_output_preflight(
+    session_fixture: SessionFixture,
+    no_limit_syscalls: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(session_fixture.package_root)
+    result_path = session_fixture.session_root / "result.json"
+
+    def replace_result(_descriptor: dict[str, object], _content: bytes) -> dict[str, object]:
+        result_path.unlink()
+        result_path.write_bytes(b"replacement")
+        return _observation_namespace()
+
+    with pytest.raises(RunnerProtocolError, match="precreated"):
+        run_request(session_fixture.request, execute_script=replace_result)
+
+    assert result_path.read_bytes() == b"replacement"
+    assert (session_fixture.session_root / "artifact.bin").read_bytes() == b""
+
+
+def test_runner_rejects_artifact_preflight_failure_before_result_or_package_load(
+    session_fixture: SessionFixture,
+    no_limit_syscalls: None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(session_fixture.package_root)
+    artifact_path = session_fixture.session_root / "artifact.bin"
+    victim = tmp_path / "artifact-victim"
+    victim.write_bytes(b"do not touch")
+    artifact_path.unlink()
+    artifact_path.symlink_to(victim)
+    loaded: list[bytes] = []
+
+    with pytest.raises(RunnerProtocolError, match="precreated"):
+        run_request(
+            session_fixture.request,
+            execute_script=lambda _descriptor, content: (
+                loaded.append(content) or _observation_namespace()
+            ),
+        )
+
+    assert loaded == []
+    assert (session_fixture.session_root / "result.json").read_bytes() == b""
+    assert victim.read_bytes() == b"do not touch"

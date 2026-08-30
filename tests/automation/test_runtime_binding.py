@@ -105,7 +105,7 @@ def test_background_binding_round_trips_in_current_checkpoint(tmp_path) -> None:
     )
 
     assert store.load().state.background_occurrence_binding == binding
-    assert json.loads(path.read_text())["schema_version"] == 8
+    assert json.loads(path.read_text())["schema_version"] == 9
 
 
 def test_background_binding_rejects_extra_checkpoint_member(tmp_path) -> None:

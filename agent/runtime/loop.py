@@ -52,6 +52,7 @@ from agent.runtime.contracts import (
     GoalDraftProposal,
     GoalProgress,
     GoalStatus,
+    InvocationOrigin,
     JSONValue,
     LoadedSnapshot,
     ModelTextBlock,
@@ -132,6 +133,7 @@ from agent.runtime.state import (
     record_nonexecuted_tool_result,
     record_provider_response,
     record_tool_result,
+    release_operator_tool,
     start_tool_batch,
     verify_goal_completion,
 )
@@ -706,6 +708,23 @@ class AgentRuntime:
             if active is None:
                 raise RuntimeError("active run disappeared before terminal result")
 
+            if (
+                active.invocation_origin is InvocationOrigin.OPERATOR
+                and active.status is ActiveRunStatus.RUNNABLE
+                and active.phase is ContinuationPhase.MODEL
+            ):
+                released = release_operator_tool(current.state)
+                return self._finish(
+                    current,
+                    action,
+                    status=RunStatus.COMPLETED,
+                    warnings=warnings,
+                    event_kind=RuntimeEventKind.COMPLETED,
+                    run_id=active.run_id,
+                    message="operator tool action completed",
+                    outcome_state=released,
+                )
+
             self._open_control_binding(current.state)
             controlled = self._poll_control(action, current, warnings)
             if controlled is not None:
@@ -761,6 +780,8 @@ class AgentRuntime:
                     )
                 request_digest = self._product_request_digest(call.name, call.arguments)
                 if (
+                    active.invocation_origin is InvocationOrigin.MODEL
+                    and
                     request_digest in successful_product_requests
                     and not self._is_lease_governed_tool(call.name)
                 ):
@@ -923,6 +944,7 @@ class AgentRuntime:
                             active.sandbox_commands_used
                         ),
                         background_browser_actions_used=active.browser_actions_used,
+                        invocation_origin=active.invocation_origin,
                     ),
                     approval=active.approval_grant,
                 )
@@ -959,7 +981,10 @@ class AgentRuntime:
                             payload={"tool_call_id": call.tool_call_id, "is_error": True},
                         )
                     )
-                    if no_progress_since_product_action:
+                    if (
+                        active.invocation_origin is InvocationOrigin.MODEL
+                        and no_progress_since_product_action
+                    ):
                         same_replan_opportunity = no_progress.same_replan_opportunity(model_calls)
                         if no_progress.repair_exhausted(
                             no_progress_signature,
@@ -990,7 +1015,7 @@ class AgentRuntime:
                                 ),
                             ),
                         )
-                    else:
+                    elif active.invocation_origin is InvocationOrigin.MODEL:
                         if no_progress.repair_exhausted(
                             no_progress_signature,
                             allowance=self._limits.max_no_progress_replans,
@@ -1175,7 +1200,11 @@ class AgentRuntime:
                         message="browser takeover waiting for user",
                         outcome_state=current.state,
                     )
-                if tool_result.executed and not tool_result.is_error:
+                if (
+                    active.invocation_origin is InvocationOrigin.MODEL
+                    and tool_result.executed
+                    and not tool_result.is_error
+                ):
                     verified = self._finish_if_durable_evidence_is_complete(
                         current,
                         action,
@@ -2889,6 +2918,7 @@ class AgentRuntime:
         prefix = f"run:{active.run_id}:"
         return any(
             fact.kind is FactKind.TOOL_CALLS
+            and not AgentRuntime._is_operator_fact(fact)
             and fact.fact_id.startswith(prefix)
             and isinstance(fact.content.get("calls"), list)
             and bool(fact.content["calls"])
@@ -2915,6 +2945,8 @@ class AgentRuntime:
         run_prefix = f"run:{active.run_id}:"
         calls: dict[str, tuple[str, object]] = {}
         for fact in state.facts:
+            if AgentRuntime._is_operator_fact(fact):
+                continue
             if fact.kind is not FactKind.TOOL_CALLS or not fact.fact_id.startswith(
                 run_prefix
             ):
@@ -2932,6 +2964,8 @@ class AgentRuntime:
 
         rejected_calls: list[tuple[str, object]] = []
         for fact in state.facts:
+            if AgentRuntime._is_operator_fact(fact):
+                continue
             if fact.kind is not FactKind.TOOL_RESULT or fact.content.get("rejected") is not True:
                 continue
             call_id = fact.content.get("tool_call_id")
@@ -2989,6 +3023,8 @@ class AgentRuntime:
         latest_relevant_rejected = False
         executed = False
         for fact in state.facts:
+            if AgentRuntime._is_operator_fact(fact):
+                continue
             if fact.kind is FactKind.TOOL_CALLS and fact.fact_id.startswith(run_prefix):
                 raw_calls = fact.content.get("calls")
                 if not isinstance(raw_calls, list):
@@ -3052,6 +3088,7 @@ class AgentRuntime:
         prefix = f"run:{active.run_id}:"
         return any(
             fact.kind is FactKind.POLICY_RESULT
+            and not AgentRuntime._is_operator_fact(fact)
             and fact.fact_id.startswith(prefix)
             and fact.content.get("code") == code
             for fact in state.facts
@@ -3209,6 +3246,8 @@ class AgentRuntime:
         successful: set[str] = set()
         workspace_observations: set[str] = set()
         for fact in state.facts:
+            if cls._is_operator_fact(fact):
+                continue
             if not fact.fact_id.startswith(run_prefix):
                 continue
             if fact.kind is FactKind.TOOL_CALLS:
@@ -3423,14 +3462,20 @@ class AgentRuntime:
     def _public_web_requirement_pending(state: ConversationState) -> bool:
         if state.goal is None:
             return False
-        _, projections = project_tool_result_sources(state.facts, state)
+        _, projections = project_tool_result_sources(
+            AgentRuntime._non_operator_facts(state.facts),
+            state,
+        )
         return public_web_requirement_pending(state, projections)
 
     @staticmethod
     def _citable_source_refs_for(state: ConversationState) -> tuple[str, ...]:
         if state.goal is None:
             return ()
-        _, projections = project_tool_result_sources(state.facts, state)
+        _, projections = project_tool_result_sources(
+            AgentRuntime._non_operator_facts(state.facts),
+            state,
+        )
         return citable_source_refs(projections)
 
     @staticmethod
@@ -3439,7 +3484,10 @@ class AgentRuntime:
     ) -> tuple[tuple[str, str], ...]:
         if state.goal is None:
             return ()
-        _, projections = project_tool_result_sources(state.facts, state)
+        _, projections = project_tool_result_sources(
+            AgentRuntime._non_operator_facts(state.facts),
+            state,
+        )
         return citable_citation_sources(projections)
 
     @staticmethod
@@ -3457,6 +3505,8 @@ class AgentRuntime:
             target for target in goal.targets if not target.endswith(".citations.json")
         }
         for fact in state.facts:
+            if AgentRuntime._is_operator_fact(fact):
+                continue
             if not fact.fact_id.startswith(run_prefix):
                 continue
             if fact.kind is FactKind.TOOL_CALLS:
@@ -3513,6 +3563,8 @@ class AgentRuntime:
         ):
             return None
         for fact in reversed(state.facts):
+            if AgentRuntime._is_operator_fact(fact):
+                continue
             if (
                 fact.kind is not FactKind.TOOL_RESULT
                 or fact.content.get("is_error") is not False
@@ -3682,18 +3734,31 @@ class AgentRuntime:
         return replace(result, delivery_warnings=tuple(warnings))
 
     @staticmethod
+    def _is_operator_fact(fact: ConversationFact) -> bool:
+        return fact.content.get("invocation_origin") == InvocationOrigin.OPERATOR.value
+
+    @staticmethod
+    def _non_operator_facts(
+        facts: tuple[ConversationFact, ...],
+    ) -> tuple[ConversationFact, ...]:
+        return tuple(fact for fact in facts if not AgentRuntime._is_operator_fact(fact))
+
+    @staticmethod
     def _tool_result_fact(state, result: ToolResult) -> ConversationFact:
         active = state.active_run
         if active is None:
             raise RuntimeError("tool result requires an active run")
+        content = {
+            "tool_call_id": result.tool_call_id,
+            "text": result.content,
+            "is_error": result.is_error,
+            "executed": result.executed,
+            "metadata": result.metadata,
+        }
+        if active.invocation_origin is InvocationOrigin.OPERATOR:
+            content["invocation_origin"] = InvocationOrigin.OPERATOR.value
         return ConversationFact(
             fact_id=f"run:{active.run_id}:tool-result:{result.tool_call_id}:{state.revision + 1}",
             kind=FactKind.TOOL_RESULT,
-            content={
-                "tool_call_id": result.tool_call_id,
-                "text": result.content,
-                "is_error": result.is_error,
-                "executed": result.executed,
-                "metadata": result.metadata,
-            },
+            content=content,
         )

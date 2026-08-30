@@ -39,6 +39,7 @@ from agent.runtime.contracts import (
     GoalBootstrap,
     GoalStatus,
     InteractionState,
+    InvocationOrigin,
     JSONValue,
     ModelMessage,
     SideEffectClass,
@@ -278,7 +279,11 @@ class KernelContextManager:
                     constrained_tools.append(replace(tool, input_schema=input_schema))
                 exposed_tools = tuple(constrained_tools)
 
-        facts_for_projection = state.facts
+        facts_for_projection = tuple(
+            fact
+            for fact in state.facts
+            if fact.content.get("invocation_origin") != InvocationOrigin.OPERATOR.value
+        )
         if intent_decision_pending:
             run_prefix = (
                 f"run:{state.active_run.run_id}:"
@@ -287,7 +292,7 @@ class KernelContextManager:
             )
             facts_for_projection = tuple(
                 fact
-                for fact in state.facts
+                for fact in facts_for_projection
                 if fact.kind in {FactKind.USER_MESSAGE, FactKind.ASSISTANT_MESSAGE}
                 or (
                     fact.kind is FactKind.POLICY_RESULT
@@ -548,6 +553,8 @@ class KernelContextManager:
         successful_by_tool: dict[str, int] = {}
         source_receipts_by_kind: dict[str, int] = {}
         for fact in facts:
+            if fact.content.get("invocation_origin") == InvocationOrigin.OPERATOR.value:
+                continue
             if not fact.fact_id.startswith(run_prefix):
                 continue
             if fact.kind is FactKind.TOOL_CALLS:

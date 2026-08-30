@@ -218,8 +218,8 @@ def test_public_network_executing_identity_round_trips(tmp_path) -> None:
 
     restored = store.load().state
     document = json.loads((tmp_path / "public-network.json").read_text())
-    # 019：current writer 统一写 v8；v6/v7 继续作为 migration source。
-    assert document["schema_version"] == 8
+    # 020a：current writer 统一写 v9；v6-v8 继续作为 migration source。
+    assert document["schema_version"] == 9
     assert restored == state
     assert restored.active_run is not None
     assert restored.active_run.executing_intent is not None

@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
+    ActiveRun,
     ApprovalPolicy,
     ConversationState,
+    ExecuteOperatorTool,
     ExecutionAuthorityClass,
+    InvocationOrigin,
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
     OutputPolicy,
+    ResolveApproval,
     RunStatus,
     SideEffectClass,
     SubmitMessage,
+    ToolExposure,
     ToolRisk,
     ToolSpec,
 )
@@ -20,13 +27,22 @@ from agent.runtime.tools import KernelToolRuntime, RegisteredTool
 from tests.kernel.fakes import (
     CollectingSink,
     InMemoryCheckpointStore,
+    RecordingCheckpointStore,
     ScriptedProvider,
     conversation_with_active_goal,
     goal_noop_response,
 )
 
 
-def _runtime(store, provider, callable_):
+def _runtime(
+    store,
+    provider,
+    callable_,
+    *,
+    approval: ApprovalPolicy = ApprovalPolicy.NEVER,
+    exposure: ToolExposure = ToolExposure.MODEL,
+    event_sink=None,
+):
     spec = ToolSpec(
         execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="write_fixture",
@@ -36,7 +52,7 @@ def _runtime(store, provider, callable_):
         risk=ToolRisk.HIGH,
         side_effect=SideEffectClass.WRITE,
         output_policy=OutputPolicy.BOUNDED_TEXT,
-        approval_policy=ApprovalPolicy.NEVER,
+        approval_policy=approval,
         safety_policy={},
         output_limit_chars=20,
     )
@@ -46,9 +62,11 @@ def _runtime(store, provider, callable_):
             system_policy="policy",
             limits=ContextLimits(max_input_tokens=8_000, output_reserve=100),
         ),
-        tool_runtime=KernelToolRuntime((RegisteredTool(spec, callable_),)),
+        tool_runtime=KernelToolRuntime(
+            (RegisteredTool(spec, callable_, exposure=exposure),)
+        ),
         checkpoint_store=store,
-        event_sink=CollectingSink(),
+        event_sink=event_sink or CollectingSink(),
         limits=InvocationLimits(),
         invocation_id_factory=lambda: "invocation-1",
     )
@@ -138,6 +156,61 @@ def test_write_callable_exception_enters_unknown_outcome_recovery() -> None:
     assert len(provider.calls) == 2
     assert store.state.active_run is not None
     assert store.state.active_run.status.value == "awaiting_recovery"
+
+
+def test_operator_tool_uses_same_approval_executing_result_order() -> None:
+    calls: list[str] = []
+    state = replace(
+        conversation_with_active_goal(),
+        active_run=ActiveRun(run_id="run-existing"),
+    )
+    store = RecordingCheckpointStore(state)
+    provider = ScriptedProvider()
+    events = CollectingSink()
+    runtime = _runtime(
+        store,
+        provider,
+        lambda intent: calls.append(intent.tool_call_id) or "private result",
+        approval=ApprovalPolicy.ALWAYS,
+        exposure=ToolExposure.OPERATOR,
+        event_sink=events,
+    )
+    action = ExecuteOperatorTool(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+        action_id="operator-action-1",
+        tool_name="write_fixture",
+        arguments={},
+        submitted_at="2026-08-30T12:00:00Z",
+    )
+
+    first = runtime.run_turn(action, store.load())
+
+    assert first.status is RunStatus.AWAITING_APPROVAL
+    assert calls == []
+    pending = store.load()
+    assert pending.state.active_run.invocation_origin is InvocationOrigin.OPERATOR
+    assert first.request is not None
+    second = runtime.run_turn(
+        ResolveApproval(
+            conversation_id=pending.state.conversation_id,
+            action_seq=pending.state.next_action_seq,
+            expected_revision=pending.state.revision,
+            request_id=first.request.request_id,
+            binding_digest=first.request.binding_digest,
+            approved=True,
+        ),
+        pending,
+    )
+
+    assert second.status is RunStatus.COMPLETED
+    assert calls == ["operator-action-1"]
+    assert store.saved_phases.index("executing") < store.saved_fact_kinds.index(
+        "tool_result"
+    )
+    assert provider.calls == []
+    assert "private result" not in repr(events.events)
 
 
 def test_terminal_and_replay_result_commit_atomically() -> None:

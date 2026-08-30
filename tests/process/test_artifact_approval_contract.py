@@ -807,6 +807,7 @@ def test_015_v5_retargeted_pending_candidate_is_revoked_not_resigned(
     document = json.loads(_encode_state(_awaiting_state(request, criterion)))
     document["schema_version"] = 5
     document["state"].pop("background_occurrence_binding")
+    document["state"]["active_run"].pop("invocation_origin")
     for field in (
         "provider_call_intent",
         "persisted_model_response",

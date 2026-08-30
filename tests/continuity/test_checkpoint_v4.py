@@ -155,6 +155,7 @@ def _pre_015_v3_document() -> dict:
 def _remove_v8_active_fields(document: dict) -> None:
     active = document["state"].get("active_run")
     if active is not None:
+        active.pop("invocation_origin")
         active.pop("provider_call_intent")
         active.pop("persisted_model_response")
         active.pop("model_calls_used")
@@ -165,14 +166,14 @@ def _remove_v8_active_fields(document: dict) -> None:
         active.pop("output_tokens_used")
 
 
-def test_current_state_encodes_as_v8_and_round_trips(tmp_path) -> None:
+def test_current_state_encodes_as_v9_and_round_trips(tmp_path) -> None:
     state = _current_state()
     path = tmp_path / "conversation.json"
     store = LocalCheckpointStore.initialize(path, state)
 
     document = json.loads(path.read_text(encoding="utf-8"))
-    assert document["schema_version"] == 8, (
-        "019 background occurrence binding makes v8 the current checkpoint schema"
+    assert document["schema_version"] == 9, (
+        "020a invocation origin makes v9 the current checkpoint schema"
     )
     restored = store.load().state
     assert restored == state
@@ -183,14 +184,14 @@ def test_current_state_encodes_as_v8_and_round_trips(tmp_path) -> None:
     )
 
 
-def test_process_leases_alone_use_current_v8_schema(tmp_path) -> None:
-    """current writer 统一写 v8；v6/v7 只作为可读取 migration source。"""
+def test_process_leases_alone_use_current_v9_schema(tmp_path) -> None:
+    """current writer 统一写 v9；v6-v8 只作为可读取 migration source。"""
 
     state = replace(
         ConversationState.new(CONVERSATION), goal=_goal(), process_leases=(_lease(),)
     )
     document = json.loads(_encode_state(state).decode("utf-8"))
-    assert document["schema_version"] == 8
+    assert document["schema_version"] == 9
 
 
 def test_015_pre_015_v3_whole_state_migrates_completely(tmp_path) -> None:
@@ -315,11 +316,11 @@ def test_015_v6_missing_proposed_oracle_fails_closed(tmp_path) -> None:
 
 def test_015_unknown_schema_version_still_rejected(tmp_path) -> None:
     document = json.loads(_encode_state(_current_state()).decode("utf-8"))
-    document["schema_version"] = 9
+    document["schema_version"] = 10
     path = tmp_path / "conversation.json"
     _write_document(path, document)
 
-    with pytest.raises(CheckpointVersionError, match="schema version: 9"):
+    with pytest.raises(CheckpointVersionError, match="schema version: 10"):
         LocalCheckpointStore(path).load()
 
 

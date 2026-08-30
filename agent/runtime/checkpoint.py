@@ -42,6 +42,7 @@ from agent.runtime.contracts import (
     GoalFrame,
     GoalStatus,
     InteractionState,
+    InvocationOrigin,
     LoadedSnapshot,
     PersistedModelResponseV1,
     ProcessAuthorityCandidateV1,
@@ -63,7 +64,7 @@ from agent.runtime.contracts import (
 )
 from agent.runtime.ports import CheckpointCASConflictError
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 # v3 是 process-authority migration source；v4 是旧 strict process schema；v5 加入
 # artifact confirmation。v6 绑定 candidate/lease 全部 immutable authority 字段，并把
 # readable command 持久化到 lease。旧版本显式重算收窄后的 digest；v6 漂移 fail closed。
@@ -72,6 +73,7 @@ PREVIOUS_SCHEMA_VERSION = 4
 ARTIFACT_SCHEMA_VERSION = 5
 PROCESS_SCHEMA_VERSION = 6
 BROWSER_SCHEMA_VERSION = 7
+BACKGROUND_SCHEMA_VERSION = 8
 LEGACY_SCHEMA_VERSION = 2
 DEFAULT_MAX_STATE_BYTES = 2_000_000
 
@@ -484,6 +486,7 @@ def _decode_state(data: bytes) -> ConversationState:
         ARTIFACT_SCHEMA_VERSION,
         PROCESS_SCHEMA_VERSION,
         BROWSER_SCHEMA_VERSION,
+        BACKGROUND_SCHEMA_VERSION,
         SCHEMA_VERSION,
     }:
         raise CheckpointVersionError(f"unsupported checkpoint schema version: {version}")
@@ -497,12 +500,21 @@ def _decode_state(data: bytes) -> ConversationState:
                 ARTIFACT_SCHEMA_VERSION,
                 PROCESS_SCHEMA_VERSION,
                 BROWSER_SCHEMA_VERSION,
+                BACKGROUND_SCHEMA_VERSION,
                 SCHEMA_VERSION,
             },
             process_contract_current=version
-            in {PROCESS_SCHEMA_VERSION, BROWSER_SCHEMA_VERSION, SCHEMA_VERSION},
-            sandbox_contract_current=version in {BROWSER_SCHEMA_VERSION, SCHEMA_VERSION},
-            background_contract_current=version == SCHEMA_VERSION,
+            in {
+                PROCESS_SCHEMA_VERSION,
+                BROWSER_SCHEMA_VERSION,
+                BACKGROUND_SCHEMA_VERSION,
+                SCHEMA_VERSION,
+            },
+            sandbox_contract_current=version
+            in {BROWSER_SCHEMA_VERSION, BACKGROUND_SCHEMA_VERSION, SCHEMA_VERSION},
+            background_contract_current=version
+            in {BACKGROUND_SCHEMA_VERSION, SCHEMA_VERSION},
+            origin_contract_current=version == SCHEMA_VERSION,
         )
     except CheckpointVersionError:
         raise
@@ -579,6 +591,7 @@ def _state_from_dict(
     process_contract_current: bool = False,
     sandbox_contract_current: bool = False,
     background_contract_current: bool = False,
+    origin_contract_current: bool = False,
 ) -> ConversationState:
     keys = {
         "conversation_id",
@@ -649,6 +662,7 @@ def _state_from_dict(
             process_contract_current=process_contract_current,
             sandbox_contract_current=sandbox_contract_current,
             background_contract_current=background_contract_current,
+            origin_contract_current=origin_contract_current,
         ),
         last_safe_result=_result_from_dict(value["last_safe_result"]),
         goal=_goal_from_dict(
@@ -1383,6 +1397,7 @@ def _active_to_dict(active: ActiveRun | None) -> dict | None:
         "browser_actions_used": active.browser_actions_used,
         "input_tokens_used": active.input_tokens_used,
         "output_tokens_used": active.output_tokens_used,
+        "invocation_origin": active.invocation_origin.value,
     }
 
 
@@ -1394,6 +1409,7 @@ def _active_from_dict(
     process_contract_current: bool = False,
     sandbox_contract_current: bool = False,
     background_contract_current: bool = False,
+    origin_contract_current: bool = False,
 ) -> ActiveRun | None:
     if value is None:
         return None
@@ -1424,6 +1440,8 @@ def _active_from_dict(
                 "output_tokens_used",
             }
         )
+    if origin_contract_current:
+        keys.add("invocation_origin")
     _expect_keys(value, keys, "active_run")
     return ActiveRun(
         run_id=_string(value["run_id"], "active_run.run_id"),
@@ -1501,6 +1519,13 @@ def _active_from_dict(
             _integer(value["output_tokens_used"], "active_run.output_tokens_used")
             if background_contract_current
             else 0
+        ),
+        invocation_origin=(
+            InvocationOrigin(
+                _string(value["invocation_origin"], "active_run.invocation_origin")
+            )
+            if origin_contract_current
+            else InvocationOrigin.MODEL
         ),
     )
 

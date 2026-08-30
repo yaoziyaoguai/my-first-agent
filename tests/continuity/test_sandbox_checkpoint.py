@@ -87,10 +87,10 @@ def _state_with_pending_candidate():  # noqa: ANN202
     )
 
 
-def test_v8_round_trips_native_one_shot_lease_exactly() -> None:
+def test_v9_round_trips_native_one_shot_lease_exactly() -> None:
     state = replace(conversation_with_active_goal(), sandbox_leases=(_lease(),))
     payload = json.loads(_encode_state(state))
-    assert payload["schema_version"] == 8
+    assert payload["schema_version"] == 9
     encoded = payload["state"]["sandbox_leases"][0]
     assert encoded["original_command_fingerprint"] == HEX_A
     assert "image_digest" not in encoded

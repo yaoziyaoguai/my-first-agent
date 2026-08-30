@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum, StrEnum
 from typing import TypeAlias
@@ -3244,10 +3245,13 @@ class ActiveRun:
     browser_actions_used: int = 0
     input_tokens_used: int = 0
     output_tokens_used: int = 0
+    invocation_origin: InvocationOrigin = InvocationOrigin.MODEL
 
     def __post_init__(self) -> None:
         if not self.run_id:
             raise ValueError("run_id must not be empty")
+        if not isinstance(self.invocation_origin, InvocationOrigin):
+            raise TypeError("active run invocation origin must be closed")
         if self.batch_cursor < 0:
             raise ValueError("batch_cursor must be non-negative")
         if self.owner_invocation_id == "":
@@ -3267,6 +3271,11 @@ class ActiveRun:
         call_ids = tuple(call.tool_call_id for call in self.tool_calls)
         if len(set(call_ids)) != len(call_ids):
             raise ValueError("tool_call_id must be unique within an active batch")
+        if (
+            self.invocation_origin is InvocationOrigin.OPERATOR
+            and len(self.tool_calls) > 1
+        ):
+            raise ValueError("operator invocation cannot contain more than one tool call")
         if self.phase is ContinuationPhase.MODEL:
             if self.tool_calls or self.executing_intent is not None:
                 raise ValueError("MODEL phase cannot retain a tool batch or executing intent")
@@ -4219,6 +4228,34 @@ class ConfirmCriterion(RuntimeAction):
             raise ValueError("criterion confirmation fields must not be empty")
 
 
+_OPERATOR_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_TOOL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+_RFC3339_Z = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$"
+)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ExecuteOperatorTool(RuntimeAction):
+    action_id: str
+    tool_name: str
+    arguments: dict[str, JSONValue]
+    submitted_at: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.action_id, str) or _OPERATOR_ID.fullmatch(self.action_id) is None:
+            raise ValueError("operator action_id has an invalid closed shape")
+        if not isinstance(self.tool_name, str) or _TOOL_NAME.fullmatch(self.tool_name) is None:
+            raise ValueError("operator tool_name has an invalid closed shape")
+        if (
+            not isinstance(self.submitted_at, str)
+            or _RFC3339_Z.fullmatch(self.submitted_at) is None
+        ):
+            raise ValueError("operator submitted_at must be zoned RFC3339")
+        _assert_json_compatible(self.arguments, path="operator_tool.arguments")
+        object.__setattr__(self, "arguments", _freeze_json_dict(self.arguments))
+
+
 Action: TypeAlias = (
     SubmitMessage
     | ResolveApproval
@@ -4236,6 +4273,7 @@ Action: TypeAlias = (
     | RevokeProcessAuthority
     | CompleteBrowserTakeover
     | CancelBrowserTakeover
+    | ExecuteOperatorTool
 )
 
 

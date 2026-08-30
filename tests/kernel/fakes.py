@@ -279,6 +279,25 @@ class InMemoryCheckpointStore:
         return self.capacity_available
 
 
+class RecordingCheckpointStore(InMemoryCheckpointStore):
+    def __init__(self, state: ConversationState) -> None:
+        super().__init__(state)
+        self._saved_timeline: list[str] = []
+        self.saved_phases = self._saved_timeline
+        self.saved_fact_kinds = self._saved_timeline
+
+    def compare_and_swap(self, snapshot, new_state):
+        prior_fact_count = len(self.state.facts)
+        result = super().compare_and_swap(snapshot, new_state)
+        active = new_state.active_run
+        if active is not None:
+            self._saved_timeline.append(active.phase.value)
+        self._saved_timeline.extend(
+            fact.kind.value for fact in new_state.facts[prior_fact_count:]
+        )
+        return result
+
+
 class CollectingSink:
     def __init__(self, *, fail: bool = False) -> None:
         self.events: list[RuntimeEvent] = []
@@ -288,3 +307,7 @@ class CollectingSink:
         self.events.append(event)
         if self.fail:
             raise RuntimeError("injected sink failure")
+
+
+class RecordingEventSink(CollectingSink):
+    pass

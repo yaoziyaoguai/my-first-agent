@@ -45,6 +45,7 @@ from agent.runtime.contracts import (
     EgressClass,
     EvidenceOracleKind,
     EvidenceRecord,
+    ExecuteOperatorTool,
     ExecutingIntentRecord,
     ExecutionAuthorityClass,
     FactKind,
@@ -57,6 +58,7 @@ from agent.runtime.contracts import (
     GoalProposal,
     GoalStatus,
     InteractionState,
+    InvocationOrigin,
     PauseGoal,
     PersistedModelResponseV1,
     ProcessAuthorityLeaseV1,
@@ -1694,6 +1696,23 @@ def _action_is_legal(state: ConversationState, action: Action) -> tuple[bool, st
             return False, "model_outcome_abandonment_mismatch"
         return True, None
 
+    if isinstance(action, ExecuteOperatorTool):
+        goal = state.goal
+        if _has_unknown_effect(state):
+            return False, "unknown_effect_recovery_required"
+        if goal is None or goal.status not in {GoalStatus.GOAL_READY, GoalStatus.EXECUTING}:
+            return False, "operator_tool_requires_active_goal"
+        if active is None:
+            return False, "operator_tool_requires_active_run"
+        if (
+            active.status is not ActiveRunStatus.RUNNABLE
+            or active.phase is not ContinuationPhase.MODEL
+            or active.owner_invocation_id is not None
+            or active.invocation_origin is not InvocationOrigin.MODEL
+        ):
+            return False, "operator_tool_requires_idle_run"
+        return True, None
+
     if active is None:
         return False, "illegal_action_for_state"
 
@@ -2005,6 +2024,8 @@ def _mint_sandbox_authority_lease(
 
 
 def _apply_action(state: ConversationState, action: Action) -> ConversationState:
+    if isinstance(action, ExecuteOperatorTool):
+        return start_operator_tool(state, action)
     if isinstance(action, AcknowledgeProviderDisclosure):
         return acknowledge_provider_disclosure(state, action)
     if isinstance(action, ConfirmCriterion):
@@ -2087,6 +2108,12 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                             "is_error": True,
                             "executed": False,
                             "superseded": True,
+                            **(
+                                {"invocation_origin": InvocationOrigin.OPERATOR.value}
+                                if state.active_run.invocation_origin
+                                is InvocationOrigin.OPERATOR
+                                else {}
+                            ),
                         },
                     )
                     for call in state.active_run.tool_calls[
@@ -2219,6 +2246,11 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                 "is_error": True,
                 "executed": False,
                 "rejected": True,
+                **(
+                    {"invocation_origin": InvocationOrigin.OPERATOR.value}
+                    if active.invocation_origin is InvocationOrigin.OPERATOR
+                    else {}
+                ),
             },
         )
         updated = replace(
@@ -2258,6 +2290,11 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                 ),
                 "is_error": not succeeded,
                 "synthetic": True,
+                **(
+                    {"invocation_origin": InvocationOrigin.OPERATOR.value}
+                    if active.invocation_origin is InvocationOrigin.OPERATOR
+                    else {}
+                ),
             },
         )
         updated = replace(
@@ -2299,6 +2336,11 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                     "observation_outcome": "observation_unknown",
                     "source_receipts": [],
                 },
+                **(
+                    {"invocation_origin": InvocationOrigin.OPERATOR.value}
+                    if active.invocation_origin is InvocationOrigin.OPERATOR
+                    else {}
+                ),
             },
         )
         next_cursor = active.batch_cursor + 1
@@ -3241,6 +3283,64 @@ def mark_model_outcome_unknown(state: ConversationState) -> ConversationState:
         active_run=replace(
             active,
             status=ActiveRunStatus.MODEL_OUTCOME_UNKNOWN,
+            owner_invocation_id=None,
+        ),
+    )
+
+
+def start_operator_tool(
+    state: ConversationState,
+    action: ExecuteOperatorTool,
+) -> ConversationState:
+    active = state.active_run
+    if active is None:
+        raise ValueError("operator tool requires an active run")
+    call = ToolCall(action.action_id, action.tool_name, action.arguments)
+    fact = ConversationFact(
+        fact_id=f"run:{active.run_id}:operator-tool:{state.revision + 1}",
+        kind=FactKind.TOOL_CALLS,
+        content={
+            "invocation_origin": InvocationOrigin.OPERATOR.value,
+            "calls": [{
+                "tool_call_id": call.tool_call_id,
+                "name": call.name,
+                "arguments": {},
+                "arguments_redacted": True,
+            }],
+        },
+    )
+    return replace(
+        state,
+        revision=state.revision + 1,
+        facts=(*state.facts, fact),
+        active_run=replace(
+            active,
+            invocation_origin=InvocationOrigin.OPERATOR,
+            phase=ContinuationPhase.TOOL,
+            batch_cursor=0,
+            tool_calls=(call,),
+            approval_grant=None,
+        ),
+    )
+
+
+def release_operator_tool(state: ConversationState) -> ConversationState:
+    active = state.active_run
+    if (
+        active is None
+        or active.invocation_origin is not InvocationOrigin.OPERATOR
+        or active.status is not ActiveRunStatus.RUNNABLE
+        or active.phase is not ContinuationPhase.MODEL
+        or active.tool_calls
+        or active.executing_intent is not None
+    ):
+        raise ValueError("completed operator tool invocation required")
+    return replace(
+        state,
+        revision=state.revision + 1,
+        active_run=replace(
+            active,
+            invocation_origin=InvocationOrigin.MODEL,
             owner_invocation_id=None,
         ),
     )

@@ -62,7 +62,12 @@ from agent.runtime.tool_governance import (
     CitationGovernance,
     SourceGovernance,
 )
-from agent.sandbox.contracts import SandboxDraftOutcome, SandboxExecutionDraftV1
+from agent.sandbox.contracts import (
+    SandboxDraftOutcome,
+    SandboxExecutionDraftV1,
+    StructuredReadbackOutcome,
+    StructuredSandboxProcessDraftV1,
+)
 
 
 def _default_utc_now() -> str:
@@ -705,6 +710,10 @@ class KernelToolRuntime:
                 )
             if isinstance(raw_result, ProcessExecutionDraftV1):
                 return self._process_outcome(intent, registration.spec, raw_result)
+            if isinstance(raw_result, StructuredSandboxProcessDraftV1):
+                return self._structured_sandbox_outcome(
+                    intent, registration.spec, raw_result
+                )
             if isinstance(raw_result, SandboxExecutionDraftV1):
                 return self._sandbox_outcome(intent, registration.spec, raw_result)
             if (
@@ -1652,6 +1661,85 @@ class KernelToolRuntime:
                 "tool_identity": spec.identity_digest,
                 "untrusted_output": True,
             },
+        )
+
+    def _structured_sandbox_outcome(
+        self,
+        intent: ExecutionIntent,
+        spec: ToolSpec,
+        draft: StructuredSandboxProcessDraftV1,
+    ) -> ToolResult:
+        """验证 transient readback draft，再复用唯一 sandbox receipt minting 路径。"""
+
+        if canonical_json_digest(draft.identity_values()) != draft.draft_digest:
+            raise IntentConflictError("structured sandbox draft digest does not match")
+        if draft.structured_invocation_digest != intent.safety_binding.get(
+            "structured_invocation_digest"
+        ):
+            raise IntentConflictError(
+                "structured invocation digest does not bind the approved intent"
+            )
+        if hashlib.sha256(draft.result_bytes).hexdigest() != draft.result_digest:
+            raise IntentConflictError("structured result digest does not match bytes")
+        expected_artifact = (
+            hashlib.sha256(draft.artifact_bytes).hexdigest()
+            if draft.artifact_bytes is not None
+            else None
+        )
+        if expected_artifact != draft.artifact_digest:
+            raise IntentConflictError("structured artifact digest does not match bytes")
+        process_result = self._sandbox_outcome(intent, spec, draft.process)
+        metadata = dict(process_result.metadata)
+        metadata["structured_invocation_digest"] = draft.structured_invocation_digest
+        if not process_result.executed:
+            return ToolResult(
+                tool_call_id=intent.tool_call_id,
+                content=process_result.content,
+                is_error=process_result.is_error,
+                executed=False,
+                metadata=metadata,
+            )
+        if draft.readback_outcome is not StructuredReadbackOutcome.VALID:
+            metadata["code"] = draft.readback_outcome.value
+            return ToolResult(
+                tool_call_id=intent.tool_call_id,
+                content="Structured sandbox readback failed.",
+                is_error=True,
+                executed=True,
+                metadata=metadata,
+            )
+        try:
+            result_text = draft.result_bytes.decode("utf-8")
+            decoded = json.loads(result_text)
+            result_kind = decoded["kind"]
+        except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError):
+            metadata["code"] = StructuredReadbackOutcome.RESULT_MALFORMED.value
+            return ToolResult(
+                tool_call_id=intent.tool_call_id,
+                content="Structured sandbox readback failed.",
+                is_error=True,
+                executed=True,
+                metadata=metadata,
+            )
+        metadata.update(
+            {
+                "structured_result_digest": draft.result_digest,
+                "structured_artifact_digest": draft.artifact_digest,
+                "structured_result_size": len(draft.result_bytes),
+                "structured_artifact_size": (
+                    len(draft.artifact_bytes)
+                    if draft.artifact_bytes is not None
+                    else None
+                ),
+                "structured_result_kind": result_kind,
+            }
+        )
+        return ToolResult(
+            tool_call_id=intent.tool_call_id,
+            content=result_text[: spec.output_limit_chars],
+            is_error=process_result.is_error,
+            executed=True,
+            metadata=metadata,
         )
 
     @staticmethod

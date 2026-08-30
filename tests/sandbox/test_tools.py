@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 import pytest
 
 from agent.runtime.contracts import (
@@ -28,10 +31,13 @@ from agent.sandbox.contracts import (
     SandboxExecutionDraftV1,
     SandboxMode,
     SandboxNetworkMode,
+    StructuredReadbackOutcome,
+    StructuredSandboxProcessDraftV1,
 )
 
 HEX_A = "a" * 64
 HEX_B = "b" * 64
+HEX_C = "c" * 64
 NOW = "2026-08-27T08:00:00+00:00"
 
 
@@ -97,6 +103,39 @@ def _draft(**overrides) -> SandboxExecutionDraftV1:
     }
     values.update(overrides)
     return SandboxExecutionDraftV1(**values)
+
+
+def _structured_draft(
+    *,
+    process: SandboxExecutionDraftV1 | None = None,
+    readback_outcome: StructuredReadbackOutcome = StructuredReadbackOutcome.VALID,
+    outer_digest: str = HEX_C,
+) -> StructuredSandboxProcessDraftV1:
+    result = (
+        json.dumps(
+            {
+                "kind": "observation",
+                "payload": {"summary": "private staged result"},
+                "protocol": "first-agent-skill-result-v1",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        if readback_outcome is StructuredReadbackOutcome.VALID
+        else b""
+    )
+    return StructuredSandboxProcessDraftV1(
+        process=process or _draft(),
+        structured_invocation_digest=outer_digest,
+        readback_outcome=readback_outcome,
+        request_digest=HEX_A,
+        input_digests=(("source", 3, HEX_B),),
+        result_bytes=result,
+        result_digest=hashlib.sha256(result).hexdigest(),
+        artifact_bytes=None,
+        artifact_digest=None,
+    )
 
 
 def _runtime(*, binding=None, result=None, clock=NOW) -> KernelToolRuntime:
@@ -229,6 +268,101 @@ def test_spawn_failed_mints_no_receipt() -> None:
     result = runtime.invoke(intent)
     assert result.is_error is True and result.executed is False
     assert "sandbox_receipt" not in result.metadata
+
+
+def test_structured_valid_readback_reuses_sandbox_receipt_and_exposes_no_artifact() -> None:
+    outer_digest = HEX_C
+    runtime = _runtime(
+        binding=_binding(structured_invocation_digest=outer_digest),
+        result=_structured_draft(outer_digest=outer_digest),
+    )
+    candidate = runtime.prepare(_call(), _context()).request.sandbox_authority_candidate
+    intent = runtime.prepare(_call(), _context(sandbox_leases=(_lease(candidate),)))
+
+    result = runtime.invoke(intent)
+
+    assert result.executed is True and result.is_error is False
+    assert result.content == (
+        '{"kind":"observation","payload":{"summary":"private staged result"},'
+        '"protocol":"first-agent-skill-result-v1"}'
+    )
+    assert result.metadata["sandbox_receipt_kind"] == "native_sandbox_v1"
+    assert result.metadata["structured_invocation_digest"] == outer_digest
+    assert result.metadata["structured_result_digest"] == hashlib.sha256(
+        result.content.encode("utf-8")
+    ).hexdigest()
+    assert result.metadata["structured_artifact_digest"] is None
+    assert result.metadata["structured_result_kind"] == "observation"
+    assert "artifact_bytes" not in result.metadata
+
+
+def test_structured_post_spawn_readback_error_is_executed_without_staged_bytes() -> None:
+    outer_digest = HEX_C
+    runtime = _runtime(
+        binding=_binding(structured_invocation_digest=outer_digest),
+        result=_structured_draft(
+            outer_digest=outer_digest,
+            readback_outcome=StructuredReadbackOutcome.RESULT_MALFORMED,
+        ),
+    )
+    candidate = runtime.prepare(_call(), _context()).request.sandbox_authority_candidate
+    intent = runtime.prepare(_call(), _context(sandbox_leases=(_lease(candidate),)))
+
+    result = runtime.invoke(intent)
+
+    assert result.executed is True and result.is_error is True
+    assert result.metadata["code"] == "result_malformed"
+    assert result.metadata["structured_invocation_digest"] == outer_digest
+    assert "sandbox_receipt" in result.metadata
+    assert "private staged result" not in result.content
+    assert "private staged result" not in str(result.metadata)
+
+
+def test_structured_spawn_failed_not_read_is_not_executed() -> None:
+    outer_digest = HEX_C
+    runtime = _runtime(
+        binding=_binding(structured_invocation_digest=outer_digest),
+        result=_structured_draft(
+            process=_draft(outcome=SandboxDraftOutcome.SPAWN_FAILED),
+            outer_digest=outer_digest,
+            readback_outcome=StructuredReadbackOutcome.NOT_READ,
+        ),
+    )
+    candidate = runtime.prepare(_call(), _context()).request.sandbox_authority_candidate
+    intent = runtime.prepare(_call(), _context(sandbox_leases=(_lease(candidate),)))
+
+    result = runtime.invoke(intent)
+
+    assert result.executed is False and result.is_error is True
+    assert result.metadata["code"] == "spawn_failed"
+    assert result.metadata["structured_invocation_digest"] == outer_digest
+    assert "sandbox_receipt" not in result.metadata
+
+
+def test_structured_outer_digest_mismatch_is_rejected_before_receipt() -> None:
+    runtime = _runtime(
+        binding=_binding(structured_invocation_digest=HEX_C),
+        result=_structured_draft(outer_digest=HEX_A),
+    )
+    candidate = runtime.prepare(_call(), _context()).request.sandbox_authority_candidate
+    intent = runtime.prepare(_call(), _context(sandbox_leases=(_lease(candidate),)))
+
+    with pytest.raises(IntentConflictError, match="structured invocation"):
+        runtime.invoke(intent)
+
+
+def test_structured_draft_bytes_must_match_the_bound_digest() -> None:
+    outer_digest = HEX_C
+    draft = _structured_draft(outer_digest=outer_digest)
+    object.__setattr__(draft, "result_bytes", b"x" * len(draft.result_bytes))
+    runtime = _runtime(
+        binding=_binding(structured_invocation_digest=outer_digest), result=draft
+    )
+    candidate = runtime.prepare(_call(), _context()).request.sandbox_authority_candidate
+    intent = runtime.prepare(_call(), _context(sandbox_leases=(_lease(candidate),)))
+
+    with pytest.raises(IntentConflictError, match="structured result digest"):
+        runtime.invoke(intent)
 
 
 def test_sandbox_callable_cannot_return_plain_success_without_a_draft() -> None:

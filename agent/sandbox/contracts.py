@@ -7,6 +7,7 @@ facts 与 confined invocation。本模块不认识 Goal/provider/approval；治�
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -25,6 +26,16 @@ SANDBOX_QUALIFICATION_REASONS = frozenset(
         "functional_probe_failed",
     },
 )
+
+STRUCTURED_REQUEST_MAX_BYTES = 64 * 1024
+STRUCTURED_INPUT_MAX_ITEMS = 16
+STRUCTURED_INPUT_MAX_BYTES = 32 * 1024 * 1024
+STRUCTURED_INPUT_AGGREGATE_MAX_BYTES = 64 * 1024 * 1024
+STRUCTURED_RESULT_MAX_BYTES = 64 * 1024 * 1024
+STRUCTURED_ARTIFACT_MAX_BYTES = 64 * 1024 * 1024
+STRUCTURED_OUTPUT_AGGREGATE_MAX_BYTES = 64 * 1024 * 1024
+STRUCTURED_MAGIC_MAX_ITEMS = 16
+STRUCTURED_MAGIC_MAX_BYTES = 64
 
 
 class SandboxMode(StrEnum):
@@ -240,6 +251,154 @@ class SandboxDraftOutcome(StrEnum):
     SPAWN_FAILED = "spawn_failed"
 
 
+class StructuredResultKind(StrEnum):
+    """结构化 sandbox 固定结果协议的闭合集合。"""
+
+    OBSERVATION = "observation"
+    ARTIFACT = "artifact"
+
+
+class StructuredReadbackOutcome(StrEnum):
+    """owner-only readback 的闭合分类，不能由 child 自报。"""
+
+    VALID = "valid"
+    NOT_READ = "not_read"
+    RESULT_MISSING = "result_missing"
+    RESULT_REPLACED = "result_replaced"
+    RESULT_TOO_LARGE = "result_too_large"
+    RESULT_MALFORMED = "result_malformed"
+    ARTIFACT_REPLACED = "artifact_replaced"
+    ARTIFACT_TOO_LARGE = "artifact_too_large"
+    ARTIFACT_UNEXPECTED = "artifact_unexpected"
+    ARTIFACT_MISSING = "artifact_missing"
+    EXTRA_OUTPUT = "extra_output"
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredSandboxInputV1:
+    """单个临时输入；原始 bytes 只允许停留在同次 session。"""
+
+    slot: str
+    content: bytes
+    content_digest: str
+    allowed_magic_hex: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", self.slot) is None:
+            raise ValueError("structured input slot has an invalid shape")
+        if not isinstance(self.content, bytes):
+            raise TypeError("structured input content must be bytes")
+        if hashlib.sha256(self.content).hexdigest() != self.content_digest:
+            raise ValueError("structured input digest mismatch")
+        if not isinstance(self.allowed_magic_hex, tuple) or any(
+            not isinstance(value, str) for value in self.allowed_magic_hex
+        ):
+            raise TypeError("structured input magic must be a tuple of strings")
+        magic = tuple(sorted(set(self.allowed_magic_hex)))
+        if len(magic) > STRUCTURED_MAGIC_MAX_ITEMS or any(
+            re.fullmatch(r"(?:[0-9a-f]{2})+", value) is None
+            or len(value) // 2 > STRUCTURED_MAGIC_MAX_BYTES
+            for value in magic
+        ):
+            raise ValueError("structured input magic must be lowercase even-length hex")
+        if len(self.content) > STRUCTURED_INPUT_MAX_BYTES:
+            raise ValueError("structured input exceeds product maximum")
+        object.__setattr__(self, "allowed_magic_hex", magic)
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredSandboxIoPlanV1:
+    """单次 structured invocation 的全部 authority-bound I/O 事实。"""
+
+    package_digest: str
+    entrypoint_id: str
+    entrypoint_digest: str
+    request_bytes: bytes
+    request_digest: str
+    inputs: tuple[StructuredSandboxInputV1, ...]
+    result_cap_bytes: int
+    artifact_cap_bytes: int
+    aggregate_output_cap_bytes: int
+    expected_result_kind: StructuredResultKind
+
+    def __post_init__(self) -> None:
+        _require_hex64(self.package_digest, "package_digest")
+        _require_hex64(self.entrypoint_digest, "entrypoint_digest")
+        if not self.entrypoint_id or len(self.entrypoint_id.encode("utf-8")) > 128:
+            raise ValueError("entrypoint_id is invalid")
+        if not isinstance(self.request_bytes, bytes):
+            raise TypeError("structured request must be bytes")
+        if hashlib.sha256(self.request_bytes).hexdigest() != self.request_digest:
+            raise ValueError("structured request digest mismatch")
+        if len(self.request_bytes) > STRUCTURED_REQUEST_MAX_BYTES:
+            raise ValueError("structured request exceeds product maximum")
+        if not isinstance(self.inputs, tuple) or any(
+            not isinstance(item, StructuredSandboxInputV1) for item in self.inputs
+        ):
+            raise TypeError("structured inputs must be a closed tuple")
+        if len(self.inputs) > STRUCTURED_INPUT_MAX_ITEMS:
+            raise ValueError("structured input count exceeds product maximum")
+        if (
+            sum(len(item.content) for item in self.inputs)
+            > STRUCTURED_INPUT_AGGREGATE_MAX_BYTES
+        ):
+            raise ValueError("structured input aggregate exceeds product maximum")
+        slots = tuple(item.slot for item in self.inputs)
+        if len(set(slots)) != len(slots):
+            raise ValueError("structured input slots must be unique")
+        for name in (
+            "result_cap_bytes",
+            "artifact_cap_bytes",
+            "aggregate_output_cap_bytes",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(f"{name} must be positive")
+        if self.result_cap_bytes + self.artifact_cap_bytes < self.aggregate_output_cap_bytes:
+            raise ValueError("aggregate output cap exceeds per-file caps")
+        if (
+            self.result_cap_bytes > STRUCTURED_RESULT_MAX_BYTES
+            or self.artifact_cap_bytes > STRUCTURED_ARTIFACT_MAX_BYTES
+            or self.aggregate_output_cap_bytes > STRUCTURED_OUTPUT_AGGREGATE_MAX_BYTES
+        ):
+            raise ValueError("structured output cap exceeds product maximum")
+        if not isinstance(self.expected_result_kind, StructuredResultKind):
+            raise TypeError("expected result kind must be closed")
+
+
+def structured_invocation_digest(prepared, policy, plan: StructuredSandboxIoPlanV1) -> str:  # noqa: ANN001
+    """session 随机路径之外、并且所有 authority 输入都绑定的稳定 digest。"""
+
+    return canonical_json_digest(
+        {
+            "domain": "first-agent-structured-invocation-v1",
+            "process_command_fingerprint": prepared.command.command_fingerprint,
+            "package_digest": plan.package_digest,
+            "entrypoint_id": plan.entrypoint_id,
+            "entrypoint_digest": plan.entrypoint_digest,
+            "request_size": len(plan.request_bytes),
+            "request_digest": plan.request_digest,
+            "inputs": [
+                {
+                    "slot": item.slot,
+                    "size": len(item.content),
+                    "digest": item.content_digest,
+                    "allowed_magic_hex": list(item.allowed_magic_hex),
+                }
+                for item in plan.inputs
+            ],
+            "policy_digest": policy.policy_digest,
+            "temp_parent_digest": canonical_json_digest(
+                {"temp_root": policy.temp_root}
+            ),
+            "result_cap_bytes": plan.result_cap_bytes,
+            "artifact_cap_bytes": plan.artifact_cap_bytes,
+            "aggregate_output_cap_bytes": plan.aggregate_output_cap_bytes,
+            "expected_result_kind": plan.expected_result_kind.value,
+        }
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class SandboxExecutionDraftV1:
     """confined 执行的 durable draft：绑定 original command fingerprint 与
@@ -318,3 +477,74 @@ class SandboxExecutionDraftV1:
         if self.draft_digest and self.draft_digest != digest:
             raise ValueError("sandbox draft digest mismatch")
         object.__setattr__(self, "draft_digest", digest)
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredSandboxProcessDraftV1:
+    """一次 sandbox process 与 owner-only readback 的瞬时组合草稿。"""
+
+    process: SandboxExecutionDraftV1
+    structured_invocation_digest: str
+    readback_outcome: StructuredReadbackOutcome
+    request_digest: str
+    input_digests: tuple[tuple[str, int, str], ...]
+    result_bytes: bytes
+    result_digest: str
+    artifact_bytes: bytes | None
+    artifact_digest: str | None
+    draft_digest: str = ""
+
+    def identity_values(self) -> dict[str, object]:
+        return {
+            "process_draft_digest": self.process.draft_digest,
+            "structured_invocation_digest": self.structured_invocation_digest,
+            "readback_outcome": self.readback_outcome.value,
+            "request_digest": self.request_digest,
+            "input_digests": [list(item) for item in self.input_digests],
+            "result_size": len(self.result_bytes),
+            "result_digest": self.result_digest,
+            "artifact_size": (
+                len(self.artifact_bytes) if self.artifact_bytes is not None else None
+            ),
+            "artifact_digest": self.artifact_digest,
+        }
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.process, SandboxExecutionDraftV1):
+            raise TypeError("structured draft requires one sandbox process draft")
+        _require_hex64(self.structured_invocation_digest, "structured_invocation_digest")
+        _require_hex64(self.request_digest, "request_digest")
+        if not isinstance(self.readback_outcome, StructuredReadbackOutcome):
+            raise TypeError("structured readback outcome must be closed")
+        object.__setattr__(self, "input_digests", tuple(self.input_digests))
+        if tuple(sorted(self.input_digests)) != self.input_digests:
+            raise ValueError("structured input digests must be canonical")
+        for slot, size, digest in self.input_digests:
+            if re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", slot) is None or size < 0:
+                raise ValueError("structured input digest identity is invalid")
+            _require_hex64(digest, "structured input digest")
+        if not isinstance(self.result_bytes, bytes):
+            raise TypeError("structured result must be bytes")
+        if hashlib.sha256(self.result_bytes).hexdigest() != self.result_digest:
+            raise ValueError("structured result digest mismatch")
+        if self.artifact_bytes is not None and not isinstance(self.artifact_bytes, bytes):
+            raise TypeError("structured artifact must be bytes")
+        expected_artifact = (
+            hashlib.sha256(self.artifact_bytes).hexdigest()
+            if self.artifact_bytes is not None
+            else None
+        )
+        if expected_artifact != self.artifact_digest:
+            raise ValueError("structured artifact digest mismatch")
+        if self.readback_outcome is not StructuredReadbackOutcome.VALID and (
+            self.result_bytes or self.artifact_bytes not in {None, b""}
+        ):
+            raise ValueError("invalid readback cannot expose staged bytes")
+        spawn_failed = self.process.outcome is SandboxDraftOutcome.SPAWN_FAILED
+        not_read = self.readback_outcome is StructuredReadbackOutcome.NOT_READ
+        if spawn_failed != not_read:
+            raise ValueError("spawn-failed and not-read must occur together")
+        expected = canonical_json_digest(self.identity_values())
+        if self.draft_digest and self.draft_digest != expected:
+            raise ValueError("structured draft digest mismatch")
+        object.__setattr__(self, "draft_digest", expected)

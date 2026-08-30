@@ -6,14 +6,93 @@ from dataclasses import replace
 import pytest
 
 from agent.runtime.checkpoint import LocalCheckpointStore, _encode_state
+from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ActiveRun,
+    ActiveRunStatus,
+    ApprovalPolicy,
+    ContinuationPhase,
     ConversationState,
     ExecuteOperatorTool,
+    ExecutingIntentRecord,
+    ExecutionAuthorityClass,
     InvocationOrigin,
+    OutputPolicy,
+    ResolveApproval,
+    Resume,
+    RunStatus,
+    SideEffectClass,
+    ToolExposure,
+    ToolRisk,
+    ToolSpec,
 )
+from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.state import accept_action
-from tests.kernel.fakes import conversation_with_active_goal
+from agent.runtime.tools import KernelToolRuntime, RegisteredTool
+from tests.kernel.fakes import CollectingSink, ScriptedProvider, conversation_with_active_goal
+
+
+def _operator_action(state: ConversationState) -> ExecuteOperatorTool:
+    return ExecuteOperatorTool(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+        action_id="operator-action-1",
+        tool_name="skill_package_stage",
+        arguments={"source": {"kind": "local", "path": "private.skillpkg"}},
+        submitted_at="2026-08-30T12:00:00Z",
+    )
+
+
+def _operator_runtime(store, provider, calls: list[str]) -> AgentRuntime:
+    spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name="skill_package_stage",
+        version="1",
+        description="stage an operator-owned package",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "object",
+                    "properties": {
+                        "kind": {"type": "string"},
+                        "path": {"type": "string"},
+                    },
+                    "required": ["kind", "path"],
+                    "additionalProperties": False,
+                }
+            },
+            "required": ["source"],
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.HIGH,
+        side_effect=SideEffectClass.WRITE,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        safety_policy={},
+        output_limit_chars=128,
+    )
+    return AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=8_000, output_reserve=100),
+        ),
+        tool_runtime=KernelToolRuntime(
+            (
+                RegisteredTool(
+                    spec,
+                    lambda intent: calls.append(intent.tool_call_id) or "staged",
+                    exposure=ToolExposure.OPERATOR,
+                ),
+            )
+        ),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-restarted",
+    )
 
 
 def _operator_tool_state() -> ConversationState:
@@ -21,15 +100,7 @@ def _operator_tool_state() -> ConversationState:
         conversation_with_active_goal(),
         active_run=ActiveRun(run_id="run-operator"),
     )
-    action = ExecuteOperatorTool(
-        conversation_id=initial.conversation_id,
-        action_seq=initial.next_action_seq,
-        expected_revision=initial.revision,
-        action_id="operator-action-1",
-        tool_name="skill_package_stage",
-        arguments={"source": {"kind": "local", "path": "private.skillpkg"}},
-        submitted_at="2026-08-30T12:00:00Z",
-    )
+    action = _operator_action(initial)
     transition = accept_action(initial, action)
     assert transition.reason is None
     return transition.state
@@ -42,6 +113,86 @@ def test_operator_origin_and_private_arguments_round_trip_owner_checkpoint(tmp_p
     assert restored.state.active_run.invocation_origin is InvocationOrigin.OPERATOR
     assert restored.state.active_run.tool_calls[0].arguments["source"]["path"] == "private.skillpkg"
     assert restored.token.startswith("sha256:")
+
+
+def test_operator_approval_restarts_from_checkpoint_and_invokes_once(tmp_path) -> None:
+    initial = replace(
+        conversation_with_active_goal(),
+        active_run=ActiveRun(run_id="run-operator"),
+    )
+    path = tmp_path / "checkpoint.json"
+    first_store = LocalCheckpointStore.initialize(path, initial)
+    calls: list[str] = []
+    first_provider = ScriptedProvider()
+    first_runtime = _operator_runtime(first_store, first_provider, calls)
+
+    pending = first_runtime.run_turn(_operator_action(initial), first_store.load())
+
+    assert pending.status is RunStatus.AWAITING_APPROVAL
+    assert pending.request is not None
+    restarted_store = LocalCheckpointStore(path)
+    restarted_provider = ScriptedProvider()
+    restarted_runtime = _operator_runtime(restarted_store, restarted_provider, calls)
+    snapshot = restarted_store.load()
+    approval = ResolveApproval(
+        conversation_id=snapshot.state.conversation_id,
+        action_seq=snapshot.state.next_action_seq,
+        expected_revision=snapshot.state.revision,
+        request_id=pending.request.request_id,
+        binding_digest=pending.request.binding_digest,
+        approved=True,
+    )
+
+    completed = restarted_runtime.run_turn(approval, snapshot)
+    replayed = restarted_runtime.run_turn(approval, restarted_store.load())
+
+    assert completed.status is RunStatus.COMPLETED
+    assert replayed.status is RunStatus.COMPLETED
+    assert replayed.replayed is True
+    assert calls == ["operator-action-1"]
+    assert first_provider.calls == []
+    assert restarted_provider.calls == []
+
+
+def test_operator_executing_checkpoint_restarts_into_recovery_without_reinvoking(tmp_path) -> None:
+    state = _operator_tool_state()
+    active = state.active_run
+    assert active is not None
+    executing = replace(
+        state,
+        active_run=replace(
+            active,
+            status=ActiveRunStatus.RUNNABLE,
+            phase=ContinuationPhase.EXECUTING,
+            owner_invocation_id="crashed-invocation",
+            executing_intent=ExecutingIntentRecord(
+                tool_call_id="operator-action-1",
+                intent_digest="operator-intent-digest",
+                idempotency_key="operator-idempotency-key",
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+            ),
+        ),
+    )
+    path = tmp_path / "checkpoint.json"
+    LocalCheckpointStore.initialize(path, executing)
+    restarted_store = LocalCheckpointStore(path)
+    calls: list[str] = []
+    provider = ScriptedProvider()
+    runtime = _operator_runtime(restarted_store, provider, calls)
+    snapshot = restarted_store.load()
+
+    result = runtime.run_turn(
+        Resume(
+            conversation_id=snapshot.state.conversation_id,
+            action_seq=snapshot.state.next_action_seq,
+            expected_revision=snapshot.state.revision,
+        ),
+        snapshot,
+    )
+
+    assert result.status is RunStatus.AWAITING_RECOVERY
+    assert calls == []
+    assert provider.calls == []
 
 
 _BACKGROUND_ACTIVE_KEYS = {

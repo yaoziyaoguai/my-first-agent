@@ -2263,7 +2263,11 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
             ),
             pending_request=None,
             approval_grant=None,
-            rejected_request_ids=(*active.rejected_request_ids, pending.request_id),
+            rejected_request_ids=(
+                (*active.rejected_request_ids, pending.request_id)
+                if active.invocation_origin is InvocationOrigin.MODEL
+                else active.rejected_request_ids
+            ),
             batch_cursor=active.batch_cursor + 1,
             tool_calls=(
                 active.tool_calls

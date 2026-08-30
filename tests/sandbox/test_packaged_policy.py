@@ -260,6 +260,52 @@ def test_profile_requires_existing_canonical_direct_temp_child(tmp_path: Path) -
         compile_packaged_skill_profile(policy, {"TMPDIR": str(nested)})
 
 
+def test_builder_sorts_legal_runtime_roots_before_policy_identity(tmp_path: Path) -> None:
+    roots = _roots(tmp_path)
+    first = tmp_path / "a-runtime"
+    second = tmp_path / "z-runtime"
+    for root in (first, second):
+        root.mkdir()
+        root.chmod(0o555)
+
+    policy = build_packaged_skill_policy(
+        interpreter_path=roots.interpreter,
+        runtime_roots=(second, first),
+        package_root=roots.package,
+        temp_root=roots.temp,
+        system_runtime_roots=(roots.system,),
+        workspace_root=roots.workspace,
+        home_root=roots.home,
+        state_root=roots.state,
+        private_roots=(roots.private,),
+        runtime_closure_digest="a" * 64,
+        system_runtime_digest="b" * 64,
+        resource_limits=PackagedSkillResourceLimitsV1.for_profile(
+            "skill-standard-v1"
+        ),
+    )
+
+    assert policy.runtime_roots == (str(first), str(second))
+
+
+def test_direct_policy_validator_rejects_unsorted_runtime_roots(tmp_path: Path) -> None:
+    roots = _roots(tmp_path)
+    first = tmp_path / "a-runtime"
+    second = tmp_path / "z-runtime"
+    for root in (first, second):
+        root.mkdir()
+        root.chmod(0o555)
+    session = roots.temp / "session"
+    session.mkdir()
+    policy = _direct_policy(
+        roots,
+        runtime_roots=(str(second), str(first)),
+    )
+
+    with pytest.raises(ValueError, match="sorted canonical roots"):
+        compile_packaged_skill_profile(policy, {"TMPDIR": str(session)})
+
+
 @pytest.mark.parametrize(
     ("forgery", "message"),
     [

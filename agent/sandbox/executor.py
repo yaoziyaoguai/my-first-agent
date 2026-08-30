@@ -134,7 +134,7 @@ class NativeSandboxExecutor:
                 invocation = self._confiner.confine(
                     current.command, policy, environment
                 )
-            except (OSError, ValueError) as error:
+            except Exception as error:
                 session.close_and_remove()
                 return KnownNotExecuted(
                     code="structured_confine_failed",

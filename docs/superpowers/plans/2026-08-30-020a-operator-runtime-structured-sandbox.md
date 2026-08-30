@@ -1486,7 +1486,7 @@ git commit -m "feat(sandbox): add strict packaged skill policy"
 
 **Interfaces:**
 - Produces `HermeticRuntimeFileV1`, `HermeticRuntimeClosureV1`, `qualify_hermetic_runtime_closure`, `prepare_hermetic_skill_process`.
-- Produces `materialize_test_runtime(source_root, destination_root)` which accepts only an already-qualified explicit release closure and requalifies the copy.
+- Produces `materialize_test_runtime(source_root, destination_root, *, protected_roots)` which accepts only an already-qualified explicit release closure, requires the caller's explicit product/workspace/state protection domains, and requalifies the copy.
 - Produces executable module `python -I -m first_agent_skill_runner --package DIGEST --entrypoint ID`.
 - Runner protocol is fixed request/result JSON plus optional transient artifact bytes; package script receives bytes, never paths.
 
@@ -1540,11 +1540,21 @@ def test_materializer_requires_explicit_qualified_source_and_requalifies_copy(
     tmp_path,
 ):
     destination = tmp_path / "materialized-runtime"
-    copied = materialize_test_runtime(runtime_fixture.root, destination)
+    protected = tmp_path / "protected"
+    protected.mkdir()
+    copied = materialize_test_runtime(
+        runtime_fixture.root,
+        destination,
+        protected_roots=(protected,),
+    )
     assert copied == qualify_hermetic_runtime_closure(destination)
     assert copied.runtime_root == str(destination.resolve())
     with pytest.raises(ValueError, match="qualified source"):
-        materialize_test_runtime(tmp_path / "ordinary-venv", tmp_path / "rejected")
+        materialize_test_runtime(
+            tmp_path / "ordinary-venv",
+            tmp_path / "rejected",
+            protected_roots=(protected,),
+        )
 ```
 
 Run: `.venv/bin/python -m pytest -q tests/sandbox/test_hermetic_runtime.py -rx`
@@ -1617,7 +1627,7 @@ return KnownNotExecuted(
 
 It must prove `first_agent_skill_runner/__main__.py` belongs to a declared runner root and no root points outside the closure. `HermeticRuntimeClosureV1.closure_digest` contains no user/site/product Python fallback.
 
-Implement `scripts/materialize_020a_test_runtime.py` as a tracked stdlib-only helper. It requires explicit `--source-root` and `--destination-root`; it never defaults either path. `source_root` must first pass `qualify_hermetic_runtime_closure`. Open its pinned root and copy only the exact manifest plus `closure.inventory` paths with descriptor-relative `O_NOFOLLOW` reads and `O_CREAT|O_EXCL|O_NOFOLLOW` writes, preserving canonical `0444/0555` modes and verifying size/SHA-256 after each write. Write the already-canonical manifest last, fsync files/directories, then require `qualify_hermetic_runtime_closure(destination_root)` to succeed and return that new closure. Reject destination overlap with source/product/workspace/state roots. Unit tests use a synthetic non-sensitive qualified fixture; E2M/E3 pass an explicit application-release `skill-runtime-v1` root and materialize a fresh copy. The fresh wheel-verifier venv is never accepted as `source_root`.
+Implement `scripts/materialize_020a_test_runtime.py` as a tracked stdlib-only helper. It requires explicit `--source-root`, `--destination-root`, and one or more repeated `--protected-root` values; it never defaults or infers any of those paths from cwd, module location, environment or user state. The Python API mirrors this with a required keyword-only non-empty `protected_roots` tuple. `source_root` must first pass `qualify_hermetic_runtime_closure`. Open every explicit locator component-by-component with `O_DIRECTORY|O_NOFOLLOW`; do not call `resolve()` before symlink admission. Before creating the destination, pin the source, destination parent and every protected root, then reject source/destination overlap with each other or with any product/workspace/state protection domain. Copy only the exact manifest plus `closure.inventory` paths with descriptor-relative `O_NOFOLLOW` reads and `O_CREAT|O_EXCL|O_NOFOLLOW` writes, preserving canonical `0444/0555` modes and verifying size/SHA-256 after each write. Write the already-canonical manifest last, fsync files/directories, then require `qualify_hermetic_runtime_closure(destination_root)` to succeed and return that new closure. Unit tests use a synthetic non-sensitive qualified fixture; E2M/E3 pass an explicit application-release `skill-runtime-v1` root plus their verifier-owned product/workspace/state roots and materialize a fresh copy. The fresh wheel-verifier venv is never accepted as `source_root`.
 
 Prepare the fixed command through the existing process seam; do not parse manifest or discover entrypoints:
 

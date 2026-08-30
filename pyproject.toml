@@ -42,7 +42,7 @@ first-agent-schedule = "agent.automation.cli:main"
 py-modules = ["main"]
 
 [tool.setuptools.packages.find]
-include = ["agent", "agent.*"]
+include = ["agent", "agent.*", "first_agent_skill_runner"]
 
 [tool.ruff]
 target-version = "py311"

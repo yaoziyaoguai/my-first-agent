@@ -113,6 +113,7 @@ def test_product_tree_contains_only_kernel_packages() -> None:
         "agent/sandbox/authority.py",
         "agent/sandbox/contracts.py",
         "agent/sandbox/executor.py",
+        "agent/sandbox/hermetic_runtime.py",
         "agent/sandbox/packaged_policy.py",
         "agent/sandbox/policy.py",
         "agent/sandbox/ports.py",

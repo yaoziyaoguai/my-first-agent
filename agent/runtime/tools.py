@@ -49,6 +49,7 @@ from agent.runtime.contracts import (
     ToolCall,
     ToolDefinition,
     ToolExecutionOutput,
+    ToolExposure,
     ToolPreparation,
     ToolPrepareContext,
     ToolResult,
@@ -134,6 +135,11 @@ class RegisteredTool:
     prepare_binding: BindingPreparer | None = None
     prepare_authority_binding: AuthorityBindingPreparer | None = None
     policy: ToolPolicy | None = None
+    exposure: ToolExposure = ToolExposure.MODEL
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.exposure, ToolExposure):
+            raise TypeError("registered tool exposure must be closed")
 
 
 class KernelToolRuntime:
@@ -176,7 +182,11 @@ class KernelToolRuntime:
         return registration.policy or self._default_policy
 
     def definitions(self) -> tuple[ToolDefinition, ...]:
-        return tuple(registration.spec.definition() for registration in self._tools.values())
+        return tuple(
+            registration.spec.definition()
+            for registration in self._tools.values()
+            if registration.exposure is ToolExposure.MODEL
+        )
 
     def prepare(
         self,
@@ -187,6 +197,13 @@ class KernelToolRuntime:
         registration = self._tools.get(call.name)
         if registration is None:
             return self._error(call.tool_call_id, "unknown_tool", "Unknown tool requested.")
+        expected_exposure = ToolExposure(context.invocation_origin.value)
+        if registration.exposure is not expected_exposure:
+            return self._error(
+                call.tool_call_id,
+                "tool_exposure_mismatch",
+                "Tool is not callable from this invocation origin.",
+            )
 
         if context.goal_correction_pending:
             return self._error(
@@ -541,6 +558,9 @@ class KernelToolRuntime:
         registration = self._tools.get(intent.tool_name)
         if registration is None:
             raise IntentConflictError("intent references an unknown tool")
+        expected_exposure = ToolExposure(intent.invocation_origin.value)
+        if registration.exposure is not expected_exposure:
+            raise IntentConflictError("tool exposure changed after preparation")
         if intent.idempotency_key in self._invoked_keys:
             raise IntentConflictError("intent was already invoked")
         if registration.spec.identity_digest != intent.tool_identity:
@@ -627,6 +647,7 @@ class KernelToolRuntime:
             conversation_id=intent.conversation_id,
             run_id=intent.run_id,
             state_revision=0,
+            invocation_origin=intent.invocation_origin,
             approval_basis_revision=intent.approval_basis_revision,
             goal_id=intent.goal_id,
             goal_revision=intent.goal_revision,
@@ -830,6 +851,7 @@ class KernelToolRuntime:
             conversation_id=context.conversation_id,
             run_id=context.run_id,
             side_effect=spec.side_effect,
+            invocation_origin=context.invocation_origin,
             egress=spec.egress,
             execution_authority=spec.execution_authority,
             operation=(
@@ -1035,6 +1057,7 @@ class KernelToolRuntime:
                 "arguments_digest": intent.arguments_digest,
                 "idempotency_key": intent.idempotency_key,
                 "policy_identity": intent.policy_identity,
+                "invocation_origin": intent.invocation_origin.value,
                 "conversation_id": intent.conversation_id,
                 "run_id": intent.run_id,
                 "side_effect": intent.side_effect.value,

@@ -19,6 +19,7 @@ from agent.runtime.contracts import (
     GoalFrame,
     GoalStatus,
     InteractionState,
+    InvocationOrigin,
     ProposedCriterion,
     SideEffectClass,
     SourceKind,
@@ -429,6 +430,7 @@ def test_web_fetch_is_exposed_only_while_search_refs_remain_unattempted() -> Non
         conversation_id="conversation-1",
         run_id="run-current",
         side_effect=SideEffectClass.READ_ONLY,
+        invocation_origin=InvocationOrigin.MODEL,
     )
     receipt = SourceReceiptV1.create(
         SourceReceiptDraft(
@@ -599,6 +601,7 @@ def test_active_goal_omits_stale_source_text_instead_of_downgrading_disclosure()
             conversation_id="conversation-1",
             run_id="run-old",
             side_effect=SideEffectClass.READ_ONLY,
+            invocation_origin=InvocationOrigin.MODEL,
             goal_id=goal.goal_id,
             goal_revision=1,
             workspace_identity_digest=goal.workspace_identity_digest,
@@ -687,6 +690,7 @@ def test_active_goal_exposes_only_goal_bound_citation_refs(monkeypatch) -> None:
             conversation_id="conversation-1",
             run_id="run-old",
             side_effect=SideEffectClass.READ_ONLY,
+            invocation_origin=InvocationOrigin.MODEL,
         ),
     )
     bound = SourceReceiptV1.create(
@@ -704,6 +708,7 @@ def test_active_goal_exposes_only_goal_bound_citation_refs(monkeypatch) -> None:
             conversation_id="conversation-1",
             run_id="run-current",
             side_effect=SideEffectClass.READ_ONLY,
+            invocation_origin=InvocationOrigin.MODEL,
             goal_id=goal.goal_id,
             goal_revision=goal.revision,
             workspace_identity_digest=goal.workspace_identity_digest,

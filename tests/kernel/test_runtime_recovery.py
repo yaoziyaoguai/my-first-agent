@@ -43,7 +43,11 @@ class ExplodingToolRuntime:
         )
 
     def prepare(self, call, context, approval=None):
-        from agent.runtime.contracts import ExecutionIntent, SideEffectClass
+        from agent.runtime.contracts import (
+            ExecutionIntent,
+            InvocationOrigin,
+            SideEffectClass,
+        )
 
         return ExecutionIntent(
             execution_authority=ExecutionAuthorityClass.IN_PROCESS,
@@ -58,6 +62,7 @@ class ExplodingToolRuntime:
             conversation_id=context.conversation_id,
             run_id=context.run_id,
             side_effect=SideEffectClass.WRITE,
+            invocation_origin=InvocationOrigin.MODEL,
         )
 
     def invoke(self, intent):
@@ -79,7 +84,7 @@ class ExplodingPublicObservationRuntime:
         )
 
     def prepare(self, call, context, approval=None):
-        from agent.runtime.contracts import ExecutionIntent
+        from agent.runtime.contracts import ExecutionIntent, InvocationOrigin
 
         return ExecutionIntent(
             execution_authority=ExecutionAuthorityClass.IN_PROCESS,
@@ -94,6 +99,7 @@ class ExplodingPublicObservationRuntime:
             conversation_id=context.conversation_id,
             run_id=context.run_id,
             side_effect=SideEffectClass.READ_ONLY,
+            invocation_origin=InvocationOrigin.MODEL,
             egress=EgressClass.PUBLIC_NETWORK,
             operation="search",
             request_identity="public-request-1",

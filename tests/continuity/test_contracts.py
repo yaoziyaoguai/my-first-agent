@@ -37,6 +37,7 @@ from agent.runtime.contracts import (
     GoalProgress,
     GoalProposal,
     GoalStatus,
+    InvocationOrigin,
     ModelResponse,
     ModelToolCall,
     PauseGoal,
@@ -1975,6 +1976,7 @@ def test_014_contract_extensions_preserve_preexisting_positional_prefixes() -> N
         "conversation:legacy",
         "run:legacy",
         SideEffectClass.READ_ONLY,
+        InvocationOrigin.MODEL,
         {"stable": True},
         execution_authority=ExecutionAuthorityClass.IN_PROCESS,
     )

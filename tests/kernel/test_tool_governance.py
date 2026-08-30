@@ -297,6 +297,7 @@ def _source_intent():
     from agent.runtime.contracts import (
         ExecutionAuthorityClass,
         ExecutionIntent,
+        InvocationOrigin,
         SideEffectClass,
     )
 
@@ -313,6 +314,7 @@ def _source_intent():
         conversation_id="conversation-governance",
         run_id="run-governance",
         side_effect=SideEffectClass.READ_ONLY,
+        invocation_origin=InvocationOrigin.MODEL,
     )
 
 

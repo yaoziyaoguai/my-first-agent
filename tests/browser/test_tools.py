@@ -215,6 +215,7 @@ def test_registration_closures_do_not_capture_runtime_owners(tmp_path):
             "prepare_binding",
             "prepare_authority_binding",
             "policy",
+            "exposure",
         }
 
 

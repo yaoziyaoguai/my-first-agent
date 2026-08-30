@@ -164,6 +164,16 @@ class ToolRisk(StrEnum):
     HIGH = "high"
 
 
+class ToolExposure(StrEnum):
+    MODEL = "model"
+    OPERATOR = "operator"
+
+
+class InvocationOrigin(StrEnum):
+    MODEL = "model"
+    OPERATOR = "operator"
+
+
 class SideEffectClass(StrEnum):
     READ_ONLY = "read_only"
     WRITE = "write"
@@ -5300,8 +5310,11 @@ class ToolPrepareContext:
     background_tool_calls_used: int = 0
     background_sandbox_commands_used: int = 0
     background_browser_actions_used: int = 0
+    invocation_origin: InvocationOrigin = InvocationOrigin.MODEL
 
     def __post_init__(self) -> None:
+        if not isinstance(self.invocation_origin, InvocationOrigin):
+            raise TypeError("tool context invocation origin must be closed")
         if self.approval_basis_revision is None:
             object.__setattr__(self, "approval_basis_revision", self.state_revision)
         if self.approval_basis_revision is not None and self.approval_basis_revision < 0:
@@ -5487,6 +5500,7 @@ class ExecutionIntent:
     conversation_id: str
     run_id: str
     side_effect: SideEffectClass
+    invocation_origin: InvocationOrigin
     safety_binding: dict[str, JSONValue] = field(default_factory=dict)
     goal_id: str | None = None
     goal_revision: int | None = None
@@ -5518,6 +5532,8 @@ class ExecutionIntent:
     def __post_init__(self) -> None:
         if not self.conversation_id or not self.run_id:
             raise ValueError("execution intent origin identity must be valid")
+        if not isinstance(self.invocation_origin, InvocationOrigin):
+            raise TypeError("execution intent invocation origin must be closed")
         _assert_json_compatible(self.arguments, path="execution_intent.arguments")
         _assert_json_compatible(self.safety_binding, path="execution_intent.safety_binding")
         object.__setattr__(self, "arguments", _freeze_json_dict(self.arguments))

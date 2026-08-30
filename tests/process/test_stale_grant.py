@@ -29,6 +29,7 @@ from agent.runtime.contracts import (
     FactKind,
     GoalFrame,
     GoalStatus,
+    InvocationOrigin,
     ProposedCriterion,
     ResolveApproval,
     RevokeProcessAuthority,
@@ -268,6 +269,7 @@ def test_015_invoke_rejects_process_intent_without_exact_lease(tmp_path) -> None
         conversation_id=CONVERSATION,
         run_id="run-f1",
         side_effect=local_process_tool_spec().side_effect,
+        invocation_origin=InvocationOrigin.MODEL,
         execution_authority=ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS,
         process_lease=None,
     )
@@ -297,6 +299,7 @@ def test_015_mint_receipt_rejects_lease_less_process_intent(tmp_path) -> None:
         conversation_id=CONVERSATION,
         run_id="run-f1",
         side_effect=spec.side_effect,
+        invocation_origin=InvocationOrigin.MODEL,
         execution_authority=ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS,
         goal_id=GOAL_ID,
         goal_revision=1,

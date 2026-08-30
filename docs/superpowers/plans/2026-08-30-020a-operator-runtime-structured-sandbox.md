@@ -1660,7 +1660,7 @@ Create `tests/sandbox/test_packaged_runner.py`:
 
 ```python
 @pytest.mark.parametrize("profile", ["skill-standard-v1", "artifact-standard-v1"])
-def test_runner_process_applies_the_exact_digest_selected_hard_limits(
+def test_runner_process_applies_limits_or_refuses_before_package_load_when_unavailable(
     profile,
     subprocess_session_fixture,
 ):
@@ -1669,6 +1669,12 @@ def test_runner_process_applies_the_exact_digest_selected_hard_limits(
         resource_limits_digest=limits.limits_digest,
         script="scripts/report_limits.py",
     )
+    if completed.returncode:
+        assert completed.stdout == ""
+        assert "required as limit could not be applied" in completed.stderr
+        assert result == {}
+        assert subprocess_session_fixture.output_bytes() == (b"", b"")
+        return
     assert completed.returncode == 0
     assert result["payload"]["limits"] == {
         "cpu": [limits.cpu_seconds, limits.cpu_seconds],
@@ -1677,6 +1683,16 @@ def test_runner_process_applies_the_exact_digest_selected_hard_limits(
         "nofile": [limits.open_files, limits.open_files],
         "core": [limits.core_bytes, limits.core_bytes],
     }
+
+
+def test_apply_hard_limits_sets_every_soft_and_hard_value_from_the_closed_row(
+    monkeypatch,
+    fake_resource,
+):
+    limits = PackagedSkillResourceLimitsV1.for_profile("skill-standard-v1")
+    monkeypatch.setattr(skill_runner, "resource", fake_resource)
+    skill_runner.apply_hard_limits(limits.limits_digest)
+    assert fake_resource.calls == fake_resource.expected_two_phase_calls(limits)
 
 
 def test_runner_rejects_unknown_limit_digest_before_script_load(session_fixture):
@@ -1959,6 +1975,18 @@ git diff --check
 ```
 
 Expected: pytest/Ruff/diff exit 0; invalid direct runner command exits nonzero before package load. Also assert in tests that `"agent" not in sys.modules` in a fresh runner subprocess.
+
+The fresh subprocess may report the closed resource limiter unavailable on a host that
+cannot apply every frozen hard limit. In particular, Darwin Python processes can start
+with an address-space mapping hundreds of GiB wide, so the closed 1/2 GiB
+`RLIMIT_AS` rows may be impossible to lower after interpreter startup. That outcome is
+Task-5 evidence only when the child exits nonzero before package script load, writes no
+result or artifact bytes, and the fake-resource contract test proves the exact closed
+soft/hard calls and digest-table parity. Record
+`packaged_skill_resource_limiter_unavailable`; do not change the frozen rows, skip the
+limit, or call the runtime qualified. This unavailable result blocks E2M/E3 promotion
+until a separately approved resource-profile design is implemented and re-audited
+across Task 4, the runner and the real qualified runtime.
 
 - [ ] **Step 6: Commit when authorized**
 

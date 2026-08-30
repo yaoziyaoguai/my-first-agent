@@ -1,16 +1,16 @@
 ---
 title: "020–022 Governed Executable Skills, Package Lifecycle, and Workspace Artifacts Design"
 date: 2026-08-30
-status: draft-awaiting-user-approval-sol-audited
-authority: design-review-required-before-implementation
+status: frozen-user-approved-2026-08-30
+authority: user-approved-written-spec-2026-08-30
 supersedes_after_approval: docs/architecture/capabilities/SKILL_DESIGN.md 的 Deferred executable/lifecycle 边界
 ---
 
 # 020–022 Governed Executable Skills、Package Lifecycle 与 Workspace Artifacts Design
 
-> **状态说明**：本文是等待用户 review 的书面设计，不是已冻结实现 authority。
-> 用户批准前不得进入 implementation plan 或修改 production code。2026-08-30 的三路
-> Sol xhigh 审计 findings 已在本版关闭；批准后仍需按 slice 重新 detached review。
+> **状态说明**：用户已于 2026-08-30 review 并批准本书面 spec，本文现为 020–022 的
+> frozen design authority。三路 Sol xhigh 审计 findings 已在批准版本关闭；各 slice
+> implementation 仍需按本文重新 detached review。
 
 ## 0. 裁决摘要
 

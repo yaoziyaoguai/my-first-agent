@@ -1208,6 +1208,8 @@ def test_packaged_profile_is_deny_default_and_exact_allowlist(tmp_path):
     assert "(allow default)" not in profile
     assert policy.workspace_root not in profile
     assert policy.home_root not in profile
+    assert '(allow file-read-data (literal "/"))' in profile
+    assert '(allow file-read* (subpath "/"))' not in profile
     assert '(deny network*)' in profile
     assert '(deny process-fork)' in profile
     assert f'(allow file-write-data (literal "{session}/result.json"))' in profile
@@ -1383,6 +1385,7 @@ clauses = [
     "(allow process-info*)",
     "(allow signal (target self))",
     "(allow sysctl-read)",
+    '(allow file-read-data (literal "/"))',
     f'(allow process-exec (literal "{escape_seatbelt_path(policy.interpreter_path)}"))',
     "(deny process-fork)",
     "(deny network*)",
@@ -1396,6 +1399,13 @@ clauses.append(f'(allow file-write-data (literal "{escape_seatbelt_path(session)
 clauses.append(f'(allow file-write-data (literal "{escape_seatbelt_path(session)}/artifact.bin"))')
 return "\n".join(clauses) + "\n"
 ```
+
+The literal-root clause is the only Seatbelt bootstrap exception: it permits reading the
+root directory object itself so the confined child can start, but it does not admit
+`(subpath "/")`, root-directory traversal, or any additional file payload. The Darwin
+real probe must demonstrate that this clause makes the allowed controls non-vacuous
+while workspace/home/private reads remain denied. Do not hide `/` inside
+`system_runtime_roots`.
 
 Do not allow directory write, create, unlink, rename, shell paths or arbitrary executable roots.
 

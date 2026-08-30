@@ -204,6 +204,26 @@ def test_structured_pre_spawn_confine_failure_is_known_not_executed(tmp_path):
     assert runner.calls == []
 
 
+def test_structured_confine_exception_is_known_not_executed_before_runner(tmp_path):
+    prepared, policy = _prepared_and_policy(tmp_path)
+
+    class RaisingConfiner:
+        def confine(self, command, active_policy, environment):  # noqa: ANN001, ANN202
+            del command, active_policy, environment
+            raise OSError("sandbox backend disappeared")
+
+    runner = FakeRunner(lambda _environment: pytest.fail("runner must not execute"))
+    executor = NativeSandboxExecutor(
+        confiner=RaisingConfiner(), captured_path="/usr/bin:/bin", runner=runner
+    )
+
+    result = executor.execute(prepared, policy, io_plan=_plan())
+
+    assert isinstance(result, KnownNotExecuted)
+    assert result.code == "structured_confine_failed"
+    assert runner.calls == []
+
+
 def test_structured_session_setup_failure_is_known_not_executed(
     tmp_path, monkeypatch
 ):

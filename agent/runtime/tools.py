@@ -1689,9 +1689,9 @@ class KernelToolRuntime:
         if expected_artifact != draft.artifact_digest:
             raise IntentConflictError("structured artifact digest does not match bytes")
         process_result = self._sandbox_outcome(intent, spec, draft.process)
-        metadata = dict(process_result.metadata)
-        metadata["structured_invocation_digest"] = draft.structured_invocation_digest
         if not process_result.executed:
+            metadata = dict(process_result.metadata)
+            metadata["structured_invocation_digest"] = draft.structured_invocation_digest
             return ToolResult(
                 tool_call_id=intent.tool_call_id,
                 content=process_result.content,
@@ -1699,6 +1699,13 @@ class KernelToolRuntime:
                 executed=False,
                 metadata=metadata,
             )
+        if (
+            "sandbox_receipt" not in process_result.metadata
+            or "sandbox_receipt_kind" not in process_result.metadata
+        ):
+            return process_result
+        metadata = dict(process_result.metadata)
+        metadata["structured_invocation_digest"] = draft.structured_invocation_digest
         if draft.readback_outcome is not StructuredReadbackOutcome.VALID:
             metadata["code"] = draft.readback_outcome.value
             return ToolResult(

@@ -130,7 +130,16 @@ class NativeSandboxExecutor:
                 "LC_CTYPE": SAFE_LOCALE,
                 "TZ": "UTC",
             }
-            invocation = self._confiner.confine(current.command, policy, environment)
+            try:
+                invocation = self._confiner.confine(
+                    current.command, policy, environment
+                )
+            except (OSError, ValueError) as error:
+                session.close_and_remove()
+                return KnownNotExecuted(
+                    code="structured_confine_failed",
+                    message=f"structured sandbox confine failed: {error}",
+                )
             if isinstance(invocation, KnownNotExecuted):
                 result = invocation
             elif (

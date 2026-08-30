@@ -131,6 +131,49 @@ def _validate_magic(plan: StructuredSandboxIoPlanV1) -> None:
             raise ValueError("structured input does not match its allowed magic")
 
 
+def _cleanup_unfinished_session(
+    *,
+    root_fd: int | None,
+    inputs_fd: int | None,
+    temp_parent_fd: int,
+    basename: str,
+    input_slots: tuple[str, ...],
+) -> None:
+    """creation 在 child 前失败时，也只能沿已固定 descriptor 回滚。"""
+
+    failures: list[OSError] = []
+
+    def attempt(operation, *, missing_ok: bool = False) -> None:  # noqa: ANN001
+        try:
+            operation()
+        except FileNotFoundError:
+            if not missing_ok:
+                failures.append(OSError("structured session entry disappeared"))
+        except OSError as error:
+            failures.append(error)
+
+    if root_fd is not None:
+        attempt(lambda: os.fchmod(root_fd, 0o700))
+    if inputs_fd is not None:
+        attempt(lambda: os.fchmod(inputs_fd, 0o700))
+        for slot in input_slots:
+            attempt(
+                lambda slot=slot: os.unlink(slot, dir_fd=inputs_fd), missing_ok=True
+            )
+    if root_fd is not None:
+        for name in ("request.json", "result.json", "artifact.bin"):
+            attempt(lambda name=name: os.unlink(name, dir_fd=root_fd), missing_ok=True)
+        attempt(lambda: os.rmdir("inputs", dir_fd=root_fd), missing_ok=True)
+    attempt(lambda: os.rmdir(basename, dir_fd=temp_parent_fd))
+    for descriptor in (inputs_fd, root_fd, temp_parent_fd):
+        if descriptor is not None:
+            attempt(lambda descriptor=descriptor: os.close(descriptor))
+    if failures:
+        raise StructuredSessionCleanupError(
+            "structured session creation cleanup could not be proved"
+        ) from failures[0]
+
+
 def create_structured_session(
     temp_parent: str | os.PathLike[str],
     plan: StructuredSandboxIoPlanV1,
@@ -142,42 +185,49 @@ def create_structured_session(
     temp_parent_fd = os.open(
         parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     )
-    root = tempfile.mkdtemp(prefix="fa-structured-", dir=parent_path)
     try:
-        root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        root = tempfile.mkdtemp(prefix="fa-structured-", dir=parent_path)
     except Exception:
         os.close(temp_parent_fd)
         raise
+    basename = Path(root).name
+    root_fd: int | None = None
+    inputs_fd: int | None = None
     try:
+        root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         os.fchmod(root_fd, 0o700)
         os.mkdir("inputs", 0o700, dir_fd=root_fd)
         inputs_fd = os.open(
             "inputs", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd
         )
+        _create_exact_file(root_fd, "request.json", plan.request_bytes, 0o400)
+        for item in plan.inputs:
+            _create_exact_file(inputs_fd, item.slot, item.content, 0o400)
+        result_identity = _create_exact_file(root_fd, "result.json", b"", 0o600)
+        artifact_identity = _create_exact_file(root_fd, "artifact.bin", b"", 0o600)
+        os.fchmod(inputs_fd, 0o500)
+        os.fchmod(root_fd, 0o500)
+        return StructuredSandboxSessionV1(
+            root=root,
+            root_fd=root_fd,
+            inputs_fd=inputs_fd,
+            temp_parent_fd=temp_parent_fd,
+            basename=basename,
+            result_identity=result_identity,
+            artifact_identity=artifact_identity,
+            input_slots=tuple(item.slot for item in plan.inputs),
+        )
+    except Exception as error:
         try:
-            _create_exact_file(root_fd, "request.json", plan.request_bytes, 0o400)
-            for item in plan.inputs:
-                _create_exact_file(inputs_fd, item.slot, item.content, 0o400)
-            result_identity = _create_exact_file(root_fd, "result.json", b"", 0o600)
-            artifact_identity = _create_exact_file(root_fd, "artifact.bin", b"", 0o600)
-            os.fchmod(inputs_fd, 0o500)
-            os.fchmod(root_fd, 0o500)
-            return StructuredSandboxSessionV1(
-                root=root,
+            _cleanup_unfinished_session(
                 root_fd=root_fd,
                 inputs_fd=inputs_fd,
                 temp_parent_fd=temp_parent_fd,
-                basename=Path(root).name,
-                result_identity=result_identity,
-                artifact_identity=artifact_identity,
+                basename=basename,
                 input_slots=tuple(item.slot for item in plan.inputs),
             )
-        except Exception:
-            os.close(inputs_fd)
-            raise
-    except Exception:
-        os.close(root_fd)
-        os.close(temp_parent_fd)
+        except StructuredSessionCleanupError as cleanup_error:
+            raise cleanup_error from error
         raise
 
 
@@ -231,9 +281,12 @@ def _is_canonical_result(
     raw_result: bytes,
     plan: StructuredSandboxIoPlanV1,
 ) -> bool:
+    def reject_nonfinite(_value: str) -> None:
+        raise ValueError("non-finite JSON value")
+
     try:
-        document = json.loads(raw_result.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+        document = json.loads(raw_result.decode("utf-8"), parse_constant=reject_nonfinite)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
         return False
     if (
         not isinstance(document, dict)
@@ -248,12 +301,14 @@ def _is_canonical_result(
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
+            allow_nan=False,
         )
         canonical = json.dumps(
             document,
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
+            allow_nan=False,
         ).encode("utf-8")
     except (TypeError, ValueError):
         return False

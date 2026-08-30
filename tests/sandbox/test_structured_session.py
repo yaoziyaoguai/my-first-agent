@@ -10,6 +10,7 @@ from dataclasses import replace
 
 import pytest
 
+import agent.sandbox.structured_session as structured_session
 from agent.sandbox.contracts import (
     StructuredResultKind,
     StructuredSandboxInputV1,
@@ -220,3 +221,47 @@ def test_magic_allowlist_is_checked_before_the_child_can_read_input(tmp_path):
     )
     with pytest.raises(ValueError, match="magic"):
         create_structured_session(tmp_path, plan)
+
+
+@pytest.mark.parametrize("failure_call", (1, 2, 3, 4))
+def test_creation_failure_removes_every_staged_entry_and_session_root(
+    tmp_path, monkeypatch, failure_call
+):
+    original_create = structured_session._create_exact_file
+    calls = 0
+
+    def fail_at_selected_creation(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        nonlocal calls
+        calls += 1
+        if calls == failure_call:
+            raise OSError("injected staged-file failure")
+        return original_create(*args, **kwargs)
+
+    monkeypatch.setattr(
+        structured_session, "_create_exact_file", fail_at_selected_creation
+    )
+
+    with pytest.raises(OSError, match="injected staged-file failure"):
+        create_structured_session(tmp_path, io_plan())
+
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("non_finite", ("NaN", "Infinity", "-Infinity"))
+def test_nonfinite_result_payload_is_malformed(tmp_path, non_finite):
+    plan = io_plan()
+    session = create_structured_session(tmp_path, plan)
+    try:
+        raw = (
+            '{"kind":"observation","payload":{"value":'
+            + non_finite
+            + '},"protocol":"first-agent-skill-result-v1"}'
+        ).encode("utf-8")
+        _write_existing(session, "result.json", raw)
+
+        result = read_structured_session(session, plan)
+
+        assert result.outcome.value == "result_malformed"
+        assert result.result_bytes == b""
+    finally:
+        session.close_and_remove()

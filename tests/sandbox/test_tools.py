@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -363,6 +364,26 @@ def test_structured_draft_bytes_must_match_the_bound_digest() -> None:
 
     with pytest.raises(IntentConflictError, match="structured result digest"):
         runtime.invoke(intent)
+
+
+def test_structured_forgery_does_not_expose_staged_result_without_receipt() -> None:
+    outer_digest = HEX_C
+    draft = _structured_draft(outer_digest=outer_digest)
+    runtime = _runtime(
+        binding=_binding(structured_invocation_digest=outer_digest), result=draft
+    )
+    candidate = runtime.prepare(_call(), _context()).request.sandbox_authority_candidate
+    intent = runtime.prepare(_call(), _context(sandbox_leases=(_lease(candidate),)))
+    forged_spec = replace(
+        _spec(), execution_authority=ExecutionAuthorityClass.IN_PROCESS
+    )
+
+    result = runtime._structured_sandbox_outcome(intent, forged_spec, draft)
+
+    assert result.metadata["code"] == "sandbox_draft_forgery"
+    assert "sandbox_receipt" not in result.metadata
+    assert result.content != draft.result_bytes.decode("utf-8")
+    assert "private staged result" not in result.content
 
 
 def test_sandbox_callable_cannot_return_plain_success_without_a_draft() -> None:

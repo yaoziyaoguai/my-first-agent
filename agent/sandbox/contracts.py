@@ -213,6 +213,7 @@ class PackagedSkillSandboxPolicyV1:
     runtime_closure_digest: str
     system_runtime_digest: str
     resource_limits: PackagedSkillResourceLimitsV1
+    package_read_paths: tuple[str, ...] = ()
     policy_digest: str = ""
     mode: SandboxMode = field(init=False, default=SandboxMode.READ_ONLY)
     network: SandboxNetworkMode = field(init=False, default=SandboxNetworkMode.OFF)
@@ -223,6 +224,7 @@ class PackagedSkillSandboxPolicyV1:
             "interpreter_path": self.interpreter_path,
             "runtime_roots": list(self.runtime_roots),
             "package_root": self.package_root,
+            "package_read_paths": list(self.package_read_paths),
             "temp_root": self.temp_root,
             "system_runtime_roots": list(self.system_runtime_roots),
             "workspace_root": self.workspace_root,
@@ -259,6 +261,10 @@ class PackagedSkillSandboxPolicyV1:
         object.__setattr__(
             self, "private_roots", _string_roots(self.private_roots, "private_roots")
         )
+        if not isinstance(self.package_read_paths, tuple) or any(
+            not isinstance(value, str) for value in self.package_read_paths
+        ):
+            raise TypeError("package_read_paths must be a tuple of strings")
         if not isinstance(self.resource_limits, PackagedSkillResourceLimitsV1):
             raise TypeError("resource_limits must be a packaged resource profile")
         _require_hex64(self.runtime_closure_digest, "runtime_closure_digest")

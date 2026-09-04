@@ -58,6 +58,12 @@ class RealPackagedPolicyFixture:
         self.home_file.write_text("home", encoding="utf-8")
         self.private_file = self.private / "denied.txt"
         self.private_file.write_text("private", encoding="utf-8")
+        package_scripts = self.package / "scripts"
+        package_scripts.mkdir()
+        self.package_file = package_scripts / "allowed.py"
+        self.package_file.write_text("allowed", encoding="utf-8")
+        self.package_sibling = package_scripts / "denied.py"
+        self.package_sibling.write_text("denied", encoding="utf-8")
         for path in (self.runtime, self.package):
             path.chmod(0o555)
         self.interpreter = Path(sys.executable).resolve()
@@ -85,6 +91,7 @@ class RealPackagedPolicyFixture:
             resource_limits=PackagedSkillResourceLimitsV1.for_profile(
                 "skill-standard-v1"
             ),
+            package_read_paths=("scripts/allowed.py",),
         )
         self.executor = NativeSandboxExecutor(
             confiner=SeatbeltConfiner(), captured_path=str(self.interpreter.parent)
@@ -131,6 +138,8 @@ class RealPackagedPolicyFixture:
             "read_workspace": f"open({str(self.workspace_file)!r}, 'rb').read()",
             "read_home": f"open({str(self.home_file)!r}, 'rb').read()",
             "read_private": f"open({str(self.private_file)!r}, 'rb').read()",
+            "read_package_file": f"open({str(self.package_file)!r}, 'rb').read()",
+            "read_package_sibling": f"open({str(self.package_sibling)!r}, 'rb').read()",
             "network_connect": "socket.create_connection(('127.0.0.1', PORT), timeout=1.0)",
             "fork": "fork_once()",
             "exec_true": "exec_true()",
@@ -211,6 +220,8 @@ def real_fixture(tmp_path: Path):
         ("read_workspace", "denied"),
         ("read_home", "denied"),
         ("read_private", "denied"),
+        ("read_package_file", "allowed"),
+        ("read_package_sibling", "denied"),
         ("network_connect", "denied"),
         ("fork", "denied"),
         ("exec_true", "denied"),

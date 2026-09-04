@@ -6,7 +6,9 @@ frontmatter，并冻结 descriptor / body / resource 的 identity 与 digest。
 设计要点（见 ``docs/architecture/capabilities/SKILL_DESIGN.md``）：
 
 - 不扫描默认目录（home、workspace、Coding Agent 的 ``.agents/.codex/.claude``）。
-- 不执行 ``scripts/``，不 hot refresh；scan 后任一局部漂移都让旧 identity 失效。
+- catalog 不自行执行 ``scripts/``，不 hot refresh；scan 后任一局部漂移都让旧 identity 失效。
+- 声明 ``entrypoints`` 时才读 ``scripts/``：每个 Python 入口固定 id/size/digest/
+  FileIdentity 并参与 identity_digest；``scripts/`` 内容必须与声明完全一致。
 - PyYAML 是可选依赖：未配置 root 时不导入；配置了 root 但缺失依赖时报 ``SkillDependencyError``。
 - 错误信息不包含绝对路径或私有内容。
 """
@@ -26,9 +28,12 @@ SKILL_FILE = "SKILL.md"
 RESOURCE_DIRS = ("references", "assets")
 SKILL_POLICY_VERSION = "skill-source-v1"
 _NAME_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+# canonical entrypoint script 路径：恰好一段 ``scripts/<name>.py``，无遍历/绝对路径/隐藏文件。
+_SCRIPT_PATH_PATTERN = re.compile(r"^scripts/[a-z0-9][a-z0-9_.-]*\.py$")
 _READ_CHUNK = 65536
 _KNOWN_FRONTMATTER_KEYS = frozenset({
     "name", "description", "license", "compatibility", "metadata", "allowed-tools",
+    "entrypoints",
 })
 
 
@@ -63,6 +68,7 @@ class SkillLimits:
     max_yaml_nodes: int = 2_000
     max_yaml_depth: int = 16
     max_scalar_bytes: int = 20_000
+    max_entrypoints: int = 8
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -75,6 +81,7 @@ class SkillLimits:
             ("max_yaml_nodes", self.max_yaml_nodes),
             ("max_yaml_depth", self.max_yaml_depth),
             ("max_scalar_bytes", self.max_scalar_bytes),
+            ("max_entrypoints", self.max_entrypoints),
         ):
             if value < 1:
                 raise ValueError(f"{name} must be positive")
@@ -98,6 +105,18 @@ class SkillResourceDescriptor:
 
 
 @dataclass(frozen=True, slots=True)
+class SkillEntrypointDescriptor:
+    """声明的 Python entrypoint：scan 时固定 identity/digest，不持有绝对路径。"""
+
+    id: str
+    relative_path: str
+    size: int
+    digest: str
+    identity: FileIdentity
+    parent_identity: FileIdentity
+
+
+@dataclass(frozen=True, slots=True)
 class SkillDescriptor:
     """单个 Skill 的不可变描述。不持有绝对路径。"""
 
@@ -115,6 +134,8 @@ class SkillDescriptor:
     file_digest: str
     resource_inventory_digest: str
     resources: tuple[SkillResourceDescriptor, ...]
+    # entrypoints 参与 identity_digest：script 内容漂移必须使 Skill identity 失效。
+    entrypoints: tuple[SkillEntrypointDescriptor, ...]
     policy_version: str
 
     @property
@@ -128,6 +149,10 @@ class SkillDescriptor:
             "body_digest": self.body_digest,
             "file_digest": self.file_digest,
             "resource_inventory_digest": self.resource_inventory_digest,
+            "entrypoints": [
+                (entrypoint.id, entrypoint.relative_path, entrypoint.digest)
+                for entrypoint in self.entrypoints
+            ],
             "policy_version": self.policy_version,
         }
         return _digest_json(payload)
@@ -215,6 +240,71 @@ class SkillCatalog:
         if _sha256_bytes(raw) != resource.digest:
             raise SkillSecurityError("resource drift detected; rebuild the catalog")
         return _decode_utf8(raw)
+
+    def resolve_entrypoint(self, name: str, entrypoint_id: str) -> SkillEntrypointDescriptor:
+        """按 id 解析已固定的 entrypoint，调用时重新校验 ancestor 与 script identity。
+
+        与 activation / resource read 同一合同：no-follow stat + O_NOFOLLOW 打开，
+        scan 后的替换或漂移抛 ``SkillSecurityError``。只读 pinned 相对路径，不出 root。
+        """
+        descriptor = self.descriptor_for(name)
+        entrypoint = next(
+            (e for e in descriptor.entrypoints if e.id == entrypoint_id), None
+        )
+        if entrypoint is None:
+            raise SkillSchemaError("unknown entrypoint id")
+        skill_dir = self._paths[name]
+        raw, current_identity, ancestor_identity, parent_identity = (
+            _read_regular_beneath(
+                skill_dir, entrypoint.relative_path, self.limits.max_file_bytes
+            )
+        )
+        stored_ancestor = descriptor.ancestor_identity
+        if stored_ancestor is not None and (
+            stored_ancestor.dev != ancestor_identity.dev
+            or stored_ancestor.ino != ancestor_identity.ino
+        ):
+            raise SkillSecurityError(
+                "skill directory identity drift detected; rebuild the catalog"
+            )
+        if (
+            entrypoint.parent_identity.dev != parent_identity.dev
+            or entrypoint.parent_identity.ino != parent_identity.ino
+        ):
+            raise SkillSecurityError(
+                "entrypoint directory identity drift detected; rebuild the catalog"
+            )
+        if (
+            entrypoint.identity.dev != current_identity.dev
+            or entrypoint.identity.ino != current_identity.ino
+        ):
+            raise SkillSecurityError(
+                "entrypoint identity drift detected; rebuild the catalog"
+            )
+        if entrypoint.size != current_identity.size:
+            raise SkillSecurityError("entrypoint size drift detected; rebuild the catalog")
+        if _sha256_bytes(raw) != entrypoint.digest:
+            raise SkillSecurityError("entrypoint script drift detected; rebuild the catalog")
+        return entrypoint
+
+    def resolve_entrypoint_target(
+        self, name: str, entrypoint_id: str
+    ) -> tuple[Path, SkillEntrypointDescriptor]:
+        """返回 host-only 执行目标；绝对 package path 不进入 descriptor 或 ToolResult。"""
+
+        self.revalidate_execution_descriptor(name)
+        entrypoint = self.resolve_entrypoint(name, entrypoint_id)
+        return self._paths[name], entrypoint
+
+    def revalidate_execution_descriptor(self, name: str) -> None:
+        """spawn 前重验所有参与 Skill identity 的可变 package 内容。"""
+
+        descriptor = self.descriptor_for(name)
+        self.read_activation(name)
+        for resource in descriptor.resources:
+            self.read_resource(name, resource.relative_path)
+        for entrypoint in descriptor.entrypoints:
+            self.resolve_entrypoint(name, entrypoint.id)
 
 
 def build_skill_catalog(
@@ -306,6 +396,8 @@ def _build_descriptor(skill_dir, dir_name, skill_file_stat, limits):
     inventory_digest = _digest_json(
         [(resource.relative_path, resource.digest) for resource in resources]
     )
+    entrypoints = _extract_entrypoints(data.get("entrypoints"), skill_dir, limits)
+    _scan_scripts(skill_dir, entrypoints)
     ancestor_identity = _identity_from_stat(_stat_no_follow(skill_dir))
     return SkillDescriptor(
         name=name,
@@ -320,6 +412,7 @@ def _build_descriptor(skill_dir, dir_name, skill_file_stat, limits):
         file_digest=_sha256_bytes(raw),
         resource_inventory_digest=inventory_digest,
         resources=resources,
+        entrypoints=entrypoints,
         policy_version=SKILL_POLICY_VERSION,
     )
 
@@ -357,26 +450,192 @@ def _scan_resources(skill_dir, limits):
     return tuple(resources)
 
 
+def _extract_entrypoints(
+    value: object, skill_dir: Path, limits: SkillLimits
+) -> tuple[SkillEntrypointDescriptor, ...]:
+    """解析并固定声明的 entrypoints；未声明时返回空 tuple（不读 scripts/）。"""
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise SkillSchemaError("entrypoints must be a list")
+    if len(value) > limits.max_entrypoints:
+        raise SkillLimitError("skill entrypoint count exceeds the configured limit")
+    seen_ids: set[str] = set()
+    seen_scripts: set[str] = set()
+    entrypoints: list[SkillEntrypointDescriptor] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise SkillSchemaError("entrypoint entries must be mappings")
+        unknown_keys = set(item) - {"id", "script"}
+        if unknown_keys:
+            raise SkillSchemaError("unknown entrypoint keys are not allowed")
+        if not {"id", "script"} <= set(item):
+            raise SkillSchemaError("entrypoint entries require id and script")
+        entrypoint_id = item["id"]
+        script = item["script"]
+        if not isinstance(entrypoint_id, str) or not isinstance(script, str):
+            raise SkillSchemaError("entrypoint id and script must be strings")
+        if not _NAME_PATTERN.match(entrypoint_id) or not 1 <= len(entrypoint_id) <= 64:
+            raise SkillSchemaError("entrypoint id does not match the required format")
+        if not _SCRIPT_PATH_PATTERN.match(script):
+            raise SkillSchemaError("entrypoint script must be a canonical scripts/<name>.py path")
+        if entrypoint_id in seen_ids:
+            raise SkillSchemaError("duplicate entrypoint id is not allowed")
+        if script in seen_scripts:
+            raise SkillSchemaError("duplicate entrypoint script is not allowed")
+        seen_ids.add(entrypoint_id)
+        seen_scripts.add(script)
+        raw, identity, _ancestor_identity, parent_identity = _read_regular_beneath(
+            skill_dir, script, limits.max_file_bytes
+        )
+        _decode_utf8(raw)  # 提前拒绝非 UTF-8 脚本。
+        entrypoints.append(
+            SkillEntrypointDescriptor(
+                id=entrypoint_id,
+                relative_path=script,
+                size=identity.size,
+                digest=_sha256_bytes(raw),
+                identity=identity,
+                parent_identity=parent_identity,
+            )
+        )
+    return tuple(entrypoints)
+
+
+def _scan_scripts(skill_dir: Path, declared: tuple[SkillEntrypointDescriptor, ...]) -> None:
+    """只在声明入口时校验 scripts/ 完整性；旧只读 Skill 不读取该目录。"""
+    if not declared:
+        return
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        root_fd = os.open(skill_dir, flags)
+    except OSError as error:
+        raise SkillSecurityError("skill directory could not be opened safely") from error
+    try:
+        try:
+            scripts_fd = os.open("scripts", flags, dir_fd=root_fd)
+        except FileNotFoundError as error:
+            raise SkillSchemaError(
+                "declared entrypoint scripts directory is missing"
+            ) from error
+        except OSError as error:
+            raise SkillSecurityError(
+                "skill scripts directory must be a real directory"
+            ) from error
+    finally:
+        os.close(root_fd)
+    try:
+        scripts_identity = _identity_from_stat(os.fstat(scripts_fd))
+        if any(
+            entrypoint.parent_identity.dev != scripts_identity.dev
+            or entrypoint.parent_identity.ino != scripts_identity.ino
+            for entrypoint in declared
+        ):
+            raise SkillSecurityError("skill scripts directory changed during scan")
+        declared_names = {
+            entrypoint.relative_path.split("/", 1)[1] for entrypoint in declared
+        }
+        with os.scandir(scripts_fd) as entries:
+            for entry in sorted(entries, key=lambda item: item.name):
+                if entry.name not in declared_names:
+                    raise SkillSecurityError(
+                        "scripts directory contains undeclared content"
+                    )
+    finally:
+        os.close(scripts_fd)
+
+
 def _read_regular(path: Path, max_bytes: int) -> tuple[bytes, FileIdentity]:
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode):
-            raise SkillSecurityError("skill file is not a regular file")
-        if st.st_size > max_bytes:
-            raise SkillLimitError("skill file exceeds the configured limit")
-        chunks: list[bytes] = []
-        remaining = st.st_size
-        while remaining > 0:
-            chunk = os.read(fd, min(_READ_CHUNK, remaining))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        identity = _identity_from_stat(st)
-        return b"".join(chunks), identity
+        return _read_regular_fd(fd, max_bytes)
     finally:
         os.close(fd)
+
+
+def _read_regular_beneath(
+    root: Path, relative_path: str, max_bytes: int
+) -> tuple[bytes, FileIdentity, FileIdentity, FileIdentity]:
+    """从已打开的目录逐段 no-follow 读取，避免路径组件替换竞态。"""
+
+    parts = relative_path.split("/")
+    if len(parts) < 2 or any(part in {"", ".", ".."} for part in parts):
+        raise SkillSecurityError("skill path is not canonical")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        root_fd = os.open(root, flags)
+    except OSError as error:
+        raise SkillSecurityError("skill directory could not be opened safely") from error
+    current_fd = root_fd
+    try:
+        root_stat = os.fstat(root_fd)
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise SkillSecurityError("skill root is not a real directory")
+        for part in parts[:-1]:
+            try:
+                child_fd = os.open(part, flags, dir_fd=current_fd)
+            except OSError as error:
+                raise SkillSecurityError(
+                    "skill path directory could not be opened safely"
+                ) from error
+            if current_fd != root_fd:
+                os.close(current_fd)
+            current_fd = child_fd
+            if not stat.S_ISDIR(os.fstat(current_fd).st_mode):
+                raise SkillSecurityError("skill path parent is not a directory")
+        parent_identity = _identity_from_stat(os.fstat(current_fd))
+        try:
+            file_fd = os.open(
+                parts[-1],
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=current_fd,
+            )
+        except FileNotFoundError as error:
+            raise SkillSchemaError("required skill path is missing") from error
+        except OSError as error:
+            raise SkillSecurityError("skill file could not be opened safely") from error
+        try:
+            raw, identity = _read_regular_fd(file_fd, max_bytes)
+        finally:
+            os.close(file_fd)
+        return raw, identity, _identity_from_stat(root_stat), parent_identity
+    finally:
+        if current_fd != root_fd:
+            os.close(current_fd)
+        os.close(root_fd)
+
+
+def _read_regular_fd(fd: int, max_bytes: int) -> tuple[bytes, FileIdentity]:
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode):
+        raise SkillSecurityError("skill file is not a regular file")
+    if st.st_size > max_bytes:
+        raise SkillLimitError("skill file exceeds the configured limit")
+    chunks: list[bytes] = []
+    remaining = st.st_size
+    while remaining > 0:
+        chunk = os.read(fd, min(_READ_CHUNK, remaining))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    raw = b"".join(chunks)
+    after = os.fstat(fd)
+    if len(raw) != st.st_size or (
+        st.st_dev,
+        st.st_ino,
+        st.st_mode,
+        st.st_size,
+        st.st_mtime_ns,
+    ) != (
+        after.st_dev,
+        after.st_ino,
+        after.st_mode,
+        after.st_size,
+        after.st_mtime_ns,
+    ):
+        raise SkillSecurityError("skill file changed while being read")
+    return raw, _identity_from_stat(after)
 
 
 def _identity_from_stat(st: os.stat_result) -> FileIdentity:

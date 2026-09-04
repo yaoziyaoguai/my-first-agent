@@ -168,7 +168,7 @@ Textual thread cancellation、event 丢失和 terminal renderer 输出都不是 
 | Memory | `docs/architecture/capabilities/MEMORY_DESIGN.md` | strict durable snapshot、revision-bound preview、fresh source projection |
 | SubAgent | `docs/architecture/capabilities/SUBAGENT_DESIGN.md` | provider contract、receipt precedence、exact handoff、honest availability |
 | Scheduler | `docs/architecture/capabilities/SCHEDULER_DESIGN.md` | calendar-valid identity、one-shot conflict reconciliation、latest state |
-| Skill | `docs/architecture/capabilities/SKILL_DESIGN.md` | identity + digest revalidation、model-visible metadata、read-only scope |
+| Skill | `docs/architecture/capabilities/SKILL_DESIGN.md` | identity + digest revalidation、model-visible metadata、declared entrypoint 的 exact approval/structured sandbox |
 | TUI | `docs/architecture/capabilities/TUI_DESIGN.md` | complete keyboard actions、authoritative reopen、shared event/lifecycle |
 
 ## External anchors

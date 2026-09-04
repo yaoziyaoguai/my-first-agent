@@ -58,6 +58,7 @@ from agent.runtime.ports import (
 )
 from agent.runtime.tools import KernelToolRuntime, RegisteredTool
 from agent.skill.catalog import SkillLimits, build_skill_catalog
+from agent.skill.execution import SkillExecutionConfig
 from agent.skill.tools import build_skill_tool_registrations
 from agent.tools.file_ops import DEFAULT_PRIVATE_ROOTS, build_file_tool_registrations
 from agent.tools.path_safety import WorkspaceBoundary
@@ -177,6 +178,66 @@ def build_sandbox_resources(
         registrations=(registration,),
         readiness=readiness,
         reason_code=None if report.available else report.reason_code,
+    )
+
+
+def build_skill_execution_config(
+    *,
+    workspace: Path,
+    state_root: Path,
+    runtime_root: Path,
+) -> SkillExecutionConfig:
+    """用显式 hermetic runtime 接入既有 sandbox；不复制或管理 Skill。"""
+
+    import hashlib
+    import sys
+    import tempfile as _tempfile
+
+    from agent.runtime.contracts import KnownNotExecuted
+    from agent.sandbox.executor import NativeSandboxExecutor
+    from agent.sandbox.hermetic_runtime import qualify_hermetic_runtime_closure
+    from agent.sandbox.seatbelt import SeatbeltConfiner
+
+    confiner = SeatbeltConfiner()
+    report = confiner.qualify()
+    if not report.available:
+        raise ValueError("executable Skills require the native sandbox")
+    closure = qualify_hermetic_runtime_closure(runtime_root)
+    if isinstance(closure, KnownNotExecuted):
+        raise ValueError("the configured Skill runtime could not be verified")
+    if sys.platform != "darwin":
+        raise ValueError("executable Skills are unsupported on this platform")
+    system_roots = tuple(
+        sorted(
+            (Path("/System/Library").resolve(strict=True), Path("/usr/lib").resolve(strict=True)),
+            key=str,
+        )
+    )
+    system_digest = canonical_json_digest(
+        {"roots": [str(root) for root in system_roots]}
+    )
+    canonical_temp = Path(_tempfile.gettempdir()).resolve(strict=True)
+    base = (
+        canonical_temp
+        / (
+            "first-agent-skill-"
+            + hashlib.sha256(str(state_root).encode()).hexdigest()[:12]
+        )
+    )
+    temp_root = base / "temp"
+    home_root = base / "home"
+    temp_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    home_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return SkillExecutionConfig(
+        closure=closure,
+        workspace_root=workspace,
+        temp_root=temp_root,
+        state_root=state_root,
+        home_root=home_root,
+        system_runtime_roots=system_roots,
+        system_runtime_digest=system_digest,
+        private_roots=(),
+        executor=NativeSandboxExecutor(confiner=confiner, captured_path=""),
     )
 
 
@@ -435,6 +496,7 @@ def build_tool_registrations(
     private_roots: tuple[str, ...] = DEFAULT_PRIVATE_ROOTS,
     max_tool_result_chars: int,
     skill_limits: SkillLimits | None = None,
+    skill_execution: SkillExecutionConfig | None = None,
     history_catalog: HistoryCatalog | None = None,
     captured_path: str | None = None,
 ) -> tuple[RegisteredTool, ...]:
@@ -446,6 +508,8 @@ def build_tool_registrations(
     """
     if max_tool_result_chars < 1:
         raise ValueError("max_tool_result_chars must be positive")
+    if skill_execution is not None and not skill_roots:
+        raise ValueError("Skill execution requires an explicit Skill root")
     registrations: list[RegisteredTool] = list(
         build_file_tool_registrations(
             workspace,
@@ -460,7 +524,9 @@ def build_tool_registrations(
         catalog = build_skill_catalog(skill_roots, limits=skill_limits)
         registrations.extend(
             build_skill_tool_registrations(
-                catalog, max_tool_result_chars=max_tool_result_chars
+                catalog,
+                max_tool_result_chars=max_tool_result_chars,
+                execution=skill_execution,
             )
         )
     # 015 governed local action：仅在支持 POSIX process lifecycle 的平台静态注册

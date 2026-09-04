@@ -24,6 +24,7 @@ from agent.composition import (
     build_memory_resources,
     build_owner_preference_resources,
     build_sandbox_resources,
+    build_skill_execution_config,
     build_tool_registrations,
     build_web_resources,
     load_mcp_catalog_file,
@@ -271,6 +272,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         type=Path,
         help="explicit trusted Skill root directory (repeatable)",
+    )
+    advanced.add_argument(
+        "--skill-runtime-root",
+        type=Path,
+        help="explicit verified Python runtime for declared Skill entrypoints",
     )
     advanced.add_argument(
         "--browser",
@@ -973,6 +979,15 @@ def main(
             skill_roots = tuple(
                 root.resolve(strict=True) for root in (args.skill_root or ())
             )
+            skill_execution = None
+            if args.skill_runtime_root is not None:
+                if not skill_roots:
+                    raise ValueError("--skill-runtime-root requires --skill-root")
+                skill_execution = build_skill_execution_config(
+                    workspace=workspace,
+                    state_root=session.state_root,
+                    runtime_root=args.skill_runtime_root,
+                )
             renderer = TerminalRenderer(write_fn)
             context_limits = ContextLimits(max_input_tokens=100_000, output_reserve=8_000)
             registrations = list(
@@ -982,6 +997,7 @@ def main(
                     protected_paths=protected_paths,
                     private_roots=DEFAULT_PRIVATE_ROOTS,
                     max_tool_result_chars=context_limits.max_tool_result_chars,
+                    skill_execution=skill_execution,
                     history_catalog=(
                         HistoryCatalog(
                             session.checkpoint_path.parent,

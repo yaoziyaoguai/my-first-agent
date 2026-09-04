@@ -252,6 +252,30 @@ def test_invalid_skill_root_fails_startup_without_traceback(tmp_path: Path) -> N
     assert "SkillSchemaError" not in output[0]
 
 
+def test_skill_runtime_requires_an_explicit_skill_root(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    output: list[str] = []
+
+    exit_code = entrypoint.main(
+        [
+            "--workspace",
+            str(workspace),
+            "--state-root",
+            str(tmp_path / "state-root"),
+            "--provider",
+            "fake",
+            "--skill-runtime-root",
+            str(tmp_path / "runtime"),
+        ],
+        input_fn=lambda _: "/exit",
+        write_fn=output.append,
+    )
+
+    assert exit_code == 2
+    assert output[0] == "Startup failed: --skill-runtime-root requires --skill-root"
+
+
 # --- U7 lifecycle: shared queue sink + close-stack reverse-close once ---
 
 def _write_catalog_and_state(tmp_path: Path):

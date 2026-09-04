@@ -118,6 +118,8 @@ def test_packaged_profile_is_deny_default_and_exact_allowlist(tmp_path: Path) ->
     assert f'(allow file-write* (subpath "{session}"))' not in profile
     assert f'(allow process-exec (literal "{policy.interpreter_path}"))' in profile
     assert "(allow process-exec*)" not in profile
+    assert f'(allow file-read* (subpath "{policy.package_root}"))' not in profile
+    assert f'(allow file-read-metadata (literal "{policy.package_root}"))' in profile
 
 
 def test_policy_rejects_overlapping_runtime_package_or_denied_roots(
@@ -183,7 +185,6 @@ def test_policy_identity_is_closed_to_read_only_network_off(tmp_path: Path) -> N
     ("mutate", "message"),
     [
         (lambda roots: roots.runtime.chmod(0o755), "writable"),
-        (lambda roots: roots.package.chmod(0o755), "writable"),
         (lambda roots: roots.runtime.mkdir(exist_ok=True), "product tree"),
     ],
 )
@@ -198,6 +199,55 @@ def test_policy_rejects_writable_or_product_tree_roots(
 
     with pytest.raises(ValueError, match=message):
         _policy(roots)
+
+
+def test_policy_allows_writable_package_root(tmp_path: Path) -> None:
+    roots = _roots(tmp_path)
+    roots.package.chmod(0o755)
+
+    policy = _policy(roots)
+
+    assert policy.package_root == str(roots.package)
+    assert policy.mode is SandboxMode.READ_ONLY
+
+
+def test_profile_can_limit_package_reads_to_one_declared_script(tmp_path: Path) -> None:
+    roots = _roots(tmp_path)
+    roots.package.chmod(0o755)
+    scripts = roots.package / "scripts"
+    scripts.mkdir()
+    declared = scripts / "run.py"
+    declared.write_text("def run(): pass\n", encoding="utf-8")
+    sibling = roots.package / "secret.txt"
+    sibling.write_text("secret", encoding="utf-8")
+    policy = build_packaged_skill_policy(
+        interpreter_path=roots.interpreter,
+        runtime_roots=(roots.runtime,),
+        package_root=roots.package,
+        temp_root=roots.temp,
+        system_runtime_roots=(roots.system,),
+        workspace_root=roots.workspace,
+        home_root=roots.home,
+        state_root=roots.state,
+        private_roots=(roots.private,),
+        runtime_closure_digest="a" * 64,
+        system_runtime_digest="b" * 64,
+        resource_limits=PackagedSkillResourceLimitsV1.for_profile(
+            "skill-standard-v1"
+        ),
+        package_read_paths=("scripts/run.py",),
+    )
+    session = roots.temp / "session"
+    session.mkdir()
+
+    profile = compile_packaged_skill_profile(policy, {"TMPDIR": str(session)})
+
+    assert policy.package_read_paths == ("scripts/run.py",)
+    assert f'(allow file-read* (subpath "{roots.package}"))' not in profile
+    assert f'(allow file-read* (literal "{declared}"))' in profile
+    assert str(sibling) not in profile
+    assert f'(allow file-read-metadata (literal "{roots.package}"))' in profile
+    assert f'(allow file-read-metadata (literal "{scripts}"))' in profile
 
 
 def test_policy_rejects_noncanonical_and_symlink_roots(tmp_path: Path) -> None:

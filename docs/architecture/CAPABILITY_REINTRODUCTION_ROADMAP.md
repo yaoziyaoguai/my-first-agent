@@ -50,7 +50,7 @@ flowchart TB
 | Order | Capability | Boundary proven | Entry gate | Exit gate |
 |---|---|---|---|---|
 | 0 | Tool composition foundation | 多来源 registration、per-registration policy 与 outcome 仍汇入一个显式 composition，并锁定 EXECUTING action legality | 当前 Kernel 全量测试通过 | 文件工具行为不变，所有 callable caller 仍唯一；EXECUTING Cancel unchanged、Resume 进入 recovery；不预建 ContextSource/closeable seam |
-| 1 | Skill | operator-trusted declarative capability 可经 governed read tools 渐进披露 | Order 0 完成 | Skill body/resource 可读，脚本不可执行，无 prompt hook |
+| 1 | Skill | operator-trusted declarative capability 可经 governed tools 渐进披露 | Order 0 完成 | Skill body/resource 可读；后续 declared Python entrypoint 复用既有 structured sandbox，无 prompt hook |
 | 2 | MCP | 固定的外部工具描述可映射为 governed EXTERNAL tools，并由首个真实 closeable 验证 ordered close stack | Skill 非回归通过 | stdio fixture 完成 initialize/call/close，漂移与未知结果 fail closed |
 | 3 | Memory | 新的 ContextSource seam 与 sources composition 不夺取 ContextManager 所有权 | MCP 非回归通过 | approved memory 可预算召回，写操作经审批，source 错误在 provider 前失败 |
 | 4 | SubAgent | 同一个 AgentRuntime 实现可执行受限 child run | Memory 非回归通过 | child 无工具/无继承/单次同步终结，父侧 effect ordering 可证明 |
@@ -103,7 +103,9 @@ Coding Agent 应按以下顺序读取，而不是先吞下全部文档：
 - 遵循公开 Agent Skills `SKILL.md` 核心格式，但只承诺本项目验证过的严格 subset。
 - 每个 Skill 映射为 read-only activation tool；完整 body 只在模型调用该工具后进入 ToolResult。
 - `references/` 和 `assets/` 通过单独的 no-follow bounded read tool 读取。
-- `scripts/`、安装、升级、远程 registry 和 experimental `allowed-tools` 延后。
+- 只有 `entrypoints` 声明的 `scripts/<name>.py` 可经 exact approval 与既有 structured sandbox 执行；resource tool 不读取脚本。
+- 不实现安装/升级/卸载 lifecycle 或远程 registry；用户直接管理显式 Skill root 下的目录。
+- experimental `allowed-tools` 不形成 authority。
 
 设计依据：`docs/architecture/capabilities/SKILL_DESIGN.md`。
 执行计划：`docs/plans/2026-07-18-002-feat-governed-skill-source-plan.md`。

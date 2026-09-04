@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from agent.runtime.contracts import (
     ApprovalPolicy,
+    EgressClass,
     ExecutionAuthorityClass,
     KnownNotExecuted,
     OutputPolicy,
@@ -26,7 +27,14 @@ from agent.skill.catalog import (
     SkillCatalog,
     SkillCatalogError,
     SkillDescriptor,
+    SkillEntrypointDescriptor,
     SkillSecurityError,
+)
+from agent.skill.execution import (
+    SkillExecutionConfig,
+    bind_skill_execution,
+    execute_skill_entrypoint,
+    prepare_skill_base,
 )
 
 RESOURCE_TOOL = "skill__read_resource"
@@ -52,8 +60,9 @@ def build_skill_tool_registrations(
     catalog: SkillCatalog,
     *,
     max_tool_result_chars: int,
+    execution: SkillExecutionConfig | None = None,
 ) -> tuple[RegisteredTool, ...]:
-    """从 catalog 产出每个 Skill 一个 activation registration + 一个共享 resource registration。"""
+    """产出 activation/resource；显式配置执行时再加入 declared entrypoint。"""
     if max_tool_result_chars < 1:
         raise ValueError("max_tool_result_chars must be positive")
     registrations: list[RegisteredTool] = []
@@ -66,6 +75,17 @@ def build_skill_tool_registrations(
                 policy=policy,
             )
         )
+        if execution is not None:
+            registrations.extend(
+                _entrypoint_registration(
+                    catalog,
+                    descriptor,
+                    entrypoint,
+                    execution,
+                    max_tool_result_chars,
+                )
+                for entrypoint in descriptor.entrypoints
+            )
     registrations.append(
         RegisteredTool(
             _resource_spec(catalog, max_tool_result_chars),
@@ -74,6 +94,60 @@ def build_skill_tool_registrations(
         )
     )
     return tuple(registrations)
+
+
+def _entrypoint_registration(
+    catalog: SkillCatalog,
+    descriptor: SkillDescriptor,
+    entrypoint: SkillEntrypointDescriptor,
+    execution: SkillExecutionConfig,
+    max_tool_result_chars: int,
+) -> RegisteredTool:
+    base = prepare_skill_base(catalog, descriptor, entrypoint, execution)
+    spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.ISOLATED_SANDBOX,
+        name=f"skill__{descriptor.name}__{entrypoint.id}",
+        version="1",
+        description=f"Run the '{entrypoint.id}' entrypoint of the '{descriptor.name}' skill.",
+        input_schema={
+            "type": "object",
+            "properties": {"arguments": {"type": "object"}},
+            "required": ["arguments"],
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.HIGH,
+        side_effect=SideEffectClass.EXTERNAL,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        safety_policy={
+            "kind": "skill_entrypoint",
+            "skill_name": descriptor.name,
+            "skill_identity": descriptor.identity_digest,
+            "entrypoint_id": entrypoint.id,
+            "entrypoint_digest": entrypoint.digest,
+        },
+        output_limit_chars=max_tool_result_chars,
+        egress=EgressClass.NONE,
+    )
+
+    def prepare_binding(arguments):  # noqa: ANN001, ANN202
+        return bind_skill_execution(
+            base,
+            descriptor,
+            entrypoint,
+            arguments["arguments"],
+        ).binding
+
+    def execute(intent):  # noqa: ANN001, ANN202
+        return execute_skill_entrypoint(
+            catalog=catalog,
+            descriptor=descriptor,
+            entrypoint=entrypoint,
+            config=execution,
+            intent=intent,
+        )
+
+    return RegisteredTool(spec=spec, func=execute, prepare_binding=prepare_binding)
 
 
 def _activation_spec(

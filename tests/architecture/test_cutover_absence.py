@@ -126,6 +126,7 @@ def test_product_tree_contains_only_kernel_packages() -> None:
         "agent/scheduler/contracts.py",
         "agent/skill/__init__.py",
         "agent/skill/catalog.py",
+        "agent/skill/execution.py",
         "agent/skill/tools.py",
         "agent/subagent/__init__.py",
         "agent/subagent/child.py",

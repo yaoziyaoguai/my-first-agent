@@ -8,9 +8,9 @@ type: architecture
 
 ## Purpose
 
-Skill v1 让模型按需读取 operator-trusted 的专业指令，同时保证 Skill 不能直接改 system prompt、执行脚本、调用模型或绕开 ToolRuntime。
+Skill v1 让模型按需读取 operator-trusted 的专业指令，并可通过现有 ToolRuntime 与 native sandbox 执行 Skill 明确声明的 Python entrypoint。Skill 仍不能直接改 system prompt、调用模型或绕开 ToolRuntime。
 
-它实现的是 Agent Skills 文件格式的安全读取子集，不宣称实现安装、分发或脚本沙箱。
+它实现的是 Agent Skills 文件格式的安全子集，不实现 package lifecycle 或 remote registry。安装就是把目录放到显式 Skill root，卸载就是删除该目录；catalog 只在下次启动重新扫描。
 
 ## Position in the Kernel
 
@@ -28,6 +28,9 @@ sequenceDiagram
   M-->>R: call skill__name
   R->>T: governed prepare/invoke
   T-->>R: bounded SKILL.md body
+  M-->>R: call skill__name__entrypoint
+  R->>T: exact approval + EXECUTING checkpoint
+  T-->>R: existing structured sandbox result
 ```
 
 Skill body 只通过普通 `ToolResult` 进入 conversation facts，并由现有 ContextManager 预算。
@@ -45,6 +48,7 @@ v1 严格验证以下 Agent Skills 字段：
 - `compatibility`：可选字符串，最长 500 字符，只用于展示。
 - `metadata`：可选 string-to-string map，只保留 bounded allowlisted display metadata。
 - `allowed-tools`：可以解析并标记 unsupported，但 v1 不把它视为授权或预审批。
+- `entrypoints`：可选列表；每项只允许 `id` 与 `script`，其中 script 必须是一级 `scripts/<name>.py`。
 
 YAML 基于 SafeLoader 的严格子类解析，不执行自定义 tag，并拒绝 duplicate keys、aliases、cycles；raw bytes、node depth/count 与 scalar bytes 都有上限。
 非法 frontmatter、重复名称、symlink、越界路径、文件超限或 catalog 超限都在 startup fail closed。
@@ -78,7 +82,13 @@ catalog 为 body 和每个可见 resource 分别冻结 ancestor/file descriptor 
 - path 必须相对 skill root，且只能进入 `references/` 或 `assets/`。
 - no-follow、regular-file、same-root、bounded UTF-8 read。
 - 不递归跟随文件内引用，也不自动读取 URL。
-- `scripts/` 永远拒绝。
+- resource tool 永远不能读取 `scripts/`；脚本只能经声明生成的 governed entrypoint tool 执行。
+
+### Level 4: declared Python entrypoints
+
+仅声明的 Python 文件会生成 `skill__<skill-name>__<entrypoint-id>`。catalog 在启动时固定脚本目录与文件 identity、size、digest；调用前再通过逐段打开的 no-follow descriptor 重验。未声明 `entrypoints` 的旧 Skill 即使带有 `scripts/`，仍保持只读 activation 行为，不会自动执行或读取脚本。
+
+执行复用唯一 `KernelToolRuntime`、现有 approval/lease、`EXECUTING` checkpoint、`NativeSandboxExecutor` 和 structured readback，不建立第二套 loop 或进程执行器。child 由固定 `first_agent_skill_runner` 加载已认证脚本，只接受 bounded JSON arguments；sandbox 对可写 Skill package 仅放行本次声明脚本的精确路径，不放行整个 package，因此脚本不能在审批后读取新增 sibling、SKILL.md 或 resource。网络、workspace、ambient credential、shell 与子进程均禁止，结果必须满足封闭 observation 协议。
 
 ## Tool registrations
 
@@ -99,6 +109,17 @@ catalog 为 body 和每个可见 resource 分别冻结 ancestor/file descriptor 
 - Arguments: `skill_name`、`path`
 - Output: bounded UTF-8 text
 - Identity: catalog snapshot digest 和 resource policy version
+
+### Declared entrypoint
+
+- Risk: `HIGH`
+- Side effect: `EXTERNAL`
+- Approval: `ALWAYS`
+- Authority: `ISOLATED_SANDBOX`
+- Network: `OFF`
+- Arguments: 一个 bounded JSON object
+- Output: fixed runner 的 bounded structured observation
+- Identity: Skill identity、entrypoint digest、arguments digest、runtime closure、policy 与 resource-limit digest
 
 Skill content 被视为 operator-trusted guidance，但仍不是 authority。
 它可以建议调用工具，不能修改 risk、approval、workspace 或 Runtime limits。
@@ -124,6 +145,7 @@ Skill content 被视为 operator-trusted guidance，但仍不是 authority。
 - catalog 设置最大 Skill 数、单文件字节数、body 字符数、resource 数和 metadata 总字符数。
 - body/resource 中的 prompt injection 最多影响模型建议，不能影响 policy、approval、credential 或 Runtime state。
 - Skill 文件、绝对 root 和私有内容不进入 event payload。
+- Skill package 可以由 owner 直接写入显式 root；entrypoint 代码必须通过 descriptor identity/digest 与 child digest 双重校验，sandbox 本身不给 package 写权限且只允许读取精确入口文件。hermetic runtime 仍必须只读且通过 closure qualification。
 
 ## Failure semantics
 
@@ -133,10 +155,14 @@ Skill content 被视为 operator-trusted guidance，但仍不是 authority。
 - Read error：返回 bounded generic error，不泄露绝对路径。
 - Skill activation result 不参与通用 partial clipping：可容纳时完整纳入下一次 `ContextPack` 且不产生对应 `clipped_id`；若 pinned core 与完整 activation group 无法同时容纳，则显式返回 `context_core_too_large`。只有非 Skill activation 的普通结果继续沿用 ContextManager 的通用裁剪规则。
 - Skill 指令要求 forbidden action：底层工具 policy 决定，Skill 没有特殊权限。
+- Skill body、resource、任一 entrypoint 在 spawn 前漂移，或 runtime/policy 无法重验：返回 known-not-executed，不进入 unknown-outcome recovery。
+- child 已 spawn 后的失败按现有 structured sandbox 结果与 recovery 合同处理，不能伪装为未执行。
 
 ## Configuration
 
-v1 接受一个或多个显式 `--skill-root PATH`。
+v1 接受一个或多个显式 `--skill-root PATH`。这是目录发现，不是安装系统。
+
+要启用声明脚本，还必须提供显式 `--skill-runtime-root PATH`，该目录必须是已资格认证的 immutable `skill-runtime-v1`。未提供时仍可 activation/read resource，但不注册 entrypoint tool；不从当前 venv、PATH、home 或 workspace 猜测 runtime。
 
 没有配置时不创建任何 Skill registration，也不显示“Skill disabled”状态。
 配置只在 startup 读取一次。
@@ -154,7 +180,10 @@ v1 接受一个或多个显式 `--skill-root PATH`。
 | symlink or traversal | 拒绝且不泄露目标 |
 | ancestor/file/resource-only replacement | known-not-executed，不读取替换内容 |
 | changed body after scan | identity mismatch，旧 approval/intention 不可用 |
-| script reference | 不执行，resource tool 明确拒绝 scripts |
+| undeclared scripts | 保留只读 Skill；不注册执行工具，resource tool 仍拒绝 scripts |
+| declared entrypoint without runtime | 只注册 activation/resource，不提供执行工具 |
+| declared entrypoint with runtime | exact approval 后经既有 structured sandbox 执行 |
+| entrypoint/script-directory drift | spawn 前 known-not-executed，零执行 |
 | malicious instructions | 不能绕过 tool approval/policy |
 | no configured roots | 基础 Kernel 的 tool/context 行为完全不变 |
 
@@ -166,17 +195,17 @@ v1 接受一个或多个显式 `--skill-root PATH`。
 - 内容完全相同但 inode/file 或 ancestor 被替换仍是 drift，返回 known-not-executed；只改内容的 digest test 不足以证明 identity。
 - model 初始只见 bounded name/description/display metadata；activation 后的 ToolResult/下一次 `ContextPack` 保留 bounded metadata、provenance 与 resource inventory，不暴露 absolute root。
 - production E2 从 model-visible ToolDefinition 开始，经 ToolRuntime activation/resource result 到下一次 ContextPack；直接 `catalog.read_*` 只算 E1。
-- no configured roots、scripts、prompt hook、default home/workspace scan 与 `allowed-tools` authority 继续保持 absent。
+- no configured roots、prompt hook、default home/workspace scan 与 `allowed-tools` authority 继续保持 absent；脚本只允许声明式 entrypoint。
 
 正向 activation/resource E2、same-content replacement failure E2 与 009 materialized E2M 全部通过前，Skill 仍是 `implemented-candidate`。
 
 ## Deferred
 
-- Skill 安装、升级、卸载和 remote registry。
+- Skill package manager、版本切换、升级编排和 remote registry。
 - Skill dependency resolution、lockfile 或 package version negotiation。
 - 自动触发算法、embedding retrieval 或 persistent active-skill lifecycle。
 - `allowed-tools` enforcement。
-- scripts 执行、依赖安装、sandbox 和网络权限。
+- entrypoint 的依赖安装与网络权限。
 - 不可信 repository Skill 的进程隔离。
 
 ## Sources

@@ -80,6 +80,29 @@ def _require_read_only(path: str, name: str) -> None:
         raise ValueError(f"{name} must not be writable")
 
 
+def _canonical_package_read_paths(package: str, value: object) -> tuple[str, ...]:
+    if not isinstance(value, tuple) or any(not isinstance(item, str) for item in value):
+        raise ValueError("package_read_paths must be a tuple of relative paths")
+    paths: list[str] = []
+    for item in value:
+        parts = item.split("/")
+        if (
+            not item
+            or item.startswith("/")
+            or "\\" in item
+            or any(part in {"", ".", ".."} for part in parts)
+        ):
+            raise ValueError("package_read_paths must contain canonical relative paths")
+        target = Path(package, *parts)
+        canonical = _canonical_existing(target, "package_read_path", directory=False)
+        if not _is_within(canonical, package):
+            raise ValueError("package_read_path must remain under package_root")
+        paths.append(item)
+    if len(set(paths)) != len(paths):
+        raise ValueError("package_read_paths must not contain duplicates")
+    return tuple(sorted(paths))
+
+
 def _is_within(child: str, parent: str) -> bool:
     child_path, parent_path = Path(child), Path(parent)
     return child_path == parent_path or parent_path in child_path.parents
@@ -117,6 +140,11 @@ def validate_packaged_skill_policy(policy: PackagedSkillSandboxPolicyV1) -> None
         raise ValueError("interpreter_path must be executable")
     runtime = _canonical_roots(policy.runtime_roots, "runtime_roots")
     package = _canonical_existing(policy.package_root, "package_root", directory=True)
+    package_read_paths = _canonical_package_read_paths(
+        package, policy.package_read_paths
+    )
+    if package_read_paths != policy.package_read_paths:
+        raise ValueError("package_read_paths must be sorted canonical paths")
     temp = _canonical_existing(policy.temp_root, "temp_root", directory=True)
     system = _canonical_roots(policy.system_runtime_roots, "system_runtime_roots")
     workspace = _canonical_existing(policy.workspace_root, "workspace_root", directory=True)
@@ -137,8 +165,11 @@ def validate_packaged_skill_policy(policy: PackagedSkillSandboxPolicyV1) -> None
         )
     if any(_is_within(root, str(_PRODUCT_ROOT)) for root in runtime):
         raise ValueError("runtime_roots must not be under the product tree")
-    for root in (*runtime, package):
-        _require_read_only(root, "runtime/package root")
+    # runtime 是执行信任基，必须 immutable。Skill package 由用户直接放入显式
+    # skill root，可以是 owner-writable；入口脚本由 catalog 与 child runner 以
+    # inode/size/digest 双重校验，sandbox profile 本身仍不给 package 写权限。
+    for root in runtime:
+        _require_read_only(root, "runtime root")
 
 
 def build_packaged_skill_policy(
@@ -155,12 +186,14 @@ def build_packaged_skill_policy(
     runtime_closure_digest: str,
     system_runtime_digest: str,
     resource_limits: PackagedSkillResourceLimitsV1,
+    package_read_paths: object = (),
 ) -> PackagedSkillSandboxPolicyV1:
     """构造唯一 strict packaged policy；任一 root identity 不确定即拒绝。"""
 
     interpreter = _canonical_existing(interpreter_path, "interpreter_path", directory=False)
     runtime = _canonicalize_roots(runtime_roots, "runtime_roots")
     package = _canonical_existing(package_root, "package_root", directory=True)
+    package_reads = _canonical_package_read_paths(package, package_read_paths)
     temp = _canonical_existing(temp_root, "temp_root", directory=True)
     system = _canonicalize_roots(system_runtime_roots, "system_runtime_roots")
     workspace = _canonical_existing(workspace_root, "workspace_root", directory=True)
@@ -182,6 +215,7 @@ def build_packaged_skill_policy(
         runtime_closure_digest=runtime_closure_digest,
         system_runtime_digest=system_runtime_digest,
         resource_limits=resource_limits,
+        package_read_paths=package_reads,
     )
     validate_packaged_skill_policy(policy)
     return policy
@@ -218,7 +252,23 @@ def compile_packaged_skill_profile(
     ]
     clauses += [
         f'(allow file-read* (subpath "{escape_seatbelt_path(root)}"))'
-        for root in (*policy.runtime_roots, policy.package_root, *policy.system_runtime_roots)
+        for root in (*policy.runtime_roots, *policy.system_runtime_roots)
+    ]
+    readable_directories = {policy.package_root}
+    for relative in policy.package_read_paths:
+        target = Path(policy.package_root, *relative.split("/"))
+        readable_directories.update(
+            str(parent)
+            for parent in target.parents
+            if parent == Path(policy.package_root)
+            or Path(policy.package_root) in parent.parents
+        )
+        clauses.append(
+            f'(allow file-read* (literal "{escape_seatbelt_path(str(target))}"))'
+        )
+    clauses += [
+        f'(allow file-read-metadata (literal "{escape_seatbelt_path(path)}"))'
+        for path in sorted(readable_directories)
     ]
     clauses.append(f'(allow file-read* (subpath "{escape_seatbelt_path(session)}"))')
     clauses.append(

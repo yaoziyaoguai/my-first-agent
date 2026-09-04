@@ -2007,7 +2007,7 @@ git commit -m "feat(sandbox): add hermetic skill runner"
 
 ---
 
-### Task 6: Prove real Runtime plus real Seatbelt E2 and materialized E2M
+### Task 6: Implement the real E2/E2M verifier and qualify only when host prerequisites hold
 
 **Files:**
 - Create: `tests/reference/test_020a_operator_structured_sandbox.py`
@@ -2019,6 +2019,9 @@ git commit -m "feat(sandbox): add hermetic skill runner"
 - Consumes Task 1–5 contracts only.
 - Test composition manually creates one OPERATOR `RegisteredTool`; this is not a production registration builder.
 - Produces no production API.
+- Task 6 has two separate completion states. **6A verifier implemented** means the tracked-only build, non-editable install, installed-origin checks, explicit release-runtime admission/materialization, real Runtime driver, and closed evidence decoder are implemented and their contract tests pass. **6B E2/E2M qualified** additionally requires a real application-release `skill-runtime-v1`, real Seatbelt controls, and every frozen hard limit including `RLIMIT_AS` to succeed in the fresh child. 6A may be recorded and committed while 6B is unavailable, but it is not E2, E2M, promotion, or 020a completion.
+- On the current Darwin baseline, the frozen 1/2 GiB address-space rows fail in fresh Python with `EINVAL`. The real verifier must therefore exit nonzero with `020A_E2M_UNAVAILABLE(reason=resource_limit_as_unavailable)`. The entrypoint script must remain unloaded, the precreated child `result.json` and `artifact.bin` must remain empty, and no installed-driver success evidence or acceptance artifact may be generated.
+- A missing, empty, nonexistent, synthetic-only, or unqualified application-release runtime root cannot be replaced by the current venv, an editable install, ambient `sys.path`, a fake `resource` module, or system Python. A missing/empty/nonexistent locator exits nonzero with `020A_E2M_UNAVAILABLE(reason=release_runtime_root_unavailable)`; an explicit root that fails closure qualification exits nonzero with `020A_E2M_UNAVAILABLE(reason=release_runtime_root_invalid)`. Synthetic release fixtures remain permitted only for verifier contract tests and never count as 6B evidence.
 - The verifier owns the exact selected source/build inventory domain:
 
 ```python
@@ -2029,7 +2032,7 @@ GENERATED_ACCEPTANCE_PATHS = frozenset({
 SOURCE_BUILD_DIGEST_DOMAIN = "020a-source-build-inventory-v1"
 ```
 
-- [ ] **Step 1: Write the end-to-end Red**
+- [ ] **Step 1: Write the Runtime-path and truthful-unavailability Reds**
 
 Create a reference test with one `ToolSpec` named `fixture_structured_noop`, exposure OPERATOR, HIGH/EXTERNAL/ALWAYS/ISOLATED_SANDBOX. Its deterministic `prepare_binding` returns:
 
@@ -2077,19 +2080,21 @@ assert "request_bytes" not in repr(second.state)
 assert "input_bytes" not in repr(second.state)
 ```
 
-Add restart variants after approval pending and after durable EXECUTING. Each variant closes the first Runtime, creates a new Runtime and `LocalCheckpointStore` over the same checkpoint path, calls the new Runtime with `reopened_store.load()`, and never reuses an in-memory state object. Approval-pending restart performs exactly one spawn after the exact grant. EXECUTING restart returns `AWAITING_RECOVERY` with zero automatic spawn.
+The code block above is the positive qualification branch, not an unconditional assertion for every host. Add restart variants after approval pending and after durable EXECUTING. Each variant closes the first Runtime, creates a new Runtime and `LocalCheckpointStore` over the same checkpoint path, calls the new Runtime with `reopened_store.load()`, and never reuses an in-memory state object. Approval-pending restart performs exactly one authorized spawn after the exact grant. EXECUTING restart returns `AWAITING_RECOVERY` with zero automatic spawn.
+
+The real-child case is a qualification test, not an unconditional happy-path assertion. It must use the real `SeatbeltConfiner`, executor and standalone child with no monkeypatched `resource` implementation. If the child can apply the complete frozen row, assert the full completed journey above. If it cannot apply `RLIMIT_AS`, accept only the exact nonzero `resource_limit_as_unavailable` branch and assert all of the following: approval and durable `EXECUTING` preceded the single attempted spawn; no package script was loaded; child stdout, `result.json` and `artifact.bin` are empty; no success evidence was emitted; and no fake/direct-helper result was substituted. No skip, xfail, editable interpreter or conditional weakening is allowed.
 
 Run: `.venv/bin/python -m pytest -q tests/reference/test_020a_operator_structured_sandbox.py -rx`
 
-Expected: fail until every Task 1–5 seam composes.
+Expected: fail until every Task 1–5 seam composes and the unavailable branch is as strict as the positive branch.
 
-- [ ] **Step 2: Make the reference journey Green without production composition**
+- [ ] **Step 2: Make the reference verifier Green without production composition**
 
-Use only existing `AgentRuntime`, `KernelToolRuntime`, `LocalCheckpointStore`, `SeatbeltConfiner`, `NativeSandboxExecutor`, hermetic preparation and the tracked fixture. Do not add a helper to `agent/composition.py`. The fixture receives an explicit qualified release runtime root, materializes a fresh test closure through `materialize_test_runtime`, and must never use the pytest/venv interpreter as the Skill interpreter. Assert the actual confiner backend is `seatbelt`, enforcement is `confined`, profile starts with deny-default, the child executable identity equals the qualified closure interpreter, and the canonical result reports `ambient_canary_present: false` while the trusted host driver has set `FIRST_AGENT_E2M_CANARY`.
+Use only existing `AgentRuntime`, `KernelToolRuntime`, `LocalCheckpointStore`, `SeatbeltConfiner`, `NativeSandboxExecutor`, hermetic preparation and the tracked fixture. Do not add a helper to `agent/composition.py`. `RegisteredTool` remains a manual OPERATOR registration and is still driven only through `AgentRuntime.run_turn`; the test must not call `KernelToolRuntime.invoke` directly. The contract fixture may receive an explicit synthetic qualified root and materialize a fresh test closure through `materialize_test_runtime`, but its outcome is labelled verifier-structure evidence only. It must never use the pytest/current venv interpreter as the Skill interpreter. On a positive real branch, assert the actual confiner backend is `seatbelt`, enforcement is `confined`, profile starts with deny-default, the child executable identity equals the qualified closure interpreter, and the canonical result reports `ambient_canary_present: false` while the trusted host driver has set `FIRST_AGENT_E2M_CANARY`. On the real unavailable branch, preserve the exact pre-load/empty-output facts from Step 1 and expose only the closed reason.
 
 - [ ] **Step 3: Write materialized verifier Red**
 
-`tests/reference/test_020a_materialized_verifier.py` executes `scripts/verify_020a_materialized.py --source-root <repo> --skill-runtime-root <explicit-qualified-release-root>` and requires a machine-readable final line. The test supplies its synthetic qualified release fixture path as the explicit final argument; the verifier has no environment/default lookup. It must reject:
+`tests/reference/test_020a_materialized_verifier.py` executes `scripts/verify_020a_materialized.py --source-root <repo> --skill-runtime-root <explicit-qualified-root>` and requires a machine-readable final line plus the real subprocess exit status. The synthetic qualified root supplied by this test proves argument plumbing, materialization, closure identity and the closed unavailable path only; it is never recorded as application-release or promotion evidence. The verifier has no environment/default lookup. Add an invocation with no `--skill-runtime-root` and require nonzero `020A_E2M_UNAVAILABLE(reason=release_runtime_root_unavailable)` before wheel build, installed driver or evidence creation. It must also reject:
 
 - neutral-cwd import resolving to source tree;
 - editable install;
@@ -2097,7 +2102,10 @@ Use only existing `AgentRuntime`, `KernelToolRuntime`, `LocalCheckpointStore`, `
 - missing `/usr/bin/sandbox-exec` or any skipped real denial probe;
 - a tracked-input manifest containing `.env`, `tui/`, `.ua/` or `graphify-out/`;
 - any wheel/build-context member absent from the exact `git ls-files -z` manifest, including an untracked Python package placed under `agent/` by the Red;
-- fewer than one complete Runtime journey.
+- an installed-driver evidence object with unknown/missing fields, a wrong schema, a recomputed digest mismatch, a wrong checkpoint/receipt join, or a claimed PASS after the child returned unavailable;
+- fewer than one complete Runtime journey for a positive verdict.
+
+The current-host real-path Red requires nonzero `020A_E2M_UNAVAILABLE(reason=resource_limit_as_unavailable)`, no entrypoint load, empty child result/artifact files, no `020a-installed-driver-evidence/v1` success object and no generated acceptance path. The tests for the closed evidence decoder may use canonical synthetic objects to cover positive and malformed decoding, but those objects are decoder fixtures, not E2/E2M evidence.
 
 Run: `.venv/bin/python -m pytest -q tests/reference/test_020a_materialized_verifier.py -rx`
 
@@ -2107,39 +2115,54 @@ Expected: missing verifier.
 
 `scripts/verify_020a_materialized.py` must:
 
-1. enumerate only `git ls-files -z` tracked inputs, reject forbidden tracked prefixes, remove exactly the two verifier-owned `GENERATED_ACCEPTANCE_PATHS`, and descriptor-read the remaining selected regular files into a fresh owner-only build context; preserve tracked working-tree bytes, modes and relative paths, but never open or copy an untracked path;
-2. exact-compare the temporary context inventory to that selected source/build inventory, then build from that context with `PIP_NO_INDEX=1`, `PIP_DISABLE_PIP_VERSION_CHECK=1`, `pip wheel --no-deps --no-build-isolation` and a closed build environment;
-3. create a fresh verifier venv and install the wheel non-editably with `--no-deps --no-index`; this venv is never passed to `prepare_hermetic_skill_process`;
-4. validate the explicit `--skill-runtime-root` with `qualify_hermetic_runtime_closure`, use `materialize_test_runtime` to create a distinct execution closure, and fail if either root overlaps the verifier venv/source/build/product/state roots;
-5. switch to a neutral temp cwd, remove every inherited variable except a fixed OS-safe subprocess allowlist, and set one host-only `FIRST_AGENT_E2M_CANARY` value; the structured executor's closed environment must omit it;
-6. assert `agent`, `first_agent_skill_runner`, and console entrypoint origins are inside the installed prefix, while the Skill interpreter/runner origins are inside the separately materialized closure;
-7. invoke the tracked verifier itself under the installed interpreter in `--installed-driver` mode. That stdlib driver creates the real Runtime journey, writes its durable checkpoint under a verifier-owned evidence directory, and after completion reloads the checkpoint to emit one canonical `020a-installed-driver-evidence/v1` object with exact action/intent/outer/policy/profile/sandbox-receipt/result-checkpoint digests, ordered durable phases, spawn count, backend/enforcement, loopback-control success, denial errno and `ambient_canary_present`;
-8. in the parent verifier, exact-decode that closed evidence object, recompute its canonical digest, exact-join it to the installed origins, qualified closure, real process receipt and persisted Runtime checkpoint, and require approval-before-spawn, EXECUTING-before-spawn, one spawn, result-after-spawn, `errno in {EPERM,EACCES}`, and canary absence. Child/package prose, exit 0, or a standalone boolean cannot satisfy a claim;
-9. emit only digests/counts/backend/profile digest and `020A_E2M_PASS`; never emit absolute home/private paths, environment values, request/input/result bytes or session paths.
+1. parse `--skill-runtime-root` as an explicit semantic prerequisite without consulting environment, cwd, module origin, the verifier venv or ambient import paths. Missing/empty/nonexistent input returns `release_runtime_root_unavailable`. This locator preflight happens before source build or evidence-directory creation;
+2. enumerate only `git ls-files -z` tracked inputs, reject forbidden tracked prefixes, remove exactly the two verifier-owned `GENERATED_ACCEPTANCE_PATHS`, and descriptor-read the remaining selected regular files into a fresh owner-only build context; preserve tracked working-tree bytes, modes and relative paths, but never open or copy an untracked path;
+3. exact-compare the temporary context inventory to that selected source/build inventory, then build from that context with `PIP_NO_INDEX=1`, `PIP_DISABLE_PIP_VERSION_CHECK=1`, `pip wheel --no-deps --no-build-isolation` and a closed build environment;
+4. create a fresh verifier venv and install the wheel non-editably with `--no-deps --no-index`; assert no editable metadata/source link is present. The current developer venv may launch the verifier but is never an import-origin, closure or promotion fact and is never passed to `prepare_hermetic_skill_process`;
+5. validate the explicit root with `qualify_hermetic_runtime_closure`, map closure rejection to `release_runtime_root_invalid`, use `materialize_test_runtime` to create a distinct execution closure, and fail if either root overlaps the verifier venv/source/build/product/workspace/state roots;
+6. switch to a neutral temp cwd, remove every inherited variable except a fixed OS-safe subprocess allowlist, and set one host-only `FIRST_AGENT_E2M_CANARY` value; the structured executor's closed environment must omit it;
+7. assert `agent`, `first_agent_skill_runner`, the tracked installed driver and console entrypoint origins are inside the non-editable installed prefix, while the Skill interpreter/runner origins are inside the separately materialized release closure. An editable origin, source-tree origin, current-venv origin or origin outside those two admitted roots is a closed failure;
+8. invoke the tracked verifier itself under the installed interpreter in `--installed-driver` mode. That stdlib driver creates the manual OPERATOR registration, drives the one real `AgentRuntime.run_turn` path, and writes its durable checkpoint under a verifier-owned directory. It may emit one canonical `020a-installed-driver-evidence/v1` success object only after the real child completed and the checkpoint was reloaded. Normalize `resource_limit_as_unavailable` only when the digest-bound installed runner has the exact Task 5 pre-load failure, the real process exits nonzero, stdout is empty, both fixed output files are zero length and no success object exists; stderr text alone is insufficient. The durable failure checkpoint may remain as the bounded closed diagnostic, but it is not success evidence. The entrypoint remains unloaded and the precreated result/artifact files remain zero length;
+9. in the parent verifier, exact-decode the closed success object with an exact key set and closed value types, recompute its canonical digest, exact-join it to the installed origins, selected source/build inventory, wheel, materialized closure, real process receipt and persisted Runtime checkpoint, and require approval-before-spawn, EXECUTING-before-spawn, one spawn, result-after-spawn, `errno in {EPERM,EACCES}`, real loopback-control success and canary absence. Child/package prose, fake `resource`, a synthetic decoder fixture, exit 0, a standalone boolean or a checkpoint without the joined process facts cannot satisfy a claim;
+10. emit only digests/counts/backend/profile digest and `020A_E2M_PASS` after every real prerequisite and join succeeds. Any unsupported/skip/timeout/truncation or prerequisite failure exits nonzero with one closed `020A_E2M_UNAVAILABLE(reason=<closed-code>)` line. The `resource_limit_as_unavailable` branch additionally proves zero script load, empty child result/artifact files and absent success evidence. Neither failure branch creates or preserves an acceptance artifact.
 
-Any unsupported/skip/timeout/truncation exits nonzero with a closed reason such as `020A_E2M_UNAVAILABLE(reason=seatbelt_missing)`; safe unavailability is not promotion.
-
-- [ ] **Step 5: Run E2/E2M Green**
+- [ ] **Step 5A: Close verifier implementation (6A)**
 
 Run:
 
 ```bash
-.venv/bin/python -m pytest -q tests/reference/test_020a_operator_structured_sandbox.py tests/reference/test_020a_materialized_verifier.py -rx
+.venv/bin/python -m pytest -q tests/sandbox/test_hermetic_runtime.py tests/sandbox/test_packaged_runner.py tests/reference/test_020a_operator_structured_sandbox.py tests/reference/test_020a_materialized_verifier.py -rx
+.venv/bin/ruff check tests/reference/test_020a_operator_structured_sandbox.py tests/reference/test_020a_materialized_verifier.py tests/kernel/fakes.py scripts/verify_020a_materialized.py
+git diff --check
+```
+
+Expected: tests/Ruff/diff exit 0 with zero skips. On a host where the frozen limiter is unavailable, the subprocess tests pass by proving the exact nonzero closed branch and its zero-load/zero-success-artifact facts; they do not convert that branch into E2/E2M PASS. This closes only 6A.
+
+- [ ] **Step 5B: Run the real qualification gate (6B)**
+
+Run the missing-prerequisite probe and then the release-harness command:
+
+```bash
+.venv/bin/python scripts/verify_020a_materialized.py --source-root .
 .venv/bin/python scripts/verify_020a_materialized.py --source-root . --skill-runtime-root "$FIRST_AGENT_020A_RELEASE_RUNTIME_ROOT"
 ```
 
-`FIRST_AGENT_020A_RELEASE_RUNTIME_ROOT` is a task-specific shell value supplied by the release harness and expanded into the explicit CLI argument; the verifier never reads that environment name and never forwards it to the child. Expected: zero skips, exit 0, final `020A_E2M_PASS`.
+The first command must exit nonzero with `020A_E2M_UNAVAILABLE(reason=release_runtime_root_unavailable)` and create no build/evidence/acceptance artifact. `FIRST_AGENT_020A_RELEASE_RUNTIME_ROOT` is a task-specific shell value supplied by the release harness and expanded into the explicit CLI argument; the verifier never reads that environment name and never forwards it to the child.
 
-- [ ] **Step 6: Commit when authorized**
+6B is Green only when the second command has an untruncated exit 0 and final `020A_E2M_PASS`, the decoded facts prove the full real Runtime/Seatbelt/closure/rlimit/evidence join, and the release harness records that the supplied root is its application-release runtime rather than a verifier fixture. The verifier does not mint release authority from a path alone. On the current Darwin baseline the required result is instead nonzero `020A_E2M_UNAVAILABLE(reason=resource_limit_as_unavailable)` with zero script load, zero success-evidence/acceptance-artifact generation and zero-length child result/artifact files. Record `verifier implemented; qualification unavailable`; do not mark Task 6 fully complete, do not create promotion evidence, and do not start Task 7. A fake resource, synthetic closure, editable/current-venv run or decoder fixture cannot satisfy 6B.
+
+- [ ] **Step 6: Commit verifier implementation when authorized**
 
 ```bash
 git add tests/reference/test_020a_operator_structured_sandbox.py tests/reference/test_020a_materialized_verifier.py tests/kernel/fakes.py scripts/verify_020a_materialized.py
-git commit -m "test(020a): prove materialized structured sandbox path"
+git commit -m "test(020a): add materialized structured sandbox verifier"
 ```
 
 ---
 
 ### Task 7: Run three fresh real-Seatbelt journeys and final gates
+
+**Blocking prerequisite:** Do not begin Task 7, create/update either acceptance path, or run an E3 attempt until Task 6B has a fresh real `020A_E2M_PASS` from an explicit application-release runtime root. `verifier implemented; qualification unavailable` is not sufficient. In particular, `resource_limit_as_unavailable`, `release_runtime_root_unavailable`, any other Task 6 unavailable reason, a synthetic closure, fake `resource`, editable/current-venv execution or a source-tree fixture keeps Task 7 and every promotion claim blocked. No later limiter identity, qualification, stage or activation may be minted from those substitutes.
 
 **Files:**
 - Create: `scripts/run_020a_e3.py`
@@ -2148,8 +2171,9 @@ git commit -m "test(020a): prove materialized structured sandbox path"
 - Create: `docs/acceptance/020A_OPERATOR_STRUCTURED_SANDBOX_E3_RECEIPT.json`
 
 **Interfaces:**
-- Consumes the materialized wheel and synthetic fixture only.
+- Consumes the materialized wheel and tracked synthetic no-op package fixture only; its Skill runtime is the explicit application-release closure retained from Task 6B, never a synthetic runtime fixture.
 - Produces one secret-free local OS-bound acceptance receipt; it does not promote 020b/021/PDF capabilities.
+- Consumes the Task 6 selected source/build inventory, non-editable wheel, explicit materialized application-release runtime and installed-driver evidence from the same successful 6B run; it cannot rebuild them through a second verifier authority.
 
 - [ ] **Step 1: Freeze E3 runner Reds**
 
@@ -2194,6 +2218,8 @@ SOURCE_BUILD_DIGEST_DOMAIN = "020a-source-build-inventory-v1"
 
 `scripts/run_020a_e3.py` requires explicit `--skill-runtime-root`, calls the materialized verifier once while retaining its fresh tracked-only build context, non-editable venv, wheel and separately materialized Skill runtime under one runner-owned temp root, then launches three fresh installed-process journeys from that same materialization. It uses no provider, external network or credential configuration; the only socket is the proven host loopback control. Each attempt has a hard 180-second deadline and reloads durable checkpoints to compute claims; it cannot trust printed success text from the child or package. Exact-compare the canonical policy temp parent across attempts, reject equal session child/profile digests, and require equal outer digests. Write receipt atomically only after all claims are true. Any failed attempt removes a prior accepted receipt and exits nonzero with `020A_E3_BLOCKED(reason=<closed-code>)`.
 
+If the retained Task 6 run is unavailable, the E3 runner must stop before attempt 1, remove any prior accepted receipt, and preserve the specific closed cause such as `020A_E3_BLOCKED(reason=resource_limit_as_unavailable)` or `020A_E3_BLOCKED(reason=release_runtime_root_unavailable)`. It must not turn a Task 6 structural fixture or closed diagnostic into an attempt record.
+
 `docs/acceptance/020A_OPERATOR_STRUCTURED_SANDBOX_E3.md` states this is local OS-bound foundation acceptance only. It does not claim package lifecycle, active executable Skills or artifact format value.
 
 - [ ] **Step 3: Run focused, full, materialized and E3 gates**
@@ -2209,7 +2235,7 @@ git diff --check
 .venv/bin/python scripts/run_020a_e3.py --source-root . --skill-runtime-root "$FIRST_AGENT_020A_RELEASE_RUNTIME_ROOT" --attempts 3
 ```
 
-Expected: every command exits 0; real-policy suite has zero skips; receipt has exactly three accepted attempts. Any selected source/build inventory change after E3 invalidates source/wheel digests and requires rerunning affected focused, full, E2M and E3 gates. Re-rendering only the two generated acceptance paths does not change that digest and is covered by the rerun-stability test.
+Promotion-run expected: every command exits 0; real-policy suite has zero skips; the Task 6 command returns a fresh real `020A_E2M_PASS`; and the receipt has exactly three accepted attempts. Any focused/full failure stops before E2M. Any Task 6 unavailable result stops before E3 and leaves Task 7 incomplete with no accepted receipt. On the current Darwin limiter baseline, the materialized command must exit nonzero with `resource_limit_as_unavailable`; `run_020a_e3.py` must not be used to bypass that gate. Any selected source/build inventory change after E3 invalidates source/wheel digests and requires rerunning affected focused, full, E2M and E3 gates. Re-rendering only the two generated acceptance paths does not change that digest and is covered by the rerun-stability test.
 
 - [ ] **Step 4: Run architectural and secrecy scans**
 
@@ -2234,10 +2260,11 @@ git commit -m "test(020a): record real structured sandbox acceptance"
 | --- | --- | --- |
 | E1 contracts | closed enum/action/digest/recursive-freeze/session/rlimit tests | interface is not safe to compose |
 | E1 security | no-follow inode attacks, malformed/truncated/extra output, root overlap, runner preflight | structured or strict boundary is incomplete |
-| E2 Runtime | real `AgentRuntime` + `KernelToolRuntime` + approval + checkpoint + one real Seatbelt child | direct helper/fake cannot replace this evidence |
+| Verifier implementation | tracked-only build, non-editable isolated install, installed origins, explicit release-root admission/materialization, closed evidence decoder and exact unavailable branches | implementation may be complete while qualification remains unavailable |
+| E2 Runtime | real `AgentRuntime` + `KernelToolRuntime` + approval + checkpoint + one real Seatbelt child with every frozen hard limit applied | direct helper/fake/synthetic fixture cannot replace this evidence; limiter unavailable means no E2 |
 | E2 recovery | restart at approval and EXECUTING, exact replay, zero auto-respawn | unknown outcome semantics are broken |
-| E2M | non-editable wheel, neutral cwd, installed origins, real denial probes | source-tree success cannot be promoted |
-| E3 local OS | 3 fresh synthetic attempts, real Seatbelt, durable claim recomputation | no 020a acceptance; 020b/021 remain blocked |
+| E2M | explicit application-release runtime root, tracked-only non-editable wheel, neutral cwd, installed origins, real denial probes and exact evidence/checkpoint/process join | source-tree/current-venv/synthetic success or any unavailable reason cannot be promoted |
+| E3 local OS | 3 fresh attempts over the tracked synthetic no-op package, explicit release runtime, real Seatbelt and durable claim recomputation | no 020a acceptance; 020b/021 remain blocked |
 | Full regression | Ruff, full pytest, diff check | no completion while any existing kernel capability regresses |
 
 ## Explicitly Rejected Designs
@@ -2255,4 +2282,4 @@ git commit -m "test(020a): record real structured sandbox acceptance"
 
 ## v1 Completion Boundary
 
-020a v1 is complete only when operator action governance, structured fixed session, outer digest, strict Seatbelt policy, exact hermetic closure, hard-limited runner, E2, E2M and three-attempt local E3 all pass. It still registers zero production executable Skills. Package lifecycle, active snapshot, manifest decoding, per-entrypoint production registrations, typed source receipts, workspace artifact commit and PDF/Office/image capabilities remain owned by 021/020b/later plans.
+020a v1 is complete only when operator action governance, structured fixed session, outer digest, strict Seatbelt policy, exact hermetic closure, hard-limited runner, real E2, materialized E2M and three-attempt local E3 all pass. A completed Task 6A verifier with Task 6B `resource_limit_as_unavailable` or `release_runtime_root_unavailable` is an honest implementation checkpoint, not 020a completion. While 6B is unavailable, Task 7/E3, promotion and every downstream limiter-bound qualification/stage/activation remain blocked. 020a still registers zero production executable Skills. Package lifecycle, active snapshot, manifest decoding, per-entrypoint production registrations, typed source receipts, workspace artifact commit and PDF/Office/image capabilities remain owned by 021/020b/later plans.

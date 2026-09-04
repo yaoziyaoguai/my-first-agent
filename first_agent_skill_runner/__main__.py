@@ -322,11 +322,15 @@ def _open_session_directory(session: Path) -> int:
         fd = os.open(session, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     except OSError as error:
         raise RunnerProtocolError("session preflight failed") from error
-    info = os.fstat(fd)
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+    # open 成功后、return 前（fstat/身份检查）任何失败都必须关闭当前 fd。
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+            raise RunnerProtocolError("session preflight failed")
+        return fd
+    except BaseException:
         os.close(fd)
-        raise RunnerProtocolError("session preflight failed")
-    return fd
+        raise
 
 
 def _read_exact_input(session: Path, descriptor: dict[str, object]) -> bytes:
@@ -402,12 +406,20 @@ def _read_exact_script(package_root: Path, descriptor: dict[str, object]) -> byt
                 )
             except OSError as error:
                 raise RunnerProtocolError("entrypoint script preflight failed") from error
-            child_info = os.fstat(child_fd)
-            if not stat.S_ISDIR(child_info.st_mode) or child_info.st_uid != os.getuid():
+            # child_fd 打开成功但尚未完成向 current_fd 的所有权转移前，
+            # 任何失败（fstat/身份检查）都必须先关闭 child_fd。
+            try:
+                child_info = os.fstat(child_fd)
+                if not stat.S_ISDIR(child_info.st_mode) or child_info.st_uid != os.getuid():
+                    raise RunnerProtocolError("entrypoint script preflight failed")
+            except BaseException:
                 os.close(child_fd)
-                raise RunnerProtocolError("entrypoint script preflight failed")
-            os.close(current_fd)
+                raise
+            # 先把所有权转移给 current_fd 再关闭旧 fd：即使关闭旧 fd 失败，
+            # child_fd 也已由 current_fd 持有，outer finally 仍会关闭它。
+            previous_fd = current_fd
             current_fd = child_fd
+            os.close(previous_fd)
         try:
             script_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=current_fd)
         except OSError as error:
@@ -470,23 +482,34 @@ def _write_all(fd: int, content: bytes) -> None:
 
 
 def _pin_precreated_outputs(session: Path) -> dict[str, tuple[int, os.stat_result]]:
+    if not hasattr(os, "O_NONBLOCK"):
+        raise RunnerProtocolError("required nonblocking output support is unavailable")
     session_fd = _open_session_directory(session)
     pinned: dict[str, tuple[int, os.stat_result]] = {}
     try:
         for name in ("result.json", "artifact.bin"):
             try:
-                fd = os.open(name, os.O_WRONLY | os.O_NOFOLLOW, dir_fd=session_fd)
+                fd = os.open(
+                    name,
+                    os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                    dir_fd=session_fd,
+                )
             except OSError as error:
                 raise RunnerProtocolError("precreated output inode is unavailable") from error
-            info = os.fstat(fd)
-            if (
-                not stat.S_ISREG(info.st_mode)
-                or info.st_uid != os.getuid()
-                or info.st_nlink != 1
-            ):
+            # fd 加入 pinned（ownership 转移给 outer cleanup）之前，
+            # fstat/身份检查的任何失败都必须先关闭当前 fd。
+            try:
+                info = os.fstat(fd)
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or info.st_uid != os.getuid()
+                    or info.st_nlink != 1
+                ):
+                    raise RunnerProtocolError("precreated output inode is unavailable")
+                pinned[name] = (fd, info)
+            except BaseException:
                 os.close(fd)
-                raise RunnerProtocolError("precreated output inode is unavailable")
-            pinned[name] = (fd, info)
+                raise
     except BaseException:
         for fd, _info in pinned.values():
             os.close(fd)

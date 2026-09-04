@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -554,3 +556,178 @@ def test_runner_rejects_artifact_preflight_failure_before_result_or_package_load
     assert loaded == []
     assert (session_fixture.session_root / "result.json").read_bytes() == b""
     assert victim.read_bytes() == b"do not touch"
+
+
+def test_runner_rejects_unread_fifo_output_without_loading_inputs_or_script(
+    session_fixture: SessionFixture,
+    tmp_path: Path,
+) -> None:
+    result_path = session_fixture.session_root / "result.json"
+    result_path.unlink()
+    os.mkfifo(result_path)
+    marker = tmp_path / "unexpected-load"
+    child = "\n".join(
+        (
+            "from pathlib import Path",
+            "import first_agent_skill_runner.__main__ as runner",
+            f"marker = Path({str(marker)!r})",
+            "runner.apply_hard_limits = lambda _digest: None",
+            "def unexpected_load(*_args):",
+            "    marker.write_bytes(b'loaded')",
+            "    return b''",
+            "runner._read_exact_input = unexpected_load",
+            "runner._read_exact_script = unexpected_load",
+            "try:",
+            f"    runner.run_request(Path({str(session_fixture.request)!r}))",
+            "except runner.RunnerProtocolError as error:",
+            "    print(error)",
+            "    raise SystemExit(0)",
+            "raise SystemExit(1)",
+        )
+    )
+
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-I", "-c", child],
+            cwd=session_fixture.package_root,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("FIFO output preflight blocked")
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.stdout == "precreated output inode is unavailable\n"
+    assert completed.stderr == ""
+    assert not marker.exists()
+    assert stat.S_ISFIFO(result_path.stat().st_mode)
+    assert (session_fixture.session_root / "artifact.bin").read_bytes() == b""
+
+
+def test_runner_closes_script_ancestor_fd_when_first_fstat_fails(
+    session_fixture: SessionFixture,
+    no_limit_syscalls: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(session_fixture.package_root)
+    script_dir_fds: set[int] = set()
+    real_open = os.open
+    real_fstat = os.fstat
+    before = len(os.listdir("/dev/fd"))
+
+    def record_scripts_ancestor_open(
+        path: object, flags: int, *args: object, **kwargs: object
+    ) -> int:
+        fd = real_open(path, flags, *args, **kwargs)
+        if os.fspath(path) == "scripts" and flags & os.O_DIRECTORY:
+            script_dir_fds.add(fd)
+        return fd
+
+    def fail_fstat_once_for_scripts_ancestor(fd: int) -> os.stat_result:
+        if fd in script_dir_fds:
+            script_dir_fds.clear()
+            raise OSError(errno.EIO, "forced script directory fstat failure")
+        return real_fstat(fd)
+
+    monkeypatch.setattr(skill_runner.os, "open", record_scripts_ancestor_open)
+    monkeypatch.setattr(skill_runner.os, "fstat", fail_fstat_once_for_scripts_ancestor)
+    loaded: list[bytes] = []
+
+    with pytest.raises(OSError, match="forced script directory fstat failure"):
+        run_request(
+            session_fixture.request,
+            execute_script=lambda _descriptor, content: (
+                loaded.append(content) or _observation_namespace()
+            ),
+        )
+
+    assert loaded == []
+    assert (session_fixture.session_root / "result.json").read_bytes() == b""
+    assert (session_fixture.session_root / "artifact.bin").read_bytes() == b""
+    assert len(os.listdir("/dev/fd")) == before
+
+
+def test_runner_closes_session_fd_when_first_fstat_fails(
+    session_fixture: SessionFixture,
+    no_limit_syscalls: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_fds: set[int] = set()
+    real_open = os.open
+    real_fstat = os.fstat
+    before = len(os.listdir("/dev/fd"))
+
+    def record_session_open(
+        path: object, flags: int, *args: object, **kwargs: object
+    ) -> int:
+        fd = real_open(path, flags, *args, **kwargs)
+        if os.fspath(path) == str(session_fixture.session_root) and flags & os.O_DIRECTORY:
+            session_fds.add(fd)
+        return fd
+
+    def fail_fstat_once_for_session(fd: int) -> os.stat_result:
+        if fd in session_fds:
+            session_fds.clear()
+            raise OSError(errno.EIO, "forced session fstat failure")
+        return real_fstat(fd)
+
+    monkeypatch.setattr(skill_runner.os, "open", record_session_open)
+    monkeypatch.setattr(skill_runner.os, "fstat", fail_fstat_once_for_session)
+    loaded: list[bytes] = []
+
+    with pytest.raises(OSError, match="forced session fstat failure"):
+        run_request(
+            session_fixture.request,
+            execute_script=lambda _descriptor, content: (
+                loaded.append(content) or _observation_namespace()
+            ),
+        )
+
+    assert loaded == []
+    assert (session_fixture.session_root / "result.json").read_bytes() == b""
+    assert (session_fixture.session_root / "artifact.bin").read_bytes() == b""
+    assert len(os.listdir("/dev/fd")) == before
+
+
+def test_runner_closes_new_output_fd_when_first_fstat_fails(
+    session_fixture: SessionFixture,
+    no_limit_syscalls: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_fds: set[int] = set()
+    real_open = os.open
+    real_fstat = os.fstat
+    before = len(os.listdir("/dev/fd"))
+
+    def record_output_open(
+        path: object, flags: int, *args: object, **kwargs: object
+    ) -> int:
+        fd = real_open(path, flags, *args, **kwargs)
+        if os.fspath(path) == "result.json" and flags & os.O_WRONLY and flags & os.O_NONBLOCK:
+            output_fds.add(fd)
+        return fd
+
+    def fail_fstat_once_for_output(fd: int) -> os.stat_result:
+        if fd in output_fds:
+            output_fds.clear()
+            raise OSError(errno.EIO, "forced output fstat failure")
+        return real_fstat(fd)
+
+    monkeypatch.setattr(skill_runner.os, "open", record_output_open)
+    monkeypatch.setattr(skill_runner.os, "fstat", fail_fstat_once_for_output)
+    loaded: list[bytes] = []
+
+    with pytest.raises(OSError, match="forced output fstat failure"):
+        run_request(
+            session_fixture.request,
+            execute_script=lambda _descriptor, content: (
+                loaded.append(content) or _observation_namespace()
+            ),
+        )
+
+    assert loaded == []
+    assert (session_fixture.session_root / "result.json").read_bytes() == b""
+    assert (session_fixture.session_root / "artifact.bin").read_bytes() == b""
+    assert len(os.listdir("/dev/fd")) == before

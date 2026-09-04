@@ -202,12 +202,20 @@ def _open_relative_parent(root_fd: int, parts: tuple[str, ...], *, create: bool 
                     os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                     dir_fd=current,
                 )
-            info = os.fstat(child)
-            if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+            # child 打开成功但尚未完成向 current 的所有权转移前，
+            # 任何失败（fstat/身份检查）都必须先关闭 child。
+            try:
+                info = os.fstat(child)
+                if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+                    raise OSError("runtime directory is not owned and regular")
+            except BaseException:
                 os.close(child)
-                raise OSError("runtime directory is not owned and regular")
-            os.close(current)
+                raise
+            # 先转移所有权再关闭旧 fd：即使关闭旧 fd 失败，child 也已由
+            # current 持有，outer except 仍会关闭它。
+            previous = current
             current = child
+            os.close(previous)
         return current
     except BaseException:
         os.close(current)
@@ -217,11 +225,15 @@ def _open_relative_parent(root_fd: int, parts: tuple[str, ...], *, create: bool 
 def _read_relative_file(root_fd: int, path: str, *, cap: int) -> tuple[bytes, os.stat_result]:
     parts = tuple(path.split("/"))
     parent_fd = _open_relative_parent(root_fd, parts[:-1])
+    # file fd 打开后立即由外层 finally 持有：即使关闭 parent_fd 报错，
+    # file fd 也会被关闭而不是泄漏；open 失败仍只关闭 parent_fd。
+    fd: int | None = None
     try:
-        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
-    finally:
-        os.close(parent_fd)
-    try:
+        try:
+            fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
+        finally:
+            os.close(parent_fd)
+        assert fd is not None
         before = os.fstat(fd)
         _require_regular_owned_single_link(before, cap=cap)
         raw = _read_fd_bounded(fd, before.st_size, cap=cap)
@@ -230,7 +242,8 @@ def _read_relative_file(root_fd: int, path: str, *, cap: int) -> tuple[bytes, os
             raise OSError("runtime file changed while being read")
         return raw, after
     finally:
-        os.close(fd)
+        if fd is not None:
+            os.close(fd)
 
 
 def _loads_canonical_json(raw: bytes, *, name: str) -> dict[str, object]:
@@ -523,6 +536,100 @@ def _reverify_manifest(
         raise OSError("runtime manifest drifted")
 
 
+def _qualify_pinned_runtime_closure(
+    root_fd: int, runtime_root: Path
+) -> HermeticRuntimeClosureV1:
+    """在已 pin 的 root_fd 上完成全部资格校验；路径值取显式传入的 admitted root。"""
+
+    manifest_entry = os.stat(_MANIFEST_NAME, dir_fd=root_fd, follow_symlinks=False)
+    raw_manifest, manifest_info = _read_pinned_file(
+        root_fd,
+        _MANIFEST_NAME,
+        manifest_entry,
+        cap=_MANIFEST_MAX_BYTES,
+    )
+    manifest = _loads_canonical_json(raw_manifest, name="runtime closure manifest")
+    if set(manifest) != {
+        "schema",
+        "interpreter",
+        "stdlib_roots",
+        "dynload_roots",
+        "runner_roots",
+        "distribution_roots",
+        "inventory_digest",
+    }:
+        raise ValueError("runtime closure manifest keys are not closed")
+    if manifest["schema"] != "first-agent-skill-runtime-closure/v1":
+        raise ValueError("runtime closure manifest schema is not closed")
+    interpreter = _canonical_relative(manifest["interpreter"], "interpreter")
+    roots_by_role = {
+        "stdlib": _manifest_roots(manifest["stdlib_roots"], "stdlib_roots"),
+        "dynload": _manifest_roots(manifest["dynload_roots"], "dynload_roots"),
+        "runner": _manifest_roots(manifest["runner_roots"], "runner_roots"),
+        "distribution": _manifest_roots(
+            manifest["distribution_roots"], "distribution_roots"
+        ),
+    }
+    all_roots = (interpreter, *[item for roots in roots_by_role.values() for item in roots])
+    if len(set(all_roots)) != len(all_roots):
+        raise ValueError("runtime closure roots overlap")
+    for first in all_roots:
+        if any(first != second and _under(first, second) for second in all_roots):
+            raise ValueError("runtime closure roots overlap")
+    _require_declared_roots(root_fd, roots_by_role)
+    inventory, pinned_tree = _scan_runtime_tree(
+        root_fd,
+        interpreter=interpreter,
+        roots_by_role=roots_by_role,
+    )
+    if not any(
+        item.path == interpreter and item.role == "interpreter" for item in inventory
+    ):
+        raise ValueError("runtime interpreter is absent from inventory")
+    if not any(
+        item.role == "runner"
+        and item.path.endswith("/first_agent_skill_runner/__main__.py")
+        and any(
+            item.path.startswith(root_name + "/")
+            for root_name in roots_by_role["runner"]
+        )
+        for item in inventory
+    ):
+        raise ValueError("runtime runner __main__.py is not declared")
+    inventory_digest = canonical_json_digest([asdict(item) for item in inventory])
+    if inventory_digest != _require_hex64(manifest["inventory_digest"], "inventory_digest"):
+        raise ValueError("runtime inventory digest drifted")
+    _reverify_runtime_tree(root_fd, pinned=pinned_tree, inventory=inventory)
+    _reverify_manifest(
+        root_fd,
+        initial_info=manifest_info,
+        expected_digest=hashlib.sha256(raw_manifest).hexdigest(),
+    )
+    readable_roots = tuple(
+        sorted(
+            {
+                str(runtime_root / interpreter.rsplit("/", 1)[0])
+                if "/" in interpreter
+                else str(runtime_root),
+                *(
+                    str(runtime_root / root_name)
+                    for roots in roots_by_role.values()
+                    for root_name in roots
+                ),
+            },
+            key=lambda item: item.encode("utf-8"),
+        )
+    )
+    return HermeticRuntimeClosureV1(
+        runtime_root=str(runtime_root),
+        interpreter_path=str(runtime_root / interpreter),
+        readable_roots=readable_roots,
+        inventory=inventory,
+        inventory_digest=inventory_digest,
+        manifest_digest=hashlib.sha256(raw_manifest).hexdigest(),
+    )
+
+
 def qualify_hermetic_runtime_closure(
     root: Path | str,
 ) -> HermeticRuntimeClosureV1 | KnownNotExecuted:
@@ -535,95 +642,7 @@ def qualify_hermetic_runtime_closure(
         runtime_root = supplied_root.resolve(strict=True)
         root_fd = _open_root(runtime_root)
         try:
-            manifest_entry = os.stat(
-                _MANIFEST_NAME, dir_fd=root_fd, follow_symlinks=False
-            )
-            raw_manifest, manifest_info = _read_pinned_file(
-                root_fd,
-                _MANIFEST_NAME,
-                manifest_entry,
-                cap=_MANIFEST_MAX_BYTES,
-            )
-            manifest = _loads_canonical_json(raw_manifest, name="runtime closure manifest")
-            if set(manifest) != {
-                "schema",
-                "interpreter",
-                "stdlib_roots",
-                "dynload_roots",
-                "runner_roots",
-                "distribution_roots",
-                "inventory_digest",
-            }:
-                raise ValueError("runtime closure manifest keys are not closed")
-            if manifest["schema"] != "first-agent-skill-runtime-closure/v1":
-                raise ValueError("runtime closure manifest schema is not closed")
-            interpreter = _canonical_relative(manifest["interpreter"], "interpreter")
-            roots_by_role = {
-                "stdlib": _manifest_roots(manifest["stdlib_roots"], "stdlib_roots"),
-                "dynload": _manifest_roots(manifest["dynload_roots"], "dynload_roots"),
-                "runner": _manifest_roots(manifest["runner_roots"], "runner_roots"),
-                "distribution": _manifest_roots(
-                    manifest["distribution_roots"], "distribution_roots"
-                ),
-            }
-            all_roots = (interpreter, *[item for roots in roots_by_role.values() for item in roots])
-            if len(set(all_roots)) != len(all_roots):
-                raise ValueError("runtime closure roots overlap")
-            for first in all_roots:
-                if any(first != second and _under(first, second) for second in all_roots):
-                    raise ValueError("runtime closure roots overlap")
-            _require_declared_roots(root_fd, roots_by_role)
-            inventory, pinned_tree = _scan_runtime_tree(
-                root_fd,
-                interpreter=interpreter,
-                roots_by_role=roots_by_role,
-            )
-            if not any(
-                item.path == interpreter and item.role == "interpreter" for item in inventory
-            ):
-                raise ValueError("runtime interpreter is absent from inventory")
-            if not any(
-                item.role == "runner"
-                and item.path.endswith("/first_agent_skill_runner/__main__.py")
-                and any(
-                    item.path.startswith(root_name + "/")
-                    for root_name in roots_by_role["runner"]
-                )
-                for item in inventory
-            ):
-                raise ValueError("runtime runner __main__.py is not declared")
-            inventory_digest = canonical_json_digest([asdict(item) for item in inventory])
-            if inventory_digest != _require_hex64(manifest["inventory_digest"], "inventory_digest"):
-                raise ValueError("runtime inventory digest drifted")
-            _reverify_runtime_tree(root_fd, pinned=pinned_tree, inventory=inventory)
-            _reverify_manifest(
-                root_fd,
-                initial_info=manifest_info,
-                expected_digest=hashlib.sha256(raw_manifest).hexdigest(),
-            )
-            readable_roots = tuple(
-                sorted(
-                    {
-                        str(runtime_root / interpreter.rsplit("/", 1)[0])
-                        if "/" in interpreter
-                        else str(runtime_root),
-                        *(
-                            str(runtime_root / root_name)
-                            for roots in roots_by_role.values()
-                            for root_name in roots
-                        ),
-                    },
-                    key=lambda item: item.encode("utf-8"),
-                )
-            )
-            return HermeticRuntimeClosureV1(
-                runtime_root=str(runtime_root),
-                interpreter_path=str(runtime_root / interpreter),
-                readable_roots=readable_roots,
-                inventory=inventory,
-                inventory_digest=inventory_digest,
-                manifest_digest=hashlib.sha256(raw_manifest).hexdigest(),
-            )
+            return _qualify_pinned_runtime_closure(root_fd, runtime_root)
         finally:
             os.close(root_fd)
     except (OSError, ValueError, TypeError):

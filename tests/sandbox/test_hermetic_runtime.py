@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import agent.sandbox.hermetic_runtime as hermetic_runtime
+import scripts.materialize_020a_test_runtime as materializer
 from agent.runtime.contracts import KnownNotExecuted
 from agent.sandbox.hermetic_runtime import (
     HermeticRuntimeFileV1,
@@ -55,7 +57,9 @@ class RuntimeFixture:
         self.manifest_path.chmod(0o444)
 
 
-def _make_runtime(root: Path) -> RuntimeFixture:
+def _make_runtime(
+    root: Path, *, content_overrides: dict[str, bytes] | None = None
+) -> RuntimeFixture:
     files = {
         "bin/python": ("interpreter", b"#!/bin/sh\nexit 0\n", 0o555),
         "lib/stdlib/os.py": ("stdlib", b"# synthetic stdlib\n", 0o444),
@@ -67,7 +71,12 @@ def _make_runtime(root: Path) -> RuntimeFixture:
         ),
         "lib/distribution/example.py": ("distribution", b"# bundled dependency\n", 0o444),
     }
-    for relative, (_, content, mode) in files.items():
+    overrides = content_overrides or {}
+    effective = {
+        relative: (role, overrides.get(relative, content), mode)
+        for relative, (role, content, mode) in files.items()
+    }
+    for relative, (_, content, mode) in effective.items():
         _write_file(root / relative, content, mode)
 
     inventory = [
@@ -80,7 +89,7 @@ def _make_runtime(root: Path) -> RuntimeFixture:
                 sha256=hashlib.sha256(content).hexdigest(),
             )
         )
-        for relative, (role, content, mode) in sorted(files.items())
+        for relative, (role, content, mode) in sorted(effective.items())
     ]
     manifest = {
         "schema": "first-agent-skill-runtime-closure/v1",
@@ -357,3 +366,555 @@ def test_materializer_requires_non_empty_explicit_protected_roots(
         )
 
     assert not destination.exists()
+
+
+@pytest.mark.parametrize(
+    ("component", "create"),
+    [("existing", False), ("missing", True)],
+)
+def test_open_relative_parent_closes_child_fd_when_first_fstat_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    component: str,
+    create: bool,
+) -> None:
+    root = tmp_path / "root"
+    (root / "existing").mkdir(parents=True)
+    before = len(os.listdir("/dev/fd"))
+    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    child_fds: set[int] = set()
+    real_open = os.open
+    real_fstat = os.fstat
+
+    def record_component_open(
+        path: object, flags: int, *args: object, **kwargs: object
+    ) -> int:
+        fd = real_open(path, flags, *args, **kwargs)
+        if os.fspath(path) == component and flags & os.O_DIRECTORY:
+            child_fds.add(fd)
+        return fd
+
+    def fail_fstat_once_for_child(fd: int) -> os.stat_result:
+        if fd in child_fds:
+            child_fds.clear()
+            raise OSError(errno.EIO, "forced child fstat failure")
+        return real_fstat(fd)
+
+    monkeypatch.setattr(hermetic_runtime.os, "open", record_component_open)
+    monkeypatch.setattr(hermetic_runtime.os, "fstat", fail_fstat_once_for_child)
+
+    try:
+        with pytest.raises(OSError, match="forced child fstat failure"):
+            hermetic_runtime._open_relative_parent(root_fd, (component,), create=create)
+    finally:
+        os.close(root_fd)
+
+    if create:
+        assert (root / component).is_dir()
+    assert len(os.listdir("/dev/fd")) == before
+
+
+def test_close_pinned_continues_after_first_close_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = len(os.listdir("/dev/fd"))
+    directories = []
+    for index in range(3):
+        path = tmp_path / f"pinned-{index}"
+        path.mkdir()
+        directories.append(materializer._pin_absolute_directory(path, label="test"))
+    real_close = os.close
+    fired = False
+
+    def close_first_call_with_error(fd: int) -> None:
+        nonlocal fired
+        if not fired:
+            fired = True
+            real_close(fd)
+            raise OSError(errno.EIO, "forced first close failure")
+        real_close(fd)
+
+    monkeypatch.setattr(materializer.os, "close", close_first_call_with_error)
+
+    with pytest.raises(OSError, match="forced first close failure"):
+        materializer._close_pinned(tuple(directories))
+
+    assert len(os.listdir("/dev/fd")) == before
+
+
+def test_materializer_final_cleanup_closes_every_descriptor_despite_destination_close_failure(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "destination"
+    before = len(os.listdir("/dev/fd"))
+    destination_fds: set[int] = set()
+    real_open = os.open
+    real_close = os.close
+
+    def record_destination_open(
+        path: object, flags: int, *args: object, **kwargs: object
+    ) -> int:
+        fd = real_open(path, flags, *args, **kwargs)
+        if (
+            os.fspath(path) == destination.name
+            and flags & os.O_DIRECTORY
+            and flags & os.O_NOFOLLOW
+        ):
+            destination_fds.add(fd)
+        return fd
+
+    def close_destination_once_with_error(fd: int) -> None:
+        if fd in destination_fds:
+            destination_fds.clear()
+            real_close(fd)
+            raise OSError(errno.EIO, "forced destination close failure")
+        real_close(fd)
+
+    monkeypatch.setattr(materializer.os, "open", record_destination_open)
+    monkeypatch.setattr(materializer.os, "close", close_destination_once_with_error)
+
+    with pytest.raises(OSError, match="forced destination close failure"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=_protected_roots(tmp_path),
+        )
+
+    assert len(os.listdir("/dev/fd")) == before
+
+
+def test_materializer_admission_failure_closes_every_pinned_descriptor_despite_close_error(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "destination"
+    protected_roots = _protected_roots(tmp_path)
+    workspace = protected_roots[1]
+    workspace.rmdir()
+    workspace.symlink_to(runtime_fixture.root, target_is_directory=True)
+    before = len(os.listdir("/dev/fd"))
+    real_pin = materializer._pin_absolute_directory
+    real_close = os.close
+    pinned_fds: set[int] = set()
+    fired = False
+
+    def record_pin_result(path: object, **kwargs: object) -> object:
+        pinned = real_pin(path, **kwargs)
+        pinned_fds.add(pinned.fd)
+        return pinned
+
+    def close_first_pinned_once_with_error(fd: int) -> None:
+        nonlocal fired
+        if fd in pinned_fds and not fired:
+            fired = True
+            real_close(fd)
+            raise OSError(errno.EIO, "forced first close failure")
+        real_close(fd)
+
+    monkeypatch.setattr(materializer, "_pin_absolute_directory", record_pin_result)
+    monkeypatch.setattr(materializer.os, "close", close_first_pinned_once_with_error)
+
+    with pytest.raises(OSError, match="forced first close failure"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=protected_roots,
+        )
+
+    assert not destination.exists()
+    assert len(os.listdir("/dev/fd")) == before
+
+
+def test_pin_absolute_directory_closes_child_when_old_fd_close_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root_fds: set[int] = set()
+    real_open = os.open
+    real_close = os.close
+    before = len(os.listdir("/dev/fd"))
+
+    def record_root_open(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        fd = real_open(path, flags, *args, **kwargs)
+        if os.fspath(path) == "/" and flags & os.O_DIRECTORY:
+            root_fds.add(fd)
+        return fd
+
+    def close_root_once_with_error(fd: int) -> None:
+        if fd in root_fds:
+            root_fds.clear()
+            real_close(fd)
+            raise OSError(errno.EIO, "forced ancestor close failure")
+        real_close(fd)
+
+    monkeypatch.setattr(materializer.os, "open", record_root_open)
+    monkeypatch.setattr(materializer.os, "close", close_root_once_with_error)
+
+    with pytest.raises(OSError, match="forced ancestor close failure"):
+        materializer._pin_absolute_directory(tmp_path, label="test root")
+
+    assert len(os.listdir("/dev/fd")) == before
+
+
+def test_read_relative_file_closes_file_fd_when_parent_close_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "runtime-root"
+    root.mkdir()
+    (root / "leaf.bin").write_bytes(b"payload")
+    before = len(os.listdir("/dev/fd"))
+    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    parent_fds: set[int] = set()
+    real_dup = os.dup
+    real_close = os.close
+
+    def record_root_dup(fd: int) -> int:
+        new_fd = real_dup(fd)
+        if fd == root_fd:
+            parent_fds.add(new_fd)
+        return new_fd
+
+    def close_parent_once_with_error(fd: int) -> None:
+        if fd in parent_fds:
+            parent_fds.clear()
+            real_close(fd)
+            raise OSError(errno.EIO, "forced parent close failure")
+        real_close(fd)
+
+    monkeypatch.setattr(hermetic_runtime.os, "dup", record_root_dup)
+    monkeypatch.setattr(hermetic_runtime.os, "close", close_parent_once_with_error)
+
+    try:
+        with pytest.raises(OSError, match="forced parent close failure"):
+            hermetic_runtime._read_relative_file(
+                root_fd, "leaf.bin", cap=64 * 1024
+            )
+    finally:
+        os.close(root_fd)
+
+    assert len(os.listdir("/dev/fd")) == before
+
+
+def test_materializer_closes_pinned_directories_when_destination_basename_is_invalid(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+) -> None:
+    destination_parent = tmp_path / "destination-parent"
+    destination_parent.mkdir()
+    before = len(os.listdir("/dev/fd"))
+
+    with pytest.raises(ValueError, match="single directory"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination_parent / "..",
+            protected_roots=_protected_roots(tmp_path),
+        )
+
+    assert len(os.listdir("/dev/fd")) == before
+
+
+def test_materializer_leaves_partial_destination_after_source_drift(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "destination"
+    source_file = runtime_fixture.root / "lib/stdlib/os.py"
+    create_destination = materializer._create_destination
+
+    def create_then_drift(parent_fd: int, name: str) -> int:
+        destination_fd = create_destination(parent_fd, name)
+        source_file.chmod(0o600)
+        source_file.write_bytes(b"drifted after qualification")
+        source_file.chmod(0o444)
+        return destination_fd
+
+    monkeypatch.setattr(materializer, "_create_destination", create_then_drift)
+
+    with pytest.raises(ValueError, match="drifted"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=_protected_roots(tmp_path),
+        )
+
+    assert (destination / "bin/python").is_file()
+    assert not (destination / "lib/stdlib/os.py").exists()
+
+
+def test_materializer_rejects_and_preserves_destination_path_replacement(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "destination"
+    replacement = _make_runtime(
+        tmp_path / "replacement",
+        content_overrides={"lib/stdlib/os.py": b"# synthetic stdlib replacement\n"},
+    )
+    assert not isinstance(qualify_hermetic_runtime_closure(runtime_fixture.root), KnownNotExecuted)
+    assert not isinstance(qualify_hermetic_runtime_closure(replacement.root), KnownNotExecuted)
+    real_copy = materializer._copy_exact_file
+
+    def swap_destination_path_after_manifest_copy(*args: object, **kwargs: object) -> None:
+        real_copy(*args, **kwargs)
+        if kwargs.get("path") == hermetic_runtime._MANIFEST_NAME:
+            os.rename(destination, tmp_path / "moved-pinned-destination")
+            os.rename(replacement.root, destination)
+
+    monkeypatch.setattr(
+        materializer, "_copy_exact_file", swap_destination_path_after_manifest_copy
+    )
+
+    with pytest.raises(ValueError, match="joined"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=_protected_roots(tmp_path),
+        )
+
+    assert (destination / "lib/stdlib/os.py").read_bytes() == b"# synthetic stdlib replacement\n"
+    assert (tmp_path / "moved-pinned-destination").is_dir()
+
+
+def test_materializer_leaves_partial_destination_after_final_requalification_failure(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "destination"
+
+    def fail_final_requalification(root_fd: int, runtime_root: Path) -> object:
+        del root_fd, runtime_root
+        raise OSError("forced final requalification failure")
+
+    monkeypatch.setattr(
+        materializer, "_qualify_pinned_runtime_closure", fail_final_requalification
+    )
+
+    with pytest.raises(ValueError, match="did not requalify"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=_protected_roots(tmp_path),
+        )
+
+    assert (destination / "bin/python").is_file()
+    assert (destination / "runtime-closure-v1.json").is_file()
+
+
+def test_materializer_leaves_created_destination_and_closes_fds_when_pin_open_fails(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "destination"
+    real_open = os.open
+    before = len(os.listdir("/dev/fd"))
+
+    def refuse_destination_pin_open(
+        path: object, flags: int, *args: object, **kwargs: object
+    ) -> int:
+        if (
+            os.fspath(path) == destination.name
+            and flags & os.O_DIRECTORY
+            and flags & os.O_NOFOLLOW
+        ):
+            raise OSError(errno.ENOTDIR, "forced destination pin open failure")
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(materializer.os, "open", refuse_destination_pin_open)
+
+    with pytest.raises(OSError, match="forced destination pin open failure"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=_protected_roots(tmp_path),
+        )
+
+    assert destination.is_dir()
+    assert len(os.listdir("/dev/fd")) == before
+
+
+def test_materializer_rejects_destination_replacement_between_capture_and_first_pin(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "destination"
+    external = tmp_path / "external-replacement"
+    external.mkdir()
+    (external / "marker").write_bytes(b"external marker")
+    before = len(os.listdir("/dev/fd"))
+    real_open = os.open
+
+    def swap_destination_then_open(
+        path: object, flags: int, *args: object, **kwargs: object
+    ) -> int:
+        if (
+            os.fspath(path) == destination.name
+            and flags & os.O_DIRECTORY
+            and flags & os.O_NOFOLLOW
+        ):
+            os.rename(destination, tmp_path / "moved-created")
+            os.rename(external, destination)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(materializer.os, "open", swap_destination_then_open)
+
+    with pytest.raises(ValueError, match="replaced before first pin"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=_protected_roots(tmp_path),
+        )
+
+    assert sorted(entry.name for entry in destination.iterdir()) == ["marker"]
+    assert (destination / "marker").read_bytes() == b"external marker"
+    assert (tmp_path / "moved-created").is_dir()
+    assert len(os.listdir("/dev/fd")) == before
+
+
+def test_materializer_rejects_protected_root_moved_onto_destination_before_first_pin(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "destination"
+    protected_roots = _protected_roots(tmp_path)
+    workspace = protected_roots[1]
+    marker = workspace / "marker"
+    marker.write_bytes(b"protected marker")
+    before = len(os.listdir("/dev/fd"))
+    real_mkdir = os.mkdir
+
+    def move_protected_root_after_mkdir(
+        path: object, mode: int, *args: object, **kwargs: object
+    ) -> None:
+        real_mkdir(path, mode, *args, **kwargs)
+        if os.fspath(path) == destination.name:
+            os.rmdir(destination)
+            os.rename(workspace, destination)
+
+    monkeypatch.setattr(materializer.os, "mkdir", move_protected_root_after_mkdir)
+
+    with pytest.raises(ValueError, match="aliases"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=protected_roots,
+        )
+
+    assert sorted(entry.name for entry in destination.iterdir()) == ["marker"]
+    assert (destination / "marker").read_bytes() == b"protected marker"
+    assert len(os.listdir("/dev/fd")) == before
+
+
+def test_materializer_rejects_destination_replacement_after_pinned_qualification(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "destination"
+    replacement = _make_runtime(
+        tmp_path / "replacement",
+        content_overrides={"lib/stdlib/os.py": b"# synthetic stdlib replacement\n"},
+    )
+    real_seam = materializer._qualify_pinned_runtime_closure
+
+    def qualify_then_replace(root_fd: int, runtime_root: Path) -> object:
+        closure = real_seam(root_fd, runtime_root)
+        # 同 UID actor 可自行放宽 0o555 后迁移目录（Darwin rename 需要目录写权限来更新 ..）。
+        os.chmod(destination, 0o700)
+        os.rename(destination, tmp_path / "moved-pinned")
+        os.rename(replacement.root, destination)
+        return closure
+
+    monkeypatch.setattr(
+        materializer, "_qualify_pinned_runtime_closure", qualify_then_replace
+    )
+
+    with pytest.raises(ValueError, match="joined"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=_protected_roots(tmp_path),
+        )
+
+    assert (destination / "lib/stdlib/os.py").read_bytes() == b"# synthetic stdlib replacement\n"
+    assert (tmp_path / "moved-pinned/runtime-closure-v1.json").is_file()
+
+
+def test_materializer_closes_destination_fd_when_first_pin_fstat_fails(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "destination"
+    before = len(os.listdir("/dev/fd"))
+    destination_fd: list[int] = []
+    real_open = os.open
+    real_fstat = os.fstat
+
+    def record_destination_open(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        fd = real_open(path, flags, *args, **kwargs)
+        if (
+            os.fspath(path) == destination.name
+            and flags & os.O_DIRECTORY
+            and flags & os.O_NOFOLLOW
+        ):
+            destination_fd.append(fd)
+        return fd
+
+    def fail_fstat_once_for_destination(fd: int) -> os.stat_result:
+        if destination_fd and fd == destination_fd[0]:
+            destination_fd.clear()
+            raise OSError(errno.EIO, "forced destination fstat failure")
+        return real_fstat(fd)
+
+    monkeypatch.setattr(materializer.os, "open", record_destination_open)
+    monkeypatch.setattr(materializer.os, "fstat", fail_fstat_once_for_destination)
+
+    with pytest.raises(OSError, match="forced destination fstat failure"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=_protected_roots(tmp_path),
+        )
+
+    assert destination.is_dir()
+    assert len(os.listdir("/dev/fd")) == before
+
+
+def test_materializer_preserves_external_replacement_after_copy_failure(
+    runtime_fixture: RuntimeFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "destination"
+    external = tmp_path / "external"
+    external.mkdir()
+    marker = external / "preserve-me"
+    marker.write_bytes(b"external target")
+
+    def replace_destination_then_fail(*_args: object, **_kwargs: object) -> None:
+        os.rmdir(destination)
+        destination.symlink_to(external, target_is_directory=True)
+        raise ValueError("forced copy failure")
+
+    monkeypatch.setattr(materializer, "_copy_exact_file", replace_destination_then_fail)
+
+    with pytest.raises(ValueError, match="forced copy failure"):
+        materialize_test_runtime(
+            runtime_fixture.root,
+            destination,
+            protected_roots=_protected_roots(tmp_path),
+        )
+
+    assert destination.is_symlink()
+    assert marker.read_bytes() == b"external target"

@@ -60,6 +60,15 @@ LIMIT_PROFILE_VALUES: Final = {
         "open_files": 128,
         "core_bytes": 0,
     },
+    # darwin 无法降低 unlimited 的 RLIMIT_AS：平台专用 closed profile 显式
+    # 声明 address_space_bytes=None，runner 绝不触碰未声明的 limit。
+    "skill-standard-darwin-v1": {
+        "cpu_seconds": 60,
+        "address_space_bytes": None,
+        "file_size_bytes": 64 * 1024 * 1024,
+        "open_files": 64,
+        "core_bytes": 0,
+    },
 }
 
 
@@ -67,7 +76,7 @@ class RunnerProtocolError(ValueError):
     """child request/result 违反封闭协议，尚未加载 package code。"""
 
 
-def _limit_digest(profile: str, values: dict[str, int]) -> str:
+def _limit_digest(profile: str, values: dict[str, int | None]) -> str:
     raw = json.dumps(
         {"profile": profile, **values}, separators=(",", ":"), sort_keys=True
     ).encode("utf-8")
@@ -308,6 +317,10 @@ def apply_hard_limits(resource_limits_digest: str) -> None:
         ("core", resource.RLIMIT_CORE, values["core_bytes"]),
     )
     for name, limit, value in limits:
+        if value is None:
+            # 平台 closed profile 显式声明不执行该 limit（如 darwin 的 AS），
+            # 与 digest 内容严格一致；未声明为 None 的 limit 仍全部强制。
+            continue
         try:
             current_soft, current_hard = resource.getrlimit(limit)
             if current_soft > value:
@@ -554,6 +567,7 @@ def _execute_authenticated_request(
     request_path: Path,
     request: dict[str, object],
     *,
+    package_root: Path,
     execute_script: Callable[[dict[str, object], bytes], dict[str, object]],
 ) -> dict[str, object]:
     descriptor, input_descriptors = _validate_request_identity(request)
@@ -567,7 +581,7 @@ def _execute_authenticated_request(
             descriptor["slot"]: _read_exact_input(session, descriptor)
             for descriptor in input_descriptors
         }
-        script_bytes = _read_exact_script(Path.cwd(), descriptor)
+        script_bytes = _read_exact_script(package_root, descriptor)
         namespace = execute_script(descriptor, script_bytes)
         package_run = namespace.get("run")
         if not callable(package_run):
@@ -607,6 +621,7 @@ def _execute_authenticated_request(
 def run_request(
     request_path: Path,
     *,
+    package_root: Path,
     execute_script: Callable[[dict[str, object], bytes], dict[str, object]] = (
         _compile_and_exec_verified_script
     ),
@@ -615,23 +630,50 @@ def run_request(
 
     request = _read_exact_json(request_path, cap=STRUCTURED_REQUEST_MAX_BYTES)
     return _execute_authenticated_request(
-        request_path, request, execute_script=execute_script
+        request_path, request, package_root=package_root, execute_script=execute_script
     )
 
 
-def _parse_cli(argv: list[str]) -> tuple[str, str]:
-    if len(argv) != 4 or argv[0] != "--package" or argv[2] != "--entrypoint":
-        raise RunnerProtocolError("runner accepts exactly --package DIGEST --entrypoint ID")
+def _validate_package_root_arg(raw: str) -> str:
+    # seatbelt deny-default 下 getcwd/stat 祖先目录都会被拒，runner 不能靠
+    # Path.cwd() 定位 package：host 在 prepare 阶段已验证 canonical，这里仅做
+    # 无 IO 的字符串规范检查，真正的完整性由 O_NOFOLLOW 逐层打开 + size/digest
+    # 双重校验保证。
+    if (
+        not raw.startswith("/")
+        or raw == "/"
+        or raw.endswith("/")
+        or "\\" in raw
+        or "\x00" in raw
+        or any(part in ("", ".", "..") for part in raw.split("/")[1:])
+    ):
+        raise RunnerProtocolError("package root is not a canonical absolute path")
+    return raw
+
+
+def _parse_cli(argv: list[str]) -> tuple[str, str, str]:
+    if (
+        len(argv) != 6
+        or argv[0] != "--package"
+        or argv[2] != "--entrypoint"
+        or argv[4] != "--package-root"
+    ):
+        raise RunnerProtocolError(
+            "runner accepts exactly --package DIGEST --entrypoint ID --package-root PATH"
+        )
     package_digest, entrypoint_id = argv[1], argv[3]
+    package_root = _validate_package_root_arg(argv[5])
     _require_hex64(package_digest, "package digest")
     if _ENTRYPOINT_ID.fullmatch(entrypoint_id) is None:
         raise RunnerProtocolError("entrypoint id is invalid")
-    return package_digest, entrypoint_id
+    return package_digest, entrypoint_id, package_root
 
 
 def main(argv: list[str] | None = None) -> int:
     try:
-        package_digest, entrypoint_id = _parse_cli(sys.argv[1:] if argv is None else argv)
+        package_digest, entrypoint_id, package_root = (
+            _parse_cli(sys.argv[1:] if argv is None else argv)
+        )
         tmpdir = os.environ.get("TMPDIR")
         if not tmpdir:
             raise RunnerProtocolError("TMPDIR is required")
@@ -643,6 +685,7 @@ def main(argv: list[str] | None = None) -> int:
         _execute_authenticated_request(
             request_path,
             request,
+            package_root=Path(package_root),
             execute_script=_compile_and_exec_verified_script,
         )
     except RunnerProtocolError as error:

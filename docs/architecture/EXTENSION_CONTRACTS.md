@@ -12,7 +12,7 @@
 
 窄化例外（SubAgent）：只有 `subagent__delegate` 的 executor 可以调用 composition root 注入的 `ChildAgentRunner` port；该 port 的唯一 production implementation 构造同一个 `AgentRuntime` 类并只调用其 `run_turn`，child 的 provider call 仍只发生在 `agent/runtime/loop.py`。executor 本身不导入或调用 `ModelProvider`/loop。不接受该窄化时，进程内 SubAgent 不属于 ToolSource 扩展。
 
-Skill v1 已经按这个 seam 实现：显式 trust root 经 `agent.skill.catalog` 冻结为不可变 descriptor/digest，`agent.skill.tools` 把每个 Skill 暴露为 `skill__<name>` READ_ONLY activation 工具加共享 `skill__read_resource`；配置了显式合格 runtime 时，声明的 Python entrypoint 额外成为 ALWAYS_APPROVAL + ISOLATED_SANDBOX 工具。`agent.composition.build_tool_registrations` 把它们与文件工具拼接进唯一 `KernelToolRuntime`。它没有 prompt hook、包生命周期、远程 registry 或自动激活。
+Skill v1 已经按这个 seam 实现：显式 trust root 经 `agent.skill.catalog` 冻结为不可变 descriptor/digest，`agent.skill.tools` 把每个 Skill 暴露为 `skill__<name>` READ_ONLY activation 工具加共享 `skill__read_resource`；启动时能建立 trusted application runtime（应用自身 interpreter/stdlib/固定 runner）时，声明的 Python entrypoint 额外成为 ALWAYS_APPROVAL + ISOLATED_SANDBOX 工具。`agent.composition.build_tool_registrations` 把它们与文件工具拼接进唯一 `KernelToolRuntime`。它没有 prompt hook、包生命周期、远程 registry 或自动激活。
 
 MCP v1 也按这个 seam 实现：operator-approved 显式 catalog 经 `agent.mcp.catalog` 冻结为具体 `mcp__<server>__<tool>`（HIGH + EXTERNAL + ALWAYS_APPROVAL）；`agent.mcp.bridge` 用 project-owned stdio transport（自持 process group/framing/commit receipt）把消息流注入 SDK public `ClientSession`，独占一条长生命周期 event-loop thread 但 startup 不创建 session；`agent.mcp.safety` 是 owner-only durable CAS 安全 latch，每次调用在 `EXECUTING` 后 arm、process-group 确认退出后 clear。MCP 是首个真实 closeable，把 ordered close stack 加入 composition；teardown 倒序关闭。它不联网 discovery、不缓存 live registry、不自动重试 effectful 调用；call 后未分类结果一律进 human recovery。
 

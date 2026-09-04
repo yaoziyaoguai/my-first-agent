@@ -679,6 +679,191 @@ def prepare_hermetic_skill_process(
                 package_digest,
                 "--entrypoint",
                 entrypoint_id,
+                "--package-root",
+                str(package),
+            ],
+            "cwd": ".",
+            "profile": "standard",
+        },
+        workspace=package,
+        captured_path="",
+    )
+
+
+
+# --------------------------------------------------------------------------- #
+# trusted application runtime：composition root 采信的应用自身 Python 环境
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True, slots=True)
+class TrustedApplicationRuntime:
+    """应用自身 interpreter/stdlib/固定 runner 的最小可执行描述。
+
+    这些路径由 composition root 采信为 trusted application runtime（与产品
+    代码同级的信任基）：sandbox 只负责让 child 只读使用它们；host 侧不扫描、
+    不 hash 整棵 stdlib，也不承诺 runtime 的 host 端完整性清单——应用自身
+    环境的防篡改属于部署边界，不属于 sandbox。这里只保留启动与 spawn 所需
+    的最小检查（canonical、存在、可执行），``identity_digest`` 仅绑定
+    policy 采信的是哪些路径，不声称内容完整性。
+    """
+
+    interpreter_path: str
+    runner_main_path: str
+    readable_roots: tuple[str, ...]
+    identity_digest: str = ""
+
+    def __post_init__(self) -> None:
+        for name in ("interpreter_path", "runner_main_path"):
+            if not isinstance(getattr(self, name), str) or not Path(
+                getattr(self, name)
+            ).is_absolute():
+                raise ValueError(f"trusted application runtime {name} must be absolute")
+        if not isinstance(self.readable_roots, tuple) or not self.readable_roots:
+            raise ValueError("trusted application runtime roots must be a non-empty tuple")
+        roots = _collapse_runtime_roots(self.readable_roots)
+        if tuple(roots) != self.readable_roots:
+            raise ValueError("trusted application runtime roots must be sorted and non-overlapping")
+        digest = canonical_json_digest(
+            {
+                "domain": "first-agent-trusted-application-runtime-v1",
+                "interpreter_path": self.interpreter_path,
+                "runner_main_path": self.runner_main_path,
+                "readable_roots": list(self.readable_roots),
+            }
+        )
+        if self.identity_digest and self.identity_digest != digest:
+            raise ValueError("trusted application runtime identity digest mismatch")
+        object.__setattr__(self, "identity_digest", digest)
+
+
+def _collapse_runtime_roots(roots: tuple[str, ...]) -> tuple[str, ...]:
+    """按字典序折叠相互嵌套的 root，保证两两不交。"""
+
+    collapsed: list[Path] = []
+    for raw in sorted(set(roots)):
+        candidate = Path(raw)
+        if any(
+            candidate == kept or kept in candidate.parents or candidate in kept.parents
+            for kept in collapsed
+        ):
+            continue
+        collapsed.append(candidate)
+    return tuple(str(item) for item in collapsed)
+
+
+def discover_trusted_application_runtime() -> TrustedApplicationRuntime | None:
+    """解析应用自身 runtime 的最小路径集；任何失败返回 ``None``（fail closed）。
+
+    readable roots 只覆盖 child 实际需要读取的目录：interpreter 所在目录、
+    其链接的 ``LIBDIR``（libpython/dyld 依赖）、stdlib 树与固定 runner 包。
+    """
+
+    import sys
+    import sysconfig
+
+    import first_agent_skill_runner
+
+    try:
+        interpreter = Path(sys.executable).resolve(strict=True)
+        info = interpreter.stat()
+        if not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o111:
+            return None
+        # 固定 runner 是静态安装的包：普通 import + __file__ 得到 canonical
+        # 包根，不做任何动态 registry/discovery（importlib.find_spec 等）。
+        runner_file = getattr(first_agent_skill_runner, "__file__", None)
+        if not isinstance(runner_file, str):
+            return None
+        package_root = Path(runner_file).resolve(strict=True).parent
+        runner_main = (package_root / "__main__.py").resolve(strict=True)
+        if not stat.S_ISREG(runner_main.stat().st_mode):
+            return None
+        libdir = sysconfig.get_config_var("LIBDIR")
+        stdlib = sysconfig.get_path("stdlib")
+        roots = _collapse_runtime_roots(
+            (
+                str(interpreter.parent),
+                str(Path(libdir).resolve(strict=True)),
+                str(Path(stdlib).resolve(strict=True)),
+                str(package_root),
+            )
+        )
+    except (OSError, TypeError, ValueError):
+        return None
+    return TrustedApplicationRuntime(
+        interpreter_path=str(interpreter),
+        runner_main_path=str(runner_main),
+        readable_roots=roots,
+    )
+
+
+def prepare_trusted_skill_process(
+    runtime: TrustedApplicationRuntime,
+    *,
+    package_root: Path,
+    package_digest: str,
+    entrypoint_id: str,
+) -> PreparedProcessV1 | KnownNotExecuted:
+    """准备固定隔离 child command；采信文件漂移时返回 known-not-executed。
+
+    child 以应用自身解释器 ``-I -S`` 直执行固定 runner ``__main__.py``：不经
+    site 机制，不加载任何 site-packages/editable finder，runner 只依赖 stdlib。
+    spawn 前仅重验被采信的两个文件仍以相同 canonical 路径存在且可执行/可读
+    （seatbelt 下 getcwd 被拒，package 由显式 ``--package-root`` 传入）。
+    package 与 readable roots 重叠时拒绝，避免 Skill 包与 runtime 互读。
+    """
+
+    _require_hex64(package_digest, "package_digest")
+    if _ENTRYPOINT_ID.fullmatch(entrypoint_id) is None:
+        raise ValueError("entrypoint_id has an invalid shape")
+    supplied_package = Path(package_root).absolute()
+    if not supplied_package.is_dir() or supplied_package.is_symlink():
+        raise ValueError("package_root must be a canonical directory")
+    package = supplied_package.resolve(strict=True)
+    for root in runtime.readable_roots:
+        candidate = Path(root)
+        if (
+            package == candidate
+            or package.is_relative_to(candidate)
+            or candidate.is_relative_to(package)
+        ):
+            raise ValueError("package_root overlaps the trusted application runtime roots")
+    interpreter = Path(runtime.interpreter_path)
+    runner_main = Path(runtime.runner_main_path)
+    try:
+        interpreter_info = interpreter.stat()
+        runner_info = runner_main.stat()
+        interpreter_stable = interpreter.resolve(strict=True) == interpreter
+        runner_stable = runner_main.resolve(strict=True) == runner_main
+    except OSError:
+        return KnownNotExecuted(
+            code="application_runtime_drift",
+            message="the trusted application runtime is no longer readable",
+        )
+    if (
+        not interpreter_stable
+        or not runner_stable
+        or not stat.S_ISREG(interpreter_info.st_mode)
+        or not interpreter_info.st_mode & 0o111
+        or not stat.S_ISREG(runner_info.st_mode)
+    ):
+        return KnownNotExecuted(
+            code="application_runtime_drift",
+            message="the trusted application runtime drifted",
+        )
+    return prepare_process(
+        {
+            "executable": runtime.interpreter_path,
+            "argv": [
+                "-I",
+                "-S",
+                runtime.runner_main_path,
+                "--package",
+                package_digest,
+                "--entrypoint",
+                entrypoint_id,
+                "--package-root",
+                str(package),
             ],
             "cwd": ".",
             "profile": "standard",

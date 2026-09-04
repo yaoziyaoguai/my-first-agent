@@ -16,8 +16,6 @@ from agent.sandbox.contracts import (
 )
 from agent.sandbox.policy import escape_seatbelt_path
 
-_PRODUCT_ROOT = Path(__file__).resolve().parents[2]
-
 
 def _canonical_existing(path: object, name: str, *, directory: bool) -> str:
     try:
@@ -73,11 +71,6 @@ def _require_no_overlap(roots: tuple[str, ...]) -> None:
             right_path = Path(right)
             if left == right or left_path in right_path.parents or right_path in left_path.parents:
                 raise ValueError(f"roots must not overlap: {left} vs {right}")
-
-
-def _require_read_only(path: str, name: str) -> None:
-    if os.stat(path, follow_symlinks=False).st_mode & 0o222:
-        raise ValueError(f"{name} must not be writable")
 
 
 def _canonical_package_read_paths(package: str, value: object) -> tuple[str, ...]:
@@ -163,13 +156,11 @@ def validate_packaged_skill_policy(policy: PackagedSkillSandboxPolicyV1) -> None
         raise ValueError(
             "interpreter_path must be under a qualified runtime/system root"
         )
-    if any(_is_within(root, str(_PRODUCT_ROOT)) for root in runtime):
-        raise ValueError("runtime_roots must not be under the product tree")
-    # runtime 是执行信任基，必须 immutable。Skill package 由用户直接放入显式
-    # skill root，可以是 owner-writable；入口脚本由 catalog 与 child runner 以
-    # inode/size/digest 双重校验，sandbox profile 本身仍不给 package 写权限。
-    for root in runtime:
-        _require_read_only(root, "runtime root")
+    # runtime 是调用方（composition root）提供的 trusted application runtime：
+    # 应用自身 interpreter/stdlib/固定 runner 所在目录，天然 owner-writable 且
+    # 可能位于 product tree。sandbox 不对它做 host 侧完整性或漂移保证（那是
+    # 部署边界的职责）；这里只约束 child 侧：strict profile 拒绝对 runtime 的
+    # 一切写入，读取范围精确到上述 root。
 
 
 def build_packaged_skill_policy(
@@ -266,8 +257,11 @@ def compile_packaged_skill_profile(
         clauses.append(
             f'(allow file-read* (literal "{escape_seatbelt_path(str(target))}"))'
         )
+    # 目录字面量需要 file-read-data：runner 以 O_NOFOLLOW fd 链从 package
+    # root 逐层打开目录做 TOCTOU 安全遍历，仅 metadata 无法 opendir。这同时
+    # 允许 child 列出这些目录的文件名（内容仍仅限精确 package_read_paths）。
     clauses += [
-        f'(allow file-read-metadata (literal "{escape_seatbelt_path(path)}"))'
+        f'(allow file-read* (literal "{escape_seatbelt_path(path)}"))'
         for path in sorted(readable_directories)
     ]
     clauses.append(f'(allow file-read* (subpath "{escape_seatbelt_path(session)}"))')

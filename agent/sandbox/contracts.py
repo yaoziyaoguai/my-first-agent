@@ -59,6 +59,18 @@ PACKAGED_LIMIT_PROFILE_VALUES = MappingProxyType(
                 "core_bytes": 0,
             }
         ),
+        # darwin 内核无法降低 unlimited 的 RLIMIT_AS（setrlimit 一律 EINVAL）。
+        # 平台专用 closed profile 显式声明为 None：digest 声明的与 child 实际
+        # 执行的限额严格一致，绝不在同一 digest 下声称不存在的 AS 上限。
+        "skill-standard-darwin-v1": MappingProxyType(
+            {
+                "cpu_seconds": 60,
+                "address_space_bytes": None,
+                "file_size_bytes": 64 * 1024 * 1024,
+                "open_files": 64,
+                "core_bytes": 0,
+            }
+        ),
     }
 )
 
@@ -84,7 +96,7 @@ class PackagedSkillResourceLimitsV1:
 
     profile: str
     cpu_seconds: int
-    address_space_bytes: int
+    address_space_bytes: int | None
     file_size_bytes: int
     open_files: int
     core_bytes: int
@@ -109,12 +121,18 @@ class PackagedSkillResourceLimitsV1:
         }
         expected = PACKAGED_LIMIT_PROFILE_VALUES.get(self.profile)
         if expected is None or any(
-            not isinstance(getattr(self, name), int)
-            or isinstance(getattr(self, name), bool)
-            or getattr(self, name) != value
-            for name, value in expected.items()
+            getattr(self, name) != value for name, value in expected.items()
         ):
             raise ValueError("packaged resource limits do not match their closed profile")
+        if any(
+            (
+                isinstance(getattr(self, name), bool)
+                or not isinstance(getattr(self, name), int)
+            )
+            and not (name == "address_space_bytes" and getattr(self, name) is None)
+            for name in expected
+        ):
+            raise ValueError("packaged resource limit values must be ints")
         digest = canonical_json_digest(values)
         if self.limits_digest and self.limits_digest != digest:
             raise ValueError("packaged resource limit digest mismatch")

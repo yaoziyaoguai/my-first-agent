@@ -274,11 +274,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicit trusted Skill root directory (repeatable)",
     )
     advanced.add_argument(
-        "--skill-runtime-root",
-        type=Path,
-        help="explicit verified Python runtime for declared Skill entrypoints",
-    )
-    advanced.add_argument(
         "--browser",
         action="store_true",
         help="enable the governed dedicated Chromium (018 candidate)",
@@ -979,15 +974,16 @@ def main(
             skill_roots = tuple(
                 root.resolve(strict=True) for root in (args.skill_root or ())
             )
-            skill_execution = None
-            if args.skill_runtime_root is not None:
-                if not skill_roots:
-                    raise ValueError("--skill-runtime-root requires --skill-root")
-                skill_execution = build_skill_execution_config(
+            # runtime 由应用内部复用并验证自身 interpreter/stdlib/runner；
+            # 无法验证时不注册 entrypoint 工具，仅保留 activation/resource。
+            skill_execution = (
+                build_skill_execution_config(
                     workspace=workspace,
                     state_root=session.state_root,
-                    runtime_root=args.skill_runtime_root,
                 )
+                if skill_roots
+                else None
+            )
             renderer = TerminalRenderer(write_fn)
             context_limits = ContextLimits(max_input_tokens=100_000, output_reserve=8_000)
             registrations = list(

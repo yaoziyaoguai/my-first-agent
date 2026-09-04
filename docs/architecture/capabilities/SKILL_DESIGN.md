@@ -119,7 +119,7 @@ catalog 为 body 和每个可见 resource 分别冻结 ancestor/file descriptor 
 - Network: `OFF`
 - Arguments: 一个 bounded JSON object
 - Output: fixed runner 的 bounded structured observation
-- Identity: Skill identity、entrypoint digest、arguments digest、runtime closure、policy 与 resource-limit digest
+- Identity: Skill identity、entrypoint digest、arguments digest、runtime identity、policy 与 resource-limit digest。resource-limit digest 与平台 closed profile 严格一致：darwin 无法降低 unlimited 的 `RLIMIT_AS`，因此 darwin profile 显式声明无 address-space 上限，其余限额（cpu/fsize/nofile/core）全部强制；同一 digest 绝不声称未执行的 limit。
 
 Skill content 被视为 operator-trusted guidance，但仍不是 authority。
 它可以建议调用工具，不能修改 risk、approval、workspace 或 Runtime limits。
@@ -155,14 +155,14 @@ Skill content 被视为 operator-trusted guidance，但仍不是 authority。
 - Read error：返回 bounded generic error，不泄露绝对路径。
 - Skill activation result 不参与通用 partial clipping：可容纳时完整纳入下一次 `ContextPack` 且不产生对应 `clipped_id`；若 pinned core 与完整 activation group 无法同时容纳，则显式返回 `context_core_too_large`。只有非 Skill activation 的普通结果继续沿用 ContextManager 的通用裁剪规则。
 - Skill 指令要求 forbidden action：底层工具 policy 决定，Skill 没有特殊权限。
-- Skill body、resource、任一 entrypoint 在 spawn 前漂移，或 runtime/policy 无法重验：返回 known-not-executed，不进入 unknown-outcome recovery。
+- Skill body、resource、任一 entrypoint 在 spawn 前漂移，或被采信的 interpreter/runner 文件不再可验证：返回 known-not-executed，不进入 unknown-outcome recovery。
 - child 已 spawn 后的失败按现有 structured sandbox 结果与 recovery 合同处理，不能伪装为未执行。
 
 ## Configuration
 
 v1 接受一个或多个显式 `--skill-root PATH`。这是目录发现，不是安装系统。
 
-要启用声明脚本，还必须提供显式 `--skill-runtime-root PATH`，该目录必须是已资格认证的 immutable `skill-runtime-v1`。未提供时仍可 activation/read resource，但不注册 entrypoint tool；不从当前 venv、PATH、home 或 workspace 猜测 runtime。
+要启用声明脚本，应用在启动时内部复用 composition root 采信的 trusted application runtime：应用自身的 resolved interpreter、stdlib 目录与已安装的固定 `first_agent_skill_runner`（`TrustedApplicationRuntime`）。用户不需要（也不能）提供 runtime 目录；不从 PATH、home 或 workspace 猜测。不扫描、不 hash 整棵 stdlib，也不对 runtime 做 host 侧完整性清单——应用自身环境的防篡改属于部署边界，sandbox 只负责 child 侧只读。启动与每次 spawn 前仅做最小检查（canonical、存在、可执行/可读），无法建立（非 darwin、Seatbelt 不可用或路径无法解析）时仍可 activation/read resource，但不注册 entrypoint tool，无 fallback。
 
 没有配置时不创建任何 Skill registration，也不显示“Skill disabled”状态。
 配置只在 startup 读取一次。

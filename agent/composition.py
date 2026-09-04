@@ -185,28 +185,35 @@ def build_skill_execution_config(
     *,
     workspace: Path,
     state_root: Path,
-    runtime_root: Path,
-) -> SkillExecutionConfig:
-    """用显式 hermetic runtime 接入既有 sandbox；不复制或管理 Skill。"""
+) -> SkillExecutionConfig | None:
+    """复用应用自身 trusted application runtime 接入既有 sandbox。
+
+    runtime 是 composition root 采信的应用自身 interpreter/stdlib/固定
+    runner，不扫描、不 hash、不做安装管理。无法建立（非 Darwin、native
+    sandbox 不可用或 runtime 路径无法解析）时返回 ``None``：Skill 仍以
+    activation/resource 形式 composition，声明 entrypoint 不注册，不提供
+    fallback 执行路径。
+    """
 
     import hashlib
     import sys
     import tempfile as _tempfile
 
-    from agent.runtime.contracts import KnownNotExecuted
     from agent.sandbox.executor import NativeSandboxExecutor
-    from agent.sandbox.hermetic_runtime import qualify_hermetic_runtime_closure
+    from agent.sandbox.hermetic_runtime import (
+        discover_trusted_application_runtime,
+    )
     from agent.sandbox.seatbelt import SeatbeltConfiner
 
+    if sys.platform != "darwin":
+        return None
     confiner = SeatbeltConfiner()
     report = confiner.qualify()
     if not report.available:
-        raise ValueError("executable Skills require the native sandbox")
-    closure = qualify_hermetic_runtime_closure(runtime_root)
-    if isinstance(closure, KnownNotExecuted):
-        raise ValueError("the configured Skill runtime could not be verified")
-    if sys.platform != "darwin":
-        raise ValueError("executable Skills are unsupported on this platform")
+        return None
+    runtime = discover_trusted_application_runtime()
+    if runtime is None:
+        return None
     system_roots = tuple(
         sorted(
             (Path("/System/Library").resolve(strict=True), Path("/usr/lib").resolve(strict=True)),
@@ -229,7 +236,7 @@ def build_skill_execution_config(
     temp_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     home_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     return SkillExecutionConfig(
-        closure=closure,
+        runtime=runtime,
         workspace_root=workspace,
         temp_root=temp_root,
         state_root=state_root,

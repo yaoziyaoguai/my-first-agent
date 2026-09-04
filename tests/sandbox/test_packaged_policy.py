@@ -119,7 +119,7 @@ def test_packaged_profile_is_deny_default_and_exact_allowlist(tmp_path: Path) ->
     assert f'(allow process-exec (literal "{policy.interpreter_path}"))' in profile
     assert "(allow process-exec*)" not in profile
     assert f'(allow file-read* (subpath "{policy.package_root}"))' not in profile
-    assert f'(allow file-read-metadata (literal "{policy.package_root}"))' in profile
+    assert f'(allow file-read* (literal "{policy.package_root}"))' in profile
 
 
 def test_policy_rejects_overlapping_runtime_package_or_denied_roots(
@@ -181,24 +181,18 @@ def test_policy_identity_is_closed_to_read_only_network_off(tmp_path: Path) -> N
     assert policy.policy_digest == canonical_json_digest(policy.identity_values())
 
 
-@pytest.mark.parametrize(
-    ("mutate", "message"),
-    [
-        (lambda roots: roots.runtime.chmod(0o755), "writable"),
-        (lambda roots: roots.runtime.mkdir(exist_ok=True), "product tree"),
-    ],
-)
-def test_policy_rejects_writable_or_product_tree_roots(
-    tmp_path: Path, mutate, message: str
-) -> None:
+def test_policy_accepts_application_runtime_roots(tmp_path: Path) -> None:
+    """trusted application runtime 复用应用自身 interpreter/stdlib/runner
+    所在目录；host 侧可写性/漂移不属于 sandbox 职责（部署边界），
+    child 侧仍由 profile 拒绝一切写入。"""
     roots = _roots(tmp_path)
-    if message == "product tree":
-        roots.runtime = Path(__file__).resolve().parents[2] / "agent"
-    else:
-        mutate(roots)
+    roots.runtime.chmod(0o755)
 
-    with pytest.raises(ValueError, match=message):
-        _policy(roots)
+    policy = _policy(roots)
+
+    assert policy.runtime_roots == (str(roots.runtime),)
+    assert policy.mode is SandboxMode.READ_ONLY
+    assert policy.network is SandboxNetworkMode.OFF
 
 
 def test_policy_allows_writable_package_root(tmp_path: Path) -> None:
@@ -246,8 +240,8 @@ def test_profile_can_limit_package_reads_to_one_declared_script(tmp_path: Path) 
     assert f'(allow file-read* (subpath "{roots.package}"))' not in profile
     assert f'(allow file-read* (literal "{declared}"))' in profile
     assert str(sibling) not in profile
-    assert f'(allow file-read-metadata (literal "{roots.package}"))' in profile
-    assert f'(allow file-read-metadata (literal "{scripts}"))' in profile
+    assert f'(allow file-read* (literal "{roots.package}"))' in profile
+    assert f'(allow file-read* (literal "{scripts}"))' in profile
 
 
 def test_policy_rejects_noncanonical_and_symlink_roots(tmp_path: Path) -> None:
@@ -363,7 +357,6 @@ def test_direct_policy_validator_rejects_unsorted_runtime_roots(tmp_path: Path) 
         ("workspace_runtime", "overlap"),
         ("noncanonical_runtime", "canonical"),
         ("symlink_runtime", "canonical"),
-        ("writable_runtime", "writable"),
         ("interpreter_outside_roots", "qualified runtime/system root"),
     ],
 )
@@ -384,8 +377,6 @@ def test_directly_constructed_forged_policy_cannot_emit_profile(
         alias = tmp_path / "runtime-alias"
         alias.symlink_to(roots.runtime)
         overrides["runtime_roots"] = (str(alias),)
-    elif forgery == "writable_runtime":
-        roots.runtime.chmod(0o755)
     else:
         outside = tmp_path / "outside-python"
         outside.write_text("fixture", encoding="utf-8")

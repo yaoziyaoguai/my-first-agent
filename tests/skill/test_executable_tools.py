@@ -42,9 +42,16 @@ from agent.sandbox.contracts import (
     structured_invocation_digest,
 )
 from agent.sandbox.executor import NativeSandboxExecutor
-from agent.sandbox.hermetic_runtime import HermeticRuntimeClosureV1
+from agent.sandbox.hermetic_runtime import (
+    TrustedApplicationRuntime,
+    discover_trusted_application_runtime,
+)
 from agent.skill.catalog import build_skill_catalog
-from agent.skill.execution import SkillExecutionConfig
+from agent.skill.execution import (
+    SkillExecutionConfig,
+    bind_skill_execution,
+    prepare_skill_base,
+)
 from agent.skill.tools import build_skill_tool_registrations
 from tests.kernel.fakes import (
     RUNTIME_GOAL_ID,
@@ -54,7 +61,6 @@ from tests.kernel.fakes import (
     conversation_with_active_goal,
     goal_noop_response,
 )
-from tests.sandbox.test_hermetic_runtime import _make_runtime
 
 NOW = "2026-09-04T08:00:00+00:00"
 
@@ -206,29 +212,36 @@ def _approved_intent(runtime: KernelToolRuntime, call: ToolCall, lease_id: str):
     )
 
 
+def _trusted_runtime(tmp_path: Path) -> TrustedApplicationRuntime:
+    """synthetic trusted application runtime：与各 root 两两不相交的最小布局。"""
+
+    bin_dir = tmp_path / "app-bin"
+    lib_dir = tmp_path / "app-lib"
+    package = tmp_path / "app-runner" / "first_agent_skill_runner"
+    bin_dir.mkdir()
+    lib_dir.mkdir()
+    package.mkdir(parents=True)
+    interpreter = bin_dir / "python3"
+    interpreter.write_bytes(b"#!/bin/sh\nexit 0\n")
+    interpreter.chmod(0o755)
+    runner_main = package / "__main__.py"
+    runner_main.write_text("# fixed standalone runner\n", encoding="utf-8")
+    return TrustedApplicationRuntime(
+        interpreter_path=str(interpreter),
+        runner_main_path=str(runner_main),
+        readable_roots=(str(bin_dir), str(lib_dir), str(package)),
+    )
+
+
 def _execution_config(
-    tmp_path: Path, skill: Path, *, executor=None
+    tmp_path: Path, *, executor=None
 ) -> SkillExecutionConfig:
     roots = {}
     for name in ("workspace", "temp", "state", "home", "system"):
         roots[name] = tmp_path / name
         roots[name].mkdir()
-    runtime = tmp_path / "runtime"
-    runtime.mkdir()
-    interpreter = runtime / "python"
-    interpreter.write_bytes(b"synthetic interpreter")
-    interpreter.chmod(0o555)
-    runtime.chmod(0o555)
-    closure = HermeticRuntimeClosureV1(
-        runtime_root=str(runtime),
-        interpreter_path=str(interpreter),
-        readable_roots=(str(runtime),),
-        inventory=(),
-        inventory_digest=canonical_json_digest([]),
-        manifest_digest="b" * 64,
-    )
     return SkillExecutionConfig(
-        closure=closure,
+        runtime=_trusted_runtime(tmp_path),
         workspace_root=roots["workspace"],
         temp_root=roots["temp"],
         state_root=roots["state"],
@@ -245,7 +258,7 @@ def _execution_config(
 
 def test_declared_entrypoint_registers_one_closed_governed_tool(tmp_path: Path) -> None:
     catalog, skill = _catalog_with_entrypoint(tmp_path)
-    config = _execution_config(tmp_path, skill)
+    config = _execution_config(tmp_path)
 
     registrations = build_skill_tool_registrations(
         catalog,
@@ -276,7 +289,7 @@ def test_composition_registers_declared_entrypoint_when_execution_is_configured(
     tmp_path: Path,
 ) -> None:
     _catalog, skill = _catalog_with_entrypoint(tmp_path)
-    config = _execution_config(tmp_path, skill)
+    config = _execution_config(tmp_path)
 
     registrations = build_tool_registrations(
         workspace=config.workspace_root,
@@ -291,17 +304,9 @@ def test_composition_registers_declared_entrypoint_when_execution_is_configured(
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="native Skill sandbox is macOS-only")
-def test_production_skill_execution_config_canonicalizes_system_temp_alias(
+def test_production_skill_execution_config_reuses_the_trusted_application_runtime(
     tmp_path: Path, monkeypatch
 ) -> None:
-    runtime_fixture = _make_runtime(tmp_path / "skill-runtime-v1")
-    for directory in sorted(
-        (path for path in runtime_fixture.root.rglob("*") if path.is_dir()),
-        key=lambda path: len(path.parts),
-        reverse=True,
-    ):
-        directory.chmod(0o555)
-    runtime_fixture.root.chmod(0o555)
     real_temp = tmp_path / "real-temp"
     real_temp.mkdir()
     temp_alias = tmp_path / "temp-alias"
@@ -323,8 +328,21 @@ def test_production_skill_execution_config_canonicalizes_system_temp_alias(
     config = build_skill_execution_config(
         workspace=workspace,
         state_root=state,
-        runtime_root=runtime_fixture.root,
     )
+
+    assert config is not None
+    assert config.runtime.interpreter_path == str(
+        Path(sys.executable).resolve(strict=True)
+    )
+    assert config.runtime.runner_main_path.endswith("__main__.py")
+    assert str(Path(config.runtime.runner_main_path).parent) in set(
+        config.runtime.readable_roots
+    )
+    assert str(Path(sys.executable).resolve(strict=True).parent) in set(
+        config.runtime.readable_roots
+    )
+    assert str(config.temp_root).startswith(str(real_temp.resolve(strict=True)))
+    assert str(temp_alias) not in str(config.temp_root)
     catalog, _skill = _catalog_with_entrypoint(tmp_path / "catalog")
     registrations = build_skill_tool_registrations(
         catalog,
@@ -332,18 +350,73 @@ def test_production_skill_execution_config_canonicalizes_system_temp_alias(
         execution=config,
     )
 
-    assert str(config.temp_root).startswith(str(real_temp.resolve(strict=True)))
-    assert str(temp_alias) not in str(config.temp_root)
     assert "skill__text-stats__analyze" in {
         registration.spec.name for registration in registrations
     }
+
+
+def test_composition_without_runtime_registers_no_entrypoint_tool(
+    tmp_path: Path,
+) -> None:
+    """无法建立 trusted application runtime 时无 fallback：只保留
+    activation/resource，不注册任何 entrypoint 工具。"""
+
+    _catalog, skill = _catalog_with_entrypoint(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    registrations = build_tool_registrations(
+        workspace=workspace,
+        skill_roots=(skill.parent,),
+        max_tool_result_chars=10_000,
+        skill_execution=None,
+    )
+    names = {registration.spec.name for registration in registrations}
+
+    assert "skill__text-stats__analyze" not in names
+    assert "skill__text-stats" in names
+    assert "skill__read_resource" in names
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="native Skill sandbox is macOS-only")
+def test_discovery_fails_closed_when_runner_cannot_be_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import first_agent_skill_runner
+
+    monkeypatch.setattr(
+        first_agent_skill_runner,
+        "__file__",
+        str(tmp_path / "absent" / "first_agent_skill_runner" / "__init__.py"),
+    )
+
+    assert discover_trusted_application_runtime() is None
+
+
+def test_skill_limits_follow_the_platform_closed_profile(tmp_path: Path) -> None:
+    """darwin 只声明平台实际可执行的 limits：同一 digest 不再声称不存在的
+    address-space 上限。"""
+
+    catalog, _skill = _catalog_with_entrypoint(tmp_path)
+    descriptor = catalog.descriptor_for("text-stats")
+    entrypoint = descriptor.entrypoints[0]
+    config = _execution_config(tmp_path)
+
+    base = prepare_skill_base(catalog, descriptor, entrypoint, config)
+
+    expected_profile = (
+        "skill-standard-darwin-v1" if sys.platform == "darwin" else "skill-standard-v1"
+    )
+    assert base.policy.resource_limits.profile == expected_profile
+    if sys.platform == "darwin":
+        assert base.policy.resource_limits.address_space_bytes is None
 
 
 def test_entrypoint_prepare_builds_bounded_binding_and_requires_approval(
     tmp_path: Path,
 ) -> None:
     catalog, skill = _catalog_with_entrypoint(tmp_path)
-    config = _execution_config(tmp_path, skill)
+    config = _execution_config(tmp_path)
     registrations = build_skill_tool_registrations(
         catalog,
         max_tool_result_chars=10_000,
@@ -379,7 +452,7 @@ def test_entrypoint_prepare_builds_bounded_binding_and_requires_approval(
         skill,
         config.workspace_root,
         config.temp_root,
-        Path(config.closure.runtime_root),
+        *config.runtime.readable_roots,
     ):
         assert str(path) not in disclosed
     assert os.path.abspath("scripts/analyze.py") not in disclosed
@@ -390,7 +463,7 @@ def test_approved_entrypoint_runs_through_structured_sandbox_boundary(
 ) -> None:
     catalog, skill = _catalog_with_entrypoint(tmp_path)
     executor = RecordingExecutor()
-    config = _execution_config(tmp_path, skill, executor=executor)
+    config = _execution_config(tmp_path, executor=executor)
     runtime = KernelToolRuntime(
         build_skill_tool_registrations(
             catalog,
@@ -461,7 +534,7 @@ def test_agent_runtime_checkpoints_entrypoint_execution_before_result(
 ) -> None:
     catalog, skill = _catalog_with_entrypoint(tmp_path)
     executor = RecordingExecutor()
-    config = _execution_config(tmp_path, skill, executor=executor)
+    config = _execution_config(tmp_path, executor=executor)
     store = RecordingCheckpointStore(conversation_with_active_goal("conversation-1"))
     provider = ScriptedProvider(
         goal_noop_response("skill-user-supplement"),
@@ -544,7 +617,7 @@ def test_entrypoint_drift_after_approval_fails_before_sandbox_call(
 ) -> None:
     catalog, skill = _catalog_with_entrypoint(tmp_path)
     executor = RecordingExecutor()
-    config = _execution_config(tmp_path, skill, executor=executor)
+    config = _execution_config(tmp_path, executor=executor)
     runtime = KernelToolRuntime(
         build_skill_tool_registrations(
             catalog,
@@ -614,7 +687,7 @@ def test_skill_body_drift_after_approval_fails_before_sandbox_call(
 ) -> None:
     catalog, skill = _catalog_with_entrypoint(tmp_path)
     executor = RecordingExecutor()
-    config = _execution_config(tmp_path, skill, executor=executor)
+    config = _execution_config(tmp_path, executor=executor)
     runtime = KernelToolRuntime(
         build_skill_tool_registrations(
             catalog,
@@ -686,7 +759,7 @@ def test_any_execution_identity_drift_after_approval_fails_before_sandbox_call(
 ) -> None:
     catalog, skill = _catalog_with_full_execution_identity(tmp_path)
     executor = RecordingExecutor()
-    config = _execution_config(tmp_path, skill, executor=executor)
+    config = _execution_config(tmp_path, executor=executor)
     runtime = KernelToolRuntime(
         build_skill_tool_registrations(
             catalog,
@@ -721,7 +794,7 @@ def test_oversized_entrypoint_arguments_fail_before_approval_or_sandbox(
 ) -> None:
     catalog, skill = _catalog_with_entrypoint(tmp_path)
     executor = RecordingExecutor()
-    config = _execution_config(tmp_path, skill, executor=executor)
+    config = _execution_config(tmp_path, executor=executor)
     runtime = KernelToolRuntime(
         build_skill_tool_registrations(
             catalog,
@@ -750,3 +823,79 @@ def test_oversized_entrypoint_arguments_fail_before_approval_or_sandbox(
     assert result.is_error is True
     assert result.metadata["code"] == "binding_failure"
     assert executor.calls == []
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="real Seatbelt is macOS-only")
+def test_real_seatbelt_executes_declared_entrypoint_via_trusted_application_runtime(
+    tmp_path: Path,
+) -> None:
+    """非真空 E2E：真实 seatbelt + 应用自身 interpreter/stdlib/固定 runner 执行
+    声明 entrypoint，验证网络关闭、精确 package 读取与结构化 result 回读。"""
+    workspace = tmp_path / "workspace"
+    state = tmp_path / "state"
+    workspace.mkdir()
+    state.mkdir()
+    skill_root = tmp_path / "skills"
+    skill = skill_root / "text-stats"
+    scripts = skill / "scripts"
+    scripts.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: text-stats\n"
+        "description: Count text statistics.\n"
+        "entrypoints:\n"
+        "  - id: analyze\n"
+        "    script: scripts/analyze.py\n"
+        "---\n"
+        "Use the analyze entrypoint.\n",
+        encoding="utf-8",
+    )
+    (scripts / "analyze.py").write_text(
+        "import os\n"
+        "import socket\n"
+        "\n"
+        "def run(arguments, inputs):\n"
+        "    denied = False\n"
+        "    try:\n"
+        "        socket.create_connection((\"127.0.0.1\", 1), timeout=0.3).close()\n"
+        "    except OSError:\n"
+        "        denied = True\n"
+        "    return {\n"
+        "        \"kind\": \"observation\",\n"
+        "        \"payload\": {\"length\": len(arguments[\"text\"]), \"offline\": denied},\n"
+        "        \"artifact\": None,\n"
+        "    }\n",
+        encoding="utf-8",
+    )
+    config = build_skill_execution_config(
+        workspace=workspace,
+        state_root=state,
+    )
+    assert config is not None
+    catalog = build_skill_catalog([skill_root])
+    descriptor = catalog.descriptor_for("text-stats")
+    entrypoint = descriptor.entrypoints[0]
+
+    base = prepare_skill_base(catalog, descriptor, entrypoint, config)
+    execution = bind_skill_execution(
+        base,
+        descriptor,
+        entrypoint,
+        {"text": "hello world"},
+    )
+
+    result = config.executor.execute(
+        execution.prepared,
+        execution.policy,
+        io_plan=execution.io_plan,
+    )
+
+    assert isinstance(result, StructuredSandboxProcessDraftV1)
+    assert result.process.outcome is SandboxDraftOutcome.EXITED, (
+        result.process.stderr_projection
+    )
+    assert result.process.exit_code == 0
+    assert result.readback_outcome is StructuredReadbackOutcome.VALID
+    payload = json.loads(result.result_bytes)
+    assert payload["payload"] == {"length": 11, "offline": True}
+    assert execution.policy.package_read_paths == ("scripts/analyze.py",)

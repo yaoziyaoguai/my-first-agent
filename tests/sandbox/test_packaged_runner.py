@@ -6,6 +6,7 @@ import errno
 import hashlib
 import json
 import os
+import resource as resource_module
 import shutil
 import stat
 import subprocess
@@ -98,6 +99,8 @@ class SessionFixture:
                 "a" * 64,
                 "--entrypoint",
                 "inspect",
+                "--package-root",
+                str(self.package_root),
             ],
             cwd=self.package_root,
             env={"TMPDIR": str(self.session_root)},
@@ -185,6 +188,64 @@ def test_runner_process_applies_limits_or_refuses_before_package_load_when_unava
     assert result["payload"]["limits"] == {
         "cpu": [limits.cpu_seconds, limits.cpu_seconds],
         "as": [limits.address_space_bytes, limits.address_space_bytes],
+        "fsize": [limits.file_size_bytes, limits.file_size_bytes],
+        "nofile": [limits.open_files, limits.open_files],
+        "core": [limits.core_bytes, limits.core_bytes],
+    }
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="darwin closed limits profile")
+def test_darwin_closed_profile_never_claims_or_touches_as_limit(
+    subprocess_session_fixture: SessionFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """darwin closed profile：digest 不声明 AS 上限，runner 也绝不触碰 AS。"""
+
+    limits = PackagedSkillResourceLimitsV1.for_profile("skill-standard-darwin-v1")
+    assert limits.address_space_bytes is None
+
+    class RecordingResource:
+        RLIMIT_CPU = "cpu"
+        RLIMIT_AS = "as"
+        RLIMIT_FSIZE = "fsize"
+        RLIMIT_NOFILE = "nofile"
+        RLIMIT_CORE = "core"
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def getrlimit(self, _name: str) -> tuple[int, int]:
+            return (2**62, 2**62)
+
+        def setrlimit(self, name: str, _values: tuple[int, int]) -> None:
+            self.calls.append(name)
+
+    fake = RecordingResource()
+    monkeypatch.setattr(skill_runner, "resource", fake)
+    skill_runner.apply_hard_limits(limits.limits_digest)
+    assert fake.calls == [
+        "cpu",
+        "cpu",
+        "fsize",
+        "fsize",
+        "nofile",
+        "nofile",
+        "core",
+        "core",
+    ]
+    monkeypatch.setattr(skill_runner, "resource", resource_module)
+
+    subprocess_session_fixture.use_script(
+        "scripts/report_limits.py", (_FIXTURE_ROOT / "report_limits.py").read_bytes()
+    )
+    subprocess_session_fixture.set_resource_limits_digest(limits.limits_digest)
+
+    completed, result = subprocess_session_fixture.run_real_runner()
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == ""
+    assert result["payload"]["limits"] == {
+        "cpu": [limits.cpu_seconds, limits.cpu_seconds],
+        "as": [resource_module.RLIM_INFINITY, resource_module.RLIM_INFINITY],
         "fsize": [limits.file_size_bytes, limits.file_size_bytes],
         "nofile": [limits.open_files, limits.open_files],
         "core": [limits.core_bytes, limits.core_bytes],
@@ -282,6 +343,7 @@ def test_as_limit_set_failure_never_loads_package_script(
     with pytest.raises(RunnerProtocolError, match="required as limit could not be applied"):
         run_request(
             session_fixture.request,
+            package_root=session_fixture.package_root,
             execute_script=lambda descriptor, content: loaded.append((descriptor, content)),
         )
 
@@ -297,6 +359,7 @@ def test_runner_rejects_unknown_limit_digest_before_script_load(
     with pytest.raises(RunnerProtocolError, match="not closed"):
         run_request(
             session_fixture.request,
+            package_root=session_fixture.package_root,
             execute_script=lambda descriptor, content: loaded.append((descriptor, content)),
         )
 
@@ -306,7 +369,11 @@ def test_runner_rejects_unknown_limit_digest_before_script_load(
 def test_agent_and_stdlib_runner_limit_tables_have_identical_digests() -> None:
     expected = {
         PackagedSkillResourceLimitsV1.for_profile(profile).limits_digest
-        for profile in ("skill-standard-v1", "artifact-standard-v1")
+        for profile in (
+            "skill-standard-v1",
+            "artifact-standard-v1",
+            "skill-standard-darwin-v1",
+        )
     }
 
     assert set(skill_runner.LIMITS_BY_DIGEST) == expected
@@ -321,6 +388,7 @@ def test_header_and_digest_preflight_happen_before_package_load(
     with pytest.raises(RunnerProtocolError, match="preflight"):
         run_request(
             session_fixture.request,
+            package_root=session_fixture.package_root,
             execute_script=lambda descriptor, content: loaded.append((descriptor, content)),
         )
 
@@ -344,6 +412,7 @@ def test_package_script_receives_bytes_not_paths(
 
     returned = run_request(
         session_fixture.request,
+        package_root=session_fixture.package_root,
         execute_script=lambda _descriptor, _bytes: {"run": run},
     )
 
@@ -364,6 +433,7 @@ def test_runner_rejects_nonfinite_result_payload(
     with pytest.raises(RunnerProtocolError, match="finite JSON"):
         run_request(
             session_fixture.request,
+            package_root=session_fixture.package_root,
             execute_script=lambda _descriptor, _bytes: {
                 "run": lambda _arguments, _inputs: {
                     "kind": "observation",
@@ -383,6 +453,7 @@ def test_runner_requires_precreated_fixed_result_inode(
     with pytest.raises(RunnerProtocolError, match="precreated"):
         run_request(
             session_fixture.request,
+            package_root=session_fixture.package_root,
             execute_script=lambda _descriptor, _bytes: {
                 "run": lambda _arguments, _inputs: {
                     "kind": "observation",
@@ -443,7 +514,19 @@ def test_main_executes_the_single_request_instance_it_authenticated(
     )
     monkeypatch.setenv("TMPDIR", str(session_fixture.session_root))
 
-    assert skill_runner.main(["--package", "a" * 64, "--entrypoint", "inspect"]) == 0
+    assert (
+        skill_runner.main(
+            [
+                "--package",
+                "a" * 64,
+                "--entrypoint",
+                "inspect",
+                "--package-root",
+                str(session_fixture.package_root),
+            ]
+        )
+        == 0
+    )
     assert reads == 1
 
 
@@ -474,6 +557,7 @@ def test_runner_rejects_hardlinked_result_before_loading_or_truncating_victim(
     with pytest.raises(RunnerProtocolError, match="precreated"):
         run_request(
             session_fixture.request,
+            package_root=session_fixture.package_root,
             execute_script=lambda _descriptor, content: (
                 loaded.append(content) or _observation_namespace()
             ),
@@ -501,6 +585,7 @@ def test_runner_rejects_symlinked_result_before_loading_or_touching_victim(
     with pytest.raises(RunnerProtocolError, match="precreated"):
         run_request(
             session_fixture.request,
+            package_root=session_fixture.package_root,
             execute_script=lambda _descriptor, content: (
                 loaded.append(content) or _observation_namespace()
             ),
@@ -525,7 +610,11 @@ def test_runner_rejects_result_replacement_after_output_preflight(
         return _observation_namespace()
 
     with pytest.raises(RunnerProtocolError, match="precreated"):
-        run_request(session_fixture.request, execute_script=replace_result)
+        run_request(
+            session_fixture.request,
+            package_root=session_fixture.package_root,
+            execute_script=replace_result,
+        )
 
     assert result_path.read_bytes() == b"replacement"
     assert (session_fixture.session_root / "artifact.bin").read_bytes() == b""
@@ -548,6 +637,7 @@ def test_runner_rejects_artifact_preflight_failure_before_result_or_package_load
     with pytest.raises(RunnerProtocolError, match="precreated"):
         run_request(
             session_fixture.request,
+            package_root=session_fixture.package_root,
             execute_script=lambda _descriptor, content: (
                 loaded.append(content) or _observation_namespace()
             ),
@@ -578,7 +668,9 @@ def test_runner_rejects_unread_fifo_output_without_loading_inputs_or_script(
             "runner._read_exact_input = unexpected_load",
             "runner._read_exact_script = unexpected_load",
             "try:",
-            f"    runner.run_request(Path({str(session_fixture.request)!r}))",
+            f"    request = Path({str(session_fixture.request)!r})",
+            f"    package = Path({str(session_fixture.package_root)!r})",
+            "    runner.run_request(request, package_root=package)",
             "except runner.RunnerProtocolError as error:",
             "    print(error)",
             "    raise SystemExit(0)",
@@ -638,6 +730,7 @@ def test_runner_closes_script_ancestor_fd_when_first_fstat_fails(
     with pytest.raises(OSError, match="forced script directory fstat failure"):
         run_request(
             session_fixture.request,
+            package_root=session_fixture.package_root,
             execute_script=lambda _descriptor, content: (
                 loaded.append(content) or _observation_namespace()
             ),
@@ -680,6 +773,7 @@ def test_runner_closes_session_fd_when_first_fstat_fails(
     with pytest.raises(OSError, match="forced session fstat failure"):
         run_request(
             session_fixture.request,
+            package_root=session_fixture.package_root,
             execute_script=lambda _descriptor, content: (
                 loaded.append(content) or _observation_namespace()
             ),
@@ -722,6 +816,7 @@ def test_runner_closes_new_output_fd_when_first_fstat_fails(
     with pytest.raises(OSError, match="forced output fstat failure"):
         run_request(
             session_fixture.request,
+            package_root=session_fixture.package_root,
             execute_script=lambda _descriptor, content: (
                 loaded.append(content) or _observation_namespace()
             ),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,8 +19,8 @@ from agent.sandbox.contracts import (
 )
 from agent.sandbox.executor import NativeSandboxExecutor
 from agent.sandbox.hermetic_runtime import (
-    HermeticRuntimeClosureV1,
-    prepare_hermetic_skill_process,
+    TrustedApplicationRuntime,
+    prepare_trusted_skill_process,
 )
 from agent.sandbox.packaged_policy import build_packaged_skill_policy
 from agent.skill.catalog import (
@@ -45,7 +46,7 @@ _ARTIFACT_CAP_BYTES = 1
 class SkillExecutionConfig:
     """composition root 注入的单一执行配置；不拥有 Skill 生命周期。"""
 
-    closure: HermeticRuntimeClosureV1
+    runtime: TrustedApplicationRuntime
     workspace_root: Path
     temp_root: Path
     state_root: Path
@@ -72,6 +73,15 @@ class PreparedSkillBase:
     policy: PackagedSkillSandboxPolicyV1
 
 
+def skill_resource_limits() -> PackagedSkillResourceLimitsV1:
+    """按平台选择 closed limits profile；darwin 只声明可执行的限额。"""
+
+    profile = (
+        "skill-standard-darwin-v1" if sys.platform == "darwin" else "skill-standard-v1"
+    )
+    return PackagedSkillResourceLimitsV1.for_profile(profile)
+
+
 def prepare_skill_base(
     catalog: SkillCatalog,
     descriptor: SkillDescriptor,
@@ -85,9 +95,9 @@ def prepare_skill_base(
     )
     if current != entrypoint:
         raise ValueError("skill entrypoint identity changed")
-    limits = PackagedSkillResourceLimitsV1.for_profile("skill-standard-v1")
-    prepared = prepare_hermetic_skill_process(
-        config.closure,
+    limits = skill_resource_limits()
+    prepared = prepare_trusted_skill_process(
+        config.runtime,
         package_root=package_root,
         package_digest=descriptor.identity_digest,
         entrypoint_id=entrypoint.id,
@@ -95,8 +105,8 @@ def prepare_skill_base(
     if isinstance(prepared, KnownNotExecuted):
         raise ValueError("skill process could not be prepared")
     policy = build_packaged_skill_policy(
-        interpreter_path=config.closure.interpreter_path,
-        runtime_roots=config.closure.readable_roots,
+        interpreter_path=config.runtime.interpreter_path,
+        runtime_roots=config.runtime.readable_roots,
         package_root=package_root,
         temp_root=config.temp_root,
         system_runtime_roots=config.system_runtime_roots,
@@ -104,7 +114,7 @@ def prepare_skill_base(
         home_root=config.home_root,
         state_root=config.state_root,
         private_roots=config.private_roots,
-        runtime_closure_digest=config.closure.closure_digest,
+        runtime_closure_digest=config.runtime.identity_digest,
         system_runtime_digest=config.system_runtime_digest,
         resource_limits=limits,
         package_read_paths=(entrypoint.relative_path,),

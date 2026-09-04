@@ -144,6 +144,8 @@ def test_fixed_command_contains_no_session_or_model_supplied_process_fields(
         "a" * 64,
         "--entrypoint",
         "inspect",
+        "--package-root",
+        str(package_root),
     )
     assert "fa-structured-" not in repr(prepared.command)
     assert prepared.command.executable_identity is not None

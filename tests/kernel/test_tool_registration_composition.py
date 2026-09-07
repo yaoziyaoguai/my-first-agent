@@ -128,3 +128,59 @@ def test_composition_builds_single_owners_without_extension_seams() -> None:
     # close_stack（MCP）与 sources（Memory）都是 composition 的显式扩展点；默认空。
     assert composition.close_stack == ()
     assert composition.sources == ()
+
+
+def test_composition_passes_conversation_archive_to_runtime() -> None:
+    """020：conversation_archive 参数必须原样到达唯一 AgentRuntime 依赖。"""
+
+    from agent.composition import build_composition
+    from agent.runtime.context import ContextLimits
+    from agent.runtime.contracts import ConversationState, ModelResponse, ModelTextBlock
+    from agent.runtime.loop import InvocationLimits
+    from agent.runtime.ports import ConversationArchive
+    from tests.kernel.fakes import CollectingSink, InMemoryCheckpointStore, ScriptedProvider
+
+    class _RecordingArchive:
+        """只验证 identity 透传；任何真实归档调用都是接线缺陷。"""
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def archive(self, state, *, source_checkpoint_digest, workspace_scope_digest):
+            self.calls.append(source_checkpoint_digest)
+            raise AssertionError("wiring test must not archive")
+
+        def list_archived(self, *, workspace_scope_digest):
+            raise AssertionError("wiring test must not list archives")
+
+        def load_archived(self, archive):
+            raise AssertionError("wiring test must not load archives")
+
+        def load_archived_by_identity(
+            self,
+            *,
+            conversation_id,
+            workspace_scope_digest,
+            source_checkpoint_digest,
+        ):
+            raise AssertionError("wiring test must not load archives")
+
+    recording = _RecordingArchive()
+    assert isinstance(recording, ConversationArchive)
+
+    composition = build_composition(
+        provider=ScriptedProvider(ModelResponse((ModelTextBlock("ok"),))),
+        checkpoint_store=InMemoryCheckpointStore(
+            ConversationState.new("conversation-1")
+        ),
+        tool_registrations=(),
+        event_sink=CollectingSink(),
+        system_policy="policy",
+        context_limits=ContextLimits(max_input_tokens=2_000, output_reserve=200),
+        invocation_limits=InvocationLimits(),
+        conversation_archive=recording,
+    )
+
+    # 只检查构造后的私有依赖，不新增公共 getter；recording 未被触碰。
+    assert composition.runtime._conversation_archive is recording
+    assert recording.calls == []

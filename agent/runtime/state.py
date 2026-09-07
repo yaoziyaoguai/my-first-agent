@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 
+from agent.runtime.compaction_rules import validate_compaction_removal
 from agent.runtime.contracts import (
     SANDBOX_EXPIRY_MINUTES,
     AbandonUnknownModelOutcome,
@@ -41,6 +42,7 @@ from agent.runtime.contracts import (
     ControlRequestKind,
     ConversationFact,
     ConversationState,
+    ConversationSummaryV1,
     CriterionAdmissionBinding,
     EgressClass,
     EvidenceOracleKind,
@@ -3722,6 +3724,81 @@ def record_tool_result(
             batch_cursor=next_cursor,
             tool_calls=active.tool_calls if has_more else (),
         ),
+    )
+
+
+def _context_summary_fact_id(summary: ConversationSummaryV1) -> str:
+    """CONTEXT_SUMMARY fact 的 deterministic identity，只由两个 source digest 派生。
+
+    不含任何模型文本：同一批被归档 facts 的 summary 无论措辞如何变化，
+    identity 都指向同一条 replacement fact，方便 archive/CAS 幂等重放。
+    """
+
+    return (
+        "fact:context-summary:"
+        + canonical_json_digest(
+            (
+                summary.source_checkpoint_digest,
+                summary.source_fact_ids_digest,
+            )
+        )[:16]
+    )
+
+
+def apply_compaction_summary(
+    state: ConversationState,
+    summary: ConversationSummaryV1,
+    removable_fact_ids: tuple[str, ...],
+) -> ConversationState:
+    """020 长会话压缩：把已归档的 summary 应用为唯一的 CONTEXT_SUMMARY fact。
+
+    这是 summary reducer 的全部状态变化：由 ``validate_compaction_removal``
+    判定的 selected facts（可非连续）被替换为恰好一个
+    ``FactKind.CONTEXT_SUMMARY`` fact——summary 插在最早 selected fact 的
+    原位置，每个 selected fact 被跳过，其余 facts 原序保留，revision 恰好
+    +1；其余 canonical 字段（Goal/Evidence/Approval/Recovery/control/
+    workspace/background/leases）原样携带，永不从 summary 重建。summary
+    文本即使形似控制指令也只是 Frozen JSON content。digest 不绑定 state
+    原顺序的 selected ids、非法移除或派生 fact_id 与任何 retained fact
+    冲突时 fail closed，输入 state 不变。archive 与 CAS 由调用方先行
+    在本函数返回后按序完成，本函数不负责。
+    """
+
+    removable = validate_compaction_removal(state, removable_fact_ids)
+    expected_source_digest = canonical_json_digest(
+        [fact.fact_id for fact in removable]
+    )
+    if summary.source_fact_ids_digest != expected_source_digest:
+        raise ValueError(
+            "conversation summary does not bind the removable facts in state order"
+        )
+    # removal 可非连续：用 selected id 集合遍历全量 facts，不能按前缀切片。
+    selected_ids = frozenset(fact.fact_id for fact in removable)
+    fact_id = _context_summary_fact_id(summary)
+    if any(
+        fact.fact_id == fact_id
+        for fact in state.facts
+        if fact.fact_id not in selected_ids
+    ):
+        raise ValueError("context summary fact_id collides with retained facts")
+    summary_fact = ConversationFact(
+        fact_id=fact_id,
+        kind=FactKind.CONTEXT_SUMMARY,
+        content=summary.to_content(),
+    )
+    facts: list[ConversationFact] = []
+    inserted = False
+    for fact in state.facts:
+        if fact.fact_id not in selected_ids:
+            facts.append(fact)
+        elif not inserted:
+            # removable 非空由 validate 保证，因此 summary 必然被插入一次。
+            facts.append(summary_fact)
+            inserted = True
+    return replace(
+        state,
+        revision=state.revision + 1,
+        facts=tuple(facts),
     )
 
 

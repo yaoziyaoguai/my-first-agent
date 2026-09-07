@@ -12,6 +12,7 @@ import math
 import re
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum, StrEnum
+from pathlib import Path
 from typing import TypeAlias
 from urllib.parse import urlsplit, urlunsplit
 
@@ -242,6 +243,9 @@ class FactKind(StrEnum):
     TOOL_CALLS = "tool_calls"
     TOOL_RESULT = "tool_result"
     POLICY_RESULT = "policy_result"
+    # 020 长会话压缩：模型生成的对话 summary 只能作为 untrusted context fact
+    # 进入状态，不替代任何 canonical authority。
+    CONTEXT_SUMMARY = "context_summary"
 
 
 class GoalStatus(StrEnum):
@@ -1535,6 +1539,137 @@ class ConversationFact:
         object.__setattr__(self, "content", _freeze_json_dict(self.content))
 
 
+# 020 长会话压缩：CONTEXT_SUMMARY 的闭合、有界内容形状（计划 §3.2）。
+CONVERSATION_SUMMARY_OBJECTIVE_LIMIT = 2_000
+CONVERSATION_SUMMARY_ITEM_TEXT_LIMIT = 1_000
+CONVERSATION_SUMMARY_ITEM_COUNT_LIMIT = 16
+
+_CONVERSATION_SUMMARY_LIST_FIELDS = (
+    "constraints",
+    "decisions",
+    "completed",
+    "open_items",
+    "key_references",
+)
+_CONVERSATION_SUMMARY_DIGEST_FIELDS = (
+    "source_checkpoint_digest",
+    "source_fact_ids_digest",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationSummaryV1:
+    """``FactKind.CONTEXT_SUMMARY`` 的唯一合法内容。
+
+    summary 是模型生成的 untrusted context data：闭合字段里没有 Goal、Evidence、
+    Approval、Recovery 等 canonical state 字段，未知键一律拒绝；canonical 字段
+    只能由 Runtime/用户权威路径变更，永不从 summary 重建。
+    """
+
+    objective: str
+    constraints: tuple[str, ...]
+    decisions: tuple[str, ...]
+    completed: tuple[str, ...]
+    open_items: tuple[str, ...]
+    key_references: tuple[str, ...]
+    source_checkpoint_digest: str
+    source_fact_ids_digest: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.objective, str)
+            or not self.objective.strip()
+            or len(self.objective) > CONVERSATION_SUMMARY_OBJECTIVE_LIMIT
+        ):
+            raise ValueError(
+                "conversation summary objective must be non-empty text within the "
+                f"{CONVERSATION_SUMMARY_OBJECTIVE_LIMIT}-character limit"
+            )
+        for field_name in _CONVERSATION_SUMMARY_LIST_FIELDS:
+            items = getattr(self, field_name)
+            if isinstance(items, str) or not isinstance(items, tuple | list):
+                raise ValueError(
+                    f"conversation summary {field_name} must be a list of text items"
+                )
+            if len(items) > CONVERSATION_SUMMARY_ITEM_COUNT_LIMIT:
+                raise ValueError(
+                    f"conversation summary {field_name} exceeds the "
+                    f"{CONVERSATION_SUMMARY_ITEM_COUNT_LIMIT}-item limit"
+                )
+            for item in items:
+                if (
+                    not isinstance(item, str)
+                    or not item.strip()
+                    or len(item) > CONVERSATION_SUMMARY_ITEM_TEXT_LIMIT
+                ):
+                    raise ValueError(
+                        f"conversation summary {field_name} items must be non-empty "
+                        f"text within the {CONVERSATION_SUMMARY_ITEM_TEXT_LIMIT}-character "
+                        "limit"
+                    )
+            object.__setattr__(self, field_name, tuple(items))
+        for field_name in _CONVERSATION_SUMMARY_DIGEST_FIELDS:
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not _is_lower_hex(value, length=64):
+                raise ValueError(
+                    f"conversation summary {field_name} must be a sha256 digest"
+                )
+
+    @classmethod
+    def from_content(cls, content: object) -> ConversationSummaryV1:
+        """从 JSON dict 严格解析；未知键、缺失字段、非文本 block 一律拒绝。"""
+
+        expected = {
+            "objective",
+            *_CONVERSATION_SUMMARY_LIST_FIELDS,
+            *_CONVERSATION_SUMMARY_DIGEST_FIELDS,
+        }
+        if not isinstance(content, dict) or set(content) != expected:
+            raise ValueError("conversation summary has unknown or missing fields")
+        for field_name in _CONVERSATION_SUMMARY_LIST_FIELDS:
+            if not isinstance(content[field_name], list):
+                raise ValueError(
+                    f"conversation summary {field_name} must be a list of text items"
+                )
+        return cls(
+            objective=content["objective"],
+            constraints=content["constraints"],
+            decisions=content["decisions"],
+            completed=content["completed"],
+            open_items=content["open_items"],
+            key_references=content["key_references"],
+            source_checkpoint_digest=content["source_checkpoint_digest"],
+            source_fact_ids_digest=content["source_fact_ids_digest"],
+        )
+
+    @classmethod
+    def from_json(cls, raw: str) -> ConversationSummaryV1:
+        try:
+            document = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise ValueError("conversation summary is not valid JSON") from error
+        return cls.from_content(document)
+
+    def to_content(self) -> dict[str, JSONValue]:
+        return {
+            "objective": self.objective,
+            **{
+                field_name: list(getattr(self, field_name))
+                for field_name in _CONVERSATION_SUMMARY_LIST_FIELDS
+            },
+            "source_checkpoint_digest": self.source_checkpoint_digest,
+            "source_fact_ids_digest": self.source_fact_ids_digest,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(
+            self.to_content(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+
 class ProcessOutcome(StrEnum):
     """closed process receipt outcome；unknown 不产生 receipt（进入既有 recovery）。"""
 
@@ -2663,10 +2798,22 @@ class SandboxReceiptV1:
             _require_sandbox_digest(self.profile_digest, "profile_digest")
         elif self.enforcement != "unconfined" or self.profile_digest:
             raise ValueError("native bypass receipt must be unconfined without profile")
-        if self.mode == "danger-full-access" and self.backend != "none":
-            raise ValueError("danger-full-access receipt must record native bypass")
-        if self.mode != "danger-full-access" and self.backend != "seatbelt":
-            raise ValueError("confined mode receipt must record seatbelt")
+        # 与 KernelToolRuntime._sandbox_outcome 同一二维矩阵：唯一 unconfined
+        # bypass 是 danger-full-access + network=full；danger+off 与所有
+        # confined 组合的 receipt 都必须 seatbelt/confined 且携带 profile digest。
+        if (
+            self.mode == "danger-full-access"
+            and self.network == "full"
+            and self.backend != "none"
+        ):
+            raise ValueError(
+                "danger-full-access network-full receipt must record native bypass"
+            )
+        if (
+            not (self.mode == "danger-full-access" and self.network == "full")
+            and self.backend != "seatbelt"
+        ):
+            raise ValueError("confined policy receipt must record seatbelt")
         _require_sandbox_digest(self.draft_digest, "draft_digest")
         if self.outcome not in _SANDBOX_RECEIPT_OUTCOMES:
             raise ValueError(f"unknown sandbox receipt outcome: {self.outcome!r}")
@@ -4301,6 +4448,20 @@ class LoadedSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class ArchivedConversation:
+    """transcript archive 中一个 immutable archived segment 的只读坐标。
+
+    020 长会话压缩：坐标只由闭合 identity（conversation、workspace scope、
+    source checkpoint digest）派生，load 端会重新推导并校验 path。
+    """
+
+    conversation_id: str
+    workspace_scope_digest: str
+    source_checkpoint_digest: str
+    path: Path
+
+
+@dataclass(frozen=True, slots=True)
 class RunResult:
     status: RunStatus
     state: ConversationState
@@ -4449,6 +4610,65 @@ class BudgetReport:
     excluded_ids: tuple[str, ...] = ()
     clipped_ids: tuple[str, ...] = ()
     source_digests: tuple[str, ...] = ()
+
+
+class CompactionTrigger(StrEnum):
+    """020 长会话压缩的闭合触发原因；planner 本身不属于本模块。"""
+
+    NONE = "none"
+    MANUAL = "manual"
+    TOKEN_PRESSURE = "token_pressure"
+    EXCLUDED_HISTORY = "excluded_history"
+    CHECKPOINT_PRESSURE = "checkpoint_pressure"
+    UNSAFE_BOUNDARY = "unsafe_boundary"
+    NO_CANDIDATE = "no_candidate"
+
+
+_ACTIONABLE_COMPACTION_TRIGGERS = (
+    CompactionTrigger.MANUAL,
+    CompactionTrigger.TOKEN_PRESSURE,
+    CompactionTrigger.EXCLUDED_HISTORY,
+    CompactionTrigger.CHECKPOINT_PRESSURE,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CompactionPlanV1:
+    """压缩决策的纯数据合同：只描述已决定移除什么，不参与选择或执行。"""
+
+    trigger: CompactionTrigger
+    removable_fact_ids: tuple[str, ...]
+    usage: BudgetReport
+    active_checkpoint_bytes: int
+    soft_threshold_bytes: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.trigger, CompactionTrigger):
+            raise TypeError("compaction trigger must be CompactionTrigger")
+        if not isinstance(self.usage, BudgetReport):
+            raise TypeError("compaction usage must be BudgetReport")
+        for name, value, minimum in (
+            ("active_checkpoint_bytes", self.active_checkpoint_bytes, 0),
+            ("soft_threshold_bytes", self.soft_threshold_bytes, 1),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise TypeError(f"compaction {name} must be an integer")
+            if value < minimum:
+                raise ValueError(f"compaction {name} is out of range")
+        object.__setattr__(self, "removable_fact_ids", tuple(self.removable_fact_ids))
+        if any(not isinstance(item, str) or not item for item in self.removable_fact_ids):
+            raise ValueError("compaction removable fact ids must be non-empty strings")
+        if len(set(self.removable_fact_ids)) != len(self.removable_fact_ids):
+            raise ValueError("compaction removable fact ids must be unique")
+        has_ids = bool(self.removable_fact_ids)
+        if self.trigger in _ACTIONABLE_COMPACTION_TRIGGERS and not has_ids:
+            raise ValueError("actionable compaction requires removable fact ids")
+        if self.trigger not in _ACTIONABLE_COMPACTION_TRIGGERS and has_ids:
+            raise ValueError("only actionable compaction may carry removable fact ids")
+
+    @property
+    def actionable(self) -> bool:
+        return bool(self.removable_fact_ids) and self.trigger in _ACTIONABLE_COMPACTION_TRIGGERS
 
 
 @dataclass(frozen=True, slots=True)

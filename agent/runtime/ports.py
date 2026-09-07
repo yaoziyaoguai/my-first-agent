@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from agent.runtime.contracts import (
     Action,
     ApprovalGrant,
+    ArchivedConversation,
     BackgroundClaimCheckV1,
     BackgroundClaimVerdictV1,
+    BudgetReport,
+    CompactionPlanV1,
     ContextPack,
     ContextQuery,
     ContextSourceSnapshot,
@@ -41,6 +45,29 @@ class CheckpointCASConflictError(RuntimeError):
         super().__init__(message)
 
 
+@dataclass(frozen=True, slots=True)
+class CheckpointUsage:
+    """checkpoint 用量/容量的只读度量。
+
+    三个字段都是严格正整数，且 active <= hard、soft <= hard；
+    违反不变量的构造一律 ValueError fail closed。
+    """
+
+    active_bytes: int
+    soft_threshold_bytes: int
+    hard_cap_bytes: int
+
+    def __post_init__(self) -> None:
+        for name in ("active_bytes", "soft_threshold_bytes", "hard_cap_bytes"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(f"CheckpointUsage.{name} must be a positive integer")
+        if self.active_bytes > self.hard_cap_bytes:
+            raise ValueError("active_bytes must not exceed hard_cap_bytes")
+        if self.soft_threshold_bytes > self.hard_cap_bytes:
+            raise ValueError("soft_threshold_bytes must not exceed hard_cap_bytes")
+
+
 @runtime_checkable
 class ModelProvider(Protocol):
     def generate(self, context: ContextPack) -> ModelResponse:
@@ -56,6 +83,34 @@ class ContextManager(Protocol):
         tools: tuple[ToolDefinition, ...],
     ) -> ContextPack:
         """从规范状态构造不可变且有预算的模型输入。"""
+
+    def usage(
+        self,
+        state: ConversationState,
+        action: Action,
+        tools: tuple[ToolDefinition, ...],
+    ) -> BudgetReport:
+        """只读 no-source 预算投影；供 compaction 规划观察，零副作用。"""
+
+    def plan_compaction(
+        self,
+        state: ConversationState,
+        action: Action,
+        tools: tuple[ToolDefinition, ...],
+        *,
+        active_checkpoint_bytes: int,
+        soft_threshold_bytes: int,
+        force: bool = False,
+    ) -> CompactionPlanV1:
+        """只读产出压缩决策；不执行移除，也不触碰 source/provider/tool。"""
+
+    def build_compaction(
+        self,
+        state: ConversationState,
+        plan: CompactionPlanV1,
+        source_checkpoint_digest: str,
+    ) -> ContextPack:
+        """为一次已决定的压缩构建专用 ContextPack（纯投影、零副作用）。"""
 
 
 class RetryableContextSourceError(RuntimeError):
@@ -114,6 +169,38 @@ class CheckpointStore(Protocol):
 
     def ensure_capacity(self, snapshot: LoadedSnapshot, *, reserve_bytes: int) -> bool:
         """在 Provider/Tool effect 前为结果、恢复和终态预留持久化空间。"""
+
+    def usage(self, snapshot: LoadedSnapshot) -> CheckpointUsage:
+        """只读度量当前 checkpoint 用量与容量；snapshot 过期即按 CAS 冲突 fail closed。"""
+
+
+@runtime_checkable
+class ConversationArchive(Protocol):
+    """020：pre-compaction transcript archive 的窄端口。
+
+    只负责两件事：在持有 conversation mutation lease 时以 source checkpoint
+    digest 为 identity 幂等写入完整原样状态；以及同 workspace binding 下按
+    闭合 identity 精确读取。它不得推进 state、调用 provider/tool，也不得扫描
+    transcripts 或 workspaces checkpoint 目录来发现 authority。
+    """
+
+    def archive(
+        self,
+        state: ConversationState,
+        *,
+        source_checkpoint_digest: str,
+        workspace_scope_digest: str,
+    ) -> ArchivedConversation:
+        """幂等写入完整 pre-compaction 状态；重复同 digest 内容返回同一 archive。"""
+
+    def load_archived_by_identity(
+        self,
+        *,
+        conversation_id: str,
+        workspace_scope_digest: str,
+        source_checkpoint_digest: str,
+    ) -> LoadedSnapshot:
+        """按闭合 identity 精确读取；caller 不能提供 filesystem path。"""
 
 
 @runtime_checkable

@@ -31,6 +31,7 @@ from agent.runtime.contracts import (
     ControlReceipt,
     ConversationFact,
     ConversationState,
+    ConversationSummaryV1,
     ConversationWorkspaceBindingV1,
     EgressClass,
     EvidenceOracleKind,
@@ -62,7 +63,7 @@ from agent.runtime.contracts import (
     model_response_from_payload,
     model_response_payload,
 )
-from agent.runtime.ports import CheckpointCASConflictError
+from agent.runtime.ports import CheckpointCASConflictError, CheckpointUsage
 
 SCHEMA_VERSION = 9
 # v3 是 process-authority migration source；v4 是旧 strict process schema；v5 加入
@@ -75,7 +76,7 @@ PROCESS_SCHEMA_VERSION = 6
 BROWSER_SCHEMA_VERSION = 7
 BACKGROUND_SCHEMA_VERSION = 8
 LEGACY_SCHEMA_VERSION = 2
-DEFAULT_MAX_STATE_BYTES = 2_000_000
+DEFAULT_MAX_STATE_BYTES = 8 * 1024 * 1024
 
 
 class CheckpointError(RuntimeError):
@@ -283,6 +284,22 @@ class LocalCheckpointStore:
             raise ValueError("reserve_bytes must be non-negative")
         return len(_encode_state(snapshot.state)) + reserve_bytes <= self._max_state_bytes
 
+    def usage(self, snapshot: LoadedSnapshot) -> CheckpointUsage:
+        # 只读度量：通过 store 自身的受保护读路径核对 token/revision，
+        # 过期按 CAS 冲突 fail closed，绝不绕过 store 读 checkpoint 文件。
+        directory_fd = self._open_directory()
+        try:
+            current_data = self._read_bytes(directory_fd)
+        finally:
+            os.close(directory_fd)
+        current = _decode_state(current_data)
+        if _token(current_data) != snapshot.token or current.revision != snapshot.state.revision:
+            raise CheckpointConflictError(
+                "snapshot token or revision changed",
+                LoadedSnapshot(current, _token(current_data)),
+            )
+        return _checkpoint_usage(snapshot.state, self._max_state_bytes)
+
     def _create_directory(self) -> None:
         with suppress(FileExistsError):
             self._directory.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -401,6 +418,23 @@ class InMemoryCheckpointStore:
             raise ValueError("reserve_bytes must be non-negative")
         return len(_encode_state(snapshot.state)) + reserve_bytes <= self._max_state_bytes
 
+    def usage(self, snapshot: LoadedSnapshot) -> CheckpointUsage:
+        # 与 CAS 相同的 token/revision 核对，过期 fail closed；只读零 mutation。
+        if snapshot.token != f"memory-{self._token_number}":
+            raise CheckpointConflictError("snapshot token changed", self.load())
+        if snapshot.state.revision != self._state.revision:
+            raise CheckpointConflictError("snapshot revision changed", self.load())
+        return _checkpoint_usage(snapshot.state, self._max_state_bytes)
+
+
+def _checkpoint_usage(state: ConversationState, max_state_bytes: int) -> CheckpointUsage:
+    # soft 固定为 hard 的 3/4（极小 cap 下取下限 1），与 DEFAULT 的 6 MiB 同比例。
+    return CheckpointUsage(
+        active_bytes=len(_encode_state(state)),
+        soft_threshold_bytes=max(1, max_state_bytes * 3 // 4),
+        hard_cap_bytes=max_state_bytes,
+    )
+
 
 def _o_nofollow() -> int:
     return os.O_NOFOLLOW
@@ -435,6 +469,22 @@ def _write_all(fd: int, data: bytes) -> None:
 
 def _token(data: bytes) -> str:
     return f"sha256:{hashlib.sha256(data).hexdigest()}"
+
+
+def encode_conversation_state(state: ConversationState) -> bytes:
+    """公开的 lossless checkpoint 编码。
+
+    020：transcript archive 复用同一 codec 保存完整 pre-compaction 状态，
+    避免第二套可推导出不一致字节的序列化实现。
+    """
+
+    return _encode_state(state)
+
+
+def decode_conversation_state(data: bytes) -> ConversationState:
+    """公开的 lossless checkpoint 解码（含全部 version/不变量 fail-closed 校验）。"""
+
+    return _decode_state(data)
 
 
 def _encode_state(state: ConversationState) -> bytes:
@@ -1315,15 +1365,23 @@ def _control_receipt_from_dict(value: dict) -> ControlReceipt:
 
 
 def _fact_to_dict(fact: ConversationFact) -> dict:
+    if fact.kind is FactKind.CONTEXT_SUMMARY:
+        # 020：summary fact 的持久化内容必须闭合在 ConversationSummaryV1 内，
+        # 写入路径同样 fail closed，避免 malformed summary 进入 checkpoint。
+        ConversationSummaryV1.from_content(fact.content)
     return {"fact_id": fact.fact_id, "kind": fact.kind.value, "content": fact.content}
 
 
 def _fact_from_dict(value: dict) -> ConversationFact:
     _expect_keys(value, {"fact_id", "kind", "content"}, "fact")
+    kind = FactKind(_string(value["kind"], "fact.kind"))
+    content = _object(value["content"], "fact.content")
+    if kind is FactKind.CONTEXT_SUMMARY:
+        ConversationSummaryV1.from_content(content)
     return ConversationFact(
         fact_id=_string(value["fact_id"], "fact_id"),
-        kind=FactKind(_string(value["kind"], "fact.kind")),
-        content=_object(value["content"], "fact.content"),
+        kind=kind,
+        content=content,
     )
 
 

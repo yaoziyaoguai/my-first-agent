@@ -8,6 +8,7 @@ import pytest
 
 import main as entrypoint
 from agent.continuity import sessions
+from agent.continuity.archive import LocalConversationArchive
 from agent.memory.store import MemoryStore
 from agent.provider.fake_provider import FakeProvider
 from agent.provider.profile import (
@@ -146,12 +147,24 @@ def test_no_argument_start_uses_saved_profile_and_cwd(
         lambda config: captured.append(config) or FakeProvider(),
     )
     build_composition = entrypoint.build_composition
+    captured_archives = []
 
     def capture_composition(**kwargs):
         captured_limits.append(kwargs["invocation_limits"])
+        captured_archives.append(kwargs.get("conversation_archive"))
         return build_composition(**kwargs)
 
     monkeypatch.setattr(entrypoint, "build_composition", capture_composition)
+    # F5c：包装真实 HistoryCatalog 构造，记录其收到的 conversation_archive
+    # keyword；与 composition 收到的 runtime archive 做同实例断言。
+    history_catalog = entrypoint.HistoryCatalog
+    catalog_archives = []
+
+    def capture_history_catalog(*catalog_args, **catalog_kwargs):
+        catalog_archives.append(catalog_kwargs.get("conversation_archive"))
+        return history_catalog(*catalog_args, **catalog_kwargs)
+
+    monkeypatch.setattr(entrypoint, "HistoryCatalog", capture_history_catalog)
     output: list[str] = []
 
     exit_code = entrypoint.main([], input_fn=lambda _: "/exit", write_fn=output.append)
@@ -166,6 +179,14 @@ def test_no_argument_start_uses_saved_profile_and_cwd(
     assert captured[0].strict_tools is False
     assert len(captured_limits) == 1
     assert captured_limits[0].max_invalid_repairs == 8
+    # 020：交互入口注入 session state root 的本地 archive（长会话 compaction 前置）。
+    assert len(captured_archives) == 1
+    assert isinstance(captured_archives[0], LocalConversationArchive)
+    # F5c：默认 no-argument composition 只构造一个 LocalConversationArchive，
+    # 同一实例静态注入 HistoryCatalog 与 build_composition。
+    assert len(catalog_archives) == 1
+    assert isinstance(catalog_archives[0], LocalConversationArchive)
+    assert catalog_archives[0] is captured_archives[0]
     assert tuple(state_root.glob("workspaces/*/*.json"))
     rendered = "\n".join(output)
     assert "First Agent is ready in: daily-workspace" in rendered

@@ -31,6 +31,7 @@ from agent.composition import (
     provider_trust_profile,
     workspace_scope_digest_for,
 )
+from agent.continuity.archive import LocalConversationArchive
 from agent.continuity.identity import WorkspaceIdentityV1
 from agent.continuity.restart import RestartProjection, project_restart
 from agent.continuity.sessions import (
@@ -984,6 +985,9 @@ def main(
                 if skill_roots
                 else None
             )
+            # F5c：默认 composition 只构造一个 LocalConversationArchive，同一实例
+            # 静态注入 HistoryCatalog 与 build_composition，避免双实例各自演进。
+            conversation_archive = LocalConversationArchive(session.state_root)
             renderer = TerminalRenderer(write_fn)
             context_limits = ContextLimits(max_input_tokens=100_000, output_reserve=8_000)
             registrations = list(
@@ -1003,6 +1007,7 @@ def main(
                                 if session.snapshot is not None
                                 else None
                             ),
+                            conversation_archive=conversation_archive,
                         )
                         if session.workspace_binding is not None
                         else None
@@ -1138,6 +1143,7 @@ def main(
                 strict_control_schema=bool(args.strict_tools),
                 workspace_binding=session.workspace_binding,
                 browser_takeover_complete=browser_takeover_handler,
+                conversation_archive=conversation_archive,
             )
             runtime = composition.runtime
         except (

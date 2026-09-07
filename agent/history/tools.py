@@ -41,7 +41,9 @@ def build_history_tool_registrations(
     def search_binding(arguments):  # noqa: ANN001
         try:
             snapshot = catalog.validate_search(
-                arguments["query"], arguments.get("limit", 5)
+                arguments["query"],
+                arguments.get("limit", 5),
+                arguments.get("continuation"),
             )
         except (OSError, ValueError):
             return {"denied": True, "operation": "history_search"}
@@ -77,6 +79,7 @@ def _search(catalog: HistoryCatalog, intent: ExecutionIntent) -> ToolExecutionOu
     result = catalog.search(
         intent.arguments["query"],
         limit=intent.arguments.get("limit", 5),
+        continuation=intent.arguments.get("continuation"),
     )
     rows = [
         {
@@ -93,12 +96,19 @@ def _search(catalog: HistoryCatalog, intent: ExecutionIntent) -> ToolExecutionOu
         }
         for hit in result.hits
     ]
+    status = (
+        "partial"
+        if not result.coverage_complete
+        else ("matches" if rows else "no_match")
+    )
     content = _json(
         {
-            "status": "matches" if rows else "no_match",
+            "status": status,
             "results": rows,
             "total_matches": result.total_matches,
             "incomplete": result.incomplete,
+            "coverage_complete": result.coverage_complete,
+            "continuation": result.continuation,
         }
     )
     receipts = tuple(
@@ -118,10 +128,12 @@ def _search(catalog: HistoryCatalog, intent: ExecutionIntent) -> ToolExecutionOu
     return ToolExecutionOutput(
         content=content,
         metadata={
-            "status": "matches" if rows else "no_match",
+            "status": status,
             "snapshot_digest": result.snapshot_digest,
             "total_matches": result.total_matches,
             "incomplete": result.incomplete,
+            "coverage_complete": result.coverage_complete,
+            "continuation": result.continuation,
             "excluded_legacy_unbound": result.excluded_legacy_unbound,
             "excluded_identity_mismatch": result.excluded_identity_mismatch,
         },
@@ -175,6 +187,9 @@ def _search_spec() -> ToolSpec:
         version="1",
         description=(
             "Search bounded First Agent history from this exact workspace. "
+            "When status is partial, call this tool again with the returned opaque "
+            "continuation and the same query/limit until coverage_complete is true; "
+            "total_matches is only a lower bound while coverage is incomplete. "
             "This is literal lexical search, not semantic search: use one to three rare "
             "nouns, names, paths, technologies, or artifact terms likely to appear verbatim "
             "in the earlier content. After no_match, replace the query with a different "
@@ -195,6 +210,15 @@ def _search_spec() -> ToolSpec:
                     ),
                 },
                 "limit": {"type": "integer", "minimum": 1, "maximum": 5},
+                "continuation": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96,
+                    "description": (
+                        "Opaque cursor returned by a prior partial history_search; reuse it "
+                        "with the same query and limit until coverage_complete is true."
+                    ),
+                },
             },
             "required": ["query"],
             "additionalProperties": False,
@@ -210,6 +234,8 @@ def _search_spec() -> ToolSpec:
                 "snapshot_digest",
                 "total_matches",
                 "incomplete",
+                "coverage_complete",
+                "continuation",
                 "excluded_legacy_unbound",
                 "excluded_identity_mismatch",
             ],

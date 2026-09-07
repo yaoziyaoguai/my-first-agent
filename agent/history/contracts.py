@@ -57,6 +57,8 @@ class HistorySearchResult:
     hits: tuple[HistoryHit, ...]
     total_matches: int
     incomplete: bool
+    coverage_complete: bool
+    continuation: str | None
     excluded_legacy_unbound: int
     excluded_identity_mismatch: int
 

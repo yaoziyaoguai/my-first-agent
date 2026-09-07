@@ -53,6 +53,7 @@ from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.ports import (
     BackgroundClaimVerifier,
     CheckpointStore,
+    ConversationArchive,
     EventSink,
     ModelProvider,
 )
@@ -380,6 +381,7 @@ def build_composition(
     background_claim_verifier: BackgroundClaimVerifier | None = None,
     background_execution_authority: BackgroundExecutionAuthorityV1 | None = None,
     tool_clock: Callable[[], str] | None = None,
+    conversation_archive: ConversationArchive | None = None,
 ) -> Composition:
     if workspace_binding is not None and (
         workspace_binding.workspace_identity_digest != workspace_identity_digest
@@ -436,6 +438,7 @@ def build_composition(
         workspace_binding=workspace_binding,
         browser_takeover_complete=browser_takeover_complete,
         background_execution_authority=background_execution_authority,
+        conversation_archive=conversation_archive,
     )
     return Composition(
         runtime=runtime,

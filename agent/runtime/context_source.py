@@ -131,7 +131,7 @@ def project_tool_result_sources(
             projected_facts.append(fact)
             continue
 
-        projection = _validate_tool_result(fact, state.conversation_id)
+        projection = validate_tool_result_source(fact, state.conversation_id)
         projected_fact = fact
         goal = state.goal
         if goal is not None and projection.receipts:
@@ -153,10 +153,18 @@ def project_tool_result_sources(
     return tuple(projected_facts), projections
 
 
-def _validate_tool_result(
+def validate_tool_result_source(
     fact: ConversationFact,
     conversation_id: str,
 ) -> ToolResultSourceProjection:
+    """完整校验单个 TOOL_RESULT 的 source receipts，返回具实 data classes。
+
+    普通 build 的 Goal 投影与 compaction 的 disclosure 分类共用这一校验器：
+    metadata/receipts 不一致一律 ContextLimitError，绝不信任自报的
+    ``metadata.data_classes``；无 receipts 的 generic 结果类别为
+    ``tool_results``。本函数不改写 fact，也不做 Goal 绑定过滤。
+    """
+
     metadata = fact.content.get("metadata")
     if not isinstance(metadata, dict):
         return _GENERIC_PROJECTION

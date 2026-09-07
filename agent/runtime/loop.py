@@ -10,6 +10,12 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from agent.continuity.compaction import (
+    CompactionArchiveError,
+    CompactionResponseError,
+    archive_compaction_source,
+    parse_compaction_response,
+)
 from agent.runtime.context import ContextLimitError
 from agent.runtime.context_control import goal_correction_pending, web_fetch_source_refs
 from agent.runtime.context_source import (
@@ -33,6 +39,7 @@ from agent.runtime.contracts import (
     CancelGoal,
     CitationManifestV1,
     ClarificationRequest,
+    CompactionPlanV1,
     CompleteBrowserTakeover,
     CompletionClaim,
     ConfirmCriterion,
@@ -89,6 +96,7 @@ from agent.runtime.ports import (
     CheckpointCASConflictError,
     CheckpointStore,
     ContextManager,
+    ConversationArchive,
     EventSink,
     InvalidProviderResponseError,
     ModelProvider,
@@ -107,6 +115,7 @@ from agent.runtime.state import (
     admit_process_receipt_criterion,
     admit_web_source_criterion,
     append_policy_result,
+    apply_compaction_summary,
     apply_control_request,
     authoritative_process_entrypoints,
     begin_browser_takeover,
@@ -141,7 +150,9 @@ from agent.runtime.state import (
 _WORKSPACE_OBSERVATION_TOOLS = frozenset(
     {"read_file", "read_file_chunk", "list_files", "search_paths", "search_text"}
 )
-_WORKSPACE_MUTATION_TOOLS = frozenset({"write_file", "edit_file"})
+# 可变观察：结果依赖外部世界当前状态（workspace 文件、live browser session），
+# 在任何实际执行的 effect 之后都可能过期，因此允许同参数重新观察。
+_MUTABLE_OBSERVATION_TOOLS = _WORKSPACE_OBSERVATION_TOOLS | {"browser_observe"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +217,21 @@ class _NoProgressTracker:
         self.observation_id = None
 
 
+@dataclass(frozen=True, slots=True)
+class _CompactionCallResult:
+    """一次成功 compaction 调用的内部结果（020）。
+
+    input 计数来自 compaction 专用 ContextPack 的真实预算估算；output 是
+    provider 自报的 ``ModelResponse.output_tokens``（当前合同没有 usage
+    嵌套对象，未上报记 0）。
+    """
+
+    snapshot: LoadedSnapshot
+    input_tokens: int
+    output_tokens: int
+    context: ContextPack
+
+
 class AgentRuntime:
     def __init__(
         self,
@@ -225,6 +251,7 @@ class AgentRuntime:
         browser_takeover_complete: Callable[[BrowserTakeoverRequestV1], int]
         | None = None,
         background_execution_authority: BackgroundExecutionAuthorityV1 | None = None,
+        conversation_archive: ConversationArchive | None = None,
     ) -> None:
         self._provider = provider
         self._context_manager = context_manager
@@ -242,6 +269,9 @@ class AgentRuntime:
         self._workspace_binding = workspace_binding
         self._browser_takeover_complete = browser_takeover_complete
         self._background_execution_authority = background_execution_authority
+        # 020 自动 compaction：archive 在缩减 CAS 前无损原样存档完整 state；
+        # None 时无 compaction 能力，普通 run 路径完全不变。
+        self._conversation_archive = conversation_archive
         self._event_buffer: ContextVar[list[RuntimeEvent] | None] = ContextVar(
             "agent_runtime_event_buffer",
             default=None,
@@ -695,6 +725,7 @@ class AgentRuntime:
         tool_calls = 0
         input_tokens = 0
         output_tokens = 0
+        compaction_batches = 0
         invalid_repairs = 0
         no_progress = _NoProgressTracker()
         no_progress_since_product_action = False
@@ -1203,27 +1234,30 @@ class AgentRuntime:
                 if (
                     active.invocation_origin is InvocationOrigin.MODEL
                     and tool_result.executed
-                    and not tool_result.is_error
                 ):
-                    verified = self._finish_if_durable_evidence_is_complete(
-                        current,
-                        action,
-                        warnings,
-                        tool_name=call.name,
-                    )
-                    if verified is not None:
-                        return verified
-                    if call.name in _WORKSPACE_MUTATION_TOOLS:
-                        # Workspace 发生真实 mutation 后，先前的本地观察已经过期；
-                        # 允许同参数 read/search 重新执行并取得新 snapshot。外部 Web、
-                        # history 与 effectful 请求仍保留 exact dedup。
+                    if not tool_result.is_error:
+                        verified = self._finish_if_durable_evidence_is_complete(
+                            current,
+                            action,
+                            warnings,
+                            tool_name=call.name,
+                        )
+                        if verified is not None:
+                            return verified
+                    # 实际执行的非 READ_ONLY result（含 is_error=True）可能已经
+                    # 改变外部状态：按 ToolSpec 声明的 SideEffectClass 保守使
+                    # 先前成功的可变观察过期，允许同参数重新观察/read。失效
+                    # 发生在 result checkpoint 成功之后；结果未知仍走既有
+                    # recovery，effectful 请求自身的 exact dedup 不受影响。
+                    if self._is_effectful_tool(call.name):
                         successful_product_requests.difference_update(
                             successful_workspace_observations
                         )
                         successful_workspace_observations.clear()
-                    successful_product_requests.add(request_digest)
-                    if call.name in _WORKSPACE_OBSERVATION_TOOLS:
-                        successful_workspace_observations.add(request_digest)
+                    if not tool_result.is_error:
+                        successful_product_requests.add(request_digest)
+                        if call.name in _MUTABLE_OBSERVATION_TOOLS:
+                            successful_workspace_observations.add(request_digest)
                 no_progress.reset()
                 no_progress_since_product_action = False
                 continue
@@ -1267,6 +1301,158 @@ class AgentRuntime:
                     outcome_state=paused,
                 )
 
+            # 020 前台 compaction 接线：archive 已注入、非 background
+            # occurrence、非 persisted-response 恢复时先做只读规划；actionable
+            # 才执行一个压缩批次并回到循环头，否则落回普通 build 路径。
+            # 压缩批次与普通 provider 调用共享同一套 invocation 门禁：
+            # 4 个批次上限、disclosure exact-receipt、input/output token
+            # 限额；model-call 限额已在循环头统一检查，此处不重复。
+            if (
+                self._conversation_archive is not None
+                and background_binding is None
+                and not recovering_persisted_response
+            ):
+                usage = self._checkpoint_store.usage(current)
+                try:
+                    plan = self._context_manager.plan_compaction(
+                        current.state,
+                        action,
+                        self._tool_runtime.definitions(),
+                        active_checkpoint_bytes=usage.active_bytes,
+                        soft_threshold_bytes=usage.soft_threshold_bytes,
+                    )
+                except ContextLimitError as error:
+                    # F4：compaction preflight 的 ContextLimitError 与普通
+                    # build 同型终态，不升级为 runtime_failure。
+                    return self._finish_context_limit(
+                        current, action, warnings, error
+                    )
+                if plan.actionable:
+                    if compaction_batches >= 4:
+                        paused = pause_for_limit(current.state)
+                        return self._finish(
+                            current,
+                            action,
+                            status=RunStatus.LIMIT_REACHED,
+                            warnings=warnings,
+                            event_kind=RuntimeEventKind.LIMIT_REACHED,
+                            error_code="compaction_batch_limit",
+                            outcome_state=paused,
+                        )
+                    try:
+                        context = self._context_manager.build_compaction(
+                            current.state, plan, current.token
+                        )
+                    except ContextLimitError as error:
+                        # 同上：pack 构建超限与普通 build 同型，零副作用。
+                        return self._finish_context_limit(
+                            current, action, warnings, error
+                        )
+                    # 与普通 provider 分支相同的 disclosure exact-receipt 门禁。
+                    disclosure = self._required_disclosure(context)
+                    if disclosure is not None and (
+                        current.state.provider_disclosure_receipt is None
+                        or current.state.provider_disclosure_receipt.request_digest
+                        != disclosure.request_digest
+                    ):
+                        paused = pause_for_provider_disclosure(current.state, disclosure)
+                        return self._finish(
+                            current,
+                            action,
+                            status=RunStatus.AWAITING_DISCLOSURE,
+                            warnings=warnings,
+                            event_kind=RuntimeEventKind.DISCLOSURE_REQUESTED,
+                            message="remote provider disclosure acknowledgement required",
+                            outcome_state=paused,
+                        )
+                    if (
+                        self._limits.max_input_tokens is not None
+                        and input_tokens + context.budget.estimated_input_tokens
+                        > self._limits.max_input_tokens
+                    ):
+                        paused = pause_for_limit(current.state)
+                        return self._finish(
+                            current,
+                            action,
+                            status=RunStatus.LIMIT_REACHED,
+                            warnings=warnings,
+                            event_kind=RuntimeEventKind.LIMIT_REACHED,
+                            error_code="input_token_limit",
+                            outcome_state=paused,
+                        )
+                    try:
+                        result = self._perform_compaction(current, plan, context)
+                    except RetryableProviderError as error:
+                        # 压缩批次的 provider 失败与普通模型调用同语义：
+                        # pause_for_retryable + FAILED_RETRYABLE，等待显式
+                        # Resume；不隐式重试压缩提交，也不升级为 fatal。
+                        paused = pause_for_retryable(current.state)
+                        provider_code = getattr(error, "code", "provider_retryable")
+                        if provider_code == "provider_http_retryable":
+                            provider_code = (
+                                "provider_rate_limit"
+                                if getattr(error, "status_code", None) == 429
+                                else "provider_unavailable"
+                            )
+                        if provider_code not in {
+                            "provider_retryable",
+                            "provider_timeout",
+                            "provider_transport",
+                            "provider_rate_limit",
+                            "provider_unavailable",
+                        }:
+                            provider_code = "provider_retryable"
+                        return self._finish(
+                            current,
+                            action,
+                            status=RunStatus.FAILED_RETRYABLE,
+                            warnings=warnings,
+                            event_kind=RuntimeEventKind.FAILED,
+                            error_code=provider_code,
+                            message=str(error),
+                            outcome_state=paused,
+                        )
+                    except (CompactionResponseError, CompactionArchiveError) as error:
+                        # summary 拒绝与 archive 不可用都发生在本批缩减 CAS 前。
+                        # 保留最新 current（可能已含前一批缩减），释放 invocation
+                        # owner，等待显式 Resume；不在这里隐式重试 Provider/archive。
+                        paused = pause_for_retryable(current.state)
+                        error_code = (
+                            "compaction_response_invalid"
+                            if isinstance(error, CompactionResponseError)
+                            else "compaction_archive_unavailable"
+                        )
+                        return self._finish(
+                            current,
+                            action,
+                            status=RunStatus.FAILED_RETRYABLE,
+                            warnings=warnings,
+                            event_kind=RuntimeEventKind.FAILED,
+                            error_code=error_code,
+                            message=str(error),
+                            outcome_state=paused,
+                        )
+                    current = result.snapshot
+                    model_calls += 1
+                    input_tokens += result.input_tokens
+                    output_tokens += result.output_tokens
+                    compaction_batches += 1
+                    if (
+                        self._limits.max_output_tokens is not None
+                        and output_tokens > self._limits.max_output_tokens
+                    ):
+                        paused = pause_for_limit(current.state)
+                        return self._finish(
+                            current,
+                            action,
+                            status=RunStatus.LIMIT_REACHED,
+                            warnings=warnings,
+                            event_kind=RuntimeEventKind.LIMIT_REACHED,
+                            error_code="output_token_limit",
+                            outcome_state=paused,
+                        )
+                    continue
+
             try:
                 context = self._context_manager.build(
                     current.state,
@@ -1286,20 +1472,7 @@ class AgentRuntime:
                     outcome_state=paused,
                 )
             except ContextLimitError as error:
-                failed = fail_run(
-                    current.state,
-                    code=error.code,
-                    message=str(error),
-                )
-                return self._finish(
-                    current,
-                    action,
-                    status=RunStatus.CONVERSATION_LIMIT_REACHED,
-                    warnings=warnings,
-                    event_kind=RuntimeEventKind.LIMIT_REACHED,
-                    error_code=error.code,
-                    outcome_state=failed,
-                )
+                return self._finish_context_limit(current, action, warnings, error)
             disclosure = self._required_disclosure(context)
             if disclosure is not None and (
                 current.state.provider_disclosure_receipt is None
@@ -3233,11 +3406,18 @@ class AgentRuntime:
             "materially different web_search only if another source is genuinely required."
         )
 
-    @classmethod
     def _successful_product_request_inventory(
-        cls,
+        self,
         state: ConversationState,
     ) -> tuple[set[str], set[str]]:
+        # 从 durable facts 重建与 _drive 内相同的失效语义：实际执行（含
+        # is_error=True）的非 READ_ONLY 工具使先前可变观察过期，判定依据
+        # 是当前 ToolRuntime 注册声明的 SideEffectClass。
+        state_changing_tools = frozenset(
+            definition.name
+            for definition in self._tool_runtime.definitions()
+            if definition.side_effect is not SideEffectClass.READ_ONLY
+        )
         active = state.active_run
         if active is None:
             return set(), set()
@@ -3246,7 +3426,7 @@ class AgentRuntime:
         successful: set[str] = set()
         workspace_observations: set[str] = set()
         for fact in state.facts:
-            if cls._is_operator_fact(fact):
+            if self._is_operator_fact(fact):
                 continue
             if not fact.fact_id.startswith(run_prefix):
                 continue
@@ -3266,24 +3446,24 @@ class AgentRuntime:
                         and isinstance(arguments, dict)
                     ):
                         request_by_call_id[call_id] = (
-                            cls._product_request_digest(name, arguments),
+                            self._product_request_digest(name, arguments),
                             name,
                         )
                 continue
             if (
                 fact.kind is FactKind.TOOL_RESULT
                 and fact.content.get("executed") is True
-                and fact.content.get("is_error") is False
             ):
                 call_id = fact.content.get("tool_call_id")
                 if isinstance(call_id, str) and call_id in request_by_call_id:
                     request_digest, tool_name = request_by_call_id[call_id]
-                    if tool_name in _WORKSPACE_MUTATION_TOOLS:
+                    if tool_name in state_changing_tools:
                         successful.difference_update(workspace_observations)
                         workspace_observations.clear()
-                    successful.add(request_digest)
-                    if tool_name in _WORKSPACE_OBSERVATION_TOOLS:
-                        workspace_observations.add(request_digest)
+                    if fact.content.get("is_error") is False:
+                        successful.add(request_digest)
+                        if tool_name in _MUTABLE_OBSERVATION_TOOLS:
+                            workspace_observations.add(request_digest)
         return successful, workspace_observations
 
     def _finish(
@@ -3371,6 +3551,65 @@ class AgentRuntime:
 
     def _save(self, snapshot: LoadedSnapshot, state) -> LoadedSnapshot:
         return self._checkpoint_store.compare_and_swap(snapshot, state)
+
+    def _finish_context_limit(
+        self,
+        current: LoadedSnapshot,
+        action: Action,
+        warnings: list[str],
+        error: ContextLimitError,
+    ) -> RunResult:
+        """ContextLimitError 的统一终态：普通 build 与 compaction preflight 共用。"""
+
+        failed = fail_run(
+            current.state,
+            code=error.code,
+            message=str(error),
+        )
+        return self._finish(
+            current,
+            action,
+            status=RunStatus.CONVERSATION_LIMIT_REACHED,
+            warnings=warnings,
+            event_kind=RuntimeEventKind.LIMIT_REACHED,
+            error_code=error.code,
+            outcome_state=failed,
+        )
+
+    def _perform_compaction(
+        self,
+        current: LoadedSnapshot,
+        plan: CompactionPlanV1,
+        context: ContextPack,
+    ) -> _CompactionCallResult:
+        """执行一次长会话压缩（020 内部成功路径）。
+
+        调用方必须已持有 run_turn 取得的 conversation mutation lease，并
+        传入 ``build_compaction`` 已构建好的专用 ContextPack。顺序固定：
+        单次 provider 调用 → 严格解析 → reducer 换 summary →
+        archive-before-CAS：先把完整原样 source 幂等写入 archive，成功后
+        才由 ``self._save`` 执行本批缩减的 CAS。任何失败原样向上传播，
+        本方法不捕获、不重试、不回滚。
+        """
+        if self._conversation_archive is None:
+            raise RuntimeError("compaction requires a conversation archive")
+        if not plan.actionable:
+            raise RuntimeError("compaction requires an actionable plan")
+        response = self._provider.generate(context)
+        summary = parse_compaction_response(
+            response,
+            source_checkpoint_digest=current.token.removeprefix("sha256:"),
+            source_fact_ids_digest=canonical_json_digest(list(plan.removable_fact_ids)),
+        )
+        reduced = apply_compaction_summary(current.state, summary, plan.removable_fact_ids)
+        archive_compaction_source(self._conversation_archive, current, reduced)
+        saved = self._save(current, reduced)
+        return _CompactionCallResult(
+            snapshot=saved,
+            input_tokens=context.budget.estimated_input_tokens,
+            output_tokens=response.bounded_output_tokens,
+            context=context,
+        )
 
     def _is_effectful_tool(self, tool_name: str) -> bool:
         # 非 READ_ONLY 一律视为 effectful,未来新增的副作用类别默认 fail closed。

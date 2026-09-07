@@ -25,6 +25,9 @@ First Agent 可在专属 Chromium 中读取公开网页、在 site-bound profile
 - adapter 内部拥有 quarantine/host path；ToolRuntime 只传 one-shot opaque upload staging
   capability，不把 concrete store/path 反向注入 port。
 - profile/session/quarantine store：只拥有 browser lifecycle state；state 不是 authority。
+- profile store 的 `writer.lock` 是 exact nonce/acquisition-revision lease；所有 profile
+  mutation 共用同一 per-profile guard 协议；live/unknown writer 期间 revoke/clear 拒绝
+  （busy/fail closed，不 quarantine、不删除）。
 - profile create/list/revoke/clear 是 user-only CLI control；create 只返回 opaque ID，
   并把一个 canonical HTTPS origin 的 policy digest 与当前 browser identity 固定进 profile。
 
@@ -56,8 +59,9 @@ First Agent 可在专属 Chromium 中读取公开网页、在 site-bound profile
 - takeover 前 Runtime durable pause；takeover 期间 provider/tool/observation/recording 为零；
   site-bound 自动化阶段保持 headless；同一 owner profile 只有在 pending checkpoint
   成功后才由既有 ToolRuntime 调 adapter 切换为 headed，不能提前显示窗口；
-  CLI 只提交 typed complete；Runtime 经注入的 browser lifecycle port 校验 exact live headed
-  session，幂等完成 profile revision++ 并 fresh observe；takeover 不批准后续 commit。
+  CLI 只提交 typed complete；completion 由与 registrations 同一静态 browser tool owner
+  callback 消费原 session 的 exact writer lease（Runtime 先校验 exact live headed
+  session），幂等完成 profile revision+1 并 fresh observe；takeover 不批准后续 commit。
 
 ## 6. Files and recovery
 

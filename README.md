@@ -218,7 +218,7 @@ EOF
 first-agent --provider fake --skill-root /tmp/skills
 ```
 
-模型按需调用 `skill__code-review` 激活完整 body，或用共享的 `skill__read_resource` 读取该 Skill 的 `references/`、`assets/`。`scripts/`、远程 registry、自动激活、`allowed-tools` 授权、prompt hook 和默认目录扫描都不在 v1 中；scan 后内容漂移会让旧 activation 失效（要求重启重建 catalog）。未配置 `--skill-root` 时 Kernel 行为与基线完全一致，且 base 安装不依赖 PyYAML。
+模型按需调用 `skill__code-review` 激活完整 body，或用共享的 `skill__read_resource` 读取该 Skill 的 `references/`、`assets/`。任意 `scripts/`、远程安装/registry、自动激活、`allowed-tools` 扩权和 prompt hook 仍不支持：唯一可执行路径是 manifest 声明的 owner-local Python entrypoint（`skill__<name>__<entrypoint>`），在固定 directory/file identity 与 digest、exact approval、既有 native sandbox、network off 下运行，证据等级为 implemented-candidate，不是 accepted/production-ready；scan 后内容漂移会让旧 activation 失效（要求重启重建 catalog）。未配置 `--skill-root` 时 Kernel 行为与基线完全一致，且 base 安装不依赖 PyYAML。
 
 ## MCP tools
 

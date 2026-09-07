@@ -30,9 +30,11 @@ flowchart LR
 - `runtime.context`、`runtime.tools`：各自拥有领域语义。
 - `runtime.loop`：只依赖合同与 ports，不依赖具体 provider、CLI 或文件工具。
 - `provider`、`runtime.checkpoint`、`runtime.events`、`agent.tools`：port adapter，不拥有循环。
-- `main.py`：当前唯一组合根。Capability reintroduction 的 Order 0 可先把 registrations 的静态 assembly 提取到 `agent/composition.py`；MCP 出现首个真实 closeable 时再加入 close stack，Memory 定义 ContextSource 时再加入 sources tuple。`main.py` 仍是配置与 caller 入口；二者不能演变成 service locator 或第二套 Runtime。
+- `main.py`：配置与 caller 入口；静态 assembly 已提取到 `agent/composition.py`：它显式构造唯一的 `KernelToolRuntime`、`KernelContextManager` 与 `AgentRuntime`，MCP closeables 进入 ordered close stack，Memory 以 immutable `ContextSource` 进入 sources tuple。二者不能演变成 service locator 或第二套 Runtime。
 
 这个 DAG 防止某个新能力通过“临时调用”绕开主循环，最终演化成第二个 Agent。
+
+对“caller 只提交 typed Action”有一条已知的边界情形：`main.py` 的 `browser_profile_user_command`（CLI `/browser-profiles`）是本机用户主动触发的 operator-only 浏览器 profile 管理面，提供 create/list/revoke/clear；它直接调用 `BrowserProfileStore`，输出只含 opaque profile ID，不进入 conversation checkpoint。模型驱动的会话行为、browser takeover 的 complete/cancel，以及一切 provider/tool/state progression 仍只能通过 typed Action 进入唯一的 `AgentRuntime.run_turn`：该管理面不暴露给模型，不是 tool 或 approval 的自授权路径，不能推进 Goal、调用 provider 或进入 `ToolRuntime`。因此它是“所有 CLI 输入都只是 typed conversation action”的明确限定，而不是模型权限绕过；它也不是通用桌面管理面，本切片不把它重写为新的 runtime action。
 
 ## 一次工具 effect 的顺序
 
@@ -69,12 +71,12 @@ sequenceDiagram
 
 `KernelContextManager` 统一预算 system policy、当前输入、历史、未解决请求、工具 schema 与工具结果，并保留输出空间。裁剪是确定性的：先限制过大的工具结果，再按最旧的完整原子组淘汰；tool call 与对应 result 不会被拆开。固定核心仍装不下时，会在 provider 调用前返回 limit，而不是悄悄丢失安全事实。
 
-Kernel v1 不做模型生成的摘要，也没有可执行的 Context Contributor 插件。Memory 若重新进入项目，必须先定义一个只读、不可变、受预算约束的 context-source seam。
+长会话压缩走一条严格、无 capability 的内部路径：专用 compaction `ContextPack` 由 `KernelContextManager` 构建，模型 summary 经严格解析后写回，缩减 CAS 前先把完整原样 state 无损写入 archive（archive-before-reduction）。summary 是 untrusted data，只能作为上下文参考，不能重建 Goal、Evidence、Approval 或 Recovery。Memory v1 已按只读、不可变、受预算约束的 `ContextSource` 加 governed tools 接入；仍没有可执行的 Context Contributor 插件。
 
 ## 持久化边界
 
-本地 store 只接受显式 v1 路径，使用 `0700` 目录、`0600` 文件、no-follow open、进程锁、snapshot token 和 revision CAS。`--state` 只创建，`--resume` 只加载。它不扫描、不迁移也不删除旧状态。
+本地 store 默认使用 owner-only state root，并按 workspace identity 确定性选择 session；`--state-root` 仅是 advanced override。store 仍使用 `0700` 目录、`0600` 文件、no-follow open、进程锁、snapshot token 和 revision CAS，不扫描、不迁移也不删除旧状态。
 
 ## 诚实边界
 
-Kernel v1 已通过 fake 和 mocked HTTP 合同验证，但这不等同于“通用 Agent 已完成”或生产级沙箱。Python tool source 是 operator-trusted；对抗同 UID 进程的最终文件竞态、untrusted extension 隔离、流式模型协议、语义压缩与真实 provider dogfood 都不在当前承诺内。
+Kernel v1 已通过 fake 和 mocked HTTP 合同验证，但这不等同于“通用 Agent 已完成”或生产级沙箱。Python tool source 是 operator-trusted；对抗同 UID 进程的最终文件竞态、untrusted extension 隔离、流式模型协议、模型 summary 的语义保真保证与真实 provider dogfood 都不在当前承诺内。

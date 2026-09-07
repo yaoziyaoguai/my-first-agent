@@ -31,7 +31,7 @@ from agent.browser.session_store import (
     BrowserSessionStore,
     SessionPhase,
 )
-from agent.browser.tools import build_browser_tool_registrations
+from agent.browser.tools import build_browser_tools
 from agent.browser.url_policy import browser_site_policy_digest
 from agent.runtime.contracts import (
     ApprovalGrant,
@@ -267,7 +267,7 @@ def test_upload_executes_once_only_after_exact_lease_and_removes_staging(
     )
     session_store = BrowserSessionStore(root=tmp_path / "sessions")
     runtime = KernelToolRuntime(
-        build_browser_tool_registrations(
+        build_browser_tools(
             environment=environment,
             profile_store=profiles,
             session_store=session_store,
@@ -276,7 +276,7 @@ def test_upload_executes_once_only_after_exact_lease_and_removes_staging(
             monotonic_clock=lambda: 1000.0,
             workspace=workspace,
             quarantine=quarantine,
-        ),
+        ).registrations,
         clock=lambda: "2026-08-28T10:00:00+00:00",
     )
     open_call = ToolCall(

@@ -159,3 +159,149 @@ def test_takeover_tool_result_returns_waiting_without_second_model_call():
     assert resumed.state.browser_takeover_pending is None
     assert len(provider.calls) == 3
     assert not provider._responses
+
+
+# --------------------------------------------------------------------------- #
+# 003：AgentRuntime 消费 bundle 静态绑定的 typed complete_takeover callback
+# --------------------------------------------------------------------------- #
+
+
+def test_run_turn_consumes_bundle_complete_takeover_with_exact_lease(tmp_path):
+    """完整 AgentRuntime 垂直切片。
+
+    takeover completion 只能来自 bundle 同一 browser tool owner 的
+    ``complete_takeover``（消费原 session 的 exact writer lease）：
+    begin → durable pending → typed complete → revision 恰好推进一次；
+    二次 complete 因 pending 已清而诚实拒绝，revision 不再漂移。
+    """
+
+    from agent.browser.profile_store import BrowserProfileStore
+    from agent.browser.session_store import BrowserSessionStore
+    from agent.browser.tools import build_browser_tools
+    from agent.browser.url_policy import browser_site_policy_digest
+    from agent.runtime.contracts import ApprovalGrant, ApprovalRequired, ToolCall
+    from agent.runtime.tools import KernelToolRuntime
+    from tests.browser.profile_probe import DeterministicProcessIdentityProbe
+    from tests.browser.test_tools import RecordingEnvironment, _context
+
+    environment = RecordingEnvironment()
+    profiles = BrowserProfileStore(
+        root=tmp_path / "profiles",
+        process_probe=DeterministicProcessIdentityProbe(),
+    )
+    browser_identity = "b" * 64
+    profile = profiles.create(
+        site_policy_digest=browser_site_policy_digest(
+            ("https://site.example.test",)
+        ),
+        account_label="flow account",
+        browser_identity_digest=browser_identity,
+    )
+    tools = build_browser_tools(
+        environment=environment,
+        profile_store=profiles,
+        session_store=BrowserSessionStore(root=tmp_path / "sessions"),
+        browser_identity_digest=browser_identity,
+        clock=lambda: "2026-08-28T10:00:00+00:00",
+        monotonic_clock=lambda: 1000.0,
+    )
+    tool_runtime = KernelToolRuntime(
+        tools.registrations, clock=lambda: "2026-08-28T10:00:00+00:00"
+    )
+
+    # 同一 owner 先打开 governed session（writer lease 由该 owner 持有）。
+    open_call = ToolCall(
+        "open-1",
+        "browser_open",
+        {
+            "mode": "site_bound_interactive",
+            "profile_ref": profile.profile_id,
+            "profile_revision": profile.revision,
+            "allowed_origins": ["https://site.example.test"],
+        },
+    )
+    approval = tool_runtime.prepare(open_call, _context())
+    assert isinstance(approval, ApprovalRequired)
+    opened = tool_runtime.invoke(
+        tool_runtime.prepare(
+            open_call,
+            _context(),
+            approval=ApprovalGrant(
+                request_id=approval.request.request_id,
+                binding_digest=approval.request.binding_digest,
+                approval_basis_revision=7,
+            ),
+        )
+    )
+    session_ref = opened.metadata["session_ref"]
+
+    provider = ScriptedProvider(
+        goal_noop_response("delta-takeover"),
+        ModelResponse(
+            (ModelToolCall("call-1", "browser_begin_takeover", {"session_ref": session_ref}),)
+        ),
+        # sentinel：pending 期间不得消费。
+        RetryableProviderError("resume-after-takeover"),
+    )
+    store = InMemoryCheckpointStore(conversation_with_active_goal())
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="Be concise.",
+            limits=ContextLimits(max_input_tokens=2_000, output_reserve=200),
+        ),
+        tool_runtime=tool_runtime,
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        browser_takeover_complete=tools.complete_takeover,
+        invocation_id_factory=lambda: "invocation-1",
+    )
+
+    submit = SubmitMessage(
+        conversation_id=store.state.conversation_id,
+        action_seq=store.state.next_action_seq,
+        expected_revision=store.state.revision,
+        run_id="run-1",
+        message="sign in please",
+    )
+    waiting = runtime.run_turn(submit, store.load())
+
+    pending = waiting.state.browser_takeover_pending
+    assert pending is not None
+    assert pending.session_ref == session_ref
+    assert pending.profile_revision == profile.revision
+    assert [handle.session_ref for handle in environment.takeovers] == [session_ref]
+    assert profiles.open(profile.profile_id).revision == profile.revision
+    assert len(provider.calls) == 2
+
+    complete = CompleteBrowserTakeover(
+        conversation_id=waiting.state.conversation_id,
+        action_seq=waiting.state.next_action_seq,
+        expected_revision=waiting.state.revision,
+        request_id=pending.request_id,
+        session_ref=pending.session_ref,
+        expected_profile_revision=pending.profile_revision,
+    )
+    resumed = runtime.run_turn(complete, store.load())
+
+    # callback 消费 exact lease：revision 恰好推进一次，pending 清除，
+    # sentinel 此时才消费（FAILED_RETRYABLE 是 sentinel 注入的期望结果）。
+    assert resumed.state.browser_takeover_pending is None
+    assert profiles.open(profile.profile_id).revision == profile.revision + 1
+    assert len(provider.calls) == 3
+
+    # 二次 complete：pending 已清，诚实拒绝且 revision 不再漂移。
+    duplicate = CompleteBrowserTakeover(
+        conversation_id=resumed.state.conversation_id,
+        action_seq=resumed.state.next_action_seq,
+        expected_revision=resumed.state.revision,
+        request_id=pending.request_id,
+        session_ref=pending.session_ref,
+        expected_profile_revision=pending.profile_revision + 1,
+    )
+    rejected = runtime.run_turn(duplicate, store.load())
+    # accept_action 在无 pending 时直接拒绝 typed control（fail closed）。
+    assert rejected.status is RunStatus.CONFLICT
+    assert rejected.state.browser_takeover_pending is None
+    assert profiles.open(profile.profile_id).revision == profile.revision + 1

@@ -85,6 +85,17 @@ def test_open_returns_current_ref_and_missing_profile_rejected(tmp_path):
         store.open("profile-does-not-exist")
 
 
+def test_open_for_missing_profile_leaves_root_untouched(tmp_path):
+    # 失败查询零 root mutation：不得为不存在的 profile O_CREAT guard。
+    store = make_store(tmp_path)
+    create_profile(store)
+    root = tmp_path / "profiles"
+    before = sorted(entry.name for entry in os.scandir(root))
+    with pytest.raises(ProfileNotFoundError):
+        store.open("profile-0000000000000000")
+    assert sorted(entry.name for entry in os.scandir(root)) == before
+
+
 def test_open_rejects_metadata_symlink(tmp_path):
     store = make_store(tmp_path)
     ref = create_profile(store)
@@ -108,13 +119,17 @@ def test_open_rejects_profile_directory_symlink(tmp_path):
         store.open(ref.profile_id)
 
 
-def test_revision_advance_requires_matching_expected_revision(tmp_path):
+def test_revision_advance_requires_matching_acquisition_revision(tmp_path):
     store = make_store(tmp_path)
     ref = create_profile(store)
-    bumped = store.advance_revision(ref, expected_revision=1)
+    lease = store.acquire_writer(ref)
+    bumped = store.advance_revision(lease, expected_revision=1)
     assert bumped.revision == 2
+    # 非 acquisition revision 一律拒绝；同 lease 重试幂等，不推进到 3。
     with pytest.raises(ProfileRevisionConflict):
-        store.advance_revision(ref, expected_revision=1)
+        store.advance_revision(lease, expected_revision=2)
+    assert store.advance_revision(lease, expected_revision=1).revision == 2
+    store.release_writer(lease)
     assert store.open(ref.profile_id).revision == 2
 
 
@@ -123,8 +138,9 @@ def test_revoke_blocks_reuse(tmp_path):
     ref = create_profile(store)
     revoked = store.revoke(ref)
     assert revoked.status is ProfileStatus.REVOKED
+    # revoked profile 不能取得 writer：复用在 acquisition 处被阻断。
     with pytest.raises(ProfileRevokedError):
-        store.advance_revision(revoked, expected_revision=1)
+        make_store(tmp_path).acquire_writer(revoked)
 
 
 def test_clear_removes_only_canonical_owned_root(tmp_path):
@@ -188,9 +204,9 @@ def test_forged_digest_reference_cannot_mutate_profile(tmp_path):
     ref = create_profile(store)
     forged = replace(ref, site_policy_digest="9" * 64)
     with pytest.raises(ProfileIntegrityError):
-        store.advance_revision(forged, expected_revision=1)
-    with pytest.raises(ProfileIntegrityError):
         store.revoke(forged)
+    with pytest.raises(ProfileIntegrityError):
+        store.clear(forged)
     with pytest.raises(ProfileIntegrityError):
         store.acquire_writer(forged)
     # 全部拒绝且零副作用：metadata revision 未动。
@@ -208,7 +224,10 @@ def test_forged_status_reference_cannot_acquire_writer(tmp_path):
 def test_stale_revision_reference_cannot_revoke(tmp_path):
     store = make_store(tmp_path)
     ref = create_profile(store)
-    store.advance_revision(ref, expected_revision=1)
+    # revision 推进只能由持有 exact lease 的 takeover 完成。
+    lease = store.acquire_writer(ref)
+    store.advance_revision(lease, expected_revision=1)
+    store.release_writer(lease)
     with pytest.raises(ProfileRevisionConflict):
         store.revoke(ref)
     stored = store.open(ref.profile_id)
@@ -237,6 +256,8 @@ def test_quarantine_root_symlink_never_receives_profiles(tmp_path):
 def test_root_replaced_by_symlink_fails_closed_before_any_write(tmp_path, mutation):
     store = make_store(tmp_path)
     ref = create_profile(store)
+    # 003：advance_revision 只接受 exact lease；在替换 root 前先取得。
+    lease = store.acquire_writer(ref) if mutation == "advance_revision" else None
     canonical_root = tmp_path / "profiles"
     escaped = tmp_path / "escaped-root"
     canonical_root.rename(escaped)
@@ -245,7 +266,7 @@ def test_root_replaced_by_symlink_fails_closed_before_any_write(tmp_path, mutati
     before = metadata.read_bytes()
     with pytest.raises(ProfileIntegrityError):
         if mutation == "advance_revision":
-            store.advance_revision(ref, expected_revision=1)
+            store.advance_revision(lease, expected_revision=1)
         elif mutation == "revoke":
             store.revoke(ref)
         elif mutation == "acquire_writer":
@@ -363,6 +384,7 @@ mode = sys.argv[3]
 
 store = BrowserProfileStore(root=root)
 ref = store.open(profile_id)
+lease = store.acquire_writer(ref)
 original = store._read_metadata_fd
 
 
@@ -383,7 +405,7 @@ def read_then_replace(profile_fd):
 
 store._read_metadata_fd = read_then_replace
 try:
-    store.advance_revision(ref, expected_revision=1)
+    store.advance_revision(lease, expected_revision=ref.revision)
     print("CAS_COMPLETED")
 except ProfileIntegrityError:
     print("CAS_REJECTED")

@@ -32,6 +32,12 @@ from agent.browser.ports import (
 )
 from agent.browser.profile_store import (
     BrowserProfileStore,
+    ProfileIntegrityError,
+    ProfileLockHeldError,
+    ProfileLockUnknownError,
+    ProfileNotFoundError,
+    ProfileRevisionConflict,
+    ProfileRevokedError,
     ProfileStatus,
     ProfileWriterLeaseV1,
 )
@@ -47,6 +53,7 @@ from agent.browser.session_store import (
     SessionPhase,
     SessionRecovery,
 )
+from agent.browser.takeover import complete_browser_takeover_profile
 from agent.browser.url_policy import browser_site_policy_digest
 from agent.runtime.contracts import (
     ApprovalPolicy,
@@ -120,6 +127,20 @@ class _Session:
     writer_lease: ProfileWriterLeaseV1 | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class BrowserToolBundle:
+    """browser tool owner 的静态组合产物（003）。
+
+    ``registrations`` 与 ``complete_takeover`` 绑定同一个 browser tool
+    owner：takeover completion 只能消费该 owner 持有的 exact writer lease，
+    不从 registration 反射、不经出动态 registry。bundle 不暴露 store、
+    environment 或 lease 本身。
+    """
+
+    registrations: tuple[RegisteredTool, ...]
+    complete_takeover: Callable[[BrowserTakeoverRequestV1], int]
+
+
 class _BrowserTools:
     def __init__(
         self,
@@ -142,7 +163,9 @@ class _BrowserTools:
         self._sessions = session_store
         self._browser_identity_digest = browser_identity_digest
         self._clock = clock
-        self._session_expiry = monotonic_clock() + _SESSION_SECONDS
+        # 会话租期不在注册/审批阶段固化；只有本次获批 open 真正开始执行时
+        # 才读一次 monotonic clock（见 interactive open callable）。
+        self._monotonic_clock = monotonic_clock
         self._active: dict[str, _Session] = {}
         self._action_bindings: dict[str, BrowserActionBindingV1] = {}
         self._workspace = Path(workspace).absolute() if workspace is not None else None
@@ -166,6 +189,8 @@ class _BrowserTools:
             if not origins or any(not isinstance(item, str) for item in origins):
                 raise ValueError("interactive browser requires exact origins")
             current = self._profiles.open(profile_ref)
+            if current.status is not ProfileStatus.ACTIVE:
+                raise ValueError("browser profile is not active")
             if (
                 current.revision != profile_revision
                 or current.browser_identity_digest != self._browser_identity_digest
@@ -180,7 +205,7 @@ class _BrowserTools:
             "allowed_origins": list(origins),
             "action_budget": action_budget,
             "browser_identity_digest": self._browser_identity_digest,
-            "session_expiry_monotonic": self._session_expiry,
+            "session_duration_seconds": _SESSION_SECONDS,
             "effect_preview": (
                 f"Open dedicated {mode.value} Chromium session; origins="
                 + (", ".join(origins) if origins else "public HTTPS policy")
@@ -200,18 +225,72 @@ class _BrowserTools:
                 profile = None
                 writer = None
             else:
-                profile = self._profiles.open(str(binding["profile_ref"]))
-                writer = self._profiles.acquire_writer(profile)
-                spec = BrowserSessionSpecV1.site_bound(
-                    goal_id=intent.goal_id or "",
-                    goal_revision=intent.goal_revision or 0,
-                    profile_ref=profile.profile_id,
-                    allowed_origins=tuple(binding["allowed_origins"]),
-                    action_budget=int(binding["action_budget"]),
-                    profile_revision=profile.revision,
-                    browser_identity_digest=self._browser_identity_digest,
-                    expiry_monotonic=float(binding["session_expiry_monotonic"]),
-                )
+                try:
+                    profile = self._profiles.open(str(binding["profile_ref"]))
+                    # frozen binding 的最后一次 exact 校验：Runtime revalidation
+                    # 通过后、本次 effect 前，profile 仍可能在 revision/status/site
+                    # policy/browser identity 上漂移；任一漂移都必须在 writer 与
+                    # adapter 效果前返回 closed KnownNotExecuted。
+                    if (
+                        profile.status is not ProfileStatus.ACTIVE
+                        or profile.revision != binding["profile_revision"]
+                        or profile.browser_identity_digest
+                        != binding["browser_identity_digest"]
+                        or profile.site_policy_digest
+                        != browser_site_policy_digest(tuple(binding["allowed_origins"]))
+                    ):
+                        return KnownNotExecuted(
+                            code="browser_open_binding_changed",
+                            message=(
+                                "browser profile binding changed before execution"
+                            ),
+                        )
+                    # final 校验与 acquire_writer 的二次 metadata 重读之间仍存在
+                    # 并发 owner mutation 窗口；store 层漂移/notfound/integrity/
+                    # revoked/lock 异常同样发生在 BrowserEnvironment.open 之前，
+                    # 效果为零：closed KnownNotExecuted，不能让 Runtime 误归
+                    # unknown-outcome。捕获范围严格止于 adapter 调用前。
+                    writer = self._profiles.acquire_writer(profile)
+                except (
+                    ProfileNotFoundError,
+                    ProfileIntegrityError,
+                    ProfileRevokedError,
+                    ProfileRevisionConflict,
+                ) as error:
+                    return KnownNotExecuted(
+                        code="browser_open_binding_changed",
+                        message=(
+                            "browser profile binding changed before execution: "
+                            f"{error}"
+                        ),
+                    )
+                except (ProfileLockHeldError, ProfileLockUnknownError) as error:
+                    return KnownNotExecuted(
+                        code="browser_open_unavailable",
+                        message=f"browser profile writer is unavailable: {error}",
+                    )
+                try:
+                    spec = BrowserSessionSpecV1.site_bound(
+                        goal_id=intent.goal_id or "",
+                        goal_revision=intent.goal_revision or 0,
+                        profile_ref=profile.profile_id,
+                        allowed_origins=tuple(binding["allowed_origins"]),
+                        action_budget=int(binding["action_budget"]),
+                        # open 只消费 lease acquisition 时验证过的 snapshot。
+                        profile_revision=writer.profile.revision,
+                        browser_identity_digest=self._browser_identity_digest,
+                        expiry_monotonic=(
+                            self._monotonic_clock()
+                            + float(binding["session_duration_seconds"])
+                        ),
+                    )
+                except (KeyError, TypeError, ValueError) as error:
+                    # writer 已持有而 immutable spec 构造失败：释放 writer，
+                    # 零 effect 返回 closed KnownNotExecuted。
+                    self._profiles.release_writer(writer)
+                    return KnownNotExecuted(
+                        code="browser_open_invalid", message=str(error)
+                    )
         except (KeyError, TypeError, ValueError) as error:
             return KnownNotExecuted(code="browser_open_invalid", message=str(error))
 
@@ -682,8 +761,34 @@ class _BrowserTools:
         self._environment.begin_takeover(session.handle)
         return request
 
+    def complete_takeover(self, request: BrowserTakeoverRequestV1) -> int:
+        """同一 owner 的 typed takeover completion：消费原 session 的 exact lease。
 
-def build_browser_tool_registrations(
+        验证 request/session/spec/environment headed identity 后才调用
+        lease-bound takeover helper；任何漂移零 mutation 拒绝。
+        """
+        session = self._session(request.session_ref)
+        if (
+            session.spec.mode is not BrowserMode.SITE_BOUND_INTERACTIVE
+            or session.writer_lease is None
+            or request.profile_ref != session.spec.profile_ref
+            or request.profile_revision != session.spec.profile_revision
+            or request.browser_identity_digest != self._browser_identity_digest
+            or request.goal_id != session.spec.goal_id
+            or request.goal_revision != session.spec.goal_revision
+        ):
+            raise ValueError("takeover request does not bind the active browser session")
+        if not self._environment.takeover_session_active(request.session_ref):
+            raise ValueError("browser takeover session is not headed")
+        return complete_browser_takeover_profile(
+            request,
+            self._profiles,
+            lease=session.writer_lease,
+            browser_identity_digest=self._browser_identity_digest,
+        )
+
+
+def build_browser_tools(
     *,
     environment: BrowserEnvironment,
     profile_store: BrowserProfileStore,
@@ -693,7 +798,12 @@ def build_browser_tool_registrations(
     monotonic_clock: Callable[[], float],
     workspace: Path | None = None,
     quarantine: BrowserQuarantine | None = None,
-) -> tuple[RegisteredTool, ...]:
+) -> BrowserToolBundle:
+    """构造唯一 browser tool owner 的静态 bundle。
+
+    registrations 与 complete_takeover 绑定同一个 ``_BrowserTools`` owner；
+    不保留旧 tuple builder，也不提供 compatibility wrapper。
+    """
     tools = _BrowserTools(
         environment=environment,
         profile_store=profile_store,
@@ -726,93 +836,96 @@ def build_browser_tool_registrations(
             "additionalProperties": False,
         },
     }
-    return (
-        RegisteredTool(
-            spec=_spec(
-                "browser_open",
-                "Open one dedicated governed Chromium session.",
-                {
-                    "mode": {"type": "string", "enum": list(_MODES)},
-                    "profile_ref": {"type": "string"},
-                    "profile_revision": {"type": "integer", "minimum": 1},
-                    "allowed_origins": {
-                        "type": "array",
-                        "items": {"type": "string"},
+    return BrowserToolBundle(
+        registrations=(
+            RegisteredTool(
+                spec=_spec(
+                    "browser_open",
+                    "Open one dedicated governed Chromium session.",
+                    {
+                        "mode": {"type": "string", "enum": list(_MODES)},
+                        "profile_ref": {"type": "string"},
+                        "profile_revision": {"type": "integer", "minimum": 1},
+                        "allowed_origins": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "action_budget": {"type": "integer", "minimum": 1},
                     },
-                    "action_budget": {"type": "integer", "minimum": 1},
-                },
-                required=("mode",),
-                side_effect=SideEffectClass.EXTERNAL,
-                approval=ApprovalPolicy.ALWAYS,
-                kind="browser_open",
-                risk=ToolRisk.HIGH,
-            ),
-            prepare_binding=tools.prepare_open,
-            func=tools.open,
-        ),
-        RegisteredTool(
-            spec=_spec(
-                "browser_observe",
-                "Read one bounded ARIA projection from the active session.",
-                session_property,
-                required=("session_ref",),
-                side_effect=SideEffectClass.READ_ONLY,
-                approval=ApprovalPolicy.NEVER,
-                kind="browser_observe",
-                risk=ToolRisk.LOW,
-            ),
-            prepare_binding=tools.prepare_active_session,
-            func=tools.observe,
-        ),
-        RegisteredTool(
-            spec=_spec(
-                "browser_act",
-                "Execute one closed action bound to the current browser observation.",
-                action_properties,
-                required=(
-                    "session_ref",
-                    "kind",
-                    "observation_digest",
-                    "page_id",
-                    "frame_id",
+                    required=("mode",),
+                    side_effect=SideEffectClass.EXTERNAL,
+                    approval=ApprovalPolicy.ALWAYS,
+                    kind="browser_open",
+                    risk=ToolRisk.HIGH,
                 ),
-                side_effect=SideEffectClass.EXTERNAL,
-                approval=ApprovalPolicy.ALWAYS,
-                kind="browser_action",
-                egress=EgressClass.GOVERNED_NETWORK,
-                risk=ToolRisk.HIGH,
+                prepare_binding=tools.prepare_open,
+                func=tools.open,
             ),
-            prepare_binding=tools.prepare_action,
-            func=tools.act,
-            policy=BrowserActionToolPolicy(),
-        ),
-        RegisteredTool(
-            spec=_spec(
-                "browser_close",
-                "Close one active browser session and record bounded cleanup.",
-                session_property,
-                required=("session_ref",),
-                side_effect=SideEffectClass.EXTERNAL,
-                approval=ApprovalPolicy.NEVER,
-                kind="browser_close",
+            RegisteredTool(
+                spec=_spec(
+                    "browser_observe",
+                    "Read one bounded ARIA projection from the active session.",
+                    session_property,
+                    required=("session_ref",),
+                    side_effect=SideEffectClass.READ_ONLY,
+                    approval=ApprovalPolicy.NEVER,
+                    kind="browser_observe",
+                    risk=ToolRisk.LOW,
+                ),
+                prepare_binding=tools.prepare_active_session,
+                func=tools.observe,
             ),
-            prepare_binding=tools.prepare_session,
-            func=tools.close,
-        ),
-        RegisteredTool(
-            spec=_spec(
-                "browser_begin_takeover",
-                "Pause automation for user interaction in the dedicated browser window.",
-                session_property,
-                required=("session_ref",),
-                side_effect=SideEffectClass.EXTERNAL,
-                approval=ApprovalPolicy.NEVER,
-                kind="browser_takeover",
+            RegisteredTool(
+                spec=_spec(
+                    "browser_act",
+                    "Execute one closed action bound to the current browser observation.",
+                    action_properties,
+                    required=(
+                        "session_ref",
+                        "kind",
+                        "observation_digest",
+                        "page_id",
+                        "frame_id",
+                    ),
+                    side_effect=SideEffectClass.EXTERNAL,
+                    approval=ApprovalPolicy.ALWAYS,
+                    kind="browser_action",
+                    egress=EgressClass.GOVERNED_NETWORK,
+                    risk=ToolRisk.HIGH,
+                ),
+                prepare_binding=tools.prepare_action,
+                func=tools.act,
+                policy=BrowserActionToolPolicy(),
             ),
-            prepare_binding=tools.prepare_active_session,
-            func=tools.begin_takeover,
+            RegisteredTool(
+                spec=_spec(
+                    "browser_close",
+                    "Close one active browser session and record bounded cleanup.",
+                    session_property,
+                    required=("session_ref",),
+                    side_effect=SideEffectClass.EXTERNAL,
+                    approval=ApprovalPolicy.NEVER,
+                    kind="browser_close",
+                ),
+                prepare_binding=tools.prepare_session,
+                func=tools.close,
+            ),
+            RegisteredTool(
+                spec=_spec(
+                    "browser_begin_takeover",
+                    "Pause automation for user interaction in the dedicated browser window.",
+                    session_property,
+                    required=("session_ref",),
+                    side_effect=SideEffectClass.EXTERNAL,
+                    approval=ApprovalPolicy.NEVER,
+                    kind="browser_takeover",
+                ),
+                prepare_binding=tools.prepare_active_session,
+                func=tools.begin_takeover,
+            ),
         ),
+        complete_takeover=tools.complete_takeover,
     )
 
 
-__all__ = ["BROWSER_TOOL_NAMES", "build_browser_tool_registrations"]
+__all__ = ["BROWSER_TOOL_NAMES", "BrowserToolBundle", "build_browser_tools"]

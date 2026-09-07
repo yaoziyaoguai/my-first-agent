@@ -25,7 +25,7 @@ from agent.browser.playwright_adapter import (
 from agent.browser.profile_store import BrowserProfileStore
 from agent.browser.quarantine import BrowserQuarantine, BrowserQuarantineError
 from agent.browser.session_store import BrowserSessionStore
-from agent.browser.tools import build_browser_tool_registrations
+from agent.browser.tools import build_browser_tools
 from agent.browser.url_policy import browser_site_policy_digest
 from agent.runtime.contracts import (
     ApprovalGrant,
@@ -197,7 +197,7 @@ def test_download_requires_exact_lease_and_returns_quarantine_receipt_only(tmp_p
         browser_identity_digest="b" * 64,
     )
     runtime = KernelToolRuntime(
-        build_browser_tool_registrations(
+        build_browser_tools(
             environment=environment,
             profile_store=profiles,
             session_store=BrowserSessionStore(root=tmp_path / "sessions"),
@@ -206,7 +206,7 @@ def test_download_requires_exact_lease_and_returns_quarantine_receipt_only(tmp_p
             monotonic_clock=lambda: 1000.0,
             workspace=workspace,
             quarantine=quarantine,
-        ),
+        ).registrations,
         clock=lambda: "2026-08-28T10:00:00+00:00",
     )
     open_call = ToolCall(

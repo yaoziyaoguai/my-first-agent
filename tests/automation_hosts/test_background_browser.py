@@ -36,6 +36,17 @@ def _fixture_or_skip(tmp_path, *, attempt_id: str):  # noqa: ANN001, ANN202
         raise
 
 
+def _require_browser_ready(resources, fixture) -> None:  # noqa: ANN001
+    """真实 Chromium 未物化时跳过；其他 qualification 失败仍 fail loud。"""
+
+    if resources.readiness is BrowserReadiness.READY:
+        return
+    fixture.close()
+    if resources.reason_code == "browser_binary_missing":
+        pytest.skip("Playwright Chromium binary is not installed on this test host")
+    pytest.fail(f"browser resources unavailable: {resources.reason_code}")
+
+
 def test_background_browser_grant_does_not_broaden_forbidden_classes() -> None:
     repository, _ = _running_claim()
     verifier = AutomationClaimVerifier(repository)
@@ -95,7 +106,7 @@ def test_real_public_browser_observation_uses_background_authority_and_budget(
         resolver=FixtureResolver(),
         playwright_factory=FixturePlaywrightFactory(port=fixture.port),
     )
-    assert resources.readiness is BrowserReadiness.READY
+    _require_browser_ready(resources, fixture)
     runtime = KernelToolRuntime(
         resources.registrations,
         background_claim_verifier=AutomationClaimVerifier(repository),
@@ -193,7 +204,7 @@ def test_real_public_browser_does_not_self_authorize_disclose_commit_or_download
         resolver=FixtureResolver(),
         playwright_factory=FixturePlaywrightFactory(port=fixture.port),
     )
-    assert resources.readiness is BrowserReadiness.READY
+    _require_browser_ready(resources, fixture)
     runtime = KernelToolRuntime(
         resources.registrations,
         background_claim_verifier=AutomationClaimVerifier(repository),

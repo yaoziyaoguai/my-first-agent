@@ -586,33 +586,105 @@ def browser_profile_user_command(  # noqa: ANN001
             site_policy_digest = browser_site_policy_digest((origin,))
         except URLPolicyError as error:
             raise ValueError("profile requires one canonical HTTPS origin") from error
-        ref = store.create(
-            site_policy_digest=site_policy_digest,
-            account_label=create_parts[2],
-            browser_identity_digest=browser_identity_digest,
+        from agent.browser.profile_store import (
+            ProfileIntegrityError,
+            ProfileNotFoundError,
         )
+
+        try:
+            ref = store.create(
+                site_policy_digest=site_policy_digest,
+                account_label=create_parts[2],
+                browser_identity_digest=browser_identity_digest,
+            )
+        except (ProfileNotFoundError, ProfileIntegrityError) as error:
+            # root 缺失/损坏是 store 的 closed 状态：不得穿透 run_repl。
+            raise ValueError("browser profile store unavailable") from error
         return f"Browser profile {ref.profile_id} created."
     if verb == "list":
+        from agent.browser.profile_store import (
+            ProfileIntegrityError,
+            ProfileNotFoundError,
+        )
+
         try:
             profiles = sorted(store.list_profile_ids())
-        except OSError as error:
-            raise ValueError("profile store unavailable") from error
+        except (
+            OSError,
+            ProfileNotFoundError,
+            ProfileIntegrityError,
+        ) as error:
+            raise ValueError("browser profile store unavailable") from error
         if not profiles:
             return "No browser profiles."
         return "Browser profiles:\n" + "\n".join(profiles)
     if verb in ("revoke", "clear") and len(parts) == 2:
         from agent.browser.contracts import BrowserCleanupOutcome
-        from agent.browser.profile_store import ProfileNotFoundError
+        from agent.browser.profile_store import (
+            ProfileIntegrityError,
+            ProfileLockHeldError,
+            ProfileLockUnknownError,
+            ProfileNotFoundError,
+            ProfileRevisionConflict,
+            ProfileRevokedError,
+        )
 
         profile_id = parts[1]
         try:
             ref = store.open(profile_id)
         except ProfileNotFoundError as error:
             raise ValueError("unknown browser profile") from error
+        except (ProfileIntegrityError, ProfileLockUnknownError) as error:
+            # metadata/guard 状态不可确认：closed 文本，无 path/digest/label。
+            raise ValueError(
+                "browser profile state cannot be confirmed"
+            ) from error
+        outcome = None
+        try:
+            if verb == "revoke":
+                store.revoke(ref)
+            else:
+                outcome = store.clear(ref)
+        except ProfileLockHeldError:
+            # active browser session（含 takeover）占用 writer：未撤销/未清除。
+            return (
+                f"Browser profile {profile_id} is in use; it was not "
+                + ("revoked" if verb == "revoke" else "cleared")
+                + ". Finish the browser session first, then retry."
+            )
+        except ProfileLockUnknownError:
+            # writer identity 无法确定：未执行，不删除 lock/profile。
+            return (
+                f"Browser profile {profile_id} writer state cannot be "
+                "confirmed; nothing was "
+                + ("revoked" if verb == "revoke" else "cleared")
+                + "."
+            )
+        except ProfileRevokedError:
+            if verb == "revoke":
+                # 重复 revoke：已持久化过，本次没有做任何事。
+                return (
+                    f"Browser profile {profile_id} is already revoked; "
+                    "nothing done."
+                )
+            return (
+                f"Browser profile {profile_id} changed while the command "
+                "ran; nothing was cleared."
+            )
+        except (ProfileNotFoundError, ProfileRevisionConflict):
+            # open 与 mutation 之间 profile 被删除/推进：诚实报告变更。
+            return (
+                f"Browser profile {profile_id} changed while the command "
+                "ran; nothing was "
+                + ("revoked" if verb == "revoke" else "cleared")
+                + "."
+            )
+        except ProfileIntegrityError as error:
+            raise ValueError(
+                "browser profile state cannot be confirmed"
+            ) from error
         if verb == "revoke":
-            store.revoke(ref)
             return f"Browser profile {profile_id} revoked."
-        outcome = store.clear(ref)
         if outcome is not BrowserCleanupOutcome.CLEANED:
             return (
                 f"Browser profile {profile_id} cleanup unknown; it is "

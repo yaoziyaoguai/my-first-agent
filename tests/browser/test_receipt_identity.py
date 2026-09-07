@@ -8,7 +8,7 @@ session_ref、profile_revision、browser_identity_digest——evidence oracle �
 
 from agent.browser.profile_store import BrowserProfileStore
 from agent.browser.session_store import BrowserSessionStore
-from agent.browser.tools import build_browser_tool_registrations
+from agent.browser.tools import build_browser_tools
 from agent.runtime.contracts import (
     ApprovalGrant,
     ToolCall,
@@ -23,14 +23,14 @@ CLOCK = lambda: "2026-08-28T10:00:00+00:00"  # noqa: E731
 
 
 def _runtime(tmp_path, environment):
-    registrations = build_browser_tool_registrations(
+    registrations = build_browser_tools(
         environment=environment,
         profile_store=BrowserProfileStore(root=tmp_path / "profiles"),
         session_store=BrowserSessionStore(root=tmp_path / "sessions"),
         browser_identity_digest=BROWSER_IDENTITY,
         clock=CLOCK,
         monotonic_clock=lambda: 1000.0,
-    )
+    ).registrations
     return KernelToolRuntime(registrations, clock=CLOCK)
 
 

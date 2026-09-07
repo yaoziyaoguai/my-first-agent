@@ -6,6 +6,8 @@ profile list/revoke/clear 与 takeover complete/cancel 是 user-only typed
 命令，不在模型工具面；错误无 traceback/internal path/cookie/account 原文。
 """
 
+import os
+
 import pytest
 
 from agent.browser.profile_store import BrowserProfileStore
@@ -123,6 +125,126 @@ def test_profile_list_revoke_clear_round_trip(tmp_path):
     assert "cleared" in cleared
 
 
+# --------------------------------------------------------------------------- #
+# 003：活跃/未知 writer 下的 revoke/clear 必须诚实拒绝（忙碌/未知，非清理未知）
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("verb", ["revoke", "clear"])
+def test_profile_command_reports_busy_without_touching_active_writer(tmp_path, verb):
+    from agent.browser.profile_store import ProfileLockHeldError
+
+    store = _profile_store(tmp_path)
+    ref = store.create(
+        site_policy_digest="a" * 64,
+        account_label="active account",
+        browser_identity_digest="b" * 64,
+    )
+    lease = store.acquire_writer(ref)  # 模拟活跃 browser session 的 writer
+
+    message = browser_profile_user_command(f"{verb} {ref.profile_id}", store)
+
+    assert "is in use" in message
+    assert "was not " + ("revoked" if verb == "revoke" else "cleared") in message
+    # 诚实拒绝而不是清理未知：writer 仍在，profile 未被撤销。
+    with pytest.raises(ProfileLockHeldError):
+        store.acquire_writer(ref)
+    assert store.open(ref.profile_id).status.value == "active"
+
+    store.release_writer(lease)
+    followup = browser_profile_user_command(f"{verb} {ref.profile_id}", store)
+    assert ("revoked" if verb == "revoke" else "cleared") in followup
+
+
+@pytest.mark.parametrize("verb", ["revoke", "clear"])
+def test_profile_command_reports_unknown_writer_without_touching_anything(tmp_path, verb):
+    from agent.browser.profile_store import ProcessIdentity
+
+    class UnconfirmableForeignProbe:
+        """本进程可确认；锁内 pid 的存活无法确认（非明确 dead）。"""
+
+        def probe(self, pid: int) -> ProcessIdentity:
+            if pid == os.getpid():
+                return ProcessIdentity(exists=True, started_at=f"self:{pid}")
+            return ProcessIdentity(exists=None, started_at=None)
+
+    store = BrowserProfileStore(
+        root=tmp_path / "profiles",
+        process_probe=UnconfirmableForeignProbe(),
+    )
+    ref = store.create(
+        site_policy_digest="a" * 64,
+        account_label="legacy account",
+        browser_identity_digest="b" * 64,
+    )
+    # 良构的四字段遗留 writer.lock（非本进程）：存在但身份无法确认，
+    # 绝不能当作可清理垃圾。
+    legacy_dir = tmp_path / "profiles" / ref.profile_id
+    legacy_dir.joinpath("writer.lock").write_text(
+        '{"pid": 4194304, "started_at": "foreign-start", '
+        '"lease_id": "deadbeefdeadbeefdeadbeefdeadbeef", '
+        '"acquired_revision": 1}',
+        encoding="utf-8",
+    )
+
+    message = browser_profile_user_command(f"{verb} {ref.profile_id}", store)
+
+    assert "writer state cannot be confirmed" in message
+    assert "nothing was " + ("revoked" if verb == "revoke" else "cleared") in message
+    # 零 secret：不泄漏 path/label/digest/nonce。
+    assert str(tmp_path) not in message
+    assert "deadbeef" not in message
+    assert "legacy" not in message
+    # 未清理：lock 与 profile 原样保留，交由人工确认。
+    assert legacy_dir.joinpath("writer.lock").exists()
+    assert store.open(ref.profile_id).status.value == "active"
+
+
+def test_profile_command_double_revoke_reports_already_revoked_nothing_done(
+    tmp_path,
+):
+    store = _profile_store(tmp_path)
+    ref = store.create(
+        site_policy_digest="a" * 64,
+        account_label="double revoke account",
+        browser_identity_digest="b" * 64,
+    )
+    first = browser_profile_user_command(f"revoke {ref.profile_id}", store)
+    assert "revoked" in first
+
+    second = browser_profile_user_command(f"revoke {ref.profile_id}", store)
+
+    assert "already revoked" in second
+    assert "nothing" in second
+    # 未伪装成功，也未泄漏内部细节。
+    assert str(tmp_path) not in second
+    assert "double revoke" not in second
+
+
+@pytest.mark.parametrize("verb", ["revoke", "clear"])
+def test_profile_command_corrupt_metadata_surfaces_closed_value_error(tmp_path, verb):
+    store = _profile_store(tmp_path)
+    ref = store.create(
+        site_policy_digest="a" * 64,
+        account_label="corrupt metadata account",
+        browser_identity_digest="b" * 64,
+    )
+    (tmp_path / "profiles" / ref.profile_id / "metadata.json").write_text(
+        "{ not json"
+    )
+
+    try:
+        browser_profile_user_command(f"{verb} {ref.profile_id}", store)
+    except ValueError as error:
+        message = str(error)
+    else:
+        pytest.fail("corrupt metadata must surface a closed ValueError")
+
+    # closed 文本：不含 path/label 原文/digest，也不含 store 内部措辞。
+    for forbidden in (str(tmp_path), "not json", "metadata", "corrupt metadata"):
+        assert forbidden not in message, forbidden
+
+
 def test_takeover_profile_completion_is_idempotent_after_runtime_retry(tmp_path):
     from agent.runtime.contracts import BrowserTakeoverRequestV1
 
@@ -142,18 +264,20 @@ def test_takeover_profile_completion_is_idempotent_after_runtime_retry(tmp_path)
         goal_revision=1,
         requested_at="2026-08-28T10:00:00+00:00",
     )
+    # 003：completion 只消费原 session 的 exact writer lease。
+    lease = store.acquire_writer(ref)
 
     first = complete_browser_takeover_profile(
         request,
         store,
+        lease=lease,
         browser_identity_digest="b" * 64,
-        session_is_active=lambda session_ref: session_ref == request.session_ref,
     )
     second = complete_browser_takeover_profile(
         request,
         store,
+        lease=lease,
         browser_identity_digest="b" * 64,
-        session_is_active=lambda session_ref: session_ref == request.session_ref,
     )
 
     assert first == ref.revision + 1
@@ -222,8 +346,8 @@ def test_takeover_completion_advances_the_exact_persistent_profile(tmp_path):
     assert complete_browser_takeover_profile(
         request,
         store,
+        lease=store.acquire_writer(profile),
         browser_identity_digest=browser_identity,
-        session_is_active=lambda session_ref: session_ref == request.session_ref,
     ) == 2
     assert store.open(profile.profile_id).revision == 2
 
@@ -254,8 +378,8 @@ def test_takeover_completion_rejects_changed_browser_identity_without_mutation(
         complete_browser_takeover_profile(
             request,
             store,
+            lease=store.acquire_writer(profile),
             browser_identity_digest="c" * 64,
-            session_is_active=lambda _session_ref: True,
         )
     assert store.open(profile.profile_id).revision == 1
 
@@ -297,17 +421,15 @@ def test_browser_act_approval_preview_is_exact_and_bounded(tmp_path):
     # 真实 governed browser_act 审批 UX：site-bound open（approve+invoke）→
     # observe → DISCLOSE fill_form 经实际 BrowserActionPolicy/
     # KernelToolRuntime.prepare 得到 ApprovalRequired.request.preview；
-    # 只投影该真实 approval 数据为 APPROVAL_REQUESTED 事件交
-    # TerminalRenderer 渲染。无平行 preview/event 构造。
+    # 只投影该真实 approval 数据为 authoritative pending state 交
+    # TerminalRenderer.render_pending 渲染。无平行 preview/event 构造。
     from agent.browser.session_store import BrowserSessionStore
-    from agent.browser.tools import build_browser_tool_registrations
+    from agent.browser.tools import build_browser_tools
     from agent.browser.url_policy import browser_site_policy_digest
     from agent.cli.render import TerminalRenderer
     from agent.runtime.contracts import (
         ApprovalGrant,
         ApprovalRequired,
-        RuntimeEvent,
-        RuntimeEventKind,
         ToolCall,
     )
     from agent.runtime.tools import KernelToolRuntime
@@ -322,14 +444,14 @@ def test_browser_act_approval_preview_is_exact_and_bounded(tmp_path):
         account_label="test account",
         browser_identity_digest="b" * 64,
     )
-    registrations = build_browser_tool_registrations(
+    registrations = build_browser_tools(
         environment=environment,
         profile_store=profiles,
         session_store=BrowserSessionStore(root=tmp_path / "sessions"),
         browser_identity_digest="b" * 64,
         clock=lambda: "2026-08-28T10:00:00+00:00",
         monotonic_clock=lambda: 1000.0,
-    )
+    ).registrations
     runtime = KernelToolRuntime(
         registrations, clock=lambda: "2026-08-28T10:00:00+00:00"
     )
@@ -385,23 +507,29 @@ def test_browser_act_approval_preview_is_exact_and_bounded(tmp_path):
     assert candidate.consequence == "disclose"
     assert candidate.mode == "site_bound_interactive"
     assert candidate.allowed_origins == ("https://site.example.test",)
-    # 真实 approval 数据 → 真实 Runtime event 形状 → TerminalRenderer。
+    # 真实 approval 数据 → authoritative state → TerminalRenderer.render_pending。
+    # （pending event 已不再是可操作提示权威，渲染载体改用 render_pending。）
     rendered_lines: list[str] = []
     renderer = TerminalRenderer(write_fn=rendered_lines.append)
-    renderer.emit(
-        RuntimeEvent(
-            event_id="event-approval-act-1",
-            kind=RuntimeEventKind.APPROVAL_REQUESTED,
-            conversation_id="conversation-1",
-            run_id="run-1",
-            revision=1,
-            causation_id="act-1",
-            payload={
-                "tool_name": "browser_act",
-                "risk": "high",
-                "side_effect": "external",
-                "preview": approval.request.preview,
-            },
+    from dataclasses import replace as _replace
+
+    from agent.runtime.contracts import (
+        ActiveRun,
+        ActiveRunStatus,
+        ContinuationPhase,
+        ConversationState,
+    )
+
+    renderer.render_pending(
+        _replace(
+            ConversationState.new("conversation-1"),
+            active_run=ActiveRun(
+                "run-1",
+                status=ActiveRunStatus.AWAITING_APPROVAL,
+                phase=ContinuationPhase.TOOL,
+                pending_request=approval.request,
+                tool_calls=(act_call,),
+            ),
         )
     )
     text = "\n".join(rendered_lines)
@@ -447,3 +575,66 @@ def test_profile_list_uses_public_store_interface(tmp_path):
 
     source = inspect.getsource(main_module.browser_profile_user_command)
     assert "_root" not in source  # 不依赖私有属性
+
+
+# --------------------------------------------------------------------------- #
+# 003 修复批 2（fresh reviewer P2）：list/create 面对不可用 root 时，store 的
+# closed 异常（ProfileNotFoundError/ProfileIntegrityError）不得穿透 handler，
+# 只抛 closed ValueError，且消息不含 tmp path/account label/internal 细节。
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        pytest.param("missing", id="root-missing"),
+        pytest.param("symlink", id="root-symlink"),
+    ],
+)
+def test_profile_list_with_unusable_root_surfaces_closed_value_error(tmp_path, damage):
+    store = _profile_store(tmp_path)
+    if damage == "symlink":
+        target = tmp_path / "elsewhere"
+        target.mkdir()
+        (tmp_path / "profiles").symlink_to(target)
+
+    with pytest.raises(ValueError) as raised:
+        browser_profile_user_command("list", store)
+
+    message = str(raised.value)
+    assert "unavailable" in message
+    for forbidden in (
+        str(tmp_path),
+        "elsewhere",
+        "root missing",
+        "real directory",
+        "Errno",
+        "Traceback",
+    ):
+        assert forbidden not in message, forbidden
+
+
+def test_profile_create_with_unusable_root_surfaces_closed_value_error(tmp_path):
+    # root 位置被普通文件占用：无法创建 owned root，create 不得让 store 的
+    # closed 异常穿透（乃至 run_repl），只抛 closed ValueError。
+    (tmp_path / "profiles").write_text("not a directory", encoding="utf-8")
+    store = _profile_store(tmp_path)
+
+    with pytest.raises(ValueError) as raised:
+        browser_profile_user_command(
+            "create https://site.example.test secret-account-label",
+            store,
+            browser_identity_digest="b" * 64,
+        )
+
+    message = str(raised.value)
+    assert "unavailable" in message
+    for forbidden in (
+        str(tmp_path),
+        "secret-account-label",
+        "site.example.test",
+        "real directory",
+        "Errno",
+        "Traceback",
+    ):
+        assert forbidden not in message, forbidden

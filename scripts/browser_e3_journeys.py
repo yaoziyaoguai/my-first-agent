@@ -34,8 +34,7 @@ from agent.browser.quarantine import (
     QuarantinedDownloadV1,
 )
 from agent.browser.session_store import BrowserSessionStore
-from agent.browser.takeover import complete_browser_takeover_profile
-from agent.browser.tools import build_browser_tool_registrations
+from agent.browser.tools import build_browser_tools
 from agent.browser.url_policy import URLPolicyError, browser_site_policy_digest
 from agent.cli.render import TerminalRenderer
 from agent.runtime.checkpoint import LocalCheckpointStore
@@ -510,7 +509,9 @@ class RealBrowserFlow:
             response_timeout=30.0,
             join_timeout=10.0,
         )
-        registrations = build_browser_tool_registrations(
+        # 003：registrations 与 complete_takeover 静态绑定同一 browser tool
+        # owner；J6 的 takeover completion 消费该 owner 持有的 exact lease。
+        self.tools = build_browser_tools(
             environment=self.environment,
             profile_store=self.profile_store,
             session_store=self.session_store,
@@ -521,7 +522,7 @@ class RealBrowserFlow:
             quarantine=self.quarantine,
         )
         self.runtime = KernelToolRuntime(
-            registrations,
+            self.tools.registrations,
             clock=_utc_now,
         )
         self.definition_digest = _tool_definitions_digest(self.runtime)
@@ -1034,12 +1035,7 @@ class BrowserE3JourneySuite:
             checkpoint_store=checkpoint_store,
             event_sink=_DiscardingEventSink(),
             limits=InvocationLimits(),
-            browser_takeover_complete=lambda request: complete_browser_takeover_profile(
-                request,
-                self.flow.profile_store,
-                browser_identity_digest=self.flow.browser_identity_digest,
-                session_is_active=self.flow.environment.takeover_session_active,
-            ),
+            browser_takeover_complete=self.flow.tools.complete_takeover,
             invocation_id_factory=lambda: "j6-invocation",
         )
         initial = checkpoint_store.load()

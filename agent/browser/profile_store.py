@@ -27,6 +27,7 @@ import re
 import secrets
 import stat
 import subprocess
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -37,6 +38,7 @@ from agent.browser.contracts import BrowserCleanupOutcome
 
 PROFILE_ID_PATTERN = re.compile(r"profile-[0-9a-f]{16}")
 HEX64_PATTERN = re.compile(r"[0-9a-f]{64}")
+LEASE_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 METADATA_NAME = "metadata.json"
 LOCK_NAME = "writer.lock"
 QUARANTINE_NAME = "_quarantine"
@@ -52,7 +54,9 @@ METADATA_KEYS = frozenset(
         "status",
     }
 )
-LOCK_KEYS = frozenset({"pid", "started_at"})
+# 003：writer.lock 是四字段 closed schema（pid/started_at/lease_id/
+# acquired_revision）；旧两字段 lock 不静默升级，按 unknown 阻断。
+LOCK_KEYS = frozenset({"pid", "started_at", "lease_id", "acquired_revision"})
 
 
 class ProfileIntegrityError(Exception):
@@ -98,10 +102,16 @@ class BrowserProfileRefV1:
 
 @dataclass(frozen=True, slots=True)
 class ProfileWriterLeaseV1:
-    """一次 writer 授权的 opaque 凭据；不暴露 profile path，release 只作用于
-    匹配自己身份的锁。"""
+    """一次 writer acquisition 的 immutable 身份（003）。
 
-    profile_id: str
+    ``profile`` 是在 acquisition 线性化点验证过的完整 snapshot；``lease_id``
+    是本次 acquisition 的 32 位小写 hex nonce，与四字段 ``writer.lock``
+    全等绑定。lease 只存在于 browser owner/store 内存与 owner-only lock
+    中，不进入 model arguments、checkpoint、event 或 CLI 输出。
+    """
+
+    profile: BrowserProfileRefV1
+    lease_id: str
     pid: int
     started_at: str
 
@@ -450,46 +460,80 @@ class BrowserProfileStore:
         )
 
     def open(self, profile_id: str) -> BrowserProfileRefV1:
-        with (
-            self._owned_root_fd() as root_fd,
-            self._profile_dir_fd(root_fd, profile_id) as profile_fd,
-        ):
-            payload = self._read_metadata_fd(profile_fd)
-            ref = self._ref_from_payload(payload)
-            if ref.profile_id != profile_id:
-                raise ProfileIntegrityError("profile metadata identity mismatch")
-            return ref
+        # 参加同一 per-profile 短临界区：guard 内读到的 metadata snapshot 与
+        # mutation/acquisition 有明确线性化顺序。
+        with self._owned_root_fd() as root_fd:
+            self._require_profile_id(profile_id)
+            # 非权威预筛：失败查询不创建 guard，保持 root 零 mutation。
+            # 预筛与 guard 之间的创建竞态仍由 guard 内 _profile_dir_fd 的
+            # 权威失败兜底，这里不引入第二套协议。
+            try:
+                os.stat(profile_id, dir_fd=root_fd, follow_symlinks=False)
+            except FileNotFoundError as error:
+                raise ProfileNotFoundError(
+                    f"profile {profile_id!r} does not exist"
+                ) from error
+            except OSError:
+                pass
+            with (
+                self._serialized(root_fd, profile_id),
+                self._profile_dir_fd(root_fd, profile_id) as profile_fd,
+            ):
+                payload = self._read_metadata_fd(profile_fd)
+                ref = self._ref_from_payload(payload)
+                if ref.profile_id != profile_id:
+                    raise ProfileIntegrityError("profile metadata identity mismatch")
+                return ref
 
     def advance_revision(
-        self, ref: BrowserProfileRefV1, *, expected_revision: int,
+        self,
+        lease: ProfileWriterLeaseV1,
+        *,
+        expected_revision: int,
     ) -> BrowserProfileRefV1:
+        """takeover completion 专用：只有原 session 的 exact lease 能推进一次。
+
+        guard 内要求当前调用进程、lock nonce/owner/acquired revision、lease
+        snapshot immutable identity 与 ACTIVE metadata 全部匹配；
+        ``expected_revision`` 必须等于 acquisition revision。当前 revision 为
+        ``r`` 时 CAS 到 ``r+1``；仍由同一 lease 调用且当前已是 ``r+1`` 时
+        幂等返回；其他情况拒绝。
+        """
         with (
-            self._owned_root_fd() as root_fd,
-            self._profile_dir_fd(root_fd, ref.profile_id) as profile_fd,
+            self._owned_root_fd() as root_fd, self._serialized(root_fd, lease.profile.profile_id),
+            self._profile_dir_fd(root_fd, lease.profile.profile_id) as profile_fd,
         ):
             payload = self._read_metadata_fd(profile_fd)
             current = self._ref_from_payload(payload)
-            self._verify_reference(ref, current)
-            if expected_revision != ref.revision:
+            self._verify_lease_snapshot(lease, current)
+            if expected_revision != lease.profile.revision:
                 raise ProfileRevisionConflict(
-                    f"expected revision {expected_revision} != reference {ref.revision}"
+                    "expected revision must equal the acquisition revision"
                 )
-            new_payload = {**payload, "revision": expected_revision + 1}
+            self._require_lease_owns_lock(profile_fd, lease)
+            if current.revision == expected_revision + 1:
+                return current  # 同一 lease 已完成的幂等重试
+            if current.revision != expected_revision:
+                raise ProfileRevisionConflict(
+                    f"expected revision {expected_revision}, "
+                    f"found {current.revision}"
+                )
             self._cas_write_fd(
                 profile_fd,
                 expected_revision=expected_revision,
-                new_payload=new_payload,
+                new_payload={**payload, "revision": expected_revision + 1},
             )
             return replace(current, revision=expected_revision + 1)
 
     def revoke(self, ref: BrowserProfileRefV1) -> BrowserProfileRefV1:
         with (
-            self._owned_root_fd() as root_fd,
+            self._owned_root_fd() as root_fd, self._serialized(root_fd, ref.profile_id),
             self._profile_dir_fd(root_fd, ref.profile_id) as profile_fd,
         ):
             payload = self._read_metadata_fd(profile_fd)
             current = self._ref_from_payload(payload)
             self._verify_reference(ref, current)
+            self._require_no_live_writer(profile_fd)
             self._cas_write_fd(
                 profile_fd,
                 expected_revision=current.revision,
@@ -503,25 +547,22 @@ class BrowserProfileStore:
 
     @contextlib.contextmanager
     def _serialized(self, root_fd: int, profile_id: str) -> Iterator[None]:
-        """per-profile takeover 临界区：owned root 内的稳定 guard + flock。
+        """per-profile 唯一短临界区（003 协议）。
 
-        guard 锚定在 owned root（``guard-<profile_id>``）而不是 profile 目录：
-        clear 删除 profile 内容不会删除 guard，因此同 profile 的所有临界区
-        （acquire/release/clear）永远竞争同一 inode，不存在“guard unlink 后
-        contender 创建第二 inode”的窗口。guard 不携带任何 authority；clear
-        成功后残留为 root 级空 0600 文件，由 root 生命周期管理。
+        所有 lifecycle/writer 操作（open/acquire_writer/release_writer/
+        advance_revision/revoke/clear）都按 ``owned root fd → root 级 guard →
+        canonical profile dir fd → metadata/writer.lock`` 的固定顺序穿过
+        同一个 guard，从而在同 profile 的 mutation 与 writer acquisition
+        之间建立明确的线性化顺序。guard 锢定在 owned root（``guard-<profile_id>``）
+        而不是 profile 目录：clear 删除 profile 内容不会删除 guard，因此同
+        profile 的所有临界区永远竞争同一 inode。guard 不携带任何 authority，
+        也不跨浏览器启动或用户 takeover 长期持有；持 guard 期间绝不等待
+        另一个 guard actor。clear 成功后残留为 root 级空 0600 文件，由
+        root 生命周期管理。
         """
         self._require_profile_id(profile_id)
         guard_name = f"guard-{profile_id}"
-        try:
-            fd = os.open(
-                guard_name,
-                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
-                0o600,
-                dir_fd=root_fd,
-            )
-        except OSError as error:
-            raise ProfileLockUnknownError("guard unreadable") from error
+        fd = self._open_guard_fd(root_fd, guard_name)
         try:
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode):
@@ -540,30 +581,65 @@ class BrowserProfileStore:
         finally:
             os.close(fd)
 
-    def acquire_writer(self, ref: BrowserProfileRefV1) -> ProfileWriterLeaseV1:
+    @staticmethod
+    def _open_guard_fd(root_fd: int, guard_name: str) -> int:
+        # macOS 的 openat(dir_fd, O_CREAT) 在多进程竞争同一 guard 名时会短暂
+        # 返回 ENOENT（APFS 名字查找竞态；root fd 已验证有效，guard 只增不删）。
+        # 这里做的是 syscall 级有界重试，不是协议层自动重试：guard 只是临界区
+        # 入口，不携带任何 authority，重试不会扩大效果面。
+        last_error: OSError | None = None
+        for attempt in range(8):
+            try:
+                return os.open(
+                    guard_name,
+                    os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
+                    0o600,
+                    dir_fd=root_fd,
+                )
+            except FileNotFoundError as error:
+                last_error = error
+                time.sleep(0.01 * (attempt + 1))
+            except OSError as error:
+                raise ProfileLockUnknownError("guard unreadable") from error
+        raise ProfileLockUnknownError("guard unreadable") from last_error
+
+    def acquire_writer(self, expected_ref: BrowserProfileRefV1) -> ProfileWriterLeaseV1:
+        # self identity probe 在 guard 外完成：guard 内不做任何可停靠的
+        # 进程探测，避免持锁等待；acquisition 线性化点在 guard 内。
+        my_pid = os.getpid()
+        mine = self._probe.probe(my_pid)
+        if mine.exists is not True or mine.started_at is None:
+            raise ProfileLockUnknownError("cannot determine current process identity")
         with (
-            self._owned_root_fd() as root_fd,
-            self._profile_dir_fd(root_fd, ref.profile_id) as profile_fd,
+            self._owned_root_fd() as root_fd, self._serialized(root_fd, expected_ref.profile_id),
+            self._profile_dir_fd(root_fd, expected_ref.profile_id) as profile_fd,
         ):
             current = self._ref_from_payload(self._read_metadata_fd(profile_fd))
-            self._verify_reference(ref, current)
+            self._verify_reference(expected_ref, current)
             if current.status is not ProfileStatus.ACTIVE:
                 raise ProfileRevokedError("profile is revoked")
-            my_pid = os.getpid()
-            mine = self._probe.probe(my_pid)
-            if mine.exists is not True or mine.started_at is None:
-                raise ProfileLockUnknownError("cannot determine current process identity")
-            with self._serialized(root_fd, ref.profile_id):
-                if self._lock_exists(profile_fd):
-                    lock_pid, lock_start = self._read_lock_fd(profile_fd)
-                    self._assert_lock_takeover(lock_pid, lock_start, my_pid, mine.started_at)
-                    try:
-                        os.unlink(LOCK_NAME, dir_fd=profile_fd)
-                    except OSError as error:
-                        raise ProfileLockUnknownError("cannot replace stale lock") from error
-                self._create_lock_fd(profile_fd, my_pid, mine.started_at)
+            if self._lock_exists(profile_fd):
+                lock = self._read_lock_fd(profile_fd)
+                self._assert_lock_takeover(
+                    lock["pid"], lock["started_at"], my_pid, mine.started_at
+                )
+                try:
+                    os.unlink(LOCK_NAME, dir_fd=profile_fd)
+                except OSError as error:
+                    raise ProfileLockUnknownError(
+                        "cannot replace stale lock"
+                    ) from error
+            lease_id = secrets.token_hex(16)
+            self._create_lock_fd(
+                profile_fd,
+                my_pid,
+                mine.started_at,
+                lease_id=lease_id,
+                acquired_revision=current.revision,
+            )
             return ProfileWriterLeaseV1(
-                profile_id=ref.profile_id,
+                profile=current,
+                lease_id=lease_id,
                 pid=my_pid,
                 started_at=mine.started_at,
             )
@@ -589,14 +665,18 @@ class BrowserProfileStore:
 
     @staticmethod
     def _lock_exists(profile_fd: int) -> bool:
+        # 只有 ENOENT 表示“无锁”；其余 OSError（权限/IO 错误）说明锁状态
+        # 不可判定，必须 fail closed 为 unknown，不得当作锁存在或不存在。
         try:
             os.stat(LOCK_NAME, dir_fd=profile_fd, follow_symlinks=False)
         except FileNotFoundError:
             return False
+        except OSError as error:
+            raise ProfileLockUnknownError("lock existence unknown") from error
         return True
 
     @staticmethod
-    def _read_lock_fd(profile_fd: int) -> tuple[int, str]:
+    def _read_lock_fd(profile_fd: int) -> dict:
         try:
             fd = os.open(
                 LOCK_NAME,
@@ -623,12 +703,23 @@ class BrowserProfileStore:
             or payload["pid"] <= 0
             or not isinstance(payload["started_at"], str)
             or not payload["started_at"]
+            or not isinstance(payload["lease_id"], str)
+            or LEASE_ID_PATTERN.fullmatch(payload["lease_id"]) is None
+            or type(payload["acquired_revision"]) is not int
+            or payload["acquired_revision"] <= 0
         ):
             raise ProfileLockUnknownError("lock identity malformed")
-        return payload["pid"], payload["started_at"]
+        return payload
 
     @staticmethod
-    def _create_lock_fd(profile_fd: int, my_pid: int, my_start: str) -> None:
+    def _create_lock_fd(
+        profile_fd: int,
+        my_pid: int,
+        my_start: str,
+        *,
+        lease_id: str,
+        acquired_revision: int,
+    ) -> None:
         try:
             fd = os.open(
                 LOCK_NAME,
@@ -636,77 +727,178 @@ class BrowserProfileStore:
                 0o600,
                 dir_fd=profile_fd,
             )
-        except OSError as error:
+        except FileExistsError as error:
+            # 只有明确的“名字已被占用”才表示 held；其余 OSError（权限/IO）
+            # 是锁状态不可判定，不得伪装成“另一 writer 刚抢到”。
             raise ProfileLockHeldError("lock acquired concurrently") from error
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump({"pid": my_pid, "started_at": my_start}, handle, sort_keys=True)
-            handle.flush()
-            os.fsync(handle.fileno())
+        except OSError as error:
+            raise ProfileLockUnknownError("lock cannot be created") from error
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "pid": my_pid,
+                        "started_at": my_start,
+                        "lease_id": lease_id,
+                        "acquired_revision": acquired_revision,
+                    },
+                    handle,
+                    sort_keys=True,
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as error:
+            # 写入确认失败：lock 内容已不可判定，既不是成功 acquisition 也不
+            # 能 best-effort unlink 不确定状态；交由既有 unknown/takeover 判定。
+            raise ProfileLockUnknownError(
+                "lock write could not be confirmed"
+            ) from error
 
     def release_writer(self, lease: ProfileWriterLeaseV1) -> None:
-        # 迟来的 release（clear 已删 canonical root 等）必须是安全 no-op。
+        # 迟来的 release（clear 已删 canonical root 等）必须是安全 no-op；
+        # 只有四字段与 exact lease 全等的 lock 才允许删除，因此迟到的旧
+        # lease 永远不会删除同 profile 后续 acquisition 的锁（消除 ABA）。
         try:
             with (
                 self._owned_root_fd() as root_fd,
-                self._profile_dir_fd(root_fd, lease.profile_id) as profile_fd,
+                self._serialized(root_fd, lease.profile.profile_id),
+                self._profile_dir_fd(
+                    root_fd, lease.profile.profile_id
+                ) as profile_fd,
             ):
                 if not self._lock_exists(profile_fd):
                     return
-                with self._serialized(root_fd, lease.profile_id):
-                    try:
-                        lock_pid, lock_start = self._read_lock_fd(profile_fd)
-                    except ProfileLockUnknownError:
-                        return
-                    if lock_pid == lease.pid and lock_start == lease.started_at:
-                        with contextlib.suppress(OSError):
-                            os.unlink(LOCK_NAME, dir_fd=profile_fd)
+                try:
+                    lock = self._read_lock_fd(profile_fd)
+                except ProfileLockUnknownError:
+                    return
+                if (
+                    lock["pid"] == lease.pid
+                    and lock["started_at"] == lease.started_at
+                    and lock["lease_id"] == lease.lease_id
+                    and lock["acquired_revision"] == lease.profile.revision
+                ):
+                    with contextlib.suppress(OSError):
+                        os.unlink(LOCK_NAME, dir_fd=profile_fd)
         except (ProfileNotFoundError, ProfileIntegrityError):
             return
+
+    def _require_no_live_writer(self, profile_fd: int) -> None:
+        """mutation 前置：live writer → busy；unknown → fail closed。
+
+        只有无 writer 或 confirmed-stale writer 被安全移除后才允许 mutation；
+        active mutation 不删除 lock/profile/浏览器数据。
+        """
+        if not self._lock_exists(profile_fd):
+            return
+        lock = self._read_lock_fd(profile_fd)
+        my_pid = os.getpid()
+        mine = self._probe.probe(my_pid)
+        if mine.exists is not True or mine.started_at is None:
+            raise ProfileLockUnknownError("cannot determine current process identity")
+        self._assert_lock_takeover(lock["pid"], lock["started_at"], my_pid, mine.started_at)
+        try:
+            os.unlink(LOCK_NAME, dir_fd=profile_fd)
+        except OSError as error:
+            raise ProfileLockUnknownError("cannot remove stale lock") from error
+
+    @staticmethod
+    def _verify_lease_snapshot(
+        lease: ProfileWriterLeaseV1, current: BrowserProfileRefV1
+    ) -> None:
+        # lease 携带 acquisition 线性化点验证过的 immutable snapshot；
+        # digest/profile_id 任一漂移都说明 lease 不再描述这份 metadata。
+        if (
+            lease.profile.profile_id != current.profile_id
+            or lease.profile.site_policy_digest != current.site_policy_digest
+            or lease.profile.account_label_digest != current.account_label_digest
+            or lease.profile.browser_identity_digest != current.browser_identity_digest
+        ):
+            raise ProfileIntegrityError("lease snapshot does not match stored identity")
+        # acquire_writer 只会发出 ACTIVE snapshot；status 非 ACTIVE 的
+        # lease 必然是伪造的 acquisition 身份。
+        if lease.profile.status is not ProfileStatus.ACTIVE:
+            raise ProfileRevokedError("lease snapshot is not active")
+        if current.status is not ProfileStatus.ACTIVE:
+            raise ProfileRevokedError("profile is not active")
+
+    def _require_lease_owns_lock(
+        self, profile_fd: int, lease: ProfileWriterLeaseV1
+    ) -> None:
+        # ownerless advance 已删除：lock 必须由当前调用进程按 exact lease
+        # 持有（nonce/owner/acquired revision 全等），否则拒绝。
+        if not self._lock_exists(profile_fd):
+            raise ProfileLockUnknownError("writer lease has no live writer lock")
+        lock = self._read_lock_fd(profile_fd)
+        if (
+            lease.pid != os.getpid()
+            or lock["pid"] != lease.pid
+            or lock["started_at"] != lease.started_at
+            or lock["lease_id"] != lease.lease_id
+            or lock["acquired_revision"] != lease.profile.revision
+        ):
+            raise ProfileLockUnknownError("writer lock does not match the lease")
 
     # ------------------------------------------------------------------ #
     # clear / quarantine
     # ------------------------------------------------------------------ #
 
     def clear(self, ref: BrowserProfileRefV1) -> BrowserCleanupOutcome:
+        # 003 协议：root fd → guard → profile fd 全程同一短临界区。writer
+        # 判定先于 metadata 读取：live writer → ProfileLockHeldError（不删
+        # lock/profile，也不返 CLEANED）；unknown/corrupt writer →
+        # ProfileLockUnknownError；两者都不 quarantine。无 writer 或
+        # confirmed-stale writer 被安全移除后，corrupt metadata 仍保持既有
+        # CLEANUP_UNKNOWN + quarantine 语义。
         with self._owned_root_fd() as root_fd:
             self._require_profile_id(ref.profile_id)
-            try:
-                info = os.stat(ref.profile_id, dir_fd=root_fd, follow_symlinks=False)
-            except FileNotFoundError as error:
-                raise ProfileNotFoundError(
-                    f"profile {ref.profile_id!r} does not exist"
-                ) from error
-            if not stat.S_ISDIR(info.st_mode):
-                return self._quarantine(root_fd, ref.profile_id)
-            # phase 1：metadata 可读性（fs 不确定 → quarantine，不动 caller）。
-            try:
-                with self._profile_dir_fd(root_fd, ref.profile_id) as profile_fd:
-                    payload = self._read_metadata_fd(profile_fd)
-                    current = self._ref_from_payload(payload)
-            except (ProfileIntegrityError, ProfileNotFoundError):
-                return self._quarantine(root_fd, ref.profile_id)
-            # phase 2：caller ref 校验（forged → 拒绝，不触碰文件系统）。
-            self._verify_reference(ref, current)
-            # phase 3：先 revoke（关闭 writer 语义），再删 canonical owned root；
-            # already-revoked 的 clear 直接安全删除——revoke 已持久化过。
-            try:
-                # guard 必须覆盖最终 rmdir；否则 late contender 可在 tree 已清空、
-                # guard 已释放但 canonical directory 尚未删除的窗口重建 lock。
-                with self._serialized(root_fd, ref.profile_id):
+            with self._serialized(root_fd, ref.profile_id):
+                try:
+                    info = os.stat(ref.profile_id, dir_fd=root_fd, follow_symlinks=False)
+                except FileNotFoundError as error:
+                    raise ProfileNotFoundError(
+                        f"profile {ref.profile_id!r} does not exist"
+                    ) from error
+                if not stat.S_ISDIR(info.st_mode):
+                    return self._quarantine(root_fd, ref.profile_id)
+                # phase 1：同 fd 内先判 writer（live/unknown 优先于 metadata
+                # 可读性，不得把活跃 writer 的 profile 连同 writer.lock 一起
+                # quarantine 掉），再读 metadata（fs 不确定 → quarantine）。
+                try:
                     with self._profile_dir_fd(root_fd, ref.profile_id) as profile_fd:
+                        self._require_no_live_writer(profile_fd)
+                        payload = self._read_metadata_fd(profile_fd)
+                        current = self._ref_from_payload(payload)
+                except (ProfileIntegrityError, ProfileNotFoundError):
+                    return self._quarantine(root_fd, ref.profile_id)
+                # phase 2：caller ref 校验（forged → 拒绝，不触碰文件系统）。
+                self._verify_reference(ref, current)
+                # phase 3：先 revoke（关闭 writer 语义），再删 canonical owned
+                # root；already-revoked 的 clear 直接安全删除——revoke 已持久化
+                # 过。guard 覆盖最终 rmdir，late contender 无法在 tree 已清空、
+                # guard 已释放但 canonical directory 尚未删除的窗口重建 lock。
+                try:
+                    with self._profile_dir_fd(root_fd, ref.profile_id) as profile_fd:
+                        self._require_no_live_writer(profile_fd)
                         if current.status is ProfileStatus.ACTIVE:
                             self._cas_write_fd(
                                 profile_fd,
                                 expected_revision=current.revision,
-                                new_payload={**payload, "status": ProfileStatus.REVOKED.value},
+                                new_payload={
+                                    **payload,
+                                    "status": ProfileStatus.REVOKED.value,
+                                },
                             )
                         self._remove_tree_fd(profile_fd)
                     os.rmdir(ref.profile_id, dir_fd=root_fd)
-            except (ProfileIntegrityError, ProfileRevisionConflict, ProfileRevokedError):
-                return self._quarantine(root_fd, ref.profile_id)
-            except OSError:
-                return self._quarantine(root_fd, ref.profile_id)
-            return BrowserCleanupOutcome.CLEANED
+                except (
+                    ProfileIntegrityError,
+                    ProfileRevisionConflict,
+                    ProfileRevokedError,
+                    OSError,
+                ):
+                    return self._quarantine(root_fd, ref.profile_id)
+                return BrowserCleanupOutcome.CLEANED
 
     def _quarantine(self, root_fd: int, profile_id: str) -> BrowserCleanupOutcome:
         # quarantine 只 rename canonical 名（symlink 也只移动 link 本身），

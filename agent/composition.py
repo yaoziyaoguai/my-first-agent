@@ -778,8 +778,7 @@ def build_browser_resources(
     from agent.browser.profile_store import BrowserProfileStore
     from agent.browser.quarantine import BrowserQuarantine
     from agent.browser.session_store import BrowserSessionStore
-    from agent.browser.takeover import complete_browser_takeover_profile
-    from agent.browser.tools import build_browser_tool_registrations
+    from agent.browser.tools import build_browser_tools
 
     profile_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     session_root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -794,7 +793,9 @@ def build_browser_resources(
         quarantine=quarantine,
     )
     profile_store = BrowserProfileStore(root=profile_root)
-    registrations = build_browser_tool_registrations(
+    # registrations 与 takeover completion callback 静态绑定同一个 browser
+    # tool owner（callback 消费该 owner 持有的 exact writer lease）。
+    tools = build_browser_tools(
         environment=environment,
         profile_store=profile_store,
         session_store=BrowserSessionStore(root=session_root),
@@ -806,14 +807,9 @@ def build_browser_resources(
     )
     closeables: tuple[Callable[[], None], ...] = (environment.shutdown,)
     return BrowserResources(
-        registrations=registrations,
+        registrations=tools.registrations,
         closeables=closeables,
         readiness=BrowserReadiness.READY,
         reason_code=None,
-        complete_takeover=lambda request: complete_browser_takeover_profile(
-            request,
-            profile_store,
-            browser_identity_digest=browser_identity_digest,
-            session_is_active=environment.takeover_session_active,
-        ),
+        complete_takeover=tools.complete_takeover,
     )

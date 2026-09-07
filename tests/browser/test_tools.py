@@ -17,7 +17,7 @@ from agent.browser.contracts import (
 from agent.browser.ports import BrowserEnvironment, BrowserOpenNotStartedError
 from agent.browser.profile_store import BrowserProfileStore, ProfileLockHeldError
 from agent.browser.session_store import BrowserSessionStore, SessionRecovery
-from agent.browser.tools import build_browser_tool_registrations
+from agent.browser.tools import build_browser_tools
 from agent.browser.url_policy import browser_site_policy_digest
 from agent.runtime.contracts import (
     ApprovalGrant,
@@ -60,9 +60,12 @@ class RecordingEnvironment:
         self.observed = []
         self.executed = []
         self.closed = []
+        self.takeovers = []
+        self._headed: set[str] = set()
         self.profile_revision = None
 
     def open(self, spec):
+        # open-entry counter：方法入口即记录（self.opened.append）。
         self.opened.append(spec)
         self.profile_revision = spec.profile_revision
         return BrowserHandleV1(
@@ -90,6 +93,13 @@ class RecordingEnvironment:
             session_ref=handle.session_ref,
             outcome=BrowserCleanupOutcome.CLEANED,
         )
+
+    def begin_takeover(self, handle):
+        self.takeovers.append(handle)
+        self._headed.add(handle.session_ref)
+
+    def takeover_session_active(self, session_ref):
+        return session_ref in self._headed
 
 
 class UnknownActionEnvironment(RecordingEnvironment):
@@ -145,14 +155,14 @@ def _observation(handle, *, profile_revision):
 
 
 def _registrations(tmp_path):
-    return build_browser_tool_registrations(
+    return build_browser_tools(
         environment=NeverCalledEnvironment(),
         profile_store=_profile_store(tmp_path),
         session_store=BrowserSessionStore(root=tmp_path / "sessions"),
         browser_identity_digest="b" * 64,
         clock=lambda: "2026-08-28T10:00:00+00:00",
         monotonic_clock=lambda: 1000.0,
-    )
+    ).registrations
 
 
 def test_registration_surface_is_exact_and_browser_governed(tmp_path):
@@ -234,14 +244,14 @@ def _context(*, browser_leases=()) -> ToolPrepareContext:
 
 def test_public_read_open_observe_act_close_uses_one_governed_runtime(tmp_path):
     environment = RecordingEnvironment()
-    registrations = build_browser_tool_registrations(
+    registrations = build_browser_tools(
         environment=environment,
         profile_store=_profile_store(tmp_path),
         session_store=BrowserSessionStore(root=tmp_path / "sessions"),
         browser_identity_digest="b" * 64,
         clock=lambda: "2026-08-28T10:00:00+00:00",
         monotonic_clock=lambda: 1000.0,
-    )
+    ).registrations
     runtime = KernelToolRuntime(registrations, clock=lambda: "2026-08-28T10:00:00+00:00")
     open_call = ToolCall(
         "open-1", "browser_open", {"mode": "public_read_ephemeral"}
@@ -303,14 +313,14 @@ def test_unknown_action_can_cleanup_resource_without_erasing_recovery(tmp_path) 
     environment = UnknownActionEnvironment()
     sessions = BrowserSessionStore(root=tmp_path / "sessions")
     runtime = KernelToolRuntime(
-        build_browser_tool_registrations(
+        build_browser_tools(
             environment=environment,
             profile_store=_profile_store(tmp_path),
             session_store=sessions,
             browser_identity_digest="b" * 64,
             clock=lambda: "2026-08-28T10:00:00+00:00",
             monotonic_clock=lambda: 1000.0,
-        ),
+        ).registrations,
         clock=lambda: "2026-08-28T10:00:00+00:00",
     )
     open_call = ToolCall("open-unknown", "browser_open", {"mode": "public_read_ephemeral"})
@@ -370,14 +380,14 @@ def test_cleanup_unknown_keeps_site_profile_writer_quarantined(tmp_path) -> None
         browser_identity_digest="b" * 64,
     )
     runtime = KernelToolRuntime(
-        build_browser_tool_registrations(
+        build_browser_tools(
             environment=environment,
             profile_store=profiles,
             session_store=BrowserSessionStore(root=tmp_path / "sessions"),
             browser_identity_digest="b" * 64,
             clock=lambda: "2026-08-28T10:00:00+00:00",
             monotonic_clock=lambda: 1000.0,
-        ),
+        ).registrations,
         clock=lambda: "2026-08-28T10:00:00+00:00",
     )
     open_call = ToolCall(
@@ -422,14 +432,14 @@ def test_cleanup_unknown_keeps_site_profile_writer_quarantined(tmp_path) -> None
 def test_forged_open_handle_is_closed_before_reporting_failure(tmp_path) -> None:
     environment = ForgedHandleEnvironment()
     runtime = KernelToolRuntime(
-        build_browser_tool_registrations(
+        build_browser_tools(
             environment=environment,
             profile_store=_profile_store(tmp_path),
             session_store=BrowserSessionStore(root=tmp_path / "sessions"),
             browser_identity_digest="b" * 64,
             clock=lambda: "2026-08-28T10:00:00+00:00",
             monotonic_clock=lambda: 1000.0,
-        ),
+        ).registrations,
         clock=lambda: "2026-08-28T10:00:00+00:00",
     )
     call = ToolCall(
@@ -461,14 +471,14 @@ def test_prestart_open_failure_releases_profile_writer(tmp_path) -> None:
         browser_identity_digest="b" * 64,
     )
     runtime = KernelToolRuntime(
-        build_browser_tool_registrations(
+        build_browser_tools(
             environment=PrestartUnavailableEnvironment(),
             profile_store=profiles,
             session_store=BrowserSessionStore(root=tmp_path / "sessions"),
             browser_identity_digest="b" * 64,
             clock=lambda: "2026-08-28T10:00:00+00:00",
             monotonic_clock=lambda: 1000.0,
-        ),
+        ).registrations,
         clock=lambda: "2026-08-28T10:00:00+00:00",
     )
     call = ToolCall(
@@ -510,14 +520,14 @@ def test_disclose_action_needs_exact_browser_lease_before_adapter_call(tmp_path)
         account_label="test account",
         browser_identity_digest="b" * 64,
     )
-    registrations = build_browser_tool_registrations(
+    registrations = build_browser_tools(
         environment=environment,
         profile_store=profiles,
         session_store=BrowserSessionStore(root=tmp_path / "sessions"),
         browser_identity_digest="b" * 64,
         clock=lambda: "2026-08-28T10:00:00+00:00",
         monotonic_clock=lambda: 1000.0,
-    )
+    ).registrations
     runtime = KernelToolRuntime(registrations, clock=lambda: "2026-08-28T10:00:00+00:00")
     open_call = ToolCall(
         "open-1",
@@ -615,14 +625,14 @@ def test_interactive_open_rejects_profile_for_another_site_policy(tmp_path):
         browser_identity_digest="b" * 64,
     )
     runtime = KernelToolRuntime(
-        build_browser_tool_registrations(
+        build_browser_tools(
             environment=environment,
             profile_store=profiles,
             session_store=BrowserSessionStore(root=tmp_path / "sessions"),
             browser_identity_digest="b" * 64,
             clock=lambda: "2026-08-28T10:00:00+00:00",
             monotonic_clock=lambda: 1000.0,
-        ),
+        ).registrations,
         clock=lambda: "2026-08-28T10:00:00+00:00",
     )
 
@@ -655,16 +665,16 @@ def test_takeover_revision_invalidates_old_session_but_still_allows_close(tmp_pa
         account_label="test account",
         browser_identity_digest="b" * 64,
     )
-    runtime = KernelToolRuntime(
-        build_browser_tool_registrations(
-            environment=environment,
-            profile_store=profiles,
-            session_store=BrowserSessionStore(root=tmp_path / "sessions"),
-            browser_identity_digest="b" * 64,
-            clock=lambda: "2026-08-28T10:00:00+00:00",
-            monotonic_clock=lambda: 1000.0,
-        ),
+    tools = build_browser_tools(
+        environment=environment,
+        profile_store=profiles,
+        session_store=BrowserSessionStore(root=tmp_path / "sessions"),
+        browser_identity_digest="b" * 64,
         clock=lambda: "2026-08-28T10:00:00+00:00",
+        monotonic_clock=lambda: 1000.0,
+    )
+    runtime = KernelToolRuntime(
+        tools.registrations, clock=lambda: "2026-08-28T10:00:00+00:00"
     )
     open_call = ToolCall(
         "open-1",
@@ -691,7 +701,17 @@ def test_takeover_revision_invalidates_old_session_but_still_allows_close(tmp_pa
     )
     session_ref = opened.metadata["session_ref"]
 
-    profiles.advance_revision(profile, expected_revision=profile.revision)
+    # 003：revision 推进只能由同一 owner 的 exact takeover completion 完成。
+    takeover_intent = runtime.prepare(
+        ToolCall("takeover-1", "browser_begin_takeover", {"session_ref": session_ref}),
+        _context(),
+    )
+    runtime.invoke(takeover_intent)
+    request = takeover_intent.browser_takeover_request
+    assert request is not None
+    assert tools.complete_takeover(request) == profile.revision + 1
+    assert profiles.open(profile.profile_id).revision == profile.revision + 1
+
     rejected = runtime.prepare(
         ToolCall("observe-stale", "browser_observe", {"session_ref": session_ref}),
         _context(),
@@ -790,14 +810,14 @@ def test_runtime_denial_then_approval_preserves_effect_order_and_single_use(tmp_
     )
     state = conversation_with_active_goal()
     store = InMemoryCheckpointStore(state)
-    registrations = build_browser_tool_registrations(
+    registrations = build_browser_tools(
         environment=environment,
         profile_store=profiles,
         session_store=BrowserSessionStore(root=tmp_path / "sessions"),
         browser_identity_digest="b" * 64,
         clock=lambda: "2026-08-28T10:00:00+00:00",
         monotonic_clock=lambda: 1000.0,
-    )
+    ).registrations
     runtime = AgentRuntime(
         provider=provider,
         context_manager=KernelContextManager(

@@ -240,8 +240,9 @@ async def run_stdio_session(
             error_message=_sanitize(str(error)),
         )
     finally:
-        # _drive_session 已在其 finally 内有界终止 process group、reap，并通过 anyio
-        # Process.aclose 关闭全部 pipe/主 transports（task group 才能收口、transport 不残留）；
+        # _drive_session 已在其 finally 内有界终止 process group、reap；reader 持续 drain
+        # stdout/stderr 到 EOF 后，Process.aclose 再关闭 wrapper/主 transport（task group
+        # 才能收口、transport 不残留）；
         # 仅当 _drive_session 未运行（如 validate 在 drive 前失败）时才在此补做。
         # _shutdown_process 对已退出进程幂等，且 cancellation-safe（shielded）。
         if process is not None and not commit.process_exit_confirmed:
@@ -289,6 +290,24 @@ async def _drive_session(
     async def stdout_reader() -> None:
         # 直接读 bytes 而非 TextReceiveStream：按 byte 维度对单条 JSON-RPC line 施加 hard cap，
         # 超限在 decode/parse 前 fail closed，防止单条超大行在 model_validate_json 处耗尽内存。
+        async def reject_oversized_line() -> None:
+            await read_writer.send(RuntimeError("stdout line exceeded transport hard cap"))
+            # 错误已经交付给 SDK；立即结束协议输入，让 call 不必等满 timeout。OS stdout
+            # 仍由当前协程继续 drain，直到外层 shutdown 使进程退出并关闭 pipe。
+            await read_writer.aclose()
+            # AnyIO 的 Process.aclose 只关闭 stdout wrapper；如果这里直接 return，未读完的
+            # asyncio read-pipe transport 会残留到 GC。错误送达 session 后继续丢弃字节直至
+            # shutdown 关闭进程并产生 EOF，既不扩大内存占用，也不依赖私有 asyncio API。
+            while True:
+                try:
+                    await process.stdout.receive()
+                except (
+                    anyio.EndOfStream,
+                    anyio.ClosedResourceError,
+                    anyio.BrokenResourceError,
+                ):
+                    return
+
         try:
             async with read_writer:
                 buffer = b""
@@ -300,16 +319,13 @@ async def _drive_session(
                     buffer += chunk
                     # 单行（累积至今未出现换行）超过 hard cap → parse 前 fail closed。
                     if b"\n" not in buffer and len(buffer) > _STDOUT_LINE_HARD_CAP_BYTES:
-                        await read_writer.send(
-                            RuntimeError("stdout line exceeded transport hard cap")
-                        )
+                        buffer = b""
+                        await reject_oversized_line()
                         return
                     *complete_lines, buffer = buffer.split(b"\n")
                     for raw_line in complete_lines:
                         if len(raw_line) > _STDOUT_LINE_HARD_CAP_BYTES:
-                            await read_writer.send(
-                                RuntimeError("stdout line exceeded transport hard cap")
-                            )
+                            await reject_oversized_line()
                             return
                         try:
                             line = raw_line.decode("utf-8")
@@ -397,7 +413,8 @@ async def _drive_session(
         finally:
             # 有界、cancellation-safe 终止 process group，让 task group 能收口。_shutdown_process
             # 关 stdin（正常 server 见 EOF 退出）+ bounded wait + 必要时 SIGKILL 整个 process group
-            # + anyio Process.aclose 关闭全部 transports。hanging server 不会因 stdin EOF 退出，
+            # + readers drain 到 EOF，再由 anyio Process.aclose 关闭 wrapper/主 transport。
+            # hanging server 不会因 stdin EOF 退出，
             # 必须 kill 才能让其 stdout/stderr pipe 关闭 → reader 收 EOF 退出；否则 task group
             # 永远等 hanging stdout、_drive_session 不返回，只能撞 bridge total_timeout 全局
             # quarantine 误伤无关 server。shield 保证 bridge.close 取消任务时 kill+reap+aclose
@@ -591,9 +608,9 @@ async def _shutdown_process(process, timeout) -> bool:
       1. SIGKILL 整个 process group（``start_new_session=True`` 下 hanging server 自身即
          组长，含其同组子进程）；
       2. 有界 reap（确认 returncode）；
-      3. 复用 anyio ``Process.aclose`` 关闭 stdin/stdout/stderr 底层 pipe transports 与
-         主 subprocess transport——不靠进程退出的副作用，也不维护一套不完整的 wrapper cleanup
-         （StreamReaderWrapper.aclose 仅 set_exception、不关底层 read-pipe transport）。
+      3. stdout/stderr readers 在进程退出后 drain 到 EOF，关闭底层 read-pipe transport；
+         随后复用 anyio ``Process.aclose`` 关闭 wrapper 与主 subprocess transport，不触碰
+         私有 asyncio transport。
 
     ``CancelScope(shield=True)`` 让取消不会打断 kill+reap+aclose：旧实现只捕获 TimeoutError，
     CancelledError（BaseException）会跳过 SIGKILL 分支，使 hanging 子进程成为 orphan。scope
@@ -632,7 +649,7 @@ async def _shutdown_process(process, timeout) -> bool:
                         exited = True
                     except BaseException:
                         pass
-        # 4. 复用 anyio 生命周期关闭全部 pipe transports + 主 transport（对已退出进程幂等）。
+        # 4. readers 会因进程退出读到 EOF；这里关闭 anyio wrappers + 主 transport（幂等）。
         with contextlib.suppress(BaseException):
             await process.aclose()
         return exited
@@ -671,4 +688,3 @@ class _NotExecutedError(Exception):
         super().__init__(sanitized)
         self.code = code
         self.sanitized = _sanitize(sanitized)
-

@@ -271,21 +271,37 @@ def test_abusive_line_size_fails_closed(tmp_path: Path) -> None:
     """P2 防御：单行 stdout 超过 transport hard cap（远超 result cap）时，必须在 parse
     前 fail closed——call bytes 已写出，故为 UNKNOWN（recovery），绝不把超长行塞进内存
     解析后当作成功。"""
-    bridge = McpAsyncBridge(total_timeout_seconds=30.0)
-    try:
-        outcome, _latch_state = _run_behavior(
-            bridge,
-            tmp_path,
-            mode="big_result",
-            size_mb=20,
-            timeouts=SessionTimeouts(initialize=10, list_page=10, call=20, shutdown=5),
-        )
-    finally:
-        bridge.close()
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        bridge = McpAsyncBridge(total_timeout_seconds=30.0)
+        try:
+            outcome, latch_state = _run_behavior(
+                bridge,
+                tmp_path,
+                mode="big_result",
+                size_mb=20,
+                timeouts=SessionTimeouts(initialize=10, list_page=10, call=20, shutdown=5),
+            )
+        finally:
+            bridge.close()
 
-    assert outcome.call_may_have_been_sent is True
-    assert outcome.classification is McpOutcomeClassification.UNKNOWN
-    assert len(outcome.result_text.encode("utf-8")) < 100_000
+        assert outcome.call_may_have_been_sent is True
+        assert outcome.classification is McpOutcomeClassification.UNKNOWN
+        assert len(outcome.result_text.encode("utf-8")) < 100_000
+
+        # 超长行被拒绝后也必须完整释放底层 read-pipe transport。释放所有 owner 引用并
+        # 强制 GC，使这个测试自己守住资源生命周期，而不是依赖后续测试碰巧触发告警。
+        del bridge, outcome, latch_state
+        for _ in range(5):
+            gc.collect()
+
+    forbidden = ("transport", "FileIO", "subprocess", "ReadPipe", "event loop")
+    offending = [
+        f"{getattr(item.category, '__name__', item.category)}: {item.message}"
+        for item in captured
+        if any(token in str(item.message) for token in forbidden)
+    ]
+    assert not offending, "oversized stdout leaked resources: " + " | ".join(offending)
 
 
 # ---------------------------------------------------------------------------

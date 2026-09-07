@@ -47,10 +47,25 @@ class StaticStore:
 class RecordingRuntime:
     def __init__(self) -> None:
         self.actions = []
+        self.snapshots = []
 
     def run_turn(self, action, snapshot):  # noqa: ANN001
         self.actions.append(action)
+        self.snapshots.append(snapshot)
         return RunResult(RunStatus.COMPLETED, snapshot.state)
+
+
+class SequencedStore:
+    """按 load 次序返回预置 snapshot，模拟 action 完成后状态的 durable 演进。"""
+
+    def __init__(self, states: list[ConversationState]) -> None:
+        self._states = list(states)
+        self._loads = 0
+
+    def load(self) -> LoadedSnapshot:
+        index = min(len(self._states) - 1, self._loads)
+        self._loads += 1
+        return LoadedSnapshot(self._states[index], f"token-{index}")
 
 
 def _run(state: ConversationState, *inputs: str):
@@ -174,7 +189,9 @@ def test_contextual_disclosure_no_exits_without_send_action(answer: str) -> None
 
     assert exit_code == 0
     assert runtime.actions == []
-    assert output == ["Nothing was sent."]
+    # 输入前显示的是 disclosure 决策提示；退出消息是最后一行且未伪造任何发送。
+    assert output[0].startswith("Remote provider disclosure required")
+    assert output[-1] == "Nothing was sent."
 
 
 @pytest.mark.parametrize(
@@ -205,7 +222,8 @@ def test_natural_language_at_approval_is_a_goal_correction() -> None:
     action = runtime.actions[0]
     assert isinstance(action, SubmitMessage)
     assert action.message == "请改为写入 final.md，不要创建 draft.md。"
-    assert output == []
+    # 自然语言更正不产生 error 输出；终端里唯一的可操作内容是输入前的 pending 提示。
+    assert output and all("Approval required" in message for message in output)
 
 
 @pytest.mark.parametrize(
@@ -236,7 +254,8 @@ def test_recovery_stop_exits_without_classifying_or_replaying(answer: str) -> No
 
     assert exit_code == 0
     assert runtime.actions == []
-    assert output == ["Stopped without classifying or retrying the previous operation."]
+    assert output[0].startswith("Unknown tool outcome")
+    assert output[-1] == "Stopped without classifying or retrying the previous operation."
 
 
 def test_ambiguous_yes_does_not_classify_unknown_outcome() -> None:
@@ -345,3 +364,186 @@ def test_restart_redisplays_exact_pending_decision_without_provider_or_effect(
     assert expected in rendered
     assert "internal-id" not in rendered
     assert "binding" not in rendered
+
+
+def _approval_state_with(request_id: str, preview: str) -> ConversationState:
+    request = ApprovalRequest(
+        request_id=request_id,
+        run_id="run-1",
+        tool_call_id="call-1",
+        binding_digest=f"binding-{request_id}",
+        preview=preview,
+        tool_name="write_file",
+    )
+    return replace(
+        ConversationState.new("conversation-1"),
+        active_run=ActiveRun(
+            "run-1",
+            status=ActiveRunStatus.AWAITING_APPROVAL,
+            phase=ContinuationPhase.TOOL,
+            pending_request=request,
+            tool_calls=(ToolCall("call-1", "write_file", {}),),
+        ),
+    )
+
+
+def _local_store(tmp_path: Path, state: ConversationState) -> LocalCheckpointStore:
+    import os
+
+    root = tmp_path / "state-root"
+    root.mkdir()
+    os.chmod(root, 0o700)
+    return LocalCheckpointStore.initialize(root / "checkpoint", state)
+
+
+def test_answer_binds_to_the_snapshot_displayed_before_input(tmp_path: Path) -> None:
+    """两调用者竞态：显示 A 之后、输入返回 yes 前 store 漂移到 B，答案仍只绑 A。"""
+
+    state_a = _approval_state_with("approval-a", "write notes/idea.md (12 bytes)")
+    store = _local_store(tmp_path, state_a)
+    state_b = replace(
+        _approval_state_with("approval-b", "write notes/other.md (3 bytes)"),
+        revision=state_a.revision + 1,
+    )
+    runtime = RecordingRuntime()
+    output: list[str] = []
+    seen_before_input: list[str] = []
+
+    def racing_input(_prompt: str) -> str:
+        seen_before_input.append("\n".join(output))
+        if len(seen_before_input) == 1:
+            lease = store.try_acquire(state_a.conversation_id)
+            assert lease is not None
+            try:
+                store.compare_and_swap(store.load(), state_b)
+            finally:
+                lease.release()
+            return "yes"
+        return "/exit"
+
+    exit_code = run_repl(
+        runtime,
+        store,
+        input_fn=racing_input,
+        write_fn=output.append,
+        run_id_factory=lambda: "run-new",
+    )
+
+    assert exit_code == 0
+    # 所见：yes 输入前终端显示的是 A 的 pending preview，不是漂移后 B 的。
+    assert "write notes/idea.md" in seen_before_input[0]
+    assert "write notes/other.md" not in seen_before_input[0]
+    # 所批：action 与 snapshot 都来自 A，绝不重绑到 B。
+    action = runtime.actions[0]
+    assert isinstance(action, ResolveApproval)
+    assert action.request_id == "approval-a"
+    assert action.expected_revision == state_a.revision
+    assert runtime.snapshots[0].state.revision == state_a.revision
+
+
+def test_drifted_answer_conflicts_with_zero_side_effects(tmp_path: Path) -> None:
+    """真实 runtime + 真实 LocalCheckpointStore：drift 后 CAS 使绑定答案零副作用。"""
+
+    from agent.runtime.context import ContextLimits, KernelContextManager
+    from agent.runtime.contracts import ModelResponse, ModelTextBlock
+    from agent.runtime.loop import AgentRuntime, InvocationLimits
+    from agent.runtime.tools import KernelToolRuntime
+    from tests.kernel.fakes import CollectingSink, ScriptedProvider
+
+    state_a = _approval_state_with("approval-a", "write notes/idea.md (12 bytes)")
+    store = _local_store(tmp_path, state_a)
+    state_b = replace(
+        _approval_state_with("approval-b", "write notes/other.md (3 bytes)"),
+        revision=state_a.revision + 1,
+    )
+    provider = ScriptedProvider(
+        ModelResponse((ModelTextBlock("must not run"),))
+    )
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=2_000, output_reserve=200),
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-race",
+    )
+    output: list[str] = []
+
+    def racing_input(_prompt: str) -> str:
+        lease = store.try_acquire(state_a.conversation_id)
+        assert lease is not None
+        try:
+            store.compare_and_swap(store.load(), state_b)
+        finally:
+            lease.release()
+        return "yes"
+
+    exit_code = run_repl(
+        runtime,
+        store,
+        input_fn=racing_input,
+        write_fn=output.append,
+        run_id_factory=lambda: "run-new",
+    )
+
+    # CAS fail closed：CONFLICT 退出，不重试、不重绑、provider 零调用。
+    assert exit_code == 2
+    assert provider.calls == []
+    final = store.load().state
+    assert final.revision == state_b.revision
+    active = final.active_run
+    assert active is not None and isinstance(active.pending_request, ApprovalRequest)
+    assert active.pending_request.request_id == "approval-b"
+
+
+@pytest.mark.parametrize("pending_kind", ["disclosure", "approval", "recovery"])
+@pytest.mark.parametrize("scenario", ["startup", "after_action"])
+def test_pending_decision_is_displayed_from_state_before_each_input(
+    pending_kind: str,
+    scenario: str,
+) -> None:
+    """event 全部丢失时，决策提示仍从 authoritative snapshot 在每次输入前显示。"""
+
+    if pending_kind == "disclosure":
+        pending = _disclosure_state()
+        expected = "Allow this information to be sent? [y/N]"
+    elif pending_kind == "approval":
+        pending = _approval_state()[0]
+        expected = "Execute this operation? [y/N]"
+    else:
+        pending = _recovery_state()[0]
+        expected = "Reply with 'success', 'failed', or 'stop'."
+    if scenario == "startup":
+        store = SequencedStore([pending])
+        first_input = "stop-answer-unused"
+    else:
+        store = SequencedStore([ConversationState.new("conversation-1"), pending])
+        first_input = "hello"
+    runtime = RecordingRuntime()
+    output: list[str] = []
+    seen_before_input: list[str] = []
+
+    def recording_input(_prompt: str) -> str:
+        seen_before_input.append("\n".join(output))
+        return "/exit" if len(seen_before_input) > 1 else first_input
+
+    exit_code = run_repl(
+        runtime,
+        store,
+        input_fn=recording_input,
+        write_fn=output.append,
+        run_id_factory=lambda: "run-new",
+    )
+
+    assert exit_code == 0
+    if scenario == "startup":
+        # REPL 启动后第一次输入前就显示决策提示。
+        assert expected in seen_before_input[0]
+    else:
+        # 启动时无 pending 不显示；完成 hello 这个 action 后、下一次输入前显示。
+        assert expected not in seen_before_input[0]
+        assert expected in seen_before_input[1]

@@ -103,6 +103,12 @@ def run_repl(
     make_run_id = run_id_factory or (lambda: str(uuid4()))
     renderer = renderer or TerminalRenderer(write_fn)
     while True:
+        # 所见即所批：先取权威 snapshot 并投影 pending 决策，再读输入；
+        # 该输入解析出的 action 与 run_turn 严格绑定同一 snapshot。
+        # 若等待输入期间 store 漂移，现有 expected_revision/token CAS 会让
+        # 该答案零副作用地 fail closed，且不重绑到新请求。
+        snapshot = store.load()
+        renderer.render_pending(snapshot.state)
         try:
             raw = input_fn("> ")
         except (EOFError, KeyboardInterrupt, StopIteration):
@@ -124,7 +130,6 @@ def run_repl(
                 write_fn("Browser profile store is unavailable.")
             continue
 
-        snapshot = store.load()
         if raw == "/sources":
             renderer.render_sources(snapshot.state)
             continue

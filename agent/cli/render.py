@@ -47,7 +47,9 @@ class TerminalRenderer:
             self._write(f"Warning: {terminal_text(warning)}")
 
     def render_pending(self, state: ConversationState) -> None:
-        """重启时只读重放 exact durable decision；绝不暴露内部 request identity。"""
+        """每次输入前从 authoritative state 只读投影 exact durable decision；
+        不暴露内部 request identity。
+        """
 
         active = state.active_run
         if active is None:
@@ -69,12 +71,16 @@ class TerminalRenderer:
             active.pending_request, ApprovalRequest
         ):
             request = active.pending_request
+            requirement = request.artifact_confirmation_requirement
             self._write(
                 self._approval_message(
                     tool_name=request.tool_name or "unknown",
                     risk=request.risk or "unknown",
                     side_effect=request.side_effect or "unknown",
                     preview=request.preview,
+                    artifact_path=(
+                        requirement.artifact_path if requirement is not None else None
+                    ),
                 )
             )
             return
@@ -123,26 +129,16 @@ class TerminalRenderer:
 
     @staticmethod
     def _event_message(event: RuntimeEvent) -> str | None:
+        # pending 类事件只是 advisory：可操作提示的唯一权威是每次输入前由
+        # authoritative state snapshot 渲染的 render_pending，避免双权威与
+        # event 丢失/延迟/重排影响正确提示。warning/informational 仍保留。
         payload = event.payload
-        if event.kind is RuntimeEventKind.APPROVAL_REQUESTED:
-            return TerminalRenderer._approval_message(
-                tool_name=payload.get("tool_name", "unknown"),
-                risk=payload.get("risk", "unknown"),
-                side_effect=payload.get("side_effect", "unknown"),
-                preview=payload.get("preview", "unavailable"),
-            )
-        if event.kind is RuntimeEventKind.RECOVERY_REQUESTED:
-            return TerminalRenderer._recovery_message(
-                payload.get("summary", "classification required"),
-                observation_unknown=payload.get("egress") == "public_network",
-            )
-        if event.kind is RuntimeEventKind.DISCLOSURE_REQUESTED:
-            classes = payload.get("data_classes", [])
-            return TerminalRenderer._disclosure_message(
-                destination=payload.get("destination", "unknown"),
-                model=payload.get("model", "unknown"),
-                data_classes=classes,
-            )
+        if event.kind in {
+            RuntimeEventKind.APPROVAL_REQUESTED,
+            RuntimeEventKind.RECOVERY_REQUESTED,
+            RuntimeEventKind.DISCLOSURE_REQUESTED,
+        }:
+            return None
         if event.kind is RuntimeEventKind.LIMIT_REACHED:
             # RunResult 带 authoritative state，可投影准确 blocker/进展；事件本身不重复刷屏。
             return None
@@ -213,15 +209,31 @@ class TerminalRenderer:
 
     @staticmethod
     def _approval_message(
-        *, tool_name: object, risk: object, side_effect: object, preview: object
+        *,
+        tool_name: object,
+        risk: object,
+        side_effect: object,
+        preview: object,
+        artifact_path: str | None = None,
     ) -> str:
-        return (
-            "Approval required\n"
-            f"tool: {terminal_text(tool_name)}\n"
-            f"risk/effect: {terminal_text(risk)}/{terminal_text(side_effect)}\n"
-            f"preview: {terminal_text(preview)}\n"
-            "Execute this operation? [y/N]"
-        )
+        lines = [
+            "Approval required",
+            f"tool: {terminal_text(tool_name)}",
+            f"risk/effect: {terminal_text(risk)}/{terminal_text(side_effect)}",
+            f"preview: {terminal_text(preview)}",
+        ]
+        if artifact_path is None:
+            lines.append("Execute this operation? [y/N]")
+        else:
+            # artifact approval 只接受 digest 确认的 special command：展示实际
+            # path 与精确格式，不自动填 digest，也不提供通用 [y/N]。
+            lines.append(
+                "This artifact-producing command requires an exact digest. "
+                "Approve with /approve-artifact <64-lowercase-hex-sha256> "
+                f"{terminal_text(artifact_path)} after verifying the file's "
+                "sha256, or reply 'no' to reject it."
+            )
+        return "\n".join(lines)
 
     @staticmethod
     def _recovery_message(

@@ -1205,8 +1205,9 @@ def main(
             except TextualNotInstalledError as error:
                 write_fn(str(error))
                 return 2
+        # run_repl 对交互生命周期独占负责：每次输入前从 authoritative
+        # snapshot 渲染 pending 决策（含启动期首次），此处不再预渲染。
         try:
-            renderer.render_pending(store.load().state)
             return run_repl(
                 runtime,
                 store,

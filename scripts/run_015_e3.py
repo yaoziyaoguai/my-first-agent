@@ -2156,7 +2156,12 @@ def _drive_j4_crash_journey(provider_factory, fixtures, clock, observed):
         input_fn=_stop_once,
         write_fn=stop_messages.append,
     )
-    observed["j4_user_stop_message"] = stop_messages[0] if stop_messages else None
+    # run_repl 合同：读取输入前先 render_pending 投影权威 pending recovery
+    # prompt（输出序列第一条）；输入 "stop" 后才写 contextual stop result（正常
+    # 序列的最后一条）。用户 stop 的证据取末条，与 _contextual_exit_message
+    # ("stop", state) 逐字对应；第一条已保留在 rendered_results，pending prompt
+    # 未被隐藏。序列为空时保持 None，claim 20 诚实 False。
+    observed["j4_user_stop_message"] = stop_messages[-1] if stop_messages else None
     observed.setdefault("rendered_results", []).extend(stop_messages)
     observed["j4_user_stop_send_count"] = _provider_send_count(provider2)
     final_state = store2.load().state

@@ -1657,6 +1657,16 @@ def test_015_j4_phase3_drives_user_stop_via_production_cli_adapter(
     j4_state = raw["journeys"]["j4"]
     assert isinstance(raw["j4_user_stop_message"], str)
     assert raw["j4_user_stop_message"] == _contextual_exit_message("stop", j4_state)
+    # run_repl 合同：读取输入前先投影权威 pending recovery prompt（stop 阶段
+    # 输出首条），输入 "stop" 后才输出 contextual stop result（末条）。首条必须
+    # 与 render_pending 对同一 state 的投影逐字相等——证明 pending prompt 未被
+    # 隐藏，且 harness 记录的末条确属用户 stop 的 contextual result。
+    from agent.cli.render import TerminalRenderer
+
+    expected_pending: list[str] = []
+    TerminalRenderer(expected_pending.append).render_pending(j4_state)
+    assert len(raw["rendered_results"]) >= 2
+    assert raw["rendered_results"][-2] == expected_pending[0]
     assert observation.claims["unknown_recovery_requires_user"] is True
 
 

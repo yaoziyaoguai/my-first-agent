@@ -22,7 +22,10 @@ from agent.sandbox.contracts import (
     SandboxNetworkMode,
 )
 from agent.sandbox.executor import NativeSandboxExecutor
-from agent.sandbox.policy import build_sandbox_policy
+from agent.sandbox.policy import (
+    NETWORK_ONLY_SEATBELT_PROFILE,
+    build_sandbox_policy,
+)
 
 
 def _draft(**overrides):
@@ -96,7 +99,10 @@ def _seatbelt_invocation(policy, command, env, *, policy_digest=None):
     )
 
 
-def _prepared_and_policy(tmp_path, mode=SandboxMode.WORKSPACE_WRITE, cwd="."):
+def _prepared_and_policy(
+    tmp_path, mode=SandboxMode.WORKSPACE_WRITE,
+    network=SandboxNetworkMode.OFF, cwd=".",
+):
     for name in ("work", "tmp", "state", "home"):
         (tmp_path / name).mkdir(parents=True, exist_ok=True)
     if cwd != ".":
@@ -108,7 +114,7 @@ def _prepared_and_policy(tmp_path, mode=SandboxMode.WORKSPACE_WRITE, cwd="."):
     )
     policy = build_sandbox_policy(
         mode=mode,
-        network=SandboxNetworkMode.OFF,
+        network=network,
         workspace=tmp_path / "work",
         temp_root=tmp_path / "tmp",
         state_root=tmp_path / "state",
@@ -211,8 +217,10 @@ def test_enforcement_facts_tampering_is_rejected(tmp_path):
 
 
 def test_bypass_invocation_runs_raw_command_with_unconfined_facts(tmp_path):
+    # 保留行为：danger+full 才是 exact-command unconfined bypass。
     prepared, policy = _prepared_and_policy(
         tmp_path, mode=SandboxMode.DANGER_FULL_ACCESS,
+        network=SandboxNetworkMode.FULL,
     )
     runner = FakeRunner()
 
@@ -245,6 +253,229 @@ def test_bypass_invocation_runs_raw_command_with_unconfined_facts(tmp_path):
     assert runner.calls[0]["resolved_executable"] == "/usr/bin/true"
 
 
+def test_valid_danger_network_off_seatbelt_invocation_runs(tmp_path):
+    # 正对照：danger/off 的 network-only profile 必须真实到达 runner。
+    prepared, policy = _prepared_and_policy(
+        tmp_path, mode=SandboxMode.DANGER_FULL_ACCESS,
+    )
+    runner = FakeRunner()
+
+    def _confine(command, pol, env):
+        invocation = _seatbelt_invocation(pol, command, env)
+        invocation = ConfinedInvocationV1(
+            wrapped_executable=invocation.wrapped_executable,
+            wrapped_argv=(
+                "/usr/bin/sandbox-exec", "-p", NETWORK_ONLY_SEATBELT_PROFILE,
+                command.executable_identity.resolved_path, *command.argv,
+            ),
+            profile=NETWORK_ONLY_SEATBELT_PROFILE,
+            environment=dict(env),
+            enforcement=SandboxEnforcementFactsV1(
+                backend="seatbelt",
+                enforcement="confined",
+                mode=pol.mode,
+                network=pol.network,
+                policy_digest=pol.policy_digest,
+                profile_digest=hashlib.sha256(
+                    NETWORK_ONLY_SEATBELT_PROFILE.encode()
+                ).hexdigest(),
+            ),
+        )
+        return invocation
+
+    confiner = FakeConfiner()
+    confiner.confine = _confine  # type: ignore[method-assign]
+    executor = NativeSandboxExecutor(
+        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+    )
+    draft = executor.execute(prepared, policy)
+    assert isinstance(draft, SandboxExecutionDraftV1)
+    assert draft.enforcement.backend == "seatbelt"
+    assert draft.enforcement.mode is SandboxMode.DANGER_FULL_ACCESS
+    assert runner.calls[0]["argv"][1] == NETWORK_ONLY_SEATBELT_PROFILE
+
+
+def test_forged_unconfined_facts_for_confined_policy_reach_no_runner(tmp_path):
+    # workspace-write + off 伪造 none/unconfined facts：runner 零调用。
+    prepared, policy = _prepared_and_policy(tmp_path)
+    runner = FakeRunner()
+    confiner = _bypass_confiner()
+    executor = NativeSandboxExecutor(
+        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+    )
+    outcome = executor.execute(prepared, policy)
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "enforcement_facts_mismatch"
+    assert runner.calls == []
+
+
+def test_forged_unconfined_facts_for_danger_network_off_reach_no_runner(tmp_path):
+    # danger+off 伪造 none/unconfined：runner 零调用（必须 seatbelt/confined）。
+    prepared, policy = _prepared_and_policy(
+        tmp_path, mode=SandboxMode.DANGER_FULL_ACCESS,
+    )
+    runner = FakeRunner()
+    executor = NativeSandboxExecutor(
+        confiner=_bypass_confiner(), captured_path="/usr/bin:/bin", runner=runner,
+    )
+    outcome = executor.execute(prepared, policy)
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "enforcement_facts_mismatch"
+    assert runner.calls == []
+
+
+def test_forged_seatbelt_facts_for_danger_full_are_a_contradiction(tmp_path):
+    # danger+full 只能 none/unconfined；seatbelt/confined 是矛盾组合。
+    prepared, policy = _prepared_and_policy(
+        tmp_path, mode=SandboxMode.DANGER_FULL_ACCESS,
+        network=SandboxNetworkMode.FULL,
+    )
+    runner = FakeRunner()
+
+    def _confine(command, pol, env):
+        return _seatbelt_invocation(pol, command, env)
+
+    confiner = FakeConfiner()
+    confiner.confine = _confine  # type: ignore[method-assign]
+    executor = NativeSandboxExecutor(
+        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+    )
+    outcome = executor.execute(prepared, policy)
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "enforcement_facts_mismatch"
+    assert runner.calls == []
+
+
+def test_profile_digest_not_matching_profile_bytes_reaches_no_runner(tmp_path):
+    # facts.profile_digest 必须等于 profile 字节的 SHA-256。
+    prepared, policy = _prepared_and_policy(tmp_path)
+    runner = FakeRunner()
+
+    def _confine(command, pol, env):
+        invocation = _seatbelt_invocation(pol, command, env)
+        return ConfinedInvocationV1(
+            wrapped_executable=invocation.wrapped_executable,
+            wrapped_argv=invocation.wrapped_argv,
+            profile=invocation.profile,
+            environment=dict(env),
+            enforcement=SandboxEnforcementFactsV1(
+                backend="seatbelt",
+                enforcement="confined",
+                mode=pol.mode,
+                network=pol.network,
+                policy_digest=pol.policy_digest,
+                profile_digest="f" * 64,
+            ),
+        )
+
+    confiner = FakeConfiner()
+    confiner.confine = _confine  # type: ignore[method-assign]
+    executor = NativeSandboxExecutor(
+        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+    )
+    outcome = executor.execute(prepared, policy)
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "enforcement_facts_mismatch"
+    assert runner.calls == []
+
+
+def test_profile_bytes_not_matching_wrapped_argv_reach_no_runner(tmp_path):
+    """receipt 绑定的 profile 必须就是 runner 将执行的 ``-p`` 参数。"""
+
+    prepared, policy = _prepared_and_policy(tmp_path)
+    runner = FakeRunner()
+
+    def _confine(command, pol, env):
+        invocation = _seatbelt_invocation(pol, command, env)
+        return ConfinedInvocationV1(
+            wrapped_executable=invocation.wrapped_executable,
+            wrapped_argv=(
+                invocation.wrapped_executable,
+                "-p",
+                "(version 1)\n(allow default)\n",
+                command.executable_identity.resolved_path,
+                *command.argv,
+            ),
+            profile=invocation.profile,
+            environment=dict(env),
+            enforcement=invocation.enforcement,
+        )
+
+    confiner = FakeConfiner()
+    confiner.confine = _confine  # type: ignore[method-assign]
+    executor = NativeSandboxExecutor(
+        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+    )
+    outcome = executor.execute(prepared, policy)
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "enforcement_facts_mismatch"
+    assert runner.calls == []
+
+
+def test_confiner_cannot_mutate_closed_environment_before_runner(tmp_path):
+    prepared, policy = _prepared_and_policy(tmp_path)
+    runner = FakeRunner()
+
+    def _confine(command, pol, env):
+        invocation = _seatbelt_invocation(pol, command, env)
+        return ConfinedInvocationV1(
+            wrapped_executable=invocation.wrapped_executable,
+            wrapped_argv=invocation.wrapped_argv,
+            profile=invocation.profile,
+            environment={**env, "INJECTED": "ambient"},
+            enforcement=invocation.enforcement,
+        )
+
+    confiner = FakeConfiner()
+    confiner.confine = _confine  # type: ignore[method-assign]
+    executor = NativeSandboxExecutor(
+        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+    )
+    outcome = executor.execute(prepared, policy)
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "enforcement_facts_mismatch"
+    assert runner.calls == []
+
+
+def test_structured_path_rejects_forged_unconfined_facts_before_runner(tmp_path):
+    # 普通与 structured path 复用同一校验：伪造 none/unconfined 同样零 runner。
+    from agent.sandbox.contracts import (
+        StructuredResultKind,
+        StructuredSandboxInputV1,
+        StructuredSandboxIoPlanV1,
+    )
+
+    prepared, policy = _prepared_and_policy(tmp_path)
+    request = b'{"task":"inspect"}'
+    source = b"pdf"
+    plan = StructuredSandboxIoPlanV1(
+        package_digest="a" * 64,
+        entrypoint_id="inspect",
+        entrypoint_digest="b" * 64,
+        request_bytes=request,
+        request_digest=hashlib.sha256(request).hexdigest(),
+        inputs=(
+            StructuredSandboxInputV1(
+                slot="source",
+                content=source,
+                content_digest=hashlib.sha256(source).hexdigest(),
+            ),
+        ),
+        result_cap_bytes=1024,
+        artifact_cap_bytes=1024,
+        aggregate_output_cap_bytes=2048,
+        expected_result_kind=StructuredResultKind.OBSERVATION,
+    )
+    runner = FakeRunner()
+    executor = NativeSandboxExecutor(
+        confiner=_bypass_confiner(), captured_path="/usr/bin:/bin", runner=runner,
+    )
+    outcome = executor.execute(prepared, policy, io_plan=plan)
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "enforcement_facts_mismatch"
+    assert runner.calls == []
+
+
 def test_timeout_and_spawn_failure_outcomes_map(tmp_path):
     prepared, policy = _prepared_and_policy(tmp_path)
     timed_out = FakeRunner(
@@ -254,7 +485,7 @@ def test_timeout_and_spawn_failure_outcomes_map(tmp_path):
         ),
     )
     executor = NativeSandboxExecutor(
-        confiner=_bypass_confiner(), captured_path="/usr/bin:/bin",
+        confiner=_seatbelt_confiner(), captured_path="/usr/bin:/bin",
         runner=timed_out,
     )
     draft = executor.execute(prepared, policy)
@@ -262,11 +493,20 @@ def test_timeout_and_spawn_failure_outcomes_map(tmp_path):
 
     spawn_failed = FakeRunner(draft=_draft(outcome=ProcessDraftOutcome.SPAWN_FAILED, pid=None))
     executor_two = NativeSandboxExecutor(
-        confiner=_bypass_confiner(), captured_path="/usr/bin:/bin",
+        confiner=_seatbelt_confiner(), captured_path="/usr/bin:/bin",
         runner=spawn_failed,
     )
     draft_two = executor_two.execute(prepared, policy)
     assert draft_two.outcome.value == "spawn_failed"
+
+
+def _seatbelt_confiner():
+    def _confine(command, pol, env):
+        return _seatbelt_invocation(pol, command, env)
+
+    confiner = FakeConfiner()
+    confiner.confine = _confine  # type: ignore[method-assign]
+    return confiner
 
 
 def _bypass_confiner():

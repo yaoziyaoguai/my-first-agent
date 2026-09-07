@@ -303,7 +303,11 @@ def test_u1_backend_unavailable_confined_zero_execution_bypass_intact(tmp_path):
         tmp_path, probe_result=ProbeResult(1, b"", b"refused", False),
     )
     bypass_result = bypass.run_confined(
-        {**_plain_arguments(), "mode": "danger-full-access"},
+        {
+            **_plain_arguments(),
+            "mode": "danger-full-access",
+            "network": "full",
+        },
     )
     assert bypass_result.is_error is False
     assert len(bypass.exec_runner.calls) == 1

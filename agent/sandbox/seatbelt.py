@@ -2,8 +2,8 @@
 
 qualify = 一次 bounded 只读 functional probe（缓存于实例）；confine = pure
 wrapping（绝不 spawn）——把 exact command 编译为 ``sandbox-exec -p <profile>
-<command>`` 并返回 enforcement facts。danger-full-access 是 unconfined
-bypass，不探测 backend（spec §2–§4）。
+<command>`` 并返回 enforcement facts。只有 danger-full-access + network=full
+是无需探测 backend 的 unconfined bypass（spec §2–§4）。
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from agent.sandbox.contracts import (
     SandboxBackendIdentityV1,
     SandboxEnforcementFactsV1,
     SandboxMode,
+    SandboxNetworkMode,
     SandboxPolicyV1,
     SandboxQualificationV1,
 )
@@ -116,7 +117,7 @@ class SeatbeltConfiner:
         policy: SandboxPolicyV1 | PackagedSkillSandboxPolicyV1,
         environment: Mapping[str, str],
     ) -> ConfinedInvocationV1 | KnownNotExecuted:
-        """pure wrapping：confined 编译 profile；danger 直接 bypass。"""
+        """pure wrapping：confined 编译 profile；仅 danger+full 直接 bypass。"""
 
         if type(policy) not in (
             PackagedSkillSandboxPolicyV1,
@@ -143,8 +144,10 @@ class SeatbeltConfiner:
         if (
             type(policy) is SandboxPolicyV1
             and policy.mode is SandboxMode.DANGER_FULL_ACCESS
+            and policy.network is SandboxNetworkMode.FULL
         ):
-            # bypass 不依赖 backend qualification（spec §2/§4）
+            # bypass 不依赖 backend qualification（spec §2/§4）；仅 danger+full
+            # 保留 exact-command unconfined bypass，danger+off 必须走 Seatbelt。
             return ConfinedInvocationV1(
                 wrapped_executable=resolved,
                 wrapped_argv=(resolved, *command.argv),

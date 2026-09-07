@@ -1,10 +1,11 @@
-"""017 native composition：自动 qualification 三态 + 唯一 sandbox_exec。
+"""017 native composition：自动 qualification 三态 + sandbox_exec 与 shell_exec。
 
-qualified → 恰一个 ``sandbox_exec`` registration（ISOLATED_SANDBOX）；
-backend missing/refused/unsupported → readiness/reason 如实，但 registration
-仍然注册（danger-full-access 是不依赖 backend 的显式 bypass，confined
-命令在 confine 处 fail closed）。注入 fake confiner 是唯一测试替身；没有
-local_process fallback、没有 Docker vocabulary。
+qualified → 静态注册恰 ``sandbox_exec`` 与 ``shell_exec``（稳定顺序，均
+ISOLATED_SANDBOX）；backend missing/refused/unsupported → readiness/reason
+如实，但两个 registration 仍然注册（danger-full-access 是不依赖 backend 的
+显式 bypass，confined 命令在 confine 处 fail closed）。注入 fake confiner
+是唯一测试替身；qualification 恰一次、没有 local_process fallback、
+没有 Docker vocabulary。
 """
 
 from __future__ import annotations
@@ -68,29 +69,36 @@ def _workspace(tmp_path: Path) -> Path:
     return work
 
 
-def test_qualified_registers_exactly_one_sandbox_exec(tmp_path):
+def test_qualified_registers_sandbox_and_shell_exec(tmp_path):
     _workspace(tmp_path)
     confiner = FakeConfiner(_qualified())
     resources = _build(tmp_path, confiner)
     assert resources.readiness is SandboxReadiness.READY
     assert resources.reason_code is None
-    assert [r.spec.name for r in resources.registrations] == ["sandbox_exec"]
-    spec = resources.registrations[0].spec
-    assert spec.execution_authority is ExecutionAuthorityClass.ISOLATED_SANDBOX
-    # 自动 qualification 恰一次（启动只读探测）
+    assert [r.spec.name for r in resources.registrations] == [
+        "sandbox_exec",
+        "shell_exec",
+    ]
+    for registration in resources.registrations:
+        spec = registration.spec
+        assert spec.execution_authority is ExecutionAuthorityClass.ISOLATED_SANDBOX
+    # 自动 qualification 恰一次（启动只读探测，两工具共享同一探测）
     assert confiner.qualify_calls == 1
     # 唯一替身是注入的 fake confiner；无 local_process fallback
     assert "local_process" not in [r.spec.name for r in resources.registrations]
 
 
-def test_missing_backend_still_registers_danger_capable_tool(tmp_path):
+def test_missing_backend_still_registers_danger_capable_tools(tmp_path):
     _workspace(tmp_path)
     confiner = FakeConfiner(_unavailable("sandbox_exec_missing"))
     resources = _build(tmp_path, confiner)
     assert resources.readiness is SandboxReadiness.TEMPORARILY_UNAVAILABLE
     assert resources.reason_code == "sandbox_exec_missing"
-    # danger-full-access 不依赖 backend：registration 仍存在
-    assert [r.spec.name for r in resources.registrations] == ["sandbox_exec"]
+    # danger-full-access 不依赖 backend：两个 registration 仍存在
+    assert [r.spec.name for r in resources.registrations] == [
+        "sandbox_exec",
+        "shell_exec",
+    ]
 
 
 def test_refused_backend_maps_to_temporarily_unavailable(tmp_path):
@@ -109,7 +117,12 @@ def test_unsupported_platform_is_distinct_state(tmp_path):
     resources = _build(tmp_path, confiner)
     assert resources.readiness is SandboxReadiness.UNSUPPORTED
     assert resources.reason_code == "unsupported_platform"
-    assert [r.spec.name for r in resources.registrations] == ["sandbox_exec"]
+    # backend unsupported 也不在 composition 裁剪工具：confined modes
+    # 执行时 fail closed，danger-full-access 仍有明确既有语义。
+    assert [r.spec.name for r in resources.registrations] == [
+        "sandbox_exec",
+        "shell_exec",
+    ]
 
 
 def test_per_invocation_roots_live_outside_state_carveout(tmp_path):

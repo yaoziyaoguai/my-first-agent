@@ -122,6 +122,7 @@ def test_product_tree_contains_only_kernel_packages() -> None:
         "agent/sandbox/ports.py",
         "agent/sandbox/qualification.py",
         "agent/sandbox/seatbelt.py",
+        "agent/sandbox/shell.py",
         "agent/sandbox/structured_session.py",
         "agent/sandbox/tools.py",
         "agent/scheduler/__init__.py",

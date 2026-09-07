@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -26,10 +27,19 @@ SANDBOX_TOOL_NAME = "sandbox_exec"
 SANDBOX_TOOL_VERSION = "native-sandbox-v1"
 SANDBOX_TRUST_NOTICE_ID = "native_sandbox_v1"
 SANDBOX_TRUST_NOTICE = (
-    "Confined modes use macOS Seatbelt and do not provide a host shell interface. "
-    "danger-full-access is an unconfined exact-command bypass. Every mode is "
-    "shell-free, foreground-only, and requires exact one-shot approval; there is "
-    "no TTY, background process, sudo, or implicit credential access."
+    "Confined modes (read-only, workspace-write) use macOS Seatbelt filesystem "
+    "controls and, when network is off, network denial. "
+    "danger-full-access with network off keeps only a "
+    "network-only Seatbelt profile and adds no filesystem isolation. "
+    "danger-full-access with network full is an unconfined exact-command "
+    "bypass with full host network. network off denies network* operations of "
+    "this command and its ordinary Seatbelt-governed subprocesses only; it "
+    "does not disconnect the machine and does not block already-open file "
+    "descriptors, system services, external applications, writable files, or "
+    "other indirect channels outside the policy. Every mode is shell-free (no "
+    "host shell interface), foreground-only, and requires exact one-shot "
+    "approval; there is no TTY, background process, sudo, or implicit "
+    "credential access."
 )
 _TRUST_NOTICE_DIGEST = hashlib.sha256(SANDBOX_TRUST_NOTICE.encode()).hexdigest()
 
@@ -108,10 +118,15 @@ def _closed_policy(arguments: dict, *, roots: dict, private_roots: tuple):
 
 
 def _render_preview(command, policy) -> str:  # noqa: ANN001
-    argv = " ".join(command.argv)
-    rendered = command.executable_token + (f" {argv}" if argv else "")
+    # executable/cwd/argv 全部逐字段 JSON quoting（镜像 agent/process/tools.py）：
+    # 模型可控字符串一律不得能伪造 cwd=/mode=/network= 披露段、碰撞 argv 边界
+    # 或注入裸控制字符；换行/引号被转义，非 ASCII 以 \uXXXX 呈现。
+    rendered_argv = " ".join(json.dumps(token) for token in command.argv)
+    rendered = json.dumps(command.executable_token) + (
+        f" {rendered_argv}" if rendered_argv else ""
+    )
     return (
-        f"{rendered} (cwd={command.cwd}, profile={command.profile.value}, "
+        f"{rendered} (cwd={json.dumps(command.cwd)}, profile={command.profile.value}, "
         f"mode={policy.mode.value}, network={policy.network.value}). "
         f"{SANDBOX_TRUST_NOTICE}"
     )

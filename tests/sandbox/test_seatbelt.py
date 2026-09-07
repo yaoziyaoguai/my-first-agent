@@ -65,12 +65,16 @@ def _command(argv=("-lc", "true"), resolved: str = "/bin/sh"):
     )
 
 
-def _policy(tmp_path, mode=SandboxMode.WORKSPACE_WRITE):
+def _policy(
+    tmp_path,
+    mode=SandboxMode.WORKSPACE_WRITE,
+    network=SandboxNetworkMode.OFF,
+):
     for name in ("work", "tmp", "state", "home"):
         (tmp_path / name).mkdir(parents=True, exist_ok=True)
     return build_sandbox_policy(
         mode=mode,
-        network=SandboxNetworkMode.OFF,
+        network=network,
         workspace=tmp_path / "work",
         temp_root=tmp_path / "tmp",
         state_root=tmp_path / "state",
@@ -117,7 +121,10 @@ def test_danger_bypass_does_not_probe_backend_and_records_unconfined(tmp_path):
         result=ProbeResult(1, b"", b"would fail", False),
     )
     confiner = SeatbeltConfiner(runner=fake, platform_system="Linux")
-    policy = _policy(tmp_path, mode=SandboxMode.DANGER_FULL_ACCESS)
+    policy = _policy(
+        tmp_path, mode=SandboxMode.DANGER_FULL_ACCESS,
+        network=SandboxNetworkMode.FULL,
+    )
     invocation = confiner.confine(_command(), policy, CLOSED_ENV)
     assert invocation.wrapped_executable == "/bin/sh"
     assert invocation.wrapped_argv == ("/bin/sh", "-lc", "true")
@@ -125,7 +132,42 @@ def test_danger_bypass_does_not_probe_backend_and_records_unconfined(tmp_path):
     assert invocation.enforcement.backend == "none"
     assert invocation.enforcement.enforcement == "unconfined"
     assert invocation.enforcement.policy_digest == policy.policy_digest
+    assert invocation.enforcement.network is SandboxNetworkMode.FULL
     # bypass 不探测 backend：fake 零调用（即便 platform 不支持）
+    assert fake.calls == []
+
+
+def test_danger_network_off_confines_via_seatbelt_and_qualification(tmp_path):
+    # danger+off 必须走既有 SeatbeltConfiner 的 network-only profile。
+    confiner, fake = _qualified_confiner()
+    policy = _policy(tmp_path, mode=SandboxMode.DANGER_FULL_ACCESS)
+    invocation = confiner.confine(_command(), policy, CLOSED_ENV)
+    assert isinstance(invocation, ConfinedInvocationV1)
+    assert invocation.wrapped_executable == "/usr/bin/sandbox-exec"
+    assert invocation.profile == "(version 1)\n(allow default)\n(deny network*)\n"
+    assert invocation.wrapped_argv[:3] == (
+        "/usr/bin/sandbox-exec", "-p", invocation.profile,
+    )
+    assert invocation.enforcement.backend == "seatbelt"
+    assert invocation.enforcement.enforcement == "confined"
+    assert invocation.enforcement.mode is SandboxMode.DANGER_FULL_ACCESS
+    assert invocation.enforcement.network is SandboxNetworkMode.OFF
+    assert invocation.enforcement.policy_digest == policy.policy_digest
+    assert invocation.enforcement.profile_digest == hashlib.sha256(
+        invocation.profile.encode(),
+    ).hexdigest()
+    # confined 路径必须先做 backend qualification（fake 记录到 probe 调用）
+    assert len(fake.calls) == 1
+
+
+def test_danger_network_off_without_backend_fails_closed(tmp_path):
+    # 缺 backend 时 danger+off 也不允许退化为 unconfined bypass。
+    fake = FakeRunner()
+    confiner = SeatbeltConfiner(runner=fake, platform_system="Linux")
+    policy = _policy(tmp_path, mode=SandboxMode.DANGER_FULL_ACCESS)
+    outcome = confiner.confine(_command(), policy, CLOSED_ENV)
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "unsupported_platform"
     assert fake.calls == []
 
 

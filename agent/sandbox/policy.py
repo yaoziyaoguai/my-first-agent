@@ -175,7 +175,8 @@ def build_sandbox_policy(
 
     - confined modes：writable = workspace + temp（workspace-write）或空
       （read-only）；git metadata 可读禁写；state/private roots unreadable。
-    - danger-full-access：不携带任何 Seatbelt root（无 profile）。
+    - danger-full-access：不携带任何 Seatbelt filesystem root；network=off
+      时仍编译 network-only profile，只有 network=full 无 profile。
     """
 
     workspace_canonical = _canonical_existing(workspace, "workspace")
@@ -210,11 +211,19 @@ def build_sandbox_policy(
     )
 
 
+# danger+off 的 network-only profile（Oracle 审计方案 1）：只叠网络限制，
+# 不携带任何 filesystem 子句——danger 不提供 filesystem 隔离。
+NETWORK_ONLY_SEATBELT_PROFILE = "(version 1)\n(allow default)\n(deny network*)\n"
+
+
 def compile_seatbelt_profile(policy: SandboxPolicyV1) -> str:
-    """固定子句 + policy 派生路径；danger mode 没有 profile（plan Step 5）。"""
+    """固定子句 + policy 派生路径；danger+full bypass 没有 profile（plan Step 5）。"""
 
     if policy.mode is SandboxMode.DANGER_FULL_ACCESS:
-        raise ValueError("unconfined bypass has no Seatbelt profile")
+        if policy.network is SandboxNetworkMode.FULL:
+            raise ValueError("unconfined bypass has no Seatbelt profile")
+        # danger+off：精确三行 network-only profile，绝不落入 filesystem 模板。
+        return NETWORK_ONLY_SEATBELT_PROFILE
     clauses = ["(version 1)", "(allow default)", "(deny file-write*)"]
     clauses += allow_backend_literals()
     clauses += [allow_write_subpath(root) for root in policy.writable_roots]

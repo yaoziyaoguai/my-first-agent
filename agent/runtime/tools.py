@@ -1553,9 +1553,27 @@ class KernelToolRuntime:
             raise IntentConflictError(
                 "sandbox draft does not bind the approved command and policy"
             )
-        danger = facts.mode.value == "danger-full-access"
-        if danger != (facts.backend == "none" and facts.enforcement == "unconfined"):
-            raise IntentConflictError("sandbox enforcement facts contradict the policy mode")
+        # 显式二维矩阵：唯一 unconfined 组合是 danger-full-access + network=full
+        # （无 profile digest）；danger+off 与所有非 danger/full 组合都必须
+        # seatbelt/confined 且携带有效 profile digest。executor 已在 runner 前
+        # 拒绝伪造 facts，这里是 receipt 铸造前的最后一致性核对。
+        unconfined_bypass = (
+            facts.mode.value == "danger-full-access" and facts.network.value == "full"
+        )
+        if unconfined_bypass != (
+            facts.backend == "none" and facts.enforcement == "unconfined"
+        ):
+            raise IntentConflictError(
+                "sandbox enforcement facts contradict the policy matrix"
+            )
+        if not unconfined_bypass and (
+            facts.backend != "seatbelt"
+            or facts.enforcement != "confined"
+            or not facts.profile_digest
+        ):
+            raise IntentConflictError(
+                "confined policy requires seatbelt facts with a profile digest"
+            )
         lease = intent.sandbox_lease
         background_action = intent.background_action_authority
         if lease is not None:

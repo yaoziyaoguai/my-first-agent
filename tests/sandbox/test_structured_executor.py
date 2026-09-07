@@ -94,22 +94,32 @@ def _prepared_and_policy(tmp_path):
 
 
 class FakeConfiner:
+    """正常 structured fake：与真实 SeatbeltConfiner 同形状（seatbelt/
+    confined + 绑定 profile 字节的 digest；slice B 的 executor 校验要求）。"""
+
     def __init__(self) -> None:
         self.environments: list[dict[str, str]] = []
 
     def confine(self, command, policy, environment):  # noqa: ANN001, ANN202
+        from agent.sandbox.policy import compile_seatbelt_profile
+
         self.environments.append(dict(environment))
+        profile = compile_seatbelt_profile(policy)
+        resolved = command.executable_identity.resolved_path
         return ConfinedInvocationV1(
-            wrapped_executable=command.executable_identity.resolved_path,
-            wrapped_argv=(command.executable_identity.resolved_path, *command.argv),
-            profile=None,
+            wrapped_executable="/usr/bin/sandbox-exec",
+            wrapped_argv=(
+                "/usr/bin/sandbox-exec", "-p", profile, resolved, *command.argv,
+            ),
+            profile=profile,
             environment=dict(environment),
             enforcement=SandboxEnforcementFactsV1(
-                backend="none",
-                enforcement="unconfined",
+                backend="seatbelt",
+                enforcement="confined",
                 mode=policy.mode,
                 network=policy.network,
                 policy_digest=policy.policy_digest,
+                profile_digest=hashlib.sha256(profile.encode()).hexdigest(),
             ),
         )
 

@@ -8,7 +8,7 @@ policy、executable identity。durable authority 合同（lease/candidate/receip
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 # F4（review finding 2026-08-16）：``KnownNotExecuted`` 只有一个 closed 类型，由
@@ -98,6 +98,29 @@ class ResourceProfileV1:
             argv_item_max_bytes=16 * 1024,
             argv_total_max_bytes=64 * 1024,
             executable_hash_max_bytes=256 * 1024 * 1024,
+        )
+
+    @classmethod
+    def for_timeout(cls, timeout_seconds: int) -> ResourceProfileV1:
+        """按 exact wall deadline 选最小足够档位，并精确覆盖 deadline。
+
+        shell_exec 的 timeout_seconds（10..900）映射：10→short，11..120→
+        standard，121..900→long；caps/grace 沿用该档位，但
+        wall_deadline_seconds 精确等于批准值，绝不向上取整到档位上限。
+        """
+
+        if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int):
+            raise ValueError("timeout must be an int in 10..900")
+        if timeout_seconds == 10:
+            tier = ResourceProfile.SHORT
+        elif 11 <= timeout_seconds <= 120:
+            tier = ResourceProfile.STANDARD
+        elif 121 <= timeout_seconds <= 900:
+            tier = ResourceProfile.LONG
+        else:
+            raise ValueError("timeout must be an int in 10..900")
+        return replace(
+            cls.for_profile(tier), wall_deadline_seconds=timeout_seconds,
         )
 
 

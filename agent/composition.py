@@ -112,11 +112,13 @@ class SandboxReadiness(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class SandboxResources:
-    """native sandbox composition 的副产品：唯一 registration + 就绪度。
+    """native sandbox composition 的副产品：registrations + 就绪度。
 
-    无 closeables/receipt book——native 执行没有长生命周期 session，清理由
-    executor 的 per-invocation temp 与既有 process owner 拥有；receipt 由
-    Runtime 在 invoke 内铸造（不经 composition 的旁路 book）。
+    registrations 固定为 ``sandbox_exec`` 与 ``shell_exec`` 两个独立工具，
+    共享同一 qualification 与 per-invocation 基座。无 closeables/receipt
+    book——native 执行没有长生命周期 session，清理由 executor 的
+    per-invocation temp 与既有 process owner 拥有；receipt 由 Runtime 在
+    invoke 内铸造（不经 composition 的旁路 book）。
     """
 
     registrations: tuple[RegisteredTool, ...]
@@ -131,20 +133,25 @@ def build_sandbox_resources(
     *,
     confiner=None,
 ):  # noqa: ANN001, ANN202
-    """native sandbox 的静态组合：自动 qualification + 唯一 sandbox_exec。
+    """native sandbox 的静态组合：自动 qualification + sandbox_exec 与 shell_exec。
 
-    无论 backend 是否可用都注册同一个 ``sandbox_exec``——danger-full-access
-    是不依赖 backend 的显式 unconfined bypass；confined 命令在 confine 处
-    fail closed（spec §2/§4）。没有 local_process fallback、没有 Docker
-    vocabulary。per-invocation temp/home 基座放在系统 temp 下的 session
-    专属目录（policy 冻结四 root 两两不交，temp/home 不得位于 state_root
-    的 unreadable carveout 内）。
+    无论 backend 是否可用都静态注册同一组 ``sandbox_exec`` 与 ``shell_exec``
+    ——danger-full-access 是不依赖 backend 的显式 unconfined bypass；confined
+    命令在 confine 处 fail closed（spec §2/§4）。shell_exec 在 backend
+    unavailable 时同样注册：它的 confined modes 执行时 fail closed，
+    danger-full-access 仍有明确既有语义；composition 不按平台裁剪工具。
+    两个工具复用同一 workspace/temp/state/home/captured_path/confiner，
+    但各自是独立的 RegisteredTool；没有 local_process fallback、没有
+    Docker vocabulary、没有 registry 或 factory。per-invocation temp/home
+    基座放在系统 temp 下的 session 专属目录（policy 冻结四 root 两两不交，
+    temp/home 不得位于 state_root 的 unreadable carveout 内）。
     """
 
     import hashlib
     import tempfile as _tempfile
 
     from agent.sandbox.seatbelt import SeatbeltConfiner
+    from agent.sandbox.shell import build_shell_exec_registration
     from agent.sandbox.tools import build_sandbox_exec_registration
 
     resolved_confiner = confiner or SeatbeltConfiner()
@@ -169,6 +176,14 @@ def build_sandbox_resources(
         captured_path=captured_path,
         confiner=resolved_confiner,
     )
+    shell_registration = build_shell_exec_registration(
+        workspace=workspace,
+        temp_root=temp_root,
+        state_root=state_root_path,
+        home=home_root,
+        captured_path=captured_path,
+        confiner=resolved_confiner,
+    )
     if report.reason_code == "unsupported_platform":
         readiness = SandboxReadiness.UNSUPPORTED
     elif report.available:
@@ -176,7 +191,7 @@ def build_sandbox_resources(
     else:
         readiness = SandboxReadiness.TEMPORARILY_UNAVAILABLE
     return SandboxResources(
-        registrations=(registration,),
+        registrations=(registration, shell_registration),
         readiness=readiness,
         reason_code=None if report.available else report.reason_code,
     )

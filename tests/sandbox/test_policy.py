@@ -165,10 +165,24 @@ def test_network_off_denies_and_full_does_not(tmp_path):
     assert "(deny network*)" not in full
 
 
-def test_danger_mode_has_no_profile(tmp_path):
-    policy = _policy(tmp_path, mode=SandboxMode.DANGER_FULL_ACCESS)
+def test_danger_full_network_bypass_has_no_profile(tmp_path):
+    # 保留行为：danger+full 是 exact-command unconfined bypass，没有 profile。
+    policy = _policy(
+        tmp_path, mode=SandboxMode.DANGER_FULL_ACCESS,
+        network=SandboxNetworkMode.FULL,
+    )
     with pytest.raises(ValueError, match="unconfined"):
         compile_seatbelt_profile(policy)
+
+
+def test_danger_network_off_compiles_exact_network_only_profile(tmp_path):
+    # Oracle 审计方案 1：danger+off 只叠网络限制，绝不落入 filesystem 模板。
+    policy = _policy(tmp_path, mode=SandboxMode.DANGER_FULL_ACCESS)
+    profile = compile_seatbelt_profile(policy)
+    assert profile == "(version 1)\n(allow default)\n(deny network*)\n"
+    assert "file-write" not in profile
+    assert "subpath" not in profile
+    assert "regex" not in profile
 
 
 def test_profile_shape_is_fixed_clause_prefix(tmp_path):

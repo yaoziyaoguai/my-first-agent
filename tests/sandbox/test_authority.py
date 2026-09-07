@@ -238,6 +238,11 @@ def test_receipt_strictly_binds_authority_enforcement_and_draft() -> None:
     with pytest.raises(ValueError):
         SandboxReceiptV1.from_json({**receipt.to_json(), "image_digest": HEX_A})
     values = receipt._digest_values()
-    values.update(receipt_id="sandbox-receipt:danger", mode="danger-full-access")
+    # 唯一 bypass 组合是 danger+full：seatbelt receipt 冒充该组合仍是矛盾。
+    values.update(
+        receipt_id="sandbox-receipt:danger",
+        mode="danger-full-access",
+        network="full",
+    )
     with pytest.raises(ValueError, match="danger-full-access"):
         SandboxReceiptV1.create(**values)

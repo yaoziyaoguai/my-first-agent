@@ -4,13 +4,13 @@ from dataclasses import replace
 
 import pytest
 
+from agent.memory.contracts import MemoryCapacityError, MemoryStoreError
 from agent.memory.preferences import (
     OwnerPreferenceSource,
     OwnerPreferenceStore,
     PreferenceAdmission,
     build_owner_preference_tool_registrations,
 )
-from agent.memory.store import MemoryStoreError
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalGrant,
@@ -212,6 +212,162 @@ def test_assistant_or_tool_fact_cannot_masquerade_as_user_confirmed_preference()
             content="Prefer sharing everything",
             confirmed=True,
         )
+
+
+def test_confirm_capacity_rejection_maps_to_known_not_executed(tmp_path, monkeypatch) -> None:
+    """写前容量拒绝是 known-not-executed：confirm 直接调用 MemoryStore mutation，
+    窄容量异常必须映射为精确 code，durable 不变。"""
+    import agent.memory.store as store_mod
+
+    path = tmp_path / "preferences.json"
+    store = OwnerPreferenceStore.create(path, provider_trust_digest="trust-1")
+    store.confirm(_admission("Prefer long answers"))
+    durable_before = path.read_bytes()
+    monkeypatch.setattr(store_mod, "_MAX_STORE_BYTES", len(durable_before))
+
+    runtime = KernelToolRuntime(build_owner_preference_tool_registrations(store))
+    content = "Prefer concise answers"
+    binding = PreferenceAdmissionBinding.create(
+        binding_id="preference-binding-capacity",
+        fact_id="action:2:user",
+        fact_digest="fact-digest-2",
+        content_digest=canonical_json_digest(content),
+    )
+    context = ToolPrepareContext(
+        "conversation-1",
+        "run-1",
+        1,
+        preference_admission=binding,
+    )
+    call = ToolCall("preference-call-capacity", "owner_preference_confirm", {"content": content})
+    pending = runtime.prepare(call, context)
+    assert isinstance(pending, ApprovalRequired)
+    intent = runtime.prepare(
+        call,
+        context,
+        approval=ApprovalGrant(pending.request.request_id, pending.request.binding_digest),
+    )
+    result = runtime.invoke(intent)
+
+    assert result.executed is False
+    assert result.is_error is True
+    assert result.metadata["code"] == "preference_capacity_exceeded"
+    assert path.read_bytes() == durable_before
+
+
+def test_correct_capacity_rejection_maps_to_known_not_executed(tmp_path, monkeypatch) -> None:
+    import agent.memory.store as store_mod
+
+    path = tmp_path / "preferences.json"
+    store = OwnerPreferenceStore.create(path, provider_trust_digest="trust-1")
+    record = store.confirm(_admission("Prefer long answers"))
+    durable_before = path.read_bytes()
+    monkeypatch.setattr(store_mod, "_MAX_STORE_BYTES", len(durable_before))
+
+    runtime = KernelToolRuntime(build_owner_preference_tool_registrations(store))
+    content = "Prefer concise answers with examples and explanations"
+    binding = PreferenceAdmissionBinding.create(
+        binding_id="preference-binding-capacity",
+        fact_id="user-2",
+        fact_digest="fact-digest-2",
+        content_digest=canonical_json_digest(content),
+    )
+    context = ToolPrepareContext(
+        "conversation-1",
+        "run-1",
+        1,
+        preference_admission=binding,
+    )
+    call = ToolCall(
+        "preference-call-capacity",
+        "owner_preference_correct",
+        {"preference_id": record.record_id, "content": content},
+    )
+    pending = runtime.prepare(call, context)
+    assert isinstance(pending, ApprovalRequired)
+    intent = runtime.prepare(
+        call,
+        context,
+        approval=ApprovalGrant(pending.request.request_id, pending.request.binding_digest),
+    )
+    result = runtime.invoke(intent)
+
+    assert result.executed is False
+    assert result.is_error is True
+    assert result.metadata["code"] == "preference_capacity_exceeded"
+    assert path.read_bytes() == durable_before
+
+
+def test_forget_tool_maps_capacity_rejection_precisely(tmp_path, monkeypatch) -> None:
+    """forget 也写（内部调用 MemoryStore.update），同样精确捕获；但公开路径上 forget
+    结构上几乎不增长 document（origin 变短、时间戳噪声），无法确定性构造超限，
+    故用 wiring monkeypatch 验证分类精确性。"""
+    path = tmp_path / "preferences.json"
+    store = OwnerPreferenceStore.create(path, provider_trust_digest="trust-1")
+    record = store.confirm(_admission("Prefer concise answers"))
+    runtime = KernelToolRuntime(build_owner_preference_tool_registrations(store))
+
+    def _raise_capacity(preference_id):
+        raise MemoryCapacityError("memory store exceeds the durable size limit")
+
+    monkeypatch.setattr(store, "forget", _raise_capacity)
+    call = ToolCall(
+        "preference-call-capacity",
+        "owner_preference_forget",
+        {"preference_id": record.record_id},
+    )
+    pending = runtime.prepare(call, ToolPrepareContext("conversation-1", "run-1", 1))
+    assert isinstance(pending, ApprovalRequired)
+    intent = runtime.prepare(
+        call,
+        ToolPrepareContext("conversation-1", "run-1", 1),
+        approval=ApprovalGrant(pending.request.request_id, pending.request.binding_digest),
+    )
+    result = runtime.invoke(intent)
+
+    assert result.executed is False
+    assert result.is_error is True
+    assert result.metadata["code"] == "preference_capacity_exceeded"
+
+
+def test_preference_non_capacity_store_error_is_not_misclassified_as_capacity(
+    tmp_path, monkeypatch
+) -> None:
+    """负面保护：非容量 MemoryStoreError（store 满）必须保持 unknown outcome 传播，
+    不得被伪装成容量 known-not-executed。"""
+    import agent.memory.store as store_mod
+
+    path = tmp_path / "preferences.json"
+    store = OwnerPreferenceStore.create(path, provider_trust_digest="trust-1")
+    store.confirm(_admission("Prefer long answers"))
+
+    runtime = KernelToolRuntime(build_owner_preference_tool_registrations(store))
+    content = "Prefer concise answers"
+    binding = PreferenceAdmissionBinding.create(
+        binding_id="preference-binding-store-full",
+        fact_id="action:2:user",
+        fact_digest="fact-digest-2",
+        content_digest=canonical_json_digest(content),
+    )
+    context = ToolPrepareContext(
+        "conversation-1",
+        "run-1",
+        1,
+        preference_admission=binding,
+    )
+    call = ToolCall("preference-call-store-full", "owner_preference_confirm", {"content": content})
+    pending = runtime.prepare(call, context)
+    assert isinstance(pending, ApprovalRequired)
+    intent = runtime.prepare(
+        call,
+        context,
+        approval=ApprovalGrant(pending.request.request_id, pending.request.binding_digest),
+    )
+    # 批准后把 record 上限压到当前数量：confirm 内的 store 满检查抛非容量 MemoryStoreError。
+    monkeypatch.setattr(store_mod, "_MAX_RECORDS", 1)
+    with pytest.raises(MemoryStoreError) as excinfo:
+        runtime.invoke(intent)
+    assert not isinstance(excinfo.value, MemoryCapacityError)
 
 
 def test_governed_preference_tool_requires_runtime_user_binding_and_approval(tmp_path) -> None:

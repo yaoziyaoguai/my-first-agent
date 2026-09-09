@@ -110,11 +110,9 @@ class NativeSandboxExecutor:
         self,
         *,
         confiner,
-        captured_path: str,
         runner=None,
     ) -> None:  # noqa: ANN001
         self._confiner = confiner
-        self._captured_path = captured_path
         self._runner = runner or run_local_process
 
     def execute(
@@ -133,18 +131,18 @@ class NativeSandboxExecutor:
         # 下创建 ephemeral HOME/TMPDIR，避免 profile 与真实写入根漂移。
         temp_root = tempfile.mkdtemp(prefix="fa-sbx-", dir=policy.temp_root)
         try:
-            environment = closed_process_environment(
-                temp_root, self._captured_path,
+            expected_environment = closed_process_environment(
+                temp_root, prepared.child_path
             )
             invocation = self._confiner.confine(
-                current.command, policy, environment,
+                current.command, policy, dict(expected_environment),
             )
             if isinstance(invocation, KnownNotExecuted):
                 return invocation
             # enforcement facts 必须精确绑定当前 policy 与 profile 字节（防
             # confine/结果被篡改或复用旧 invocation）
             mismatch = _verified_invocation(
-                invocation, policy, current.command, environment,
+                invocation, policy, current.command, expected_environment,
             )
             if mismatch is not None:
                 return mismatch
@@ -187,7 +185,7 @@ class NativeSandboxExecutor:
             )
         result = None
         try:
-            environment = {
+            expected_environment = {
                 "HOME": session.root,
                 "TMPDIR": session.root,
                 "PATH": "",
@@ -197,7 +195,7 @@ class NativeSandboxExecutor:
             }
             try:
                 invocation = self._confiner.confine(
-                    current.command, policy, environment
+                    current.command, policy, dict(expected_environment)
                 )
             except Exception as error:
                 session.close_and_remove()
@@ -209,7 +207,7 @@ class NativeSandboxExecutor:
                 session.close_and_remove()
                 return invocation
             mismatch = _verified_invocation(
-                invocation, policy, current.command, environment,
+                invocation, policy, current.command, expected_environment,
             )
             if mismatch is not None:
                 session.close_and_remove()

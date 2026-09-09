@@ -7,6 +7,12 @@ from enum import StrEnum
 
 from agent.runtime.contracts import RunStatus
 
+# 共同的 child 结果 envelope 字节上限：producer（child 输出 seam）与 consumer
+# （parent 有界读取）共用同一预算。child 必须按完整 UTF-8 JSON 编码（含 JSON 转义与
+# envelope 开销）保证写出 bytes ≤ 本上限；parent 的 ``max_bytes + 1`` 溢出检测不变。
+# 8192 使多字节 CJK/emoji 与需转义字符的合法结果不会被误判 oversized → UNCONFIRMED。
+MAX_RESULT_ENVELOPE_BYTES = 8_192
+
 
 class TerminationReceiptState(StrEnum):
     """call-scoped single-use receipt proving whether the provider call terminated."""

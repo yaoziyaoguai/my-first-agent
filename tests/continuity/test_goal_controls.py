@@ -60,6 +60,7 @@ from tests.kernel.fakes import (
     InMemoryCheckpointStore,
     ScriptedProvider,
     conversation_with_active_goal,
+    conversation_with_terminal_goal,
 )
 
 
@@ -2107,6 +2108,112 @@ def test_paused_goal_denies_unadvertised_effectful_tool_before_prepare() -> None
     )
     assert store.state.goal is not None
     assert store.state.goal.status is GoalStatus.PAUSED
+
+
+@pytest.mark.parametrize("status", [GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED])
+@pytest.mark.parametrize("side_effect", [SideEffectClass.READ_ONLY, SideEffectClass.WRITE])
+def test_terminal_follow_up_denies_registered_tool_before_batch_or_approval(
+    status: GoalStatus,
+    side_effect: SideEffectClass,
+) -> None:
+    executed: list[str] = []
+    tool_name = "read_fixture" if side_effect is SideEffectClass.READ_ONLY else "write_fixture"
+    spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name=tool_name,
+        version="1",
+        description="A registered tool that terminal discussion must not execute",
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        risk=ToolRisk.HIGH if side_effect is SideEffectClass.WRITE else ToolRisk.LOW,
+        side_effect=side_effect,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=(
+            ApprovalPolicy.ALWAYS
+            if side_effect is SideEffectClass.WRITE
+            else ApprovalPolicy.NEVER
+        ),
+        safety_policy={},
+        output_limit_chars=50,
+    )
+    state = conversation_with_terminal_goal(status)
+    original_goal = state.goal
+    original_claim = state.completion_claim
+    original_evidence = state.evidence_records
+    runtime, store, provider = _paused_runtime(
+        state,
+        ModelResponse(
+            (
+                ModelTextBlock("I will inspect it."),
+                ModelToolCall("terminal-call", tool_name, {}),
+            )
+        ),
+        ModelResponse((ModelTextBlock("The closed task remains unchanged."),)),
+        registrations=(
+            RegisteredTool(spec, lambda _intent: executed.append("ran") or "result"),
+        ),
+    )
+
+    result = runtime.run_turn(_submit_text(state, "Explain the closed task."), store.load())
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.message == "The closed task remains unchanged."
+    assert executed == []
+    assert all(call.tools == () for call in provider.calls)
+    assert any(fact.content.get("code") == "unadvertised_tool" for fact in store.state.facts)
+    assert not any(fact.kind is FactKind.TOOL_CALLS for fact in store.state.facts)
+    assert store.state.active_run is None
+    assert store.state.goal == original_goal
+    assert store.state.completion_claim == original_claim
+    assert store.state.evidence_records == original_evidence
+
+
+@pytest.mark.parametrize("status", [GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED])
+def test_terminal_follow_up_rejects_goal_progress_without_reopening_goal(
+    status: GoalStatus,
+) -> None:
+    state = conversation_with_terminal_goal(status)
+    original_goal = state.goal
+    original_claim = state.completion_claim
+    original_evidence = state.evidence_records
+    runtime, store, provider = _paused_runtime(
+        state,
+        ModelResponse(
+            (),
+            control=GoalProgress(
+                correlation_id="terminal-progress",
+                goal_id=state.goal.goal_id,
+                goal_revision=state.goal.revision,
+                summary="silently reopened",
+                next_step="continue work",
+            ),
+        ),
+        ModelResponse((ModelTextBlock("The task remains closed."),)),
+    )
+
+    result = runtime.run_turn(_submit_text(state, "Explain the closed task."), store.load())
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.message == "The task remains closed."
+    assert len(provider.calls) == 2
+    assert store.state.goal == original_goal
+    assert store.state.completion_claim == original_claim
+    assert store.state.evidence_records == original_evidence
+    assert all(
+        receipt.correlation_id != "terminal-progress"
+        for receipt in store.state.control_receipts
+    )
+
+
+def test_nonterminal_submit_still_invalidates_previous_completion_claim() -> None:
+    terminal = conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE)
+    nonterminal = replace(
+        terminal,
+        goal=replace(terminal.goal, status=GoalStatus.GOAL_READY),
+    )
+
+    accepted = accept_action(nonterminal, _submit_text(nonterminal)).state
+
+    assert accepted.completion_claim is None
 
 
 def test_paused_goal_context_hides_effectful_tools_and_control_schema() -> None:

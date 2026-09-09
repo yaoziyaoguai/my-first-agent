@@ -56,7 +56,7 @@ E0-E2 不能替代 E3。E3 也不能替代安全 fault matrix。
 
 ### SubAgent
 
-- **Eligibility:** composition exposes a provider-native hard total-deadline/termination receipt within the child cap；current OpenAI/Anthropic HTTP adapters are not eligible for v1 SubAgent E3.
+- **Eligibility:** composition exposes a provider-native hard total-deadline/termination receipt within the child cap；current OpenAI/Anthropic HTTP adapters are not eligible for v1 SubAgent E3.（历史适用范围注记：此句写作时 in-process adapter 尚无 honest hard deadline；其后 G8/G8.1 引入进程隔离 `ChildProcessRunner` 合同——parent 持有 process group、killpg+exit-confirm、`process_terminated` receipt——使真实 HTTP provider 经进程边界满足本 eligibility，2026-07-25 SubAgent E3 已据此通过。另注：进程边界证明的是本地请求路径终止；远端请求终止不等于服务端已撤销推理。）
 - **Task:** 对一个 bounded 设计提案分别运行 parent direct answer 与 parent + child review。
 - **Baseline:** parent direct answer。
 - **Pass:** child 只调用一次同 trust-domain provider、无工具/Memory/workspace；在 deadline 内结束；产生至少一个经人工确认的增量观点，且成本/时长被记录。

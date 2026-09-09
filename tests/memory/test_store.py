@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from agent.memory.contracts import MemoryCasMismatchError, MemoryStoreError, ProviderTrustProfile
+from agent.memory.contracts import (
+    MemoryCapacityError,
+    MemoryCasMismatchError,
+    MemoryStoreError,
+    ProviderTrustProfile,
+)
 from agent.memory.store import MemoryStore
 
 SCOPE = "scope-digest-1"
@@ -271,6 +276,121 @@ def test_load_rejects_coerced_or_missing_record_types(tmp_path: Path) -> None:
     _write_json(path, bad)
     with pytest.raises(MemoryStoreError):
         MemoryStore.load(path, workspace_scope_digest=SCOPE, profile=PROFILE)
+
+
+def test_mutation_rejects_document_above_capacity_before_any_write_side_effect(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """冻结容量合同：完整序列化 document 超过 _MAX_STORE_BYTES 时，remember 必须在任何
+    temp 写入副作用之前失败；内存 revision/records、durable bytes 与预先存在的 temp
+    文件都不得变化，且 durable 仍可被下一次 load 读取。"""
+    import agent.memory.store as store_mod
+
+    path = _store_path(tmp_path)
+    store = MemoryStore.create(path, workspace_scope_digest=SCOPE, profile=PROFILE)
+    record = store.remember("初始内容", clock=lambda: 50.0)
+    durable_before = path.read_bytes()
+    tmp_file = path.parent / f"{path.name}.tmp"
+    tmp_file.write_bytes(b"pre-existing-temp-sentinel")
+    # 压低上限到当前 durable 大小：等于上限仍可读取（边界接受），下一次写入增长后超限。
+    monkeypatch.setattr(store_mod, "_MAX_STORE_BYTES", len(durable_before))
+
+    with pytest.raises(MemoryCapacityError):
+        store.remember("超限的新记录" * 24, clock=lambda: 60.0)
+
+    # 内存状态不变（先于 snapshot 断言，避免 durable 刷新掩盖内存错误）。
+    assert store.revision == 1
+    assert store.get(record.record_id).content == "初始内容"
+    # durable bytes 未变；预先存在的 temp 未被触碰，也没有留下新的 temp。
+    assert path.read_bytes() == durable_before
+    assert tmp_file.read_bytes() == b"pre-existing-temp-sentinel"
+    assert [item.name for item in path.parent.glob("*.tmp")] == [tmp_file.name]
+    # 之后再 snapshot 仍一致，durable 仍可被下一次 load 读取（不会写出自己读不回的文件）。
+    assert len(store.snapshot()) == 1
+    reopened = MemoryStore.load(path, workspace_scope_digest=SCOPE, profile=PROFILE)
+    assert len(reopened.snapshot()) == 1
+
+
+def test_update_rejects_document_above_capacity_before_any_write_side_effect(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """同上，update 路径：容量拒绝先于 temp open/truncate/write/replace。"""
+    import agent.memory.store as store_mod
+
+    path = _store_path(tmp_path)
+    store = MemoryStore.create(path, workspace_scope_digest=SCOPE, profile=PROFILE)
+    record = store.remember("初始内容", clock=lambda: 50.0)
+    durable_before = path.read_bytes()
+    tmp_file = path.parent / f"{path.name}.tmp"
+    tmp_file.write_bytes(b"pre-existing-temp-sentinel")
+    monkeypatch.setattr(store_mod, "_MAX_STORE_BYTES", len(durable_before))
+
+    with pytest.raises(MemoryCapacityError):
+        store.update(
+            record.record_id,
+            "超限内容" * 32,
+            expected_record_revision=record.revision,
+            expected_content_digest=record.content_digest,
+            clock=lambda: 60.0,
+        )
+
+    assert store.revision == 1
+    assert store.get(record.record_id).content == "初始内容"
+    assert path.read_bytes() == durable_before
+    assert tmp_file.read_bytes() == b"pre-existing-temp-sentinel"
+    assert [item.name for item in path.parent.glob("*.tmp")] == [tmp_file.name]
+    assert len(store.snapshot()) == 1
+
+
+def test_capacity_boundary_exact_serialized_size_is_accepted(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """len(document) == _MAX_STORE_BYTES 必须接受：容量判断以完整序列化 bytes 的严格
+    大于为准，不能把恰好等于上限的合法 store 拒之门外。"""
+    from dataclasses import replace as _replace
+
+    import agent.memory.store as store_mod
+    from agent.memory.store import _content_digest
+
+    path = _store_path(tmp_path)
+    store = MemoryStore.create(path, workspace_scope_digest=SCOPE, profile=PROFILE)
+    record = store.remember("初始内容", clock=lambda: 50.0)
+    updated_record = _replace(
+        record,
+        content="边界内容",
+        content_digest=_content_digest("边界内容"),
+        updated_at=60.0,
+        revision=2,
+    )
+    expected = MemoryStore._serialize(SCOPE, PROFILE, 2, {record.record_id: updated_record})
+    monkeypatch.setattr(store_mod, "_MAX_STORE_BYTES", len(expected))
+
+    updated = store.update(
+        record.record_id,
+        "边界内容",
+        expected_record_revision=record.revision,
+        expected_content_digest=record.content_digest,
+        clock=lambda: 60.0,
+    )
+
+    assert updated.content == "边界内容"
+    assert path.stat().st_size == len(expected)
+
+
+def test_create_capacity_rejection_leaves_no_target_file_or_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """create 的初始序列化（含容量拒绝）必须先于目标文件/目录创建：人为压低上限的
+    拒绝不得留下目标文件或目录，也不得引入新的初始化机制。"""
+    import agent.memory.store as store_mod
+
+    path = tmp_path / "fresh" / "nested" / "store.json"
+    monkeypatch.setattr(store_mod, "_MAX_STORE_BYTES", 8)
+
+    with pytest.raises(MemoryCapacityError):
+        MemoryStore.create(path, workspace_scope_digest=SCOPE, profile=PROFILE)
+    assert not path.exists()
+    assert not path.parent.exists()
 
 
 def test_snapshot_rebuilds_from_durable_not_stale_cache(tmp_path: Path) -> None:

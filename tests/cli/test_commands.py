@@ -26,10 +26,11 @@ from agent.runtime.contracts import (
     ResumeGoal,
     RunResult,
     RunStatus,
+    SubmitMessage,
     ToolCall,
 )
 from agent.runtime.state import begin_browser_takeover
-from tests.kernel.fakes import conversation_with_active_goal
+from tests.kernel.fakes import conversation_with_active_goal, conversation_with_terminal_goal
 
 
 class StaticStore:
@@ -142,6 +143,22 @@ def test_normal_text_is_rejected_while_a_run_is_paused() -> None:
     assert any("paused" in item.lower() for item in output)
 
 
+def test_cli_terminal_follow_up_uses_existing_snapshot_bound_submit() -> None:
+    state = conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE)
+
+    runtime, _, exit_code = _run_once(state, "Explain the completed result.")
+
+    assert exit_code == 0
+    assert len(runtime.actions) == 1
+    action = runtime.actions[0]
+    assert isinstance(action, SubmitMessage)
+    assert action.conversation_id == state.conversation_id
+    assert action.action_seq == state.next_action_seq
+    assert action.expected_revision == state.revision
+    assert action.run_id == "run-new"
+    assert action.message == "Explain the completed result."
+
+
 def test_exit_eof_and_idle_interrupt_never_submit_cancel() -> None:
     state = replace(
         ConversationState.new("conversation-1"),
@@ -196,15 +213,25 @@ def test_browser_takeover_commands_reach_runtime_as_typed_actions() -> None:
         StaticStore(waiting),
         input_fn=lambda _: next(inputs),
     ) == 0
-    assert isinstance(runtime.actions[0], CompleteBrowserTakeover)
-    assert runtime.actions[0].request_id == request.request_id
+    complete = runtime.actions[0]
+    assert isinstance(complete, CompleteBrowserTakeover)
+    assert complete.conversation_id == waiting.conversation_id
+    assert complete.action_seq == waiting.next_action_seq
+    assert complete.expected_revision == waiting.revision
+    assert complete.request_id == request.request_id
+    assert complete.session_ref == request.session_ref
+    assert complete.expected_profile_revision == request.profile_revision
 
     runtime, _, _ = _run_once(waiting, "/browser-cancel")
-    assert isinstance(runtime.actions[0], CancelBrowserTakeover)
-    assert runtime.actions[0].request_id == request.request_id
+    browser_cancel = runtime.actions[0]
+    assert isinstance(browser_cancel, CancelBrowserTakeover)
+    assert browser_cancel.conversation_id == waiting.conversation_id
+    assert browser_cancel.action_seq == waiting.next_action_seq
+    assert browser_cancel.expected_revision == waiting.revision
+    assert browser_cancel.request_id == request.request_id
 
     runtime, _, _ = _run_once(waiting, "/cancel")
-    assert isinstance(runtime.actions[0], CancelBrowserTakeover)
+    assert runtime.actions[0] == browser_cancel
 
 
 def test_browser_done_submits_only_typed_runtime_action() -> None:

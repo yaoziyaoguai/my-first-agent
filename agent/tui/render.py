@@ -64,8 +64,8 @@ def _visible(cp: int) -> str:
 @dataclass(frozen=True, slots=True)
 class TuiProjection:
     main_text: str
-    form_kind: str | None  # approval | recovery | None
-    # submit | approve | reject | mark_succeeded | mark_failed | resume | cancel
+    form_kind: str | None  # approval | recovery | browser_takeover | None
+    # submit | approve | reject | mark_succeeded | mark_failed | browser_done | browser_cancel | ...
     actions: tuple[str, ...]
     focus: str
     terminal_message: str | None
@@ -78,6 +78,36 @@ class TuiProjection:
 def project(state: ConversationState, result: RunResult | None = None) -> TuiProjection:
     active = state.active_run
     goal_view = project_goal_view(state)
+    pending_takeover = state.browser_takeover_pending
+    if pending_takeover is not None and (
+        active is None
+        or (
+            active.status is not ActiveRunStatus.AWAITING_RECOVERY
+            and active.phase is not ContinuationPhase.EXECUTING
+        )
+    ):
+        return TuiProjection(
+            main_text="Browser takeover — waiting for you",
+            form_kind="browser_takeover",
+            actions=("browser_done", "browser_cancel"),
+            focus="browser_takeover",
+            terminal_message=None,
+            form_fields=(
+                ("request", pending_takeover.request_id),
+                ("session", pending_takeover.session_ref),
+                ("profile", pending_takeover.profile_ref),
+                ("profile revision", str(pending_takeover.profile_revision)),
+                (
+                    "next step",
+                    "Use Browser done after finishing in the dedicated browser window opened "
+                    "during this app session. After restarting the app, or when the original "
+                    "window is unavailable, use Browser cancel. Returning control does not "
+                    "approve later browser actions.",
+                ),
+            ),
+            goal=goal_view,
+            sources=goal_view.sources,
+        )
     if active is None:
         terminal = None
         if state.last_safe_result is not None:

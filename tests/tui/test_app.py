@@ -9,11 +9,15 @@ import pytest
 
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
+    ActiveRun,
     ActiveRunStatus,
     ApprovalRequest,
+    BrowserTakeoverRequestV1,
+    ControlRequestKind,
     ConversationState,
     EgressClass,
     ExecutionAuthorityClass,
+    GoalStatus,
     LoadedSnapshot,
     ModelResponse,
     ModelTextBlock,
@@ -27,6 +31,7 @@ from agent.runtime.contracts import (
 from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.state import (
     accept_action,
+    begin_browser_takeover,
     mark_executing,
     pause_for_approval,
     pause_for_recovery,
@@ -35,8 +40,14 @@ from agent.runtime.state import (
 from agent.runtime.tools import KernelToolRuntime
 from agent.runtime.views import SourceView
 from agent.tui.adapter import TuiAdapter
-from agent.tui.render import TuiProjection
-from tests.kernel.fakes import CollectingSink, InMemoryCheckpointStore, ScriptedProvider
+from agent.tui.render import TuiProjection, project
+from tests.kernel.fakes import (
+    CollectingSink,
+    InMemoryCheckpointStore,
+    ScriptedProvider,
+    conversation_with_active_goal,
+    conversation_with_terminal_goal,
+)
 
 
 def _adapter() -> TuiAdapter:
@@ -140,6 +151,29 @@ def _executing_state() -> ConversationState:
     )
 
 
+def _takeover_state(
+    *,
+    request_id: str = "takeover-1",
+    session_ref: str = "session-0123456789abcdef",
+    profile_ref: str = "profile-0123456789abcdef",
+    profile_revision: int = 3,
+) -> ConversationState:
+    ready = conversation_with_active_goal("c-takeover")
+    return begin_browser_takeover(
+        ready,
+        BrowserTakeoverRequestV1(
+            request_id=request_id,
+            session_ref=session_ref,
+            profile_ref=profile_ref,
+            profile_revision=profile_revision,
+            browser_identity_digest="a" * 64,
+            goal_id=ready.goal.goal_id,
+            goal_revision=ready.goal.revision,
+            requested_at="2026-09-08T08:00:00+00:00",
+        ),
+    )
+
+
 def _submit(conv: str, run_id: str, message: str):
     from agent.runtime.contracts import SubmitMessage
 
@@ -148,9 +182,14 @@ def _submit(conv: str, run_id: str, message: str):
     )
 
 
-def _runtime_with_store(state: ConversationState):
+def _runtime_with_store(
+    state: ConversationState,
+    *responses: ModelResponse,
+):
     store = InMemoryCheckpointStore(state)
-    provider = ScriptedProvider(ModelResponse((ModelTextBlock("must not run"),)))
+    provider = ScriptedProvider(
+        *(responses or (ModelResponse((ModelTextBlock("must not run"),)),))
+    )
     runtime = AgentRuntime(
         provider=provider,
         context_manager=KernelContextManager(
@@ -163,6 +202,185 @@ def _runtime_with_store(state: ConversationState):
         invocation_id_factory=lambda: "invocation-1",
     )
     return runtime, store, provider
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_hint"),
+    (
+        (GoalStatus.VERIFIED_DONE, "Task finished"),
+        (GoalStatus.CANCELLED, "Task cancelled"),
+    ),
+)
+def test_terminal_goal_mount_enables_truthful_follow_up(
+    status: GoalStatus,
+    expected_hint: str,
+) -> None:
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    state = conversation_with_terminal_goal(status)
+    store = InMemoryCheckpointStore(state)
+    app = build_app(
+        TuiAdapter(_RecordingRuntime(), store),
+        run_id_factory=_run_id_factory(),
+    )
+
+    async def scenario() -> None:
+        async with app.run_test():
+            assert app.projection is not None
+            assert app.projection.actions == ("submit",)
+            assert app.query_one("#message").disabled is False
+            hints = str(app.query_one("#action_hints").render())
+            assert expected_hint in hints
+            assert "follow-up" in hints
+            assert "new task" in hints
+
+            app._refresh(
+                RunResult(
+                    status=RunStatus.COMPLETED,
+                    state=state,
+                    message="nonempty terminal result",
+                )
+            )
+            refreshed_hints = str(app.query_one("#action_hints").render())
+            assert expected_hint in refreshed_hints
+            assert "follow-up" in refreshed_hints
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("status", [GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED])
+def test_terminal_follow_up_submit_binds_displayed_snapshot(status: GoalStatus) -> None:
+    pytest.importorskip("textual")
+    from agent.runtime.contracts import SubmitMessage
+    from agent.tui.app import build_app
+
+    displayed = conversation_with_terminal_goal(status)
+    recording = _RecordingRuntime()
+    app = build_app(
+        TuiAdapter(recording, InMemoryCheckpointStore(displayed)),
+        run_id_factory=_run_id_factory(),
+    )
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            message = app.query_one("#message")
+            message.value = "Explain the result."
+            await pilot.press("enter")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if recording.actions:
+                    break
+
+            assert len(recording.actions) == 1
+            action = recording.actions[0]
+            assert isinstance(action, SubmitMessage)
+            assert action.conversation_id == displayed.conversation_id
+            assert action.action_seq == displayed.next_action_seq
+            assert action.expected_revision == displayed.revision
+            assert action.run_id == "run-1"
+            assert action.message == "Explain the result."
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("status", [GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED])
+def test_terminal_goal_follow_up_preserves_durable_goal(status: GoalStatus) -> None:
+    state = conversation_with_terminal_goal(status)
+    original_goal = state.goal
+    original_evidence = state.evidence_records
+    original_claim = state.completion_claim
+    runtime, store, provider = _runtime_with_store(
+        state,
+        ModelResponse((ModelTextBlock("first explanation"),)),
+        ModelResponse((ModelTextBlock("second explanation"),)),
+    )
+    adapter = TuiAdapter(runtime, store)
+
+    action = replace(
+        _submit(
+            state.conversation_id,
+            "run-terminal-follow-up",
+            "Explain the result.",
+        ),
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+    )
+    result = adapter.execute_once(action)
+
+    assert result.status is RunStatus.COMPLETED
+    assert len(provider.calls) == 1
+    assert store.state.goal == original_goal
+    assert store.state.evidence_records == original_evidence
+    assert store.state.completion_claim == original_claim
+    assert project(store.state).actions == ("submit",)
+
+    refreshed = store.state
+    second_action = replace(
+        _submit(
+            refreshed.conversation_id,
+            "run-terminal-follow-up-2",
+            "Explain it another way.",
+        ),
+        action_seq=refreshed.next_action_seq,
+        expected_revision=refreshed.revision,
+    )
+    second = adapter.execute_once(second_action)
+
+    assert second.status is RunStatus.COMPLETED
+    assert len(provider.calls) == 2
+    assert store.state.goal == original_goal
+    assert store.state.evidence_records == original_evidence
+    assert store.state.completion_claim == original_claim
+    assert any(fact.content.get("text") == "first explanation" for fact in store.state.facts)
+    assert any(fact.content.get("text") == "second explanation" for fact in store.state.facts)
+    assert project(store.state).actions == ("submit",)
+
+
+def test_stale_terminal_follow_up_is_not_rebound_or_retried() -> None:
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    displayed = conversation_with_terminal_goal(GoalStatus.CANCELLED)
+    replacement = replace(
+        displayed,
+        revision=displayed.revision + 10,
+        next_action_seq=displayed.next_action_seq + 1,
+        active_run=ActiveRun("run-B", status=ActiveRunStatus.PAUSED_RETRYABLE),
+    )
+    runtime, store, provider = _runtime_with_store(displayed)
+    adapter = TuiAdapter(runtime, store)
+    app = build_app(adapter, run_id_factory=_run_id_factory())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            assert app.projection is not None
+            assert app.projection.actions == ("submit",)
+
+            store.state = replacement
+            message = app.query_one("#message")
+            message.value = "stale follow-up"
+            await pilot.press("enter")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if (
+                    not adapter.is_active
+                    and app.projection is not None
+                    and app.projection.actions == ("resume", "cancel")
+                ):
+                    break
+
+            assert store.state == replacement
+            assert provider.calls == []
+            assert app.projection is not None
+            assert app.projection.actions == ("resume", "cancel")
+
+            await pilot.press("enter")
+            await pilot.pause(delay=0.05)
+            assert store.state == replacement
+            assert provider.calls == []
+
+    asyncio.run(scenario())
 
 
 def test_pilot_submit_completes() -> None:
@@ -184,6 +402,386 @@ def test_pilot_submit_completes() -> None:
                 ):
                     return
             assert False, "kernel result did not advance authoritative state"  # noqa: B011
+
+    asyncio.run(scenario())
+
+
+def test_takeover_result_cannot_replace_authoritative_waiting_form() -> None:
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    waiting = _takeover_state()
+    store = InMemoryCheckpointStore(waiting)
+    recording = _RecordingRuntime()
+    app = build_app(TuiAdapter(recording, store), run_id_factory=_run_id_factory())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            app._refresh(
+                RunResult(
+                    status=RunStatus.COMPLETED,
+                    state=waiting,
+                    message="browser handoff requested",
+                )
+            )
+            status = str(app.query_one("#status").render())
+            assert status.startswith("Browser takeover — waiting for you")
+            assert "completed:" not in status.lower()
+            assert app.projection is not None
+            assert app.projection.form_kind == "browser_takeover"
+            assert app.query_one("#message").disabled is True
+
+            await pilot.press("enter")
+            await pilot.pause(delay=0.05)
+            assert recording.actions == []
+
+    asyncio.run(scenario())
+
+
+def test_pilot_browser_done_dispatches_exact_displayed_action() -> None:
+    pytest.importorskip("textual")
+    from agent.runtime.contracts import CompleteBrowserTakeover
+    from agent.tui.app import build_app
+
+    waiting = _takeover_state()
+    store = InMemoryCheckpointStore(waiting)
+    recording = _RecordingRuntime()
+    app = build_app(TuiAdapter(recording, store), run_id_factory=_run_id_factory())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            await pilot.press("b")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if recording.actions:
+                    break
+
+            assert len(recording.actions) == 1
+            action = recording.actions[0]
+            assert isinstance(action, CompleteBrowserTakeover)
+            assert action.conversation_id == waiting.conversation_id
+            assert action.action_seq == waiting.next_action_seq
+            assert action.expected_revision == waiting.revision
+            assert action.request_id == "takeover-1"
+            assert action.session_ref == "session-0123456789abcdef"
+            assert action.expected_profile_revision == 3
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("with_active_run", [False, True])
+def test_pilot_browser_cancel_never_becomes_run_or_goal_cancel(
+    with_active_run: bool,
+) -> None:
+    pytest.importorskip("textual")
+    from agent.runtime.contracts import CancelBrowserTakeover
+    from agent.tui.app import build_app
+
+    waiting = _takeover_state()
+    if with_active_run:
+        waiting = replace(
+            waiting,
+            active_run=ActiveRun(
+                "run-takeover",
+                status=ActiveRunStatus.PAUSED_RETRYABLE,
+            ),
+        )
+    store = InMemoryCheckpointStore(waiting)
+    recording = _RecordingRuntime()
+    app = build_app(TuiAdapter(recording, store), run_id_factory=_run_id_factory())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            await pilot.press("c")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if recording.actions:
+                    break
+
+            assert len(recording.actions) == 1
+            action = recording.actions[0]
+            assert isinstance(action, CancelBrowserTakeover)
+            assert action.conversation_id == waiting.conversation_id
+            assert action.action_seq == waiting.next_action_seq
+            assert action.expected_revision == waiting.revision
+            assert action.request_id == "takeover-1"
+
+    asyncio.run(scenario())
+
+
+def test_active_takeover_gesture_cannot_become_cooperative_control() -> None:
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    store = InMemoryCheckpointStore(_takeover_state())
+    adapter = TuiAdapter(_RecordingRuntime(), store)
+    controls: list[tuple[ControlRequestKind, str | None]] = []
+    adapter.request_control = (  # type: ignore[method-assign]
+        lambda kind, *, message=None: controls.append((kind, message))
+    )
+    app = build_app(adapter, run_id_factory=_run_id_factory())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            with adapter._active_lock:
+                adapter._active = True
+            await pilot.press("p")
+            await pilot.press("c")
+            await pilot.press("b")
+            message = app.query_one("#message")
+            message.disabled = False
+            message.value = "unrelated correction"
+            message.focus()
+            await pilot.press("enter")
+            await pilot.pause(delay=0.05)
+            with adapter._active_lock:
+                adapter._active = False
+
+            assert controls == []
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("state_factory", [_recovery_state, _executing_state])
+def test_takeover_keys_cannot_bypass_recovery_or_executing_projection(
+    state_factory,
+) -> None:
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    pending = _takeover_state().browser_takeover_pending
+    assert pending is not None
+    state = replace(state_factory(), browser_takeover_pending=pending)
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, InMemoryCheckpointStore(state))
+    app = build_app(adapter, run_id_factory=_run_id_factory())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            assert app.projection is not None
+            assert "browser_done" not in app.projection.actions
+            assert "browser_cancel" not in app.projection.actions
+            await pilot.press("b")
+            await pilot.press("c")
+            await pilot.pause(delay=0.05)
+            assert recording.actions == []
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("key", ["b", "c"])
+def test_takeover_decision_stays_bound_to_displayed_request(
+    key: str,
+) -> None:
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    displayed = _takeover_state()
+    assert displayed.browser_takeover_pending is not None
+    replacement = replace(
+        displayed,
+        revision=displayed.revision + 10,
+        next_action_seq=displayed.next_action_seq + 1,
+        browser_takeover_pending=replace(
+            displayed.browser_takeover_pending,
+            request_id="takeover-B",
+            session_ref="session-bbbbbbbbbbbbbbbb",
+            profile_ref="profile-bbbbbbbbbbbbbbbb",
+            profile_revision=9,
+            browser_identity_digest="b" * 64,
+        ),
+    )
+    effects: list[BrowserTakeoverRequestV1] = []
+    store = InMemoryCheckpointStore(displayed)
+    provider = ScriptedProvider(ModelResponse((ModelTextBlock("must not run"),)))
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=8_000, output_reserve=200),
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        browser_takeover_complete=lambda request: (
+            effects.append(request) or request.profile_revision + 1
+        ),
+        invocation_id_factory=lambda: "invocation-1",
+    )
+    adapter = TuiAdapter(runtime, store)
+    app = build_app(adapter, run_id_factory=_run_id_factory())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            assert "takeover-1" in app.form_text
+            store.state = replacement
+            await pilot.press(key)
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if not adapter.is_active and "takeover-B" in app.form_text:
+                    break
+
+            assert store.state == replacement
+            assert effects == []
+            assert provider.calls == []
+            assert "takeover-B" in app.form_text
+
+    asyncio.run(scenario())
+
+
+def test_restart_owner_failure_keeps_takeover_pending_until_explicit_cancel(
+    tmp_path,
+) -> None:
+    pytest.importorskip("textual")
+    from agent.browser.profile_store import BrowserProfileStore
+    from agent.browser.session_store import BrowserSessionStore
+    from agent.browser.tools import build_browser_tools
+    from agent.tui.app import build_app
+    from tests.browser.profile_probe import DeterministicProcessIdentityProbe
+    from tests.browser.test_tools import RecordingEnvironment
+
+    environment = RecordingEnvironment()
+    bundle = build_browser_tools(
+        environment=environment,
+        profile_store=BrowserProfileStore(
+            root=tmp_path / "profiles",
+            process_probe=DeterministicProcessIdentityProbe(),
+        ),
+        session_store=BrowserSessionStore(root=tmp_path / "sessions"),
+        browser_identity_digest="a" * 64,
+        clock=lambda: "2026-09-08T08:00:00+00:00",
+        monotonic_clock=lambda: 1_000.0,
+    )
+    waiting = _takeover_state()
+    store = InMemoryCheckpointStore(waiting)
+    provider = ScriptedProvider(ModelResponse((ModelTextBlock("must not run"),)))
+    completion_calls: list[BrowserTakeoverRequestV1] = []
+
+    def complete(request: BrowserTakeoverRequestV1) -> int:
+        completion_calls.append(request)
+        return bundle.complete_takeover(request)
+
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=8_000, output_reserve=200),
+        ),
+        tool_runtime=KernelToolRuntime(bundle.registrations),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        browser_takeover_complete=complete,
+        invocation_id_factory=lambda: "invocation-1",
+    )
+    adapter = TuiAdapter(runtime, store)
+    app = build_app(adapter, run_id_factory=_run_id_factory())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            await pilot.press("b")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                status = str(app.query_one("#status").render())
+                if not adapter.is_active and "could not be confirmed" in status:
+                    break
+
+            assert store.state.browser_takeover_pending == waiting.browser_takeover_pending
+            assert len(completion_calls) == 1
+            assert provider.calls == []
+            assert "could not be confirmed" in str(app.query_one("#status").render())
+            assert "Browser cancel" in app.form_text
+
+            await pilot.press("c")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if not adapter.is_active and store.state.browser_takeover_pending is None:
+                    break
+
+            assert store.state.browser_takeover_pending is None
+            assert len(completion_calls) == 1
+            assert provider.calls == []
+            assert environment.takeovers == []
+
+    asyncio.run(scenario())
+
+
+def test_live_browser_done_clears_pending_without_tui_generated_resume() -> None:
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    waiting = _takeover_state()
+    store = InMemoryCheckpointStore(waiting)
+    provider = ScriptedProvider(ModelResponse((ModelTextBlock("must not run"),)))
+    completion_calls: list[BrowserTakeoverRequestV1] = []
+
+    def complete(request: BrowserTakeoverRequestV1) -> int:
+        completion_calls.append(request)
+        return request.profile_revision + 1
+
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=8_000, output_reserve=200),
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        browser_takeover_complete=complete,
+        invocation_id_factory=lambda: "invocation-1",
+    )
+    adapter = TuiAdapter(runtime, store)
+    app = build_app(adapter, run_id_factory=_run_id_factory())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            await pilot.press("b")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if not adapter.is_active and store.state.browser_takeover_pending is None:
+                    break
+
+            assert completion_calls == [waiting.browser_takeover_pending]
+            assert store.state.browser_takeover_pending is None
+            assert provider.calls == []
+
+    asyncio.run(scenario())
+
+
+def test_oversized_takeover_form_blocks_done_but_keeps_exact_cancel() -> None:
+    pytest.importorskip("textual")
+    from agent.runtime.contracts import CancelBrowserTakeover
+    from agent.tui.app import build_app
+
+    waiting = _takeover_state(request_id="x" * 5_000)
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, InMemoryCheckpointStore(waiting))
+    app = build_app(adapter, run_id_factory=_run_id_factory())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            assert app._preview_too_large is True
+            rendered_form = str(app.query_one("#form").render())
+            hints = str(app.query_one("#action_hints").render())
+            assert "browser takeover details exceed display cap" in rendered_form
+            assert "Browser done" not in hints
+            assert "Browser cancel" in hints
+
+            await pilot.press("b")
+            await pilot.pause(delay=0.05)
+            assert recording.actions == []
+
+            await pilot.press("c")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if recording.actions:
+                    break
+            assert len(recording.actions) == 1
+            assert isinstance(recording.actions[0], CancelBrowserTakeover)
+            assert recording.actions[0].request_id == "x" * 5_000
 
     asyncio.run(scenario())
 
@@ -742,5 +1340,396 @@ def test_tui_approve_keyboard_action_matches_cli_builder_fields() -> None:
             assert dispatched.binding_digest == cli_action.binding_digest
             assert dispatched.approved == cli_action.approved
             assert dispatched.approved_at == "2026-08-16T12:00:00Z"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(("key", "approved"), [("a", True), ("r", False)])
+def test_pilot_approval_decision_does_not_rebind_to_unseen_request(
+    key: str,
+    approved: bool,
+) -> None:
+    """010/A1/A6：用户对 A 的批准或拒绝不能被静默重绑到 B。"""
+
+    pytest.importorskip("textual")
+
+    from agent.runtime.contracts import ResolveApproval
+    from agent.tui.app import build_app
+
+    displayed = _approval_state(preview="visible approval A")
+    assert displayed.active_run is not None
+    displayed_request = displayed.active_run.pending_request
+    assert isinstance(displayed_request, ApprovalRequest)
+
+    replacement = _approval_state(preview="unseen approval B")
+    assert replacement.active_run is not None
+    replacement = replace(
+        replacement,
+        revision=displayed.revision + 10,
+        next_action_seq=displayed.next_action_seq + 1,
+        active_run=replace(
+            replacement.active_run,
+            pending_request=replace(
+                replacement.active_run.pending_request,
+                request_id="approval-B",
+                binding_digest="binding-B",
+            ),
+        ),
+    )
+
+    store = InMemoryCheckpointStore(displayed)
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            assert "visible approval A" in app.form_text
+
+            # 模拟另一 caller 在用户阅读 A 时提交 B；TUI 仍显示 A。
+            store.state = replacement
+            await pilot.press(key)
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if recording.actions:
+                    break
+
+            assert len(recording.actions) == 1
+            dispatched = recording.actions[0]
+            assert isinstance(dispatched, ResolveApproval)
+            assert dispatched.request_id == displayed_request.request_id
+            assert dispatched.binding_digest == displayed_request.binding_digest
+            assert dispatched.action_seq == displayed.next_action_seq
+            assert dispatched.expected_revision == displayed.revision
+            assert dispatched.approved is approved
+
+    asyncio.run(scenario())
+
+
+def test_pilot_artifact_approval_uses_displayed_request(tmp_path) -> None:
+    """010/A4：artifact 命令的 requirement 与 binding 都来自已展示的 A。"""
+
+    pytest.importorskip("textual")
+
+    from agent.runtime.contracts import ResolveApproval
+    from agent.tui.app import build_app
+    from tests.process.test_artifact_approval_contract import (
+        _awaiting_state,
+        _prepare_artifact_request,
+    )
+
+    criterion, request = _prepare_artifact_request(tmp_path)
+    displayed = _awaiting_state(request, criterion)
+    assert displayed.active_run is not None
+
+    replacement_request = replace(
+        request,
+        request_id="artifact-approval-B",
+        binding_digest="artifact-binding-B",
+        preview="unseen artifact approval B",
+    )
+    replacement = replace(
+        _awaiting_state(replacement_request, criterion),
+        revision=displayed.revision + 10,
+        next_action_seq=displayed.next_action_seq + 1,
+    )
+
+    store = InMemoryCheckpointStore(displayed)
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            assert request.preview in app.form_text
+
+            store.state = replacement
+            message = app.query_one("#message")
+            message.value = "/approve-artifact " + "a" * 64 + " artifact.out"
+            await pilot.press("enter")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if recording.actions:
+                    break
+
+            assert len(recording.actions) == 1
+            dispatched = recording.actions[0]
+            assert isinstance(dispatched, ResolveApproval)
+            assert dispatched.request_id == request.request_id
+            assert dispatched.binding_digest == request.binding_digest
+            assert dispatched.expected_revision == displayed.revision
+            assert dispatched.confirmed_artifact_path == "artifact.out"
+            assert dispatched.confirmed_artifact_sha256 == "a" * 64
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("key", ["s", "f"])
+def test_pilot_recovery_resolution_uses_displayed_request(key: str) -> None:
+    """010/A6：recovery 成功/失败判断也不能从 A 重绑到 B。"""
+
+    pytest.importorskip("textual")
+
+    from agent.runtime.contracts import ResolveUnknownToolOutcome
+    from agent.tui.app import build_app
+
+    displayed = _recovery_state()
+    assert displayed.active_run is not None
+    displayed_request = displayed.active_run.pending_request
+    replacement = replace(
+        displayed,
+        revision=displayed.revision + 10,
+        next_action_seq=displayed.next_action_seq + 1,
+        active_run=replace(
+            displayed.active_run,
+            executing_intent=replace(
+                displayed.active_run.executing_intent,
+                intent_digest="recovery-binding-B",
+            ),
+            pending_request=replace(
+                displayed.active_run.pending_request,
+                request_id="recovery-B",
+                binding_digest="recovery-binding-B",
+                summary="unseen recovery B",
+            ),
+        ),
+    )
+
+    store = InMemoryCheckpointStore(displayed)
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            assert "summary-text" in app.form_text
+
+            store.state = replacement
+            await pilot.press(key)
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if recording.actions:
+                    break
+
+            assert len(recording.actions) == 1
+            dispatched = recording.actions[0]
+            assert isinstance(dispatched, ResolveUnknownToolOutcome)
+            assert dispatched.request_id == displayed_request.request_id
+            assert dispatched.binding_digest == displayed_request.binding_digest
+            assert dispatched.expected_revision == displayed.revision
+
+    asyncio.run(scenario())
+
+
+def test_pilot_public_observation_resolution_uses_displayed_intent() -> None:
+    """010/A6：public observation 的 unknown 记录绑定用户看到的 executing intent。"""
+
+    pytest.importorskip("textual")
+
+    from agent.runtime.contracts import RecoverUnknownObservation
+    from agent.tui.app import build_app
+
+    recovery = _recovery_state()
+    assert recovery.active_run is not None
+    displayed = replace(
+        recovery,
+        active_run=replace(
+            recovery.active_run,
+            executing_intent=replace(
+                recovery.active_run.executing_intent,
+                side_effect=SideEffectClass.READ_ONLY,
+                egress=EgressClass.PUBLIC_NETWORK,
+                operation="search-A",
+                request_identity="request-A",
+            ),
+        ),
+    )
+    assert displayed.active_run is not None
+    displayed_intent = displayed.active_run.executing_intent
+    replacement = replace(
+        displayed,
+        revision=displayed.revision + 10,
+        next_action_seq=displayed.next_action_seq + 1,
+        active_run=replace(
+            displayed.active_run,
+            executing_intent=replace(
+                displayed.active_run.executing_intent,
+                intent_digest="public-intent-B",
+                operation="search-B",
+                request_identity="request-B",
+            ),
+            pending_request=replace(
+                displayed.active_run.pending_request,
+                binding_digest="public-intent-B",
+                summary="unseen public observation B",
+            ),
+        ),
+    )
+
+    store = InMemoryCheckpointStore(displayed)
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            assert app.projection.actions == ("record_observation_unknown",)
+
+            store.state = replacement
+            await pilot.press("o")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if recording.actions:
+                    break
+
+            assert len(recording.actions) == 1
+            dispatched = recording.actions[0]
+            assert isinstance(dispatched, RecoverUnknownObservation)
+            assert dispatched.tool_call_id == displayed_intent.tool_call_id
+            assert dispatched.intent_digest == displayed_intent.intent_digest
+            assert dispatched.expected_revision == displayed.revision
+
+    asyncio.run(scenario())
+
+
+def test_pilot_provider_acknowledges_displayed_disclosure() -> None:
+    """010/A6：provider disclosure acknowledgement 不能重绑到未展示的目的地。"""
+
+    pytest.importorskip("textual")
+
+    from agent.runtime.contracts import (
+        AcknowledgeProviderDisclosure,
+        ActiveRun,
+        ProviderDisclosureRequest,
+    )
+    from agent.tui.app import build_app
+
+    displayed_request = ProviderDisclosureRequest.create(
+        disclosure_id="disclosure-A",
+        provider_descriptor_digest="descriptor-A",
+        canonical_destination="https://provider-a.example/v1",
+        model="model-A",
+        data_classes=("user_message",),
+    )
+    displayed = replace(
+        ConversationState.new("conversation-disclosure"),
+        active_run=ActiveRun("run-disclosure", status=ActiveRunStatus.AWAITING_DISCLOSURE),
+        provider_disclosure_request=displayed_request,
+    )
+    replacement_request = ProviderDisclosureRequest.create(
+        disclosure_id="disclosure-B",
+        provider_descriptor_digest="descriptor-B",
+        canonical_destination="https://provider-b.example/v1",
+        model="model-B",
+        data_classes=("user_message",),
+    )
+    replacement = replace(
+        displayed,
+        revision=displayed.revision + 10,
+        next_action_seq=displayed.next_action_seq + 1,
+        provider_disclosure_request=replacement_request,
+    )
+
+    store = InMemoryCheckpointStore(displayed)
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            assert "provider-a.example" in app.form_text
+
+            store.state = replacement
+            await pilot.press("d")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if recording.actions:
+                    break
+
+            assert len(recording.actions) == 1
+            dispatched = recording.actions[0]
+            assert isinstance(dispatched, AcknowledgeProviderDisclosure)
+            assert dispatched.request_digest == displayed_request.request_digest
+            assert dispatched.expected_revision == displayed.revision
+
+    asyncio.run(scenario())
+
+
+def test_pilot_stale_displayed_approval_is_rejected_by_runtime() -> None:
+    """010/A2-A3：fresh checkpoint 只裁决 stale A，不把手势重建或重试为 B。"""
+
+    pytest.importorskip("textual")
+
+    from agent.tui.app import build_app
+
+    displayed = _approval_state(preview="visible approval A")
+    assert displayed.active_run is not None
+    replacement = replace(
+        displayed,
+        revision=displayed.revision + 10,
+        next_action_seq=displayed.next_action_seq + 1,
+        active_run=replace(
+            displayed.active_run,
+            pending_request=replace(
+                displayed.active_run.pending_request,
+                request_id="approval-B",
+                binding_digest="binding-B",
+                preview="unseen approval B " * 400,
+            ),
+        ),
+    )
+
+    runtime, store, provider = _runtime_with_store(displayed)
+    adapter = TuiAdapter(runtime, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            assert "visible approval A" in app.form_text
+
+            store.state = replacement
+            await pilot.press("a")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if not adapter.is_active and app._preview_too_large:
+                    break
+
+            assert store.state == replacement
+            assert provider.calls == []
+            assert "unseen approval B" in app.form_text
+            assert app._preview_too_large is True
+            assert app.projection is not None
+            assert app.projection.actions == ("approve", "reject")
+
+            # B 现在已展示并重新计算 preview gate；必须重新输入，且 oversized B
+            # 仍 fail closed，不能继承 A 的可批准状态。
+            await pilot.press("a")
+            await pilot.pause(delay=0.05)
+            assert store.state == replacement
+            assert provider.calls == []
 
     asyncio.run(scenario())

@@ -1,20 +1,36 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from agent.runtime.checkpoint import LocalCheckpointStore
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     AbandonUnknownModelOutcome,
     ActiveRunStatus,
+    ApprovalPolicy,
     BackgroundOccurrenceBindingV1,
+    BeginAnswer,
+    ContinuationPhase,
     ConversationState,
+    ExecutionAuthorityClass,
+    FactKind,
+    KnownExecutedError,
     ModelResponse,
     ModelTextBlock,
+    ModelToolCall,
+    OutputPolicy,
     RunStatus,
+    SideEffectClass,
     SubmitMessage,
+    ToolRisk,
+    ToolSpec,
 )
 from agent.runtime.loop import AgentRuntime, InvocationLimits
-from agent.runtime.tools import KernelToolRuntime
+from agent.runtime.tools import KernelToolRuntime, RegisteredTool
+from agent.scheduler.caller import ScheduledOccurrenceCaller, create_or_load_occurrence_store
+from agent.scheduler.contracts import ScheduledOccurrence
 from tests.kernel.fakes import CollectingSink, InMemoryCheckpointStore, ScriptedProvider
 
 
@@ -50,6 +66,20 @@ class _CrashAfterSendProvider:
         raise _SimulatedProcessCrash
 
 
+class _CrashLocalCheckpointStore(LocalCheckpointStore):
+    def __init__(self, path: Path, predicate) -> None:  # noqa: ANN001
+        super().__init__(path)
+        self._predicate = predicate
+        self._crashed = False
+
+    def compare_and_swap(self, snapshot, new_state):  # noqa: ANN001
+        updated = super().compare_and_swap(snapshot, new_state)
+        if not self._crashed and self._predicate(new_state):
+            self._crashed = True
+            raise _SimulatedProcessCrash
+        return updated
+
+
 def _binding() -> BackgroundOccurrenceBindingV1:
     return BackgroundOccurrenceBindingV1.create(
         automation_id="automation:nightly-report",
@@ -82,14 +112,20 @@ def _action(state: ConversationState) -> SubmitMessage:
     )
 
 
-def _runtime(store, provider, *, invocation_id: str = "invocation:one") -> AgentRuntime:  # noqa: ANN001
+def _runtime(
+    store,
+    provider,
+    *,
+    invocation_id: str = "invocation:one",
+    tools: tuple[RegisteredTool, ...] = (),
+) -> AgentRuntime:  # noqa: ANN001
     return AgentRuntime(
         provider=provider,
         context_manager=KernelContextManager(
             system_policy="policy",
             limits=ContextLimits(max_input_tokens=8_000, output_reserve=200),
         ),
-        tool_runtime=KernelToolRuntime(()),
+        tool_runtime=KernelToolRuntime(tools),
         checkpoint_store=store,
         event_sink=CollectingSink(),
         limits=InvocationLimits(),
@@ -106,6 +142,352 @@ def _fresh_state() -> ConversationState:
 
 def _response() -> ModelResponse:
     return ModelResponse((ModelTextBlock("background ok"),))
+
+
+def _occurrence() -> ScheduledOccurrence:
+    return ScheduledOccurrence(
+        schedule_id="automation:nightly-report",
+        occurrence_id=_binding().occurrence_id,
+        scheduled_for_utc=_binding().scheduled_for_utc,
+        message="Give the bounded nightly status.",
+        workspace_scope_digest="workspace:fixture",
+        background_binding=_binding(),
+    )
+
+
+def _read_registration(
+    invocations: list[str],
+    *,
+    fail_path: str | None = None,
+    name: str = "read_recovery_fixture",
+    approval_policy: ApprovalPolicy = ApprovalPolicy.NEVER,
+) -> RegisteredTool:
+    spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name=name,
+        version="1",
+        description="Read a benign recovery fixture",
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.HIGH if approval_policy is ApprovalPolicy.ALWAYS else ToolRisk.LOW,
+        side_effect=SideEffectClass.READ_ONLY,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=approval_policy,
+        safety_policy={"fixture": True},
+        output_limit_chars=100,
+    )
+
+    def read_fixture(intent) -> str | KnownExecutedError:  # noqa: ANN001
+        path = intent.arguments["path"]
+        invocations.append(path)
+        if path == fail_path:
+            return KnownExecutedError(
+                code="fixture_read_failed",
+                message=f"could not read {path}",
+            )
+        return f"content:{path}"
+
+    return RegisteredTool(spec, read_fixture)
+
+
+def _crash_occurrence_store(
+    tmp_path: Path,
+    predicate,
+) -> tuple[ScheduledOccurrence, _CrashLocalCheckpointStore, Path]:  # noqa: ANN001
+    occurrence = _occurrence()
+    state_root = tmp_path / "state"
+    state_root.mkdir(mode=0o700)
+    create_or_load_occurrence_store(occurrence, state_root=state_root)
+    checkpoint_path = state_root / occurrence.checkpoint_relative_path
+    return (
+        occurrence,
+        _CrashLocalCheckpointStore(checkpoint_path, predicate),
+        checkpoint_path,
+    )
+
+
+def _scheduled_caller(
+    runtime: AgentRuntime,
+    store: LocalCheckpointStore,
+    occurrence: ScheduledOccurrence,
+) -> ScheduledOccurrenceCaller:
+    return ScheduledOccurrenceCaller(runtime, store, store.load(), occurrence)
+
+
+def test_restart_after_durable_tool_batch_reclaims_and_executes_once(
+    tmp_path: Path,
+) -> None:
+    occurrence, crash_store, checkpoint_path = _crash_occurrence_store(
+        tmp_path,
+        lambda item: (
+            item.active_run is not None
+            and item.active_run.status is ActiveRunStatus.RUNNABLE
+            and item.active_run.phase is ContinuationPhase.TOOL
+            and item.active_run.batch_cursor == 0
+        ),
+    )
+    invocations: list[str] = []
+    registration = _read_registration(invocations)
+    first_provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-background-read")),
+        ModelResponse(
+            (
+                ModelToolCall("call-a", "read_recovery_fixture", {"path": "a.txt"}),
+                ModelToolCall("call-b", "read_recovery_fixture", {"path": "b.txt"}),
+            )
+        ),
+    )
+    first_runtime = _runtime(crash_store, first_provider, tools=(registration,))
+
+    with pytest.raises(_SimulatedProcessCrash):
+        _scheduled_caller(first_runtime, crash_store, occurrence).run_once()
+
+    durable = LocalCheckpointStore(checkpoint_path).load().state
+    assert durable.active_run is not None
+    assert durable.active_run.status is ActiveRunStatus.RUNNABLE
+    assert durable.active_run.phase is ContinuationPhase.TOOL
+    assert durable.active_run.batch_cursor == 0
+    assert durable.active_run.executing_intent is None
+    assert len(durable.active_run.tool_calls) == 2
+    assert invocations == []
+
+    reopened = LocalCheckpointStore(checkpoint_path)
+    resumed_provider = ScriptedProvider(ModelResponse((ModelTextBlock("done"),)))
+    resumed_runtime = _runtime(
+        reopened,
+        resumed_provider,
+        invocation_id="invocation:restart",
+        tools=(registration,),
+    )
+    report = _scheduled_caller(resumed_runtime, reopened, occurrence).run_once()
+
+    assert report.run_status is RunStatus.COMPLETED
+    assert invocations == ["a.txt", "b.txt"]
+    assert len(first_provider.calls) == 2
+    assert len(resumed_provider.calls) == 1
+
+    duplicate = _scheduled_caller(resumed_runtime, reopened, occurrence).run_once()
+    assert duplicate.replayed is True
+    assert invocations == ["a.txt", "b.txt"]
+    assert len(resumed_provider.calls) == 1
+
+
+def test_reclaimed_tool_suffix_still_stops_at_approval(
+    tmp_path: Path,
+) -> None:
+    occurrence, crash_store, checkpoint_path = _crash_occurrence_store(
+        tmp_path,
+        lambda item: (
+            item.active_run is not None
+            and item.active_run.status is ActiveRunStatus.RUNNABLE
+            and item.active_run.phase is ContinuationPhase.TOOL
+            and item.active_run.batch_cursor == 1
+        ),
+    )
+    ordinary_invocations: list[str] = []
+    gated_invocations: list[str] = []
+    ordinary = _read_registration(
+        ordinary_invocations,
+        name="read_recovery_fixture",
+    )
+    gated = _read_registration(
+        gated_invocations,
+        name="read_gated_recovery_fixture",
+        approval_policy=ApprovalPolicy.ALWAYS,
+    )
+    first_provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-background-approval")),
+        ModelResponse(
+            (
+                ModelToolCall(
+                    "call-prefix",
+                    "read_recovery_fixture",
+                    {"path": "prefix.txt"},
+                ),
+                ModelToolCall(
+                    "call-gated",
+                    "read_gated_recovery_fixture",
+                    {"path": "gated.txt"},
+                ),
+            )
+        ),
+    )
+
+    with pytest.raises(_SimulatedProcessCrash):
+        _scheduled_caller(
+            _runtime(crash_store, first_provider, tools=(ordinary, gated)),
+            crash_store,
+            occurrence,
+        ).run_once()
+
+    assert ordinary_invocations == ["prefix.txt"]
+    assert gated_invocations == []
+
+    reopened = LocalCheckpointStore(checkpoint_path)
+    resumed_provider = ScriptedProvider(AssertionError("provider must not be called"))
+    resumed_runtime = _runtime(
+        reopened,
+        resumed_provider,
+        invocation_id="invocation:restart",
+        tools=(ordinary, gated),
+    )
+    report = _scheduled_caller(
+        resumed_runtime,
+        reopened,
+        occurrence,
+    ).run_once()
+
+    assert report.run_status is RunStatus.AWAITING_APPROVAL
+    assert report.occurrence_status == "needs_human"
+    assert ordinary_invocations == ["prefix.txt"]
+    assert gated_invocations == []
+    assert len(resumed_provider.calls) == 0
+
+    duplicate = _scheduled_caller(
+        resumed_runtime,
+        reopened,
+        occurrence,
+    ).run_once()
+    assert duplicate.run_status is RunStatus.AWAITING_APPROVAL
+    assert duplicate.replayed is True
+    assert ordinary_invocations == ["prefix.txt"]
+    assert gated_invocations == []
+    assert len(resumed_provider.calls) == 0
+
+
+def test_background_replay_never_retries_an_executing_tool(
+    tmp_path: Path,
+) -> None:
+    occurrence, crash_store, checkpoint_path = _crash_occurrence_store(
+        tmp_path,
+        lambda item: (
+            item.active_run is not None
+            and item.active_run.status is ActiveRunStatus.RUNNABLE
+            and item.active_run.phase is ContinuationPhase.EXECUTING
+            and item.active_run.executing_intent is not None
+        ),
+    )
+    invocations: list[str] = []
+    registration = _read_registration(invocations)
+    first_provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-background-executing")),
+        ModelResponse(
+            (
+                ModelToolCall(
+                    "call-executing",
+                    "read_recovery_fixture",
+                    {"path": "uncertain.txt"},
+                ),
+            )
+        ),
+    )
+
+    with pytest.raises(_SimulatedProcessCrash):
+        _scheduled_caller(
+            _runtime(crash_store, first_provider, tools=(registration,)),
+            crash_store,
+            occurrence,
+        ).run_once()
+
+    durable = LocalCheckpointStore(checkpoint_path).load().state
+    assert durable.active_run is not None
+    assert durable.active_run.phase is ContinuationPhase.EXECUTING
+    assert durable.active_run.executing_intent is not None
+    assert invocations == []
+
+    reopened = LocalCheckpointStore(checkpoint_path)
+    resumed_provider = ScriptedProvider(AssertionError("provider must not be called"))
+    report = _scheduled_caller(
+        _runtime(
+            reopened,
+            resumed_provider,
+            invocation_id="invocation:restart",
+            tools=(registration,),
+        ),
+        reopened,
+        occurrence,
+    ).run_once()
+
+    assert report.run_status is RunStatus.AWAITING_RECOVERY
+    assert report.occurrence_status == "needs_human"
+    assert invocations == []
+    assert len(resumed_provider.calls) == 0
+
+
+def test_restart_after_durable_tool_prefix_executes_only_remaining_suffix(
+    tmp_path: Path,
+) -> None:
+    occurrence, crash_store, checkpoint_path = _crash_occurrence_store(
+        tmp_path,
+        lambda item: (
+            item.active_run is not None
+            and item.active_run.status is ActiveRunStatus.RUNNABLE
+            and item.active_run.phase is ContinuationPhase.TOOL
+            and item.active_run.batch_cursor == 2
+        ),
+    )
+    invocations: list[str] = []
+    registration = _read_registration(invocations, fail_path="b.txt")
+    first_provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-background-prefix")),
+        ModelResponse(
+            tuple(
+                ModelToolCall(
+                    f"call-{name}",
+                    "read_recovery_fixture",
+                    {"path": f"{name}.txt"},
+                )
+                for name in ("a", "b", "c")
+            )
+        ),
+    )
+
+    with pytest.raises(_SimulatedProcessCrash):
+        _scheduled_caller(
+            _runtime(crash_store, first_provider, tools=(registration,)),
+            crash_store,
+            occurrence,
+        ).run_once()
+
+    durable = LocalCheckpointStore(checkpoint_path).load().state
+    assert durable.active_run is not None
+    assert durable.active_run.phase is ContinuationPhase.TOOL
+    assert durable.active_run.batch_cursor == 2
+    assert invocations == ["a.txt", "b.txt"]
+    prefix = tuple(fact for fact in durable.facts if fact.kind is FactKind.TOOL_RESULT)
+    assert [fact.content["tool_call_id"] for fact in prefix] == ["call-a", "call-b"]
+    assert [fact.content["is_error"] for fact in prefix] == [False, True]
+
+    reopened = LocalCheckpointStore(checkpoint_path)
+    resumed_provider = ScriptedProvider(ModelResponse((ModelTextBlock("done"),)))
+    report = _scheduled_caller(
+        _runtime(
+            reopened,
+            resumed_provider,
+            invocation_id="invocation:restart",
+            tools=(registration,),
+        ),
+        reopened,
+        occurrence,
+    ).run_once()
+
+    assert report.run_status is RunStatus.COMPLETED
+    assert invocations == ["a.txt", "b.txt", "c.txt"]
+    completed = reopened.load().state
+    results = tuple(fact for fact in completed.facts if fact.kind is FactKind.TOOL_RESULT)
+    assert results[:2] == prefix
+    assert [fact.content["tool_call_id"] for fact in results] == [
+        "call-a",
+        "call-b",
+        "call-c",
+    ]
+    assert sum(fact.kind is FactKind.TOOL_CALLS for fact in completed.facts) == 1
+    assert len(first_provider.calls) == 2
+    assert len(resumed_provider.calls) == 1
 
 
 def test_restart_before_provider_intent_save_safely_sends_once() -> None:

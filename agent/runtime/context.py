@@ -673,7 +673,12 @@ class KernelContextManager:
         # 选择前，不让任何 product tool/context source 参与语义分类。这样外部内容
         # 只能支持已经选定的 ANSWERING，不能反向铸造任务 authority。
         # PAUSED Goal 同样只暴露只读能力：任务推进/effect 必须先显式 ResumeGoal。
+        # terminal Goal 的后续普通消息只用于讨论关闭结果，不继承旧 Goal 的工具 authority。
         goal_paused = state.goal is not None and state.goal.status is GoalStatus.PAUSED
+        goal_terminal = state.goal is not None and state.goal.status in {
+            GoalStatus.VERIFIED_DONE,
+            GoalStatus.CANCELLED,
+        }
         answer_mode_active = (
             state.goal is None
             and state.interaction_state is InteractionState.ANSWERING
@@ -683,7 +688,7 @@ class KernelContextManager:
         explicit_non_prose_outcome = (
             intent_decision_pending and _explicit_non_prose_outcome_requested(state)
         )
-        if intent_decision_pending:
+        if intent_decision_pending or goal_terminal:
             exposed_tools = ()
         elif state.goal is not None and not goal_paused:
             exposed_tools = tools
@@ -835,6 +840,7 @@ class KernelContextManager:
         goal_bootstrap, bootstrap_group = self._goal_bootstrap_group(state)
         if bootstrap_group is not None:
             groups = (bootstrap_group, *groups)
+        history_group_count = len(groups)
         if intent_decision_pending or not collect_sources:
             source_groups, source_digests = (), ()
         else:
@@ -926,8 +932,14 @@ class KernelContextManager:
 
         estimated = fixed_cost + sum(cost for _group, cost in costed_groups)
         excluded_indexes: set[int] = set()
-        # 非 pinned 组按倒序排除（source 候选最低优先级，最后追加故先被淘汰）。
-        for index in range(len(costed_groups) - 1, -1, -1):
+        source_start = history_group_count
+        eviction_order = (
+            *range(source_start + len(source_groups) - 1, source_start - 1, -1),
+            *range(history_group_count),
+        )
+        # source 候选先按既有低优先级顺序淘汰；仍超限时再从最旧历史开始，
+        # 因而不会为了保留 recalled context 而忘掉较新的工作事实。
+        for index in eviction_order:
             if estimated <= available_input:
                 break
             group = costed_groups[index][0]

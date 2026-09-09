@@ -7,7 +7,11 @@ unknown-outcome recovery。preview 展示完整 bounded content/diff，不让用
 
 from __future__ import annotations
 
-from agent.memory.contracts import MemoryBusyError, MemoryCasMismatchError
+from agent.memory.contracts import (
+    MemoryBusyError,
+    MemoryCapacityError,
+    MemoryCasMismatchError,
+)
 from agent.memory.source import MemoryContextSource
 from agent.memory.store import _MAX_CONTENT_CHARS, MemoryStore
 from agent.runtime.contracts import (
@@ -216,6 +220,12 @@ def _make_remember(store, scope):
                 content,
                 fact_admission=intent.fact_admission,
             )
+        except MemoryCapacityError:
+            # 写前容量拒绝：durable 未被触碰，是 known-not-executed，不是 unknown outcome。
+            return KnownNotExecuted(
+                code="memory_capacity_exceeded",
+                message="memory store is at its durable size limit; nothing was written",
+            )
         except MemoryBusyError:
             return KnownNotExecuted(code="memory_busy", message="memory store is busy; retry later")
         except MemoryCasMismatchError:
@@ -236,6 +246,12 @@ def _make_update(store, scope):
                 expected_record_revision=int(intent.arguments.get("expected_record_revision", -1)),
                 expected_content_digest=str(intent.arguments.get("expected_content_digest", "")),
             )
+        except MemoryCapacityError:
+            # 写前容量拒绝：durable 未被触碰，是 known-not-executed，不是 unknown outcome。
+            return KnownNotExecuted(
+                code="memory_capacity_exceeded",
+                message="memory store is at its durable size limit; nothing was written",
+            )
         except MemoryBusyError:
             return KnownNotExecuted(code="memory_busy", message="memory store is busy; retry later")
         except MemoryCasMismatchError:
@@ -254,6 +270,12 @@ def _make_forget(store, scope):
                 str(intent.arguments.get("record_id", "")),
                 expected_record_revision=int(intent.arguments.get("expected_record_revision", -1)),
                 expected_content_digest=str(intent.arguments.get("expected_content_digest", "")),
+            )
+        except MemoryCapacityError:
+            # 写前容量拒绝：durable 未被触碰，是 known-not-executed，不是 unknown outcome。
+            return KnownNotExecuted(
+                code="memory_capacity_exceeded",
+                message="memory store is at its durable size limit; nothing was written",
             )
         except MemoryBusyError:
             return KnownNotExecuted(code="memory_busy", message="memory store is busy; retry later")

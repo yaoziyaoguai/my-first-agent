@@ -1,6 +1,6 @@
 """Optional Textual TUI app（lazy import）。
 
-base install、headless、普通 CLI 不导入 Textual。App 表达全部 typed actions：
+base install、headless、普通 CLI 不导入 Textual。App 表达当前 v1 键盘 adapter 的 actions：
 submit（Enter）、approve（a）、reject（r）、mark succeeded（s）、mark failed（f）、
 resume（u）、合法 paused cancel（c）。所有 action 经 shared ``agent.cli.actions``
 builder 从 authoritative state 构造，并由 projection 的可用 action 集合 gate——只有
@@ -17,7 +17,9 @@ from collections.abc import Callable
 from agent.cli.actions import (
     build_ack_provider,
     build_cancel,
+    build_cancel_browser_takeover,
     build_cancel_goal,
+    build_complete_browser_takeover,
     build_pause_goal,
     build_recover_unknown_observation,
     build_resolve_approval,
@@ -33,6 +35,7 @@ from agent.runtime.contracts import (
     Action,
     ControlRequestKind,
     ConversationState,
+    GoalStatus,
     RecoveryResolution,
     ResolveApproval,
 )
@@ -167,6 +170,7 @@ def build_app(
             ("p", "pause_goal", "Pause Goal"),
             ("c", "cancel", "Cancel"),
             ("d", "ack_provider", "Acknowledge Provider"),
+            ("b", "browser_done", "Browser done — return control"),
             ("f2", "toggle_source_refs", "Toggle Source Refs"),
         ]
 
@@ -176,6 +180,9 @@ def build_app(
             self._run_id_factory = run_id_factory
             self.close_deadline_seconds = close_deadline_seconds
             self.projection: TuiProjection | None = None
+            # 用户手势必须绑定到实际展示的 immutable snapshot；执行时 adapter 仍会
+            # fresh-load checkpoint，让 Kernel 以 revision/request binding 拒绝 stale action。
+            self._displayed_state: ConversationState | None = None
             self.form_text: str = ""
             # 最近一次 worker 失败的有界提示（observability）；成功刷新会清回 None。
             self._last_worker_error: str | None = None
@@ -211,10 +218,19 @@ def build_app(
 
             view = self._adapter.load_view()
             projection = project(view.snapshot.state, result)
-            self.projection = projection
 
             main_text = projection.main_text
-            if result is not None:
+            if (
+                result is not None
+                and projection.form_kind == "browser_takeover"
+                and result.error_code == "browser_takeover_completion_failed"
+            ):
+                main_text = (
+                    f"{projection.main_text}\nCompletion could not be confirmed; this "
+                    "takeover is still pending. Use Browser cancel after restarting or "
+                    "when the original browser window is unavailable."
+                )
+            elif result is not None and projection.form_kind != "browser_takeover":
                 label = run_status_label(result.status)
                 main_text = f"{label}: {result.message or projection.main_text}"
             sources = (
@@ -252,17 +268,25 @@ def build_app(
                 self._preview_too_large = False
             except SafeDisplayTooLargeError:
                 self._preview_too_large = True
-                escaped_form = safe_display(
-                    "approval preview exceeds display cap; approve disabled "
+                overflow_message = (
+                    "browser takeover details exceed display cap; Browser done disabled "
+                    "— use Browser cancel"
+                    if projection.form_kind == "browser_takeover"
+                    else "approval preview exceeds display cap; approve disabled "
                     "— reject or reduce the effect"
                 )
+                escaped_form = safe_display(overflow_message)
             self.query_one("#form", Static).update(Text(escaped_form))
 
             # preview 过大时从 hints 移除 approve，避免误导用户以为可批准。
             display_actions = projection.actions
             if self._preview_too_large:
-                display_actions = tuple(a for a in display_actions if a != "approve")
-            hints = self._format_hints(display_actions)
+                display_actions = tuple(
+                    action
+                    for action in display_actions
+                    if action not in {"approve", "browser_done"}
+                )
+            hints = self._format_hints(projection, display_actions)
             self.query_one("#action_hints", Static).update(Text(safe_display(hints)))
 
             msg_input = self.query_one("#message", Input)
@@ -279,6 +303,11 @@ def build_app(
                 # approval/recovery 表单聚焦；其它非 submit 状态取消 input 焦点。
                 if projection.form_kind is not None:
                     self.query_one("#form", FocusStatic).focus()
+
+            # 只有 status/form/hints/focus 都成功更新后，才让后续手势观察这份 state。
+            # 这不是 UI-owned mutation authority，只是“用户刚刚看到了什么”的绑定。
+            self.projection = projection
+            self._displayed_state = view.snapshot.state
 
             # events 只 advisory：drain queue 后不写入 terminal renderer。
             self._adapter.event_sink.drain()
@@ -298,7 +327,22 @@ def build_app(
             return "\n".join(f"{label}: {value}" for label, value in projection.form_fields)
 
         @staticmethod
-        def _format_hints(actions: tuple[str, ...]) -> str:
+        def _format_hints(
+            projection: TuiProjection,
+            actions: tuple[str, ...],
+        ) -> str:
+            goal = projection.goal
+            if goal is not None and actions == ("submit",):
+                if goal.status == GoalStatus.VERIFIED_DONE.value:
+                    return (
+                        "Task finished · Enter: ask a follow-up "
+                        "(does not start a new task)"
+                    )
+                if goal.status == GoalStatus.CANCELLED.value:
+                    return (
+                        "Task cancelled · Enter: ask a follow-up "
+                        "(task remains cancelled; does not start a new task)"
+                    )
             labels = {
                 "submit": "Enter: submit",
                 "approve": "a: approve",
@@ -313,6 +357,8 @@ def build_app(
                 "correct_goal": "Enter: correct goal",
                 "cancel_goal": "c: cancel goal",
                 "ack_provider": "d: acknowledge provider",
+                "browser_done": "b: Browser done — return control",
+                "browser_cancel": "c: Browser cancel — cancel this takeover",
             }
             parts = [labels.get(a, a) for a in actions]
             return " | ".join(parts) if parts else "no actions"
@@ -324,13 +370,13 @@ def build_app(
             if self._adapter.is_active:
                 # worker 在跑：禁止新 action，避免撞 single-flight 或绕过 unknown effect。
                 return None
-            if self._preview_too_large and name == "approve":
-                # approval preview 超过显示 cap → fail closed：approve 明确不可批准，
-                # 不能让用户批准无法完整查看关键内容的 effect。reject 不受影响（不执行 effect）。
+            if self._preview_too_large and name in {"approve", "browser_done"}:
+                # approval/takeover effect 详情超过显示 cap → fail closed；对应的
+                # approve/done 不可用，仍保留 reject/browser cancel 这类非完成选择。
                 return None
-            state = self._adapter.load_view().snapshot.state
-            projection = project(state)
-            if name not in projection.actions:
+            state = self._displayed_state
+            projection = self.projection
+            if state is None or projection is None or name not in projection.actions:
                 return None
             return state
 
@@ -344,7 +390,9 @@ def build_app(
                 or self._preview_too_large
             ):
                 return None
-            state = self._adapter.load_view().snapshot.state
+            state = self._displayed_state
+            if state is None or self.projection is None:
+                return None
             active = state.active_run
             request = active.pending_request if active is not None else None
             if getattr(request, "artifact_confirmation_requirement", None) is None:
@@ -406,6 +454,12 @@ def build_app(
 
         async def on_input_submitted(self, event: Input.Submitted) -> None:
             if self._adapter.is_active:
+                displayed = self._displayed_state
+                if (
+                    displayed is not None
+                    and displayed.browser_takeover_pending is not None
+                ):
+                    return
                 if event.value.strip():
                     self._adapter.request_control(
                         ControlRequestKind.CORRECT,
@@ -414,7 +468,9 @@ def build_app(
                 return
             if self.closing_requested or self.shutdown_blocked:
                 return
-            state = self._adapter.load_view().snapshot.state
+            state = self._displayed_state
+            if state is None:
+                return
             command_result = parse_process_command(
                 event.value,
                 state,
@@ -540,6 +596,12 @@ def build_app(
             self._run_action(build_resume(state))
 
         async def action_cancel(self) -> None:
+            displayed = self._displayed_state
+            if displayed is not None and displayed.browser_takeover_pending is not None:
+                state = self._permitted_state("browser_cancel")
+                if state is not None:
+                    self._run_action(build_cancel_browser_takeover(state))
+                return
             if self._adapter.is_active:
                 self._adapter.request_control(ControlRequestKind.CANCEL)
                 return
@@ -553,6 +615,9 @@ def build_app(
             self._run_action(build_cancel(state))
 
         async def action_pause_goal(self) -> None:
+            displayed = self._displayed_state
+            if displayed is not None and displayed.browser_takeover_pending is not None:
+                return
             if self._adapter.is_active:
                 self._adapter.request_control(ControlRequestKind.PAUSE)
                 return
@@ -566,6 +631,11 @@ def build_app(
                 self._run_action(
                     build_ack_provider(state, acknowledged_at="operator-confirmed")
                 )
+
+        async def action_browser_done(self) -> None:
+            state = self._permitted_state("browser_done")
+            if state is not None:
+                self._run_action(build_complete_browser_takeover(state))
 
         def action_toggle_source_refs(self) -> None:
             self._advanced_sources = not self._advanced_sources

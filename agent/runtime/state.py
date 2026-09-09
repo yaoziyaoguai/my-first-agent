@@ -2077,6 +2077,10 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
             )
         return replace(state, facts=(*state.facts, fact), evidence_records=evidence)
     if isinstance(action, SubmitMessage):
+        terminal_goal = (
+            state.goal is not None
+            and state.goal.status in {GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED}
+        )
         correction = (
             state.goal is not None
             and state.goal.status
@@ -2132,7 +2136,9 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
             state,
             facts=(*facts, fact),
             active_run=ActiveRun(run_id=action.run_id),
-            completion_claim=None,
+            # terminal follow-up 只推进 conversation；原 claim 仍证明关闭的 Goal，
+            # 不能因新一轮普通讨论被清除。其它路径保持原有 claim invalidation。
+            completion_claim=state.completion_claim if terminal_goal else None,
             interaction_state=InteractionState.IDLE,
         )
 
@@ -3260,10 +3266,18 @@ def reclaim_background_run(state: ConversationState, invocation_id: str) -> Conv
     active = state.active_run
     if active is None or state.background_occurrence_binding is None:
         raise ValueError("background active run required")
-    if active.phase is not ContinuationPhase.MODEL or active.status not in {
-        ActiveRunStatus.RUNNABLE,
-        ActiveRunStatus.MODEL_EXECUTING,
-    }:
+    # TOOL cursor 是 Runtime 已持久化的安全续跑点；EXECUTING 的未知副作用仍由
+    # recovery 接管，未落盘 response 的 provider intent 也绝不在这里重发。
+    runnable_continuation = (
+        active.status is ActiveRunStatus.RUNNABLE
+        and active.phase in {ContinuationPhase.MODEL, ContinuationPhase.TOOL}
+    )
+    persisted_provider_response = (
+        active.status is ActiveRunStatus.MODEL_EXECUTING
+        and active.phase is ContinuationPhase.MODEL
+        and active.persisted_model_response is not None
+    )
+    if not (runnable_continuation or persisted_provider_response):
         raise ValueError("background run is not safely reclaimable")
     if not invocation_id:
         raise ValueError("invocation_id must not be empty")

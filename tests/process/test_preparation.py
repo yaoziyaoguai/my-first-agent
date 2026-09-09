@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -204,6 +205,78 @@ def test_revalidate_process_detects_identity_and_cwd_drift(tmp_path):
     drift = revalidate_process(prepared)
     assert isinstance(drift, KnownNotExecuted)
     assert drift.code == "cwd_identity_changed"
+
+
+def test_revalidate_process_rejects_child_path_not_matching_search_paths(tmp_path):
+    from agent.process.preparation import prepare_process, revalidate_process
+    from agent.runtime.contracts import KnownNotExecuted
+
+    prepared = prepare_process(
+        {"executable": "/usr/bin/true", "cwd": "."},
+        workspace=tmp_path,
+        captured_path="/usr/bin:/bin",
+    )
+
+    outcome = revalidate_process(replace(prepared, child_path="/tmp"))
+
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "environment_policy_changed"
+
+
+def test_revalidate_process_rejects_missing_environment_policy(tmp_path):
+    from agent.process.preparation import prepare_process, revalidate_process
+    from agent.runtime.contracts import KnownNotExecuted
+
+    prepared = prepare_process(
+        {"executable": "/usr/bin/true", "cwd": "."},
+        workspace=tmp_path,
+        captured_path="/usr/bin:/bin",
+    )
+    command = replace(prepared.command, environment_policy=None)
+
+    outcome = revalidate_process(replace(prepared, command=command))
+
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "environment_policy_changed"
+
+
+def test_revalidate_process_rejects_search_paths_not_matching_child_path(tmp_path):
+    from agent.process.preparation import prepare_process, revalidate_process
+    from agent.runtime.contracts import KnownNotExecuted
+
+    prepared = prepare_process(
+        {"executable": "/usr/bin/true", "cwd": "."},
+        workspace=tmp_path,
+        captured_path="/usr/bin:/bin",
+    )
+
+    outcome = revalidate_process(
+        replace(prepared, search_paths=("/usr/bin",))
+    )
+
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "environment_policy_changed"
+
+
+def test_revalidate_process_rejects_changed_environment_policy(tmp_path):
+    from agent.process.admission import build_environment_plan
+    from agent.process.preparation import prepare_process, revalidate_process
+    from agent.runtime.contracts import KnownNotExecuted
+
+    prepared = prepare_process(
+        {"executable": "/usr/bin/true", "cwd": "."},
+        workspace=tmp_path,
+        captured_path="/usr/bin:/bin",
+    )
+    command = replace(
+        prepared.command,
+        environment_policy=build_environment_plan(captured_path="/tmp"),
+    )
+
+    outcome = revalidate_process(replace(prepared, command=command))
+
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "environment_policy_changed"
 
 
 def test_closed_process_environment_uses_temp_root_and_allowlist(tmp_path):

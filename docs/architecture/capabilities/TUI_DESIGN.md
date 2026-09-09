@@ -50,12 +50,35 @@ TUI 必须能表达全部现有用户 action：
 - `SubmitMessage`。
 - `ResolveApproval(approved=true/false)`。
 - `ResolveUnknownToolOutcome(MARK_SUCCEEDED/MARK_FAILED)`。
+- `CompleteBrowserTakeover` / `CancelBrowserTakeover`：只在 ordinary takeover pending
+  form 中可用；完成绑定 exact request/session/profile revision，取消绑定 exact request。
 - `Resume`。
 - `CancelRun`：正常交互只在 Runtime 已经返回 paused state 后可用；另允许从 durable checkpoint 重开时，对“本地没有 worker、active run 为 `RUNNABLE` 且 phase 不是 `EXECUTING`”的 interrupted 场景使用。shared reducer 对 `RUNNABLE/EXECUTING` 的 Cancel 必须返回 unchanged conflict；所有入口只能先 `Resume` 进入 Kernel recovery，不能用 Cancel 绕过未知 effect classification。
 
 TUI 不增加 UI-only mutation，例如“跳过审批”“强制重试工具”或“清空 active run”。
 
 每个 action 使用当前 authoritative state 的 `conversation_id`、`next_action_seq` 与 `revision`；pending resolution 必须携带 exact request ID 和 binding digest。
+
+这里的“当前”是用户实际看到的 authoritative snapshot，而不是按键处理时重新加载后尚未展示的
+snapshot。App 在一次 view 成功渲染后保留该 immutable state/projection，idle 用户手势只据此构造
+一次 typed action；`TuiAdapter.execute_once()` 仍在执行时 fresh-load checkpoint，由 Kernel 的
+revision、request ID 与 binding digest 拒绝 stale action。若 A 展示后 checkpoint 已推进为 B，
+同一手势不得静默重绑、自动重建或 retry 为 B；刷新展示 B 后必须重新取得用户明确输入。approval
+preview cap、artifact requirement 与 action identity 必须来自同一 displayed snapshot。
+
+browser takeover 也服从同一 displayed-snapshot 约束。TUI 只显示 durable pending identity，
+不推断原 browser session 是否仍然存活：`b` 构造一次 `CompleteBrowserTakeover`，由既有
+Kernel/browser owner 验证 same-process session/lease；`c` 构造一次
+`CancelBrowserTakeover`。进程重启或原窗口不可用时界面直接引导 cancel；completion failure
+保留 pending，不自动 retry、reopen browser 或另发 Resume。
+
+terminal Goal 继续保持关闭，但不把整个 live conversation 一并锁死。`VERIFIED_DONE` 或
+`CANCELLED` 在没有 active run/takeover 时，由 shared Goal projection 只暴露既有
+`SubmitMessage`；TUI 明确标为 follow-up，并说明不会开始新任务。reducer 保留关闭 Goal 的
+identity/revision/status/evidence/completion claim，`ContextManager` 对该 follow-up 暴露零
+product tools；模型无视空列表返回已注册工具时，仍由既有 unadvertised-tool admission 在
+batch/approval/callable 前拒绝。discussion 可以增加 conversation facts/run accounting，但不能
+恢复 Goal、继承旧 Goal 的工具 authority，或把旧 completion claim 当成新请求的完成证据。
 
 ## Single-flight lifecycle
 
@@ -97,8 +120,10 @@ startup/reload 与 worker result 共用一个 pure projection，不能由 widget
 
 | Authoritative input | Main view | Enabled actions | Reload/focus rule |
 |---|---|---|---|
-| no active run + `last_safe_result` | terminal status；`COMPLETED` 文本来自 `last_safe_result.message` | new SubmitMessage | focus input；同一 final message 只渲染一次 |
+| terminal Goal (`VERIFIED_DONE` / `CANCELLED`) + no active run/takeover | 保留 terminal result；提示可追问但不会开始新任务 | SubmitMessage（zero product tools） | focus input；Goal/claim/evidence 保持关闭且不变 |
+| no Goal + no active run + `last_safe_result` | terminal run status；`COMPLETED` 文本来自 `last_safe_result.message` | new SubmitMessage | focus input；同一 final message 只渲染一次 |
 | no active run + no result | ready | SubmitMessage | focus input |
+| ordinary `browser_takeover_pending` | waiting for user browser takeover | Browser done / Browser cancel | focus read-only form；message/Enter 禁用；重启或原窗口丢失时引导 cancel |
 | `AWAITING_APPROVAL` | exact approval form | approve / reject | focus form；不用 event 重建 |
 | `AWAITING_RECOVERY` | exact recovery form | mark succeeded / mark failed | focus form；不提供 retry |
 | `PAUSED_LIMIT` / `PAUSED_RETRYABLE` | bounded reason | Resume / CancelRun | focus Resume |
@@ -109,11 +134,18 @@ startup/reload 与 worker result 共用一个 pure projection，不能由 widget
 | worker exception / revision or checkpoint conflict | bounded error | none until reload | authoritative `store.load()` 后重新投影 |
 
 `RunResult.delivery_warnings` 与 events 只能附加 advisory 文本，不能改变表格中的 action availability。unknown status/error 使用 generic bounded 文案。
+takeover 与 `AWAITING_RECOVERY` 同时存在时 recovery form 优先；与 `EXECUTING` phase 同时存在时
+只显示 Resume 进入 Kernel recovery。其它 takeover pending 状态优先于 ready/terminal、Goal、
+approval/disclosure 与普通 run controls，不合并 action 集合。若 completion 返回
+`browser_takeover_completion_failed`，waiting form 保持权威并补充 bounded cancel guidance；
+不能用通用 `COMPLETED` headline 覆盖仍存在的 pending。
 
 ## Rendering and privacy
 
 - 当前执行完成时 assistant final message 来自 `RunResult.message`；startup/reopen 的 terminal message 来自 `state.last_safe_result.message`。
 - approval/recovery/error/result 中所有模型或外部工具可控文本都经过同一个 literal safe-display projection：Textual/Rich 使用 `markup=False`，不解析 markup/link，ANSI、C0/C1 与 Unicode bidi control 用可见且无歧义的 escape 表示。approval digest 仍绑定原始 canonical 内容；若 escape 后的完整 preview 超过 UI cap，则必须在 effect 前拒绝，不能截断或隐藏。
+- takeover identity/form 同样使用 literal safe display；若完整 form 超过 cap，Browser done
+  fail closed，仍保留与 displayed snapshot 精确绑定的 Browser cancel。
 - tool/model progress events 明确标记为 advisory，不伪装成 token streaming。
 - error code 使用稳定映射；未知 error 保留 generic 文案。
 - 不展示 checkpoint raw JSON、credential、绝对私有路径、Memory inventory、Skill roots 或 MCP environment。
@@ -124,6 +156,11 @@ startup/reload 与 worker result 共用一个 pure projection，不能由 widget
 Textual 官方 `App.run_test()` 与 `Pilot` 覆盖：
 
 - action builder 与 CLI 对同一 state 产生等价 typed action。
+- displayed A 与执行时 B 发生 revision/request drift 时，Pilot 手势仍构造 A-bound action；真实
+  Runtime 拒绝 stale A、保持 B 不变且不增加 provider/tool effect，刷新 B 后重新计算 preview gate。
+- takeover Pilot 覆盖 waiting projection、`b`/`c` 与 CLI shared builder 的逐字段一致性、
+  recovery/EXECUTING 优先级、A→B stale rejection、same-owner completion、fresh-owner restart
+  failure 后的显式 cancel，以及 active worker 时不落入 cooperative cancel/pause/correction。
 - active worker 时 single-flight 控件状态。
 - event 重复、乱序或缺失不改变 authoritative action availability。
 - approval/recovery/Resume/paused Cancel 的完整交互。
@@ -143,6 +180,9 @@ Textual 官方 `App.run_test()` 与 `Pilot` 覆盖：
 009 对本设计的 closure 以完整 authoritative keyboard journey 为准：
 
 - Pilot 真实按键覆盖 submit、approve、reject、mark succeeded、mark failed、Resume 与合法 paused Cancel，并断言 action fields/digest 与 CLI builder 一致。
+- terminal follow-up 覆盖 `VERIFIED_DONE`/`CANCELLED` mounted input、truthful hint、连续两次
+  prose response、displayed A→authoritative B stale rejection、CLI action parity，以及注册的
+  read/write tool 恶意返回仍为零 batch/approval/callable invocation。
 - App 可直接从 durable approval/recovery/interrupted checkpoint 启动；pending form 不依赖新 event 或伪造 action，provider/tool call count 为零。
 - `RUNNABLE/EXECUTING` reopen 只显示 Resume；event 丢失、重复、乱序不改变 action availability。
 - Runtime composition 与 TUI adapter 使用同一个 queue EventSink；background events 不再写 `TerminalRenderer` 污染 Textual screen。
@@ -160,6 +200,10 @@ submit smoke、projection unit test 或源码中的 action method 只能算 E0/E
 - MCP resource/media rendering、Markdown webview、file picker 和 clipboard integration。
 - scheduler management、Memory editor、Skill marketplace 和 capability configuration UI。
 - remote TUI、websocket/API service 和 multi-user state。
+- browser takeover TUI 不提供 session liveness dashboard、进程重启后的旧 session 恢复、
+  自动 browser reopen/retry/resume，也不宣称网页动作已被 cancel 回滚。
+- terminal follow-up 不提供 `/new`、live session switching 或 terminal discussion 的跨重启
+  recovery；需要新 durable Goal 时仍走既有 fresh-conversation 生命周期。
 
 ## Sources
 

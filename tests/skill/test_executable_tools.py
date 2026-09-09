@@ -11,12 +11,17 @@ from types import SimpleNamespace
 import pytest
 
 from agent.composition import build_skill_execution_config, build_tool_registrations
+from agent.provider.normalize import context_tools_to_openai
+from agent.provider.protocol import ProviderProtocolError
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalPolicy,
     BlockedClaim,
+    BudgetReport,
+    ContextPack,
     EgressClass,
     ExecutionAuthorityClass,
+    ModelMessage,
     ModelResponse,
     ModelToolCall,
     ResolveApproval,
@@ -25,6 +30,7 @@ from agent.runtime.contracts import (
     SideEffectClass,
     SubmitMessage,
     ToolCall,
+    ToolDefinition,
     ToolPrepareContext,
     ToolRisk,
     canonical_json_digest,
@@ -252,7 +258,7 @@ def _execution_config(
         ),
         private_roots=(),
         executor=executor
-        or NativeSandboxExecutor(confiner=object(), captured_path=""),
+        or NativeSandboxExecutor(confiner=object()),
     )
 
 
@@ -899,3 +905,56 @@ def test_real_seatbelt_executes_declared_entrypoint_via_trusted_application_runt
     payload = json.loads(result.result_bytes)
     assert payload["payload"] == {"length": 11, "offline": True}
     assert execution.policy.package_read_paths == ("scripts/analyze.py",)
+
+
+def test_entrypoint_open_arguments_tool_fails_strict_projection(
+    tmp_path: Path,
+) -> None:
+    """真实 registration 产出的 entrypoint ToolSpec 在 strict 投影处明确拒绝。
+
+    Skill 的 ``arguments`` 子 schema 是 {"type": "object"} 的开放 object；
+    冻结合同是给出 ``unsupported_strict_open_object`` 的明确拒绝，而不是
+    补空 properties 或修改 agent/skill/tools.py 的生产 schema。
+    """
+
+    catalog, _skill = _catalog_with_entrypoint(tmp_path)
+    config = _execution_config(tmp_path)
+    spec = next(
+        registration.spec
+        for registration in build_skill_tool_registrations(
+            catalog,
+            max_tool_result_chars=10_000,
+            execution=config,
+        )
+        if registration.spec.name == "skill__text-stats__analyze"
+    )
+    expected_schema = json.loads(json.dumps(spec.input_schema))
+    context = ContextPack(
+        system="Use only the supplied tools.",
+        messages=(
+            ModelMessage(role="user", content=({"type": "text", "text": "run it"},),),
+        ),
+        tools=(
+            ToolDefinition(
+                execution_authority=spec.execution_authority,
+                name=spec.name,
+                description=spec.description,
+                input_schema=spec.input_schema,
+            ),
+        ),
+        budget=BudgetReport(
+            input_limit=2_000,
+            estimated_input_tokens=10,
+            output_reserve=200,
+        ),
+    )
+
+    with pytest.raises(ProviderProtocolError) as caught:
+        context_tools_to_openai(context, strict=True)
+
+    assert caught.value.reason == "unsupported_strict_open_object"
+    detail = caught.value.detail or ""
+    assert "skill__text-stats__analyze" in detail
+    assert "$.properties.arguments" in detail
+    # 拒绝后生产 ToolSpec schema 保持原样。
+    assert spec.input_schema == expected_schema

@@ -18,6 +18,7 @@ from pathlib import Path
 
 from agent.memory.contracts import (
     MemoryBusyError,
+    MemoryCapacityError,
     MemoryCasMismatchError,
     MemoryRecord,
     MemoryStoreError,
@@ -82,12 +83,14 @@ class MemoryStore:
         workspace_scope_digest: str,
         profile: ProviderTrustProfile,
     ) -> MemoryStore:
+        # 初始序列化（含容量拒绝）必须先于目标文件/目录创建：压低上限的拒绝不留下
+        # 目标文件或目录，也不引入新的初始化机制。
+        document = cls._serialize(workspace_scope_digest, profile, 0, {})
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
         except FileExistsError as error:
             raise MemoryStoreError("memory store target already exists") from error
-        document = cls._serialize(workspace_scope_digest, profile, 0, {})
         try:
             os.write(fd, document)
             os.fsync(fd)
@@ -422,7 +425,13 @@ class MemoryStore:
                 for record in records.values()
             },
         }
-        return json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        document = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        # 容量合同：唯一准确依据是准备写入的完整序列化 bytes（UTF-8 多字节内容使字符数
+        # 或内容长度估算不可靠）；等于上限接受，严格大于才拒绝。检查放在共同序列化 seam，
+        # 保证拒绝先于任何 temp open/truncate/write/replace 副作用。
+        if len(document) > _MAX_STORE_BYTES:
+            raise MemoryCapacityError("memory store exceeds the durable size limit")
+        return document
 
     @staticmethod
     def _fsync_parent(directory: Path) -> None:

@@ -30,6 +30,7 @@ from agent.runtime.contracts import (
     canonical_json_digest,
     context_source_snapshot_digest,
 )
+from tests.kernel.fakes import conversation_with_terminal_goal
 
 CONTROL_SCHEMA_BUDGET = 1_466
 
@@ -66,12 +67,13 @@ class _StaticSource:
 
 def _source_candidate(
     *,
+    candidate_id: str = "candidate-1",
     content: str = "bounded source content",
     source_name: str = "memory",
     scope: str = "scope-1",
 ) -> ContextCandidate:
     return ContextCandidate(
-        candidate_id="candidate-1",
+        candidate_id=candidate_id,
         source_name=source_name,
         workspace_scope_digest=scope,
         content=content,
@@ -144,6 +146,102 @@ def test_context_source_cannot_exceed_item_cap() -> None:
 
     with pytest.raises(ContextLimitError, match="item limit"):
         manager.build(_answering(ConversationState.new("conversation-1")), _action(), ())
+
+
+def test_budget_evicts_lowest_priority_source_before_historical_facts() -> None:
+    state = _answering(
+        replace(
+            ConversationState.new("conversation-1"),
+            facts=(
+                _fact("user-old", FactKind.USER_MESSAGE, text="old " * 500),
+                _fact("user-current", FactKind.USER_MESSAGE, text="current question"),
+            ),
+        )
+    )
+    high_priority = _source_candidate(
+        candidate_id="candidate-high",
+        content="high priority source " * 10,
+    )
+    low_priority = _source_candidate(
+        candidate_id="candidate-low",
+        content="low priority source " * 10,
+    )
+    roomy_limits = ContextLimits(max_input_tokens=100_000, output_reserve=1)
+    full_cost = KernelContextManager(
+        system_policy="policy",
+        limits=roomy_limits,
+        sources=(_StaticSource(_source_snapshot((high_priority, low_priority))),),
+        context_scope_digest="scope-1",
+    ).build(state, _action(), ()).budget.estimated_input_tokens
+    high_only_cost = KernelContextManager(
+        system_policy="policy",
+        limits=roomy_limits,
+        sources=(_StaticSource(_source_snapshot((high_priority,))),),
+        context_scope_digest="scope-1",
+    ).build(state, _action(), ()).budget.estimated_input_tokens
+    low_priority_cost = full_cost - high_only_cost
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(
+            max_input_tokens=full_cost + 1,
+            output_reserve=low_priority_cost + 1,
+        ),
+        sources=(_StaticSource(_source_snapshot((high_priority, low_priority))),),
+        context_scope_digest="scope-1",
+    )
+
+    pack = manager.build(state, _action(), ())
+
+    assert pack.budget.excluded_ids == ("candidate-low",)
+    assert "user-old" in pack.budget.included_ids
+    assert "candidate-high" in pack.budget.included_ids
+
+
+def test_budget_exhausts_sources_then_evicts_oldest_history() -> None:
+    state = _answering(
+        replace(
+            ConversationState.new("conversation-1"),
+            facts=(
+                _fact("user-old", FactKind.USER_MESSAGE, text="old " * 80),
+                _fact("user-mid", FactKind.USER_MESSAGE, text="mid " * 80),
+                _fact("user-current", FactKind.USER_MESSAGE, text="current question"),
+            ),
+        )
+    )
+    candidates = (
+        _source_candidate(candidate_id="candidate-high", content="high " * 20),
+        _source_candidate(candidate_id="candidate-low", content="low " * 20),
+    )
+    roomy_limits = ContextLimits(max_input_tokens=100_000, output_reserve=1)
+    full_cost = KernelContextManager(
+        system_policy="policy",
+        limits=roomy_limits,
+        sources=(_StaticSource(_source_snapshot(candidates)),),
+        context_scope_digest="scope-1",
+    ).build(state, _action(), ()).budget.estimated_input_tokens
+    retained_state = replace(state, facts=state.facts[1:])
+    retained_cost = KernelContextManager(
+        system_policy="policy",
+        limits=roomy_limits,
+    ).build(retained_state, _action(), ()).budget.estimated_input_tokens
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(
+            max_input_tokens=full_cost + 1,
+            output_reserve=full_cost - retained_cost + 1,
+        ),
+        sources=(_StaticSource(_source_snapshot(candidates)),),
+        context_scope_digest="scope-1",
+    )
+
+    pack = manager.build(state, _action(), ())
+
+    assert pack.budget.excluded_ids == (
+        "user-old",
+        "candidate-high",
+        "candidate-low",
+    )
+    assert {"user-mid", "user-current"} <= set(pack.budget.included_ids)
 
 
 def test_clipped_source_excerpt_has_independent_digest_and_provenance() -> None:
@@ -279,6 +377,38 @@ def test_intent_gate_opens_read_tools_only_after_begin_answer_or_goal() -> None:
     after = manager.build(replace(state, goal=goal), _action("continue"), tools)
     goal_read = next(tool for tool in after.tools if tool.name == "read_file")
     assert "first_agent_control_v1" not in goal_read.description
+
+
+@pytest.mark.parametrize("status", [GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED])
+def test_terminal_goal_follow_up_exposes_no_product_tools(status: GoalStatus) -> None:
+    state = replace(
+        conversation_with_terminal_goal(status, "conversation-1"),
+        active_run=ActiveRun("run-1"),
+    )
+    tools = (
+        ToolDefinition(
+            execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+            name="read_file",
+            description="Read one bounded file",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        ToolDefinition(
+            execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+            name="write_file",
+            description="Write one file",
+            input_schema={"type": "object", "properties": {}},
+            side_effect=SideEffectClass.WRITE,
+        ),
+    )
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=8_000, output_reserve=500),
+        workspace_identity_digest="workspace-digest-1",
+    )
+
+    pack = manager.build(state, _action("Explain the closed task."), tools)
+
+    assert pack.tools == ()
 
 
 def test_effectful_tool_definitions_are_hidden_until_goal_is_durable() -> None:

@@ -1092,6 +1092,7 @@ def main(
                 workspace,
                 session.state_root,
                 os.environ.get("PATH", ""),
+                host_home=Path.home(),
             )
             registrations.extend(sandbox_resources.registrations)
             browser_resources = build_browser_resources(

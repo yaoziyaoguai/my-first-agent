@@ -68,6 +68,9 @@ _STRICT_WIRE_UNSUPPORTED_KEYWORDS = frozenset(
         "maxProperties",
     }
 )
+_STRICT_OPEN_OBJECT = "unsupported_strict_open_object"
+# detail 只携带受限 identity + schema 定位路径，截断保持有界。
+_STRICT_DETAIL_LIMIT = 200
 
 
 def _fail(reason: str, *, detail: str | None = None) -> ProviderProtocolError:
@@ -635,28 +638,79 @@ def _validate_openai_tool_message_continuity(
         raise _fail("invalid_tool_message_continuity")
 
 
-def _strict_wire_schema(value: object) -> Any:
+def _strict_wire_schema(value: object, *, identity: str) -> Any:
     """投影 DeepSeek strict wire 子集，不改写 Runtime 持有的原始合同。"""
 
-    if isinstance(value, list):
-        return [_strict_wire_schema(item) for item in value]
-    if not isinstance(value, dict):
-        return value
+    return _project_strict_wire_schema(value, identity=identity, path="$")
 
-    projected = {
-        key: _strict_wire_schema(item)
-        for key, item in value.items()
-        if key not in _STRICT_WIRE_UNSUPPORTED_KEYWORDS
-    }
+
+def _strict_detail(identity: str, path: str) -> str:
+    # 安全定位：受限 tool/control identity 与 schema 路径，绝不含 schema
+    # 数据、参数或秘密；超长路径截断，保持 detail 有界。
+    return f"{identity}:{path}"[:_STRICT_DETAIL_LIMIT]
+
+
+def _project_strict_wire_schema(node: object, *, identity: str, path: str) -> Any:
+    # 按角色递归：只清洗 schema 节点自己的 constraint 位置，properties 是
+    # 业务名称→子 schema 的 map，enum/const/default/examples 等 literal
+    # data 原样复制，不当成 schema 清洗；不演变为完整 JSON Schema framework。
+    if not isinstance(node, dict):
+        return node
+    projected: dict[str, Any] = {}
+    for key, item in node.items():
+        child_path = f"{path}.{key}"
+        if key in _STRICT_WIRE_UNSUPPORTED_KEYWORDS:
+            continue
+        if key == "properties":
+            if not isinstance(item, dict):
+                raise _fail(
+                    "malformed_strict_tool_schema",
+                    detail=_strict_detail(identity, child_path),
+                )
+            # property name 逐字保留，只对子 schema value 递归。
+            projected[key] = {
+                name: _project_strict_wire_schema(
+                    sub, identity=identity, path=f"{child_path}.{name}"
+                )
+                for name, sub in item.items()
+            }
+        elif key in ("anyOf", "oneOf", "allOf"):
+            if not isinstance(item, list):
+                raise _fail(
+                    "malformed_strict_tool_schema",
+                    detail=_strict_detail(identity, child_path),
+                )
+            projected[key] = [
+                _project_strict_wire_schema(
+                    sub, identity=identity, path=f"{child_path}[{index}]"
+                )
+                for index, sub in enumerate(item)
+            ]
+        elif key == "items":
+            if isinstance(item, list):
+                projected[key] = [
+                    _project_strict_wire_schema(
+                        sub, identity=identity, path=f"{child_path}[{index}]"
+                    )
+                    for index, sub in enumerate(item)
+                ]
+            else:
+                projected[key] = _project_strict_wire_schema(
+                    item, identity=identity, path=child_path
+                )
+        else:
+            # enum/const/default/examples 等 literal data 与普通注解原样复制。
+            projected[key] = item
     if projected.get("type") != "object":
         return projected
-
-    properties = projected.get("properties")
-    if not isinstance(properties, dict):
-        raise _fail("malformed_strict_tool_schema")
+    raw_properties = node.get("properties")
+    if raw_properties is None or node.get("additionalProperties") is not False:
+        # 缺失 properties（不可补 {}）、additionalProperties 缺省、True 或
+        # schema-valued 都是开放 object：fail closed，不补 False 伪装封闭。
+        raise _fail(_STRICT_OPEN_OBJECT, detail=_strict_detail(identity, path))
     # DeepSeek Beta strict tools 要求每个 object 的全部 properties 都列入
     # required 且禁止额外字段；原 ToolSpec schema 仍由 Runtime 原样校验。
-    projected["required"] = list(properties)
+    projected["required"] = list(projected["properties"])
     projected["additionalProperties"] = False
     return projected
 
@@ -668,7 +722,7 @@ def context_tools_to_openai(
     for tool in context.tools:
         parameters = tool.input_schema
         if strict:
-            parameters = _strict_wire_schema(parameters)
+            parameters = _strict_wire_schema(parameters, identity=tool.name)
         function = {
             "name": tool.name,
             "description": tool.description,
@@ -684,7 +738,9 @@ def context_tools_to_openai(
             parameters = context.control_schema.get("strict_input_schema")
             if not isinstance(parameters, dict):
                 raise _fail("missing_strict_control_schema")
-            parameters = _strict_wire_schema(parameters)
+            parameters = _strict_wire_schema(
+                parameters, identity=context.control_schema["name"]
+            )
         function = {
             "name": context.control_schema["name"],
             "description": context.control_schema["description"],

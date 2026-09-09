@@ -7,6 +7,7 @@ git metadata（可读禁写）与 unreadable carveout 派生。profile compiler 
 
 from __future__ import annotations
 
+import stat
 from pathlib import Path
 
 from agent.sandbox.contracts import (
@@ -118,10 +119,49 @@ def _require_disjoint(roots: list[str]) -> None:
 def _resolve_private(workspace: str, entry: object) -> str:
     if not isinstance(entry, str) or not entry:
         raise ValueError("private_roots entries must be non-empty strings")
+    if any(character in entry for character in ("\x00", "\n", "\r")):
+        raise ValueError("private_roots entries must not contain control characters")
     candidate = Path(entry)
     if not candidate.is_absolute():
+        if ".." in candidate.parts:
+            raise ValueError("private_roots entries must not escape their anchor")
         candidate = Path(workspace) / entry
+    try:
+        info = candidate.lstat()
+    except FileNotFoundError:
+        try:
+            resolved = candidate.resolve(strict=False)
+        except OSError as error:
+            raise ValueError("private_roots entry cannot be resolved") from error
+        if candidate != resolved:
+            raise ValueError(
+                "private_roots entry must not traverse symlinks or non-normalized paths"
+            ) from None
+        return str(candidate)
+    except OSError as error:
+        raise ValueError("private_roots entry cannot be inspected") from error
+    if stat.S_ISLNK(info.st_mode):
+        raise ValueError("private_roots entry must not be a symlink")
     return _canonical_existing(candidate, "private_roots entry")
+
+
+def resolve_private_roots(anchor: object, entries: tuple) -> tuple[str, ...]:
+    """把可信 anchor 下的 closed private paths 解析为稳定的绝对拒读集合。"""
+
+    canonical_anchor = _canonical_existing(anchor, "private_roots anchor")
+    if not Path(canonical_anchor).is_dir():
+        raise ValueError("private_roots anchor must be a real directory")
+    resolved_entries: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, str) or not entry or Path(entry).is_absolute():
+            raise ValueError(
+                "private_roots closed entries must be non-empty relative paths"
+            )
+        resolved_entries.append(_resolve_private(canonical_anchor, entry))
+    resolved = tuple(resolved_entries)
+    if len(resolved) != len(set(resolved)):
+        raise ValueError("private_roots entries must resolve to distinct paths")
+    return resolved
 
 
 def _git_metadata_roots(workspace: str) -> tuple[str, ...]:
@@ -157,6 +197,8 @@ def _git_metadata_roots(workspace: str) -> tuple[str, ...]:
             raise ValueError(
                 "gitdir target escapes the workspace parent; refusing policy",
             )
+        # gitfile 本身也决定仓库身份，必须与已验证的 target 一起保持可读禁写。
+        roots.append(str(candidate))
         roots.append(str(resolved))
     return tuple(roots)
 

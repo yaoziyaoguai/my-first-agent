@@ -12,8 +12,10 @@ from datetime import UTC, datetime
 
 from agent.runtime.contracts import (
     AcknowledgeProviderDisclosure,
+    CancelBrowserTakeover,
     CancelGoal,
     CancelRun,
+    CompleteBrowserTakeover,
     ConversationState,
     PauseGoal,
     RecoverUnknownObservation,
@@ -25,6 +27,36 @@ from agent.runtime.contracts import (
     RevokeProcessAuthority,
     SubmitMessage,
 )
+
+
+def build_complete_browser_takeover(
+    state: ConversationState,
+) -> CompleteBrowserTakeover:
+    pending = state.browser_takeover_pending
+    if pending is None:
+        raise ValueError("a pending browser takeover is required")
+    return CompleteBrowserTakeover(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+        request_id=pending.request_id,
+        session_ref=pending.session_ref,
+        expected_profile_revision=pending.profile_revision,
+    )
+
+
+def build_cancel_browser_takeover(
+    state: ConversationState,
+) -> CancelBrowserTakeover:
+    pending = state.browser_takeover_pending
+    if pending is None:
+        raise ValueError("a pending browser takeover is required")
+    return CancelBrowserTakeover(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+        request_id=pending.request_id,
+    )
 
 
 def build_ack_provider(

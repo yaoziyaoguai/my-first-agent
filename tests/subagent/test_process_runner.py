@@ -7,6 +7,8 @@ killed by the parent's process-group termination and surfaces UNCONFIRMED — no
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from agent.runtime.contracts import RunStatus
@@ -340,3 +342,194 @@ def test_015_persistent_config_cleanup_failure_cannot_report_success(
     assert result.reason == "cleanup_failed"
     assert result.receipt_state == "terminated"
     assert run_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# 017 Slice 2：child 结果 envelope 的共同 8192-byte UTF-8 预算合同
+# ---------------------------------------------------------------------------
+
+# 测试独立钉住预算与产品上限的数值（不 import 生产常量），作为行为合同的 oracle。
+_ENVELOPE_BUDGET_BYTES = 8_192
+_CHILD_MESSAGE_CAP_CHARS = 4_000
+# '{"status": "completed", "message": ""}' 的固定 envelope 开销（含 message 引号）。
+_ENVELOPE_OVERHEAD_BYTES = 38
+
+
+class _CompletedChildRuntime:
+    """合成 runtime：不经 provider，直接返回指定 message 的 completed 结果。"""
+
+    def __init__(self, message: str) -> None:
+        self._message = message
+
+    def run_turn(self, action, snapshot):  # noqa: ANN001, ANN202
+        from types import SimpleNamespace
+
+        return SimpleNamespace(status=RunStatus.COMPLETED, message=self._message)
+
+
+class _StubChildStore:
+    def load(self):  # noqa: ANN201
+        return None
+
+
+def _write_child_seam_config(tmp_path) -> object:
+    config = {
+        "spec": {"kind": "fake", "fake_text": "unused-by-stub-runtime"},
+        "profile": {
+            "runner_version": "subagent-v1",
+            "provider_profile_id": "default",
+            "provider_destination": "local",
+            "workspace_scope_digest": SCOPE,
+            "max_input_tokens": 4_000,
+            "max_output_tokens": 1_000,
+            "limits_digest": "limits-1",
+            "hard_deadline_seconds": 30.0,
+        },
+        "objective": "envelope budget",
+        "handoff": "",
+        "parent_idempotency_key": "parent:run-1:envelope-seam",
+    }
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _capture_child_main_stdout(
+    tmp_path, monkeypatch, capsysbinary, message: str
+) -> bytes:
+    """对实际 ``child.main`` 输出 seam 注入返回 completed 的合成 runtime，捕获真实 stdout bytes。"""
+    import agent.subagent.runner as runner_mod
+    from agent.subagent.child import main as child_main
+
+    monkeypatch.setattr(
+        runner_mod,
+        "build_child_runtime",
+        lambda provider, profile, **kwargs: (  # noqa: ANN001, ANN202, ARG005
+            _CompletedChildRuntime(message),
+            _StubChildStore(),
+        ),
+    )
+    rc = child_main([str(_write_child_seam_config(tmp_path))])
+    assert rc == 0, "child must exit 0 after terminally reporting its result"
+    return capsysbinary.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("label", "message"),
+    [
+        pytest.param("cjk", "冻结修复" * 1_000, id="cjk"),
+        pytest.param("emoji", "🚀🧊" * 2_000, id="emoji"),
+        pytest.param("quotes", '"' * 2_000 + "冻结" * 1_000, id="quotes"),
+        pytest.param("backslash", "\\" * 2_000 + "修复" * 1_000, id="backslash"),
+        pytest.param("control-chars", "\x01" * 4_000, id="control-chars"),
+        pytest.param("mixed", ('"\\' + "\x07" + "冻🚀a" + '"') * 600, id="mixed"),
+        pytest.param("short-ascii", "ok", id="short-ascii"),
+        # 2718 个 3-byte CJK 字符：envelope 恰好 8192 bytes，必须原样保留。
+        pytest.param("boundary-exact", "冻" * 2_718, id="boundary-exact"),
+    ],
+)
+def test_child_main_envelope_fits_shared_utf8_byte_budget(
+    tmp_path, monkeypatch, capsysbinary, label, message
+) -> None:
+    """017-2 Red：child 写出的完整 envelope 必须 ≤ 8192 UTF-8 bytes 且仍是合法 JSON。
+
+    旧行为只按 4000 字符截断再 ``ensure_ascii=False`` 序列化：CJK/emoji 的多字节
+    UTF-8 与引号/反斜杠/控制字符的 JSON 转义让完整 envelope 超过 parent 的
+    8192-byte 有界读取，合法 completed 结果被误判 oversized → UNCONFIRMED。
+    """
+    blob = _capture_child_main_stdout(tmp_path, monkeypatch, capsysbinary, message)
+
+    assert len(blob) <= _ENVELOPE_BUDGET_BYTES, (
+        f"[{label}] envelope is {len(blob)} bytes, exceeding the shared 8192-byte budget"
+    )
+    parsed = json.loads(blob.decode("utf-8"))
+    assert set(parsed) == {"status", "message"}, "no new protocol fields may be added"
+    assert parsed["status"] == "completed", "status must not change"
+    capped = message[:_CHILD_MESSAGE_CAP_CHARS]
+    assert capped.startswith(parsed["message"]), (
+        f"[{label}] emitted message must be a prefix of the original child message"
+    )
+    full_blob = json.dumps(
+        {"status": "completed", "message": capped}, ensure_ascii=False
+    ).encode("utf-8")
+    if len(full_blob) <= _ENVELOPE_BUDGET_BYTES:
+        assert parsed["message"] == capped, (
+            f"[{label}] messages whose full envelope fits must be preserved verbatim"
+        )
+
+
+def test_process_runner_long_cjk_completed_is_terminated_max_prefix() -> None:
+    """017-2 Red（真实 ChildProcessRunner + fake provider）：长中文 completed 路径。
+
+    "冻"×4000 的完整 envelope 为 38 + 12_000 bytes；修复后 child 保留满足预算的最大
+    字符前缀 (8192−38)//3 = 2718 字符（envelope 恰 8192 bytes），receipt 仍为 TERMINATED。
+    """
+    runner = ChildProcessRunner(
+        provider_spec=_fake_spec(text="冻" * 4_000),
+        profile=_profile(max_output_tokens=20_000),
+        hard_deadline_seconds=120.0,
+    )
+    result = runner.run(
+        objective="长中文结果", handoff="", parent_idempotency_key="parent:run-1:cjk-long"
+    )
+    assert result.receipt_state == "terminated"
+    assert result.status is RunStatus.COMPLETED
+    assert result.reason == "completed"
+    assert result.message == "冻" * ((_ENVELOPE_BUDGET_BYTES - _ENVELOPE_OVERHEAD_BYTES) // 3)
+
+
+def test_process_runner_long_emoji_completed_is_terminated_max_prefix() -> None:
+    """017-2 Red（真实 runner）：长 emoji（UTF-8 4 bytes/char）completed 路径同合同。"""
+    runner = ChildProcessRunner(
+        provider_spec=_fake_spec(text="🚀" * 4_000),
+        profile=_profile(max_output_tokens=20_000),
+        hard_deadline_seconds=120.0,
+    )
+    result = runner.run(
+        objective="emoji 结果", handoff="", parent_idempotency_key="parent:run-1:emoji-long"
+    )
+    assert result.receipt_state == "terminated"
+    assert result.status is RunStatus.COMPLETED
+    assert result.reason == "completed"
+    assert result.message == "🚀" * ((_ENVELOPE_BUDGET_BYTES - _ENVELOPE_OVERHEAD_BYTES) // 4)
+
+
+def test_process_runner_envelope_exact_boundary_is_accepted_verbatim() -> None:
+    """精确边界："冻"×2718 的完整 envelope 恰为 8192 bytes，必须原样接受不截断。
+
+    parent 侧 ``read(max_bytes + 1)`` 接受 ``len == max``；恰好等于预算的合法结果
+    不得被截断，也不得被判 oversized。
+    """
+    text = "冻" * 2_718
+    runner = ChildProcessRunner(
+        provider_spec=_fake_spec(text=text),
+        profile=_profile(max_output_tokens=20_000),
+        hard_deadline_seconds=120.0,
+    )
+    result = runner.run(
+        objective="exact boundary", handoff="", parent_idempotency_key="parent:run-1:boundary"
+    )
+    assert result.receipt_state == "terminated"
+    assert result.status is RunStatus.COMPLETED
+    assert result.message == text
+
+
+def test_process_runner_envelope_one_char_over_boundary_still_completed() -> None:
+    """017-2 Red（真实 runner）：超预算 1 字符 → 截最大前缀，而不是 oversized → UNCONFIRMED。
+
+    "冻"×2719 的完整 envelope 为 8195 bytes；child 必须退回最大前缀 "冻"×2718
+    （envelope 恰 8192），而不是把合法 completed 结果变成 oversized。
+    """
+    runner = ChildProcessRunner(
+        provider_spec=_fake_spec(text="冻" * 2_719),
+        profile=_profile(max_output_tokens=20_000),
+        hard_deadline_seconds=120.0,
+    )
+    result = runner.run(
+        objective="one over boundary",
+        handoff="",
+        parent_idempotency_key="parent:run-1:boundary-plus-one",
+    )
+    assert result.receipt_state == "terminated"
+    assert result.status is RunStatus.COMPLETED
+    assert result.message == "冻" * 2_718

@@ -58,6 +58,7 @@ from agent.runtime.ports import (
     ModelProvider,
 )
 from agent.runtime.tools import KernelToolRuntime, RegisteredTool
+from agent.sandbox.policy import resolve_private_roots
 from agent.skill.catalog import SkillLimits, build_skill_catalog
 from agent.skill.execution import SkillExecutionConfig
 from agent.skill.tools import build_skill_tool_registrations
@@ -110,6 +111,50 @@ class SandboxReadiness(StrEnum):
     READY = "ready"
 
 
+HOST_HOME_PRIVATE_ROOTS = (
+    ".aws",
+    ".claude",
+    ".codex",
+    ".config",
+    ".docker",
+    ".gnupg",
+    ".kube",
+    ".opencode",
+    ".ssh",
+    ".ua",
+    ".git-credentials",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+)
+
+
+def _sandbox_private_roots(*, host_home: object, workspace: object) -> tuple[str, ...]:
+    """从可信 composition 输入派生模型不可修改的 host-home 拒读路径。"""
+
+    home = Path(host_home)
+    try:
+        home.lstat()
+        canonical_home = home.resolve(strict=True)
+    except (FileNotFoundError, OSError) as error:
+        raise ValueError("host_home must be a canonical existing real directory") from error
+    if home.is_symlink() or not home.is_dir() or home != canonical_home:
+        raise ValueError("host_home must be a canonical existing real directory")
+    try:
+        canonical_workspace = Path(workspace).resolve(strict=True)
+    except (FileNotFoundError, OSError) as error:
+        raise ValueError("workspace must be a canonical existing real directory") from error
+    private_roots = resolve_private_roots(canonical_home, HOST_HOME_PRIVATE_ROOTS)
+    for private_root in map(Path, private_roots):
+        if (
+            private_root == canonical_workspace
+            or private_root in canonical_workspace.parents
+            or canonical_workspace in private_root.parents
+        ):
+            raise ValueError("workspace and host private roots must not overlap")
+    return private_roots
+
+
 @dataclass(frozen=True, slots=True)
 class SandboxResources:
     """native sandbox composition 的副产品：registrations + 就绪度。
@@ -131,6 +176,7 @@ def build_sandbox_resources(
     state_root,
     captured_path: str,
     *,
+    host_home,
     confiner=None,
 ):  # noqa: ANN001, ANN202
     """native sandbox 的静态组合：自动 qualification + sandbox_exec 与 shell_exec。
@@ -154,6 +200,10 @@ def build_sandbox_resources(
     from agent.sandbox.shell import build_shell_exec_registration
     from agent.sandbox.tools import build_sandbox_exec_registration
 
+    private_roots = _sandbox_private_roots(
+        host_home=host_home,
+        workspace=workspace,
+    )
     resolved_confiner = confiner or SeatbeltConfiner()
     report = resolved_confiner.qualify()
     state_root_path = Path(state_root)
@@ -175,6 +225,7 @@ def build_sandbox_resources(
         home=home_root,
         captured_path=captured_path,
         confiner=resolved_confiner,
+        private_roots=private_roots,
     )
     shell_registration = build_shell_exec_registration(
         workspace=workspace,
@@ -183,6 +234,7 @@ def build_sandbox_resources(
         home=home_root,
         captured_path=captured_path,
         confiner=resolved_confiner,
+        private_roots=private_roots,
     )
     if report.reason_code == "unsupported_platform":
         readiness = SandboxReadiness.UNSUPPORTED
@@ -260,7 +312,7 @@ def build_skill_execution_config(
         system_runtime_roots=system_roots,
         system_runtime_digest=system_digest,
         private_roots=(),
-        executor=NativeSandboxExecutor(confiner=confiner, captured_path=""),
+        executor=NativeSandboxExecutor(confiner=confiner),
     )
 
 

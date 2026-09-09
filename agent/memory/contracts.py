@@ -17,6 +17,13 @@ class MemoryCasMismatchError(MemoryStoreError):
     """store/record revision 或 content digest 前置条件不匹配。"""
 
 
+class MemoryCapacityError(MemoryStoreError):
+    """完整序列化 document 超过 durable store 上限。
+
+    仅在写入副作用（temp open/truncate/write/replace、目标文件/目录创建）发生前抛出；
+    拒绝时旧 durable bytes 与调用方内存状态不变。错误信息不携带 store 路径或 inventory。"""
+
+
 @dataclass(frozen=True, slots=True)
 class MemoryRecord:
     record_id: str

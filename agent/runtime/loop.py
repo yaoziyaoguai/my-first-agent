@@ -217,6 +217,16 @@ class _NoProgressTracker:
         self.observation_id = None
 
 
+@dataclass(slots=True)
+class _ToolBatchConvergence:
+    """当前已接纳模型工具批次的 invocation-local 收敛摘要。"""
+
+    failure_signatures: list[tuple[str, ...]]
+    has_success: bool = False
+    feedback: str | None = None
+    eligible: bool = True
+
+
 @dataclass(frozen=True, slots=True)
 class _CompactionCallResult:
     """一次成功 compaction 调用的内部结果（020）。
@@ -733,6 +743,7 @@ class AgentRuntime:
             successful_product_requests,
             successful_workspace_observations,
         ) = self._successful_product_request_inventory(current.state)
+        tool_batch = self._resumed_tool_batch_convergence(current.state)
 
         while True:
             active = current.state.active_run
@@ -825,6 +836,7 @@ class AgentRuntime:
                         content=duplicate_guidance,
                         is_error=True,
                         executed=False,
+                        metadata={"code": "duplicate_product_request"},
                     )
                     fact = self._tool_result_fact(current.state, duplicate)
                     current = self._save(
@@ -839,32 +851,27 @@ class AgentRuntime:
                             payload={"tool_call_id": call.tool_call_id, "is_error": True},
                         )
                     )
-                    same_replan_opportunity = no_progress.same_replan_opportunity(model_calls)
-                    if no_progress.repair_exhausted(
-                        ("duplicate_product_request", request_digest),
-                        allowance=self._limits.max_no_progress_replans,
-                        observation_id=model_calls,
-                    ):
-                        return self._finish_no_progress(
+                    tool_batch.failure_signatures.append(
+                        ("duplicate_product_request", request_digest)
+                    )
+                    tool_batch.feedback = duplicate_guidance
+                    if not self._tool_batch_is_complete(active):
+                        continue
+                    current, no_progress_since_product_action, finished = (
+                        self._finalize_tool_batch_convergence(
                             current,
                             action,
                             warnings,
-                            message=(
-                                "Provider repeated a product tool request that had already "
-                                "succeeded in the current run."
+                            batch=tool_batch,
+                            no_progress=no_progress,
+                            no_progress_since_product_action=(
+                                no_progress_since_product_action
                             ),
+                            observation_id=model_calls,
                         )
-                    no_progress_since_product_action = True
-                    if same_replan_opportunity:
-                        continue
-                    current = self._save(
-                        current,
-                        append_policy_result(
-                            current.state,
-                            code="no_progress_replan_required",
-                            message=duplicate_guidance,
-                        ),
                     )
+                    if finished is not None:
+                        return finished
                     continue
                 prepared = self._tool_runtime.prepare(
                     call,
@@ -988,16 +995,9 @@ class AgentRuntime:
                         outcome_state=paused,
                     )
                 if isinstance(prepared, ToolResult):
-                    no_progress_signature = (
-                        "nonexecuted_tool",
+                    no_progress_signature = self._tool_failure_signature(
                         request_digest,
-                        canonical_json_digest(
-                            {
-                                "content": prepared.content,
-                                "is_error": prepared.is_error,
-                                "metadata": prepared.metadata,
-                            }
-                        ),
+                        prepared,
                     )
                     fact = self._tool_result_fact(current.state, prepared)
                     current = self._save(
@@ -1012,56 +1012,25 @@ class AgentRuntime:
                             payload={"tool_call_id": call.tool_call_id, "is_error": True},
                         )
                     )
-                    if (
-                        active.invocation_origin is InvocationOrigin.MODEL
-                        and no_progress_since_product_action
-                    ):
-                        same_replan_opportunity = no_progress.same_replan_opportunity(model_calls)
-                        if no_progress.repair_exhausted(
-                            no_progress_signature,
-                            allowance=self._limits.max_no_progress_replans,
-                            observation_id=model_calls,
-                        ):
-                            return self._finish_no_progress(
-                                current,
-                                action,
-                                warnings,
-                                message=(
-                                    "Provider repeated non-executed tool attempts without "
-                                    "a successful product action."
-                                ),
-                            )
-                        if same_replan_opportunity:
+                    if active.invocation_origin is InvocationOrigin.MODEL:
+                        tool_batch.failure_signatures.append(no_progress_signature)
+                        if not self._tool_batch_is_complete(active):
                             continue
-                        current = self._save(
-                            current,
-                            append_policy_result(
-                                current.state,
-                                code="no_progress_replan_required",
-                                message=(
-                                    "The attempted tool was not executed and no product "
-                                    "progress has occurred. Re-read the exact ToolResult, "
-                                    "choose a materially different valid action, or send "
-                                    "blocked_claim if no safe action can advance the Goal."
-                                ),
-                            ),
-                        )
-                    elif active.invocation_origin is InvocationOrigin.MODEL:
-                        if no_progress.repair_exhausted(
-                            no_progress_signature,
-                            allowance=self._limits.max_no_progress_replans,
-                            observation_id=model_calls,
-                        ):
-                            return self._finish_no_progress(
+                        current, no_progress_since_product_action, finished = (
+                            self._finalize_tool_batch_convergence(
                                 current,
                                 action,
                                 warnings,
-                                message=(
-                                    "Provider repeated non-executed tool attempts without "
-                                    "a successful product action."
+                                batch=tool_batch,
+                                no_progress=no_progress,
+                                no_progress_since_product_action=(
+                                    no_progress_since_product_action
                                 ),
+                                observation_id=model_calls,
                             )
-                        no_progress_since_product_action = True
+                        )
+                        if finished is not None:
+                            return finished
                     continue
                 if not isinstance(prepared, ExecutionIntent):
                     raise RuntimeError("Tool Runtime returned an unsupported preparation")
@@ -1230,12 +1199,9 @@ class AgentRuntime:
                         run_id=active.run_id,
                         message="browser takeover waiting for user",
                         outcome_state=current.state,
-                    )
-                if (
-                    active.invocation_origin is InvocationOrigin.MODEL
-                    and tool_result.executed
-                ):
-                    if not tool_result.is_error:
+                )
+                if active.invocation_origin is InvocationOrigin.MODEL:
+                    if tool_result.executed and not tool_result.is_error:
                         verified = self._finish_if_durable_evidence_is_complete(
                             current,
                             action,
@@ -1249,15 +1215,42 @@ class AgentRuntime:
                     # 先前成功的可变观察过期，允许同参数重新观察/read。失效
                     # 发生在 result checkpoint 成功之后；结果未知仍走既有
                     # recovery，effectful 请求自身的 exact dedup 不受影响。
-                    if self._is_effectful_tool(call.name):
+                    if tool_result.executed and self._is_effectful_tool(call.name):
                         successful_product_requests.difference_update(
                             successful_workspace_observations
                         )
                         successful_workspace_observations.clear()
-                    if not tool_result.is_error:
+                    if tool_result.executed and not tool_result.is_error:
                         successful_product_requests.add(request_digest)
                         if call.name in _MUTABLE_OBSERVATION_TOOLS:
                             successful_workspace_observations.add(request_digest)
+                        tool_batch.has_success = True
+                    else:
+                        tool_batch.failure_signatures.append(
+                            self._tool_failure_signature(
+                                request_digest,
+                                tool_result,
+                            )
+                        )
+                    if not self._tool_batch_is_complete(active):
+                        continue
+                    current, no_progress_since_product_action, finished = (
+                        self._finalize_tool_batch_convergence(
+                            current,
+                            action,
+                            warnings,
+                            batch=tool_batch,
+                            no_progress=no_progress,
+                            no_progress_since_product_action=(
+                                no_progress_since_product_action
+                            ),
+                            observation_id=model_calls,
+                        )
+                    )
+                    if finished is not None:
+                        return finished
+                    continue
+
                 no_progress.reset()
                 no_progress_since_product_action = False
                 continue
@@ -2784,6 +2777,7 @@ class AgentRuntime:
                         preamble="\n".join(texts) or None,
                     ),
                 )
+                tool_batch = _ToolBatchConvergence(failure_signatures=[])
                 # 一个已广告、已持久化的 tool batch 是合法 Provider response。
                 # 后续若再出现 malformed/control 错误，应获得新的连续修复预算；
                 # tool 自身的失败/停滞仍由 result、policy 与 no-progress 边界处理。
@@ -3294,6 +3288,10 @@ class AgentRuntime:
             goal is None
             or active is None
             or goal.status not in {GoalStatus.GOAL_READY, GoalStatus.EXECUTING}
+            # 中间 result 已 durable，但 reducer 仍保留 TOOL phase 与剩余 calls；
+            # 只有批次最终 result 回到 MODEL 后，read-back 才有资格终结 run。
+            or active.phase is not ContinuationPhase.MODEL
+            or active.tool_calls
         ):
             return None
         mandatory_refs = tuple(
@@ -3374,6 +3372,239 @@ class AgentRuntime:
                 "arguments": arguments,
             }
         )
+
+    @staticmethod
+    def _tool_failure_signature(
+        request_digest: str,
+        result: ToolResult,
+    ) -> tuple[str, ...]:
+        return AgentRuntime._tool_failure_values_signature(
+            request_digest,
+            content=result.content,
+            executed=result.executed,
+            is_error=result.is_error,
+            metadata=result.metadata,
+        )
+
+    @staticmethod
+    def _tool_failure_values_signature(
+        request_digest: str,
+        *,
+        content: object,
+        executed: object,
+        is_error: object,
+        metadata: object,
+    ) -> tuple[str, ...]:
+        stable_metadata = metadata if isinstance(metadata, dict) else {}
+        return (
+            "known_tool_failure",
+            request_digest,
+            canonical_json_digest(
+                {
+                    "content": content,
+                    "executed": executed,
+                    "is_error": is_error,
+                    "code": stable_metadata.get("code"),
+                    "outcome": stable_metadata.get("outcome"),
+                    "exit_code": stable_metadata.get("exit_code"),
+                }
+            ),
+        )
+
+    @staticmethod
+    def _tool_batch_is_complete(active) -> bool:
+        return active.batch_cursor + 1 == len(active.tool_calls)
+
+    def _finalize_tool_batch_convergence(
+        self,
+        current: LoadedSnapshot,
+        action: Action,
+        warnings: list[str],
+        *,
+        batch: _ToolBatchConvergence,
+        no_progress: _NoProgressTracker,
+        no_progress_since_product_action: bool,
+        observation_id: int,
+    ) -> tuple[LoadedSnapshot, bool, RunResult | None]:
+        # Tool result 的 checkpoint/event 仍逐项完成；这里只在 final result 后
+        # 对整个已接纳批次做一次收敛判断。
+        if not batch.eligible or batch.has_success:
+            no_progress.reset()
+            return current, False, None
+        if not batch.failure_signatures:
+            raise RuntimeError("completed model tool batch has no classified result")
+
+        signature = (
+            batch.failure_signatures[0]
+            if len(batch.failure_signatures) == 1
+            else (
+                "known_tool_failure_batch",
+                canonical_json_digest(batch.failure_signatures),
+            )
+        )
+        same_replan_opportunity = no_progress.same_replan_opportunity(observation_id)
+        if no_progress.repair_exhausted(
+            signature,
+            allowance=self._limits.max_no_progress_replans,
+            observation_id=observation_id,
+        ):
+            return (
+                current,
+                True,
+                self._finish_no_progress(
+                    current,
+                    action,
+                    warnings,
+                    message=(
+                        "The same tool batch kept returning known failures. The task is "
+                        "paused with its recorded results preserved; adjust the request or "
+                        "environment, then explicitly continue."
+                    ),
+                ),
+            )
+
+        should_feedback = batch.feedback is not None or (
+            no_progress_since_product_action and not same_replan_opportunity
+        )
+        if should_feedback:
+            current = self._save(
+                current,
+                append_policy_result(
+                    current.state,
+                    code="no_progress_replan_required",
+                    message=(
+                        batch.feedback
+                        or "The completed tool batch returned known failures and no product "
+                        "progress occurred. Re-read every ToolResult, choose a materially "
+                        "different valid action, or send blocked_claim if no safe action can "
+                        "advance the Goal."
+                    ),
+                ),
+            )
+        return current, True, None
+
+    def _resumed_tool_batch_convergence(
+        self,
+        state: ConversationState,
+    ) -> _ToolBatchConvergence:
+        batch = _ToolBatchConvergence(failure_signatures=[])
+        active = state.active_run
+        if (
+            active is None
+            or active.invocation_origin is not InvocationOrigin.MODEL
+            or active.phase is not ContinuationPhase.TOOL
+            or active.batch_cursor == 0
+        ):
+            return batch
+
+        expected_calls = tuple(
+            (
+                call.tool_call_id,
+                call.name,
+                canonical_json_digest(call.arguments),
+            )
+            for call in active.tool_calls
+        )
+        run_prefix = f"run:{active.run_id}:"
+        batch_index: int | None = None
+        for index in range(len(state.facts) - 1, -1, -1):
+            fact = state.facts[index]
+            if (
+                fact.kind is not FactKind.TOOL_CALLS
+                or not fact.fact_id.startswith(f"{run_prefix}tool-batch:")
+            ):
+                continue
+            raw_calls = fact.content.get("calls")
+            if not isinstance(raw_calls, list) or len(raw_calls) != len(expected_calls):
+                continue
+            actual_calls: list[tuple[str, str, str]] = []
+            for raw_call in raw_calls:
+                if not isinstance(raw_call, dict):
+                    break
+                call_id = raw_call.get("tool_call_id")
+                name = raw_call.get("name")
+                arguments = raw_call.get("arguments")
+                if (
+                    not isinstance(call_id, str)
+                    or not isinstance(name, str)
+                    or not isinstance(arguments, dict)
+                ):
+                    break
+                actual_calls.append(
+                    (call_id, name, canonical_json_digest(arguments))
+                )
+            if tuple(actual_calls) == expected_calls:
+                batch_index = index
+                break
+
+        if batch_index is None:
+            batch.eligible = False
+            return batch
+
+        prefix_results: list[ConversationFact] = []
+        for fact in state.facts[batch_index + 1 :]:
+            if fact.kind is FactKind.TOOL_RESULT:
+                prefix_results.append(fact)
+                if len(prefix_results) == active.batch_cursor:
+                    break
+        if len(prefix_results) != active.batch_cursor:
+            batch.eligible = False
+            return batch
+
+        for call, fact in zip(
+            active.tool_calls[: active.batch_cursor],
+            prefix_results,
+            strict=True,
+        ):
+            if fact.content.get("tool_call_id") != call.tool_call_id:
+                batch.eligible = False
+                return batch
+            if not (
+                fact.fact_id.startswith(f"{run_prefix}tool-result:")
+                or fact.fact_id.startswith("action:")
+            ):
+                batch.eligible = False
+                return batch
+            if (
+                fact.fact_id.startswith("action:")
+                or fact.content.get("rejected") is True
+                or fact.content.get("synthetic") is True
+            ):
+                batch.eligible = False
+                continue
+            if (
+                fact.content.get("executed") is True
+                and fact.content.get("is_error") is False
+            ):
+                batch.has_success = True
+                continue
+            request_digest = self._product_request_digest(call.name, call.arguments)
+            text = fact.content.get("text")
+            metadata = fact.content.get("metadata")
+            if (
+                fact.content.get("executed") is False
+                and isinstance(metadata, dict)
+                and metadata.get("code") == "duplicate_product_request"
+            ):
+                batch.failure_signatures.append(
+                    ("duplicate_product_request", request_digest)
+                )
+                batch.feedback = (
+                    text
+                    if isinstance(text, str)
+                    else self._duplicate_product_request_guidance(state, call)
+                )
+                continue
+            batch.failure_signatures.append(
+                self._tool_failure_values_signature(
+                    request_digest,
+                    content=text,
+                    executed=fact.content.get("executed"),
+                    is_error=fact.content.get("is_error"),
+                    metadata=metadata,
+                )
+            )
+        return batch
 
     @staticmethod
     def _duplicate_product_request_guidance(

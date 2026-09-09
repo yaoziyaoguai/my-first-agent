@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 
 import pytest
@@ -72,6 +73,58 @@ def test_oldest_non_pinned_groups_are_evicted_deterministically() -> None:
     assert first == second
     assert "recent-user" in first.budget.included_ids
     assert first.budget.excluded_ids == ("old-user", "old-assistant")
+
+
+def test_pressure_evicts_oldest_history_group_before_newer_history() -> None:
+    # 三个等成本、从旧到新的非 pinned 历史组 + pinned 当前 user。
+    # 预算只允许淘汰一个历史组：必须淘汰最旧的 user-old 并保留较新组，
+    # 而不是先忘掉较新内容。
+    state = replace(
+        ConversationState.new("conversation-1"),
+        interaction_state=InteractionState.ANSWERING,
+        facts=(
+            _fact("user-old", FactKind.USER_MESSAGE, text="a" * 120),
+            _fact("user-mid", FactKind.USER_MESSAGE, text="b" * 120),
+            _fact("user-new", FactKind.USER_MESSAGE, text="c" * 120),
+            _fact("user-current", FactKind.USER_MESSAGE, text="current"),
+        ),
+    )
+    full = _full_context_cost(state, _submit())
+    core = _full_context_cost(replace(state, facts=(state.facts[-1],)), _submit())
+    # 恰好容纳“核心 + 两个历史组”：只淘汰一个组就能进入预算。
+    keep_one_group = core + math.ceil((full - core) * 2 / 3)
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=keep_one_group + 20, output_reserve=20),
+    )
+
+    pack = manager.build(state, _submit(), ())
+
+    assert pack.budget.excluded_ids == ("user-old",)
+    assert {"user-mid", "user-new", "user-current"} <= set(pack.budget.included_ids)
+    serialized = repr(pack.messages)
+    assert "ccc" in serialized
+    assert "aaa" not in serialized
+
+
+def test_exact_input_budget_keeps_all_groups() -> None:
+    state = replace(
+        ConversationState.new("conversation-1"),
+        facts=(
+            _fact("user-old", FactKind.USER_MESSAGE, text="old context"),
+            _fact("user-current", FactKind.USER_MESSAGE, text="current"),
+        ),
+    )
+    full_cost = _full_context_cost(state, _submit())
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=full_cost + 20, output_reserve=20),
+    )
+
+    pack = manager.build(state, _submit(), ())
+
+    assert pack.budget.estimated_input_tokens == full_cost
+    assert pack.budget.excluded_ids == ()
 
 
 def test_pending_recovery_tool_group_is_pinned_under_pressure() -> None:

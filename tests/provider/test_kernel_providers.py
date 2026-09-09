@@ -1095,8 +1095,43 @@ def test_strict_tools_are_rejected_outside_openai_compatible(provider_type: str)
         AgentProviderConfig(provider_type=provider_type, strict_tools=True, **kwargs)
 
 
-@pytest.mark.parametrize("provider_type", ["fake", "anthropic_compatible"])
-def test_thinking_mode_is_rejected_outside_openai_compatible(provider_type: str) -> None:
+def test_anthropic_provider_can_explicitly_disable_opaque_thinking_mode() -> None:
+    """r19 基线实证:bigmodel anthropic 端点对 glm-5.2 默认返回 thinking block,
+    normalize 层按合同拒绝 → 组合完全阻断。显式 disabled(Anthropic 官方字段)
+    让端点不返回 thinking block,组合恢复可用。"""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "content": [{"type": "text", "text": "done"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 3, "output_tokens": 1},
+            },
+        )
+
+    config = AgentProviderConfig(
+        provider_type="anthropic_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid",
+        credential="fixture-secret",
+        thinking_mode="disabled",
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        response = AnthropicCompatibleProvider(config=config, http_client=client).generate(
+            _context()
+        )
+
+    assert response == ModelResponse(
+        (ModelTextBlock("done"),), stop_reason="end_turn", input_tokens=3, output_tokens=1
+    )
+    assert json.loads(requests[0].content)["thinking"] == {"type": "disabled"}
+
+
+@pytest.mark.parametrize("provider_type", ["fake"])
+def test_thinking_mode_is_rejected_outside_http_compatible(provider_type: str) -> None:
     kwargs = (
         {}
         if provider_type == "fake"
@@ -1349,3 +1384,25 @@ def test_oversized_response_is_rejected_before_json_parsing(
 
     with client, pytest.raises(ProviderProtocolError, match="response_too_large"):
         provider.generate(_context())
+
+
+def test_anthropic_thinking_block_is_dropped_not_fatal() -> None:
+    """r19 基线实证(2026-09-10):bigmodel anthropic 端点在带 tool_result 的多轮
+    请求中违反 thinking:disabled 仍返回 thinking block。normalize 必须丢弃
+    opaque 推理 block(不展示、不持久化、不当内容)并接纳同响应中的 text;
+    不得因 thinking block 存在而使整个响应失败。"""
+
+    from agent.provider.normalize import normalize_anthropic_response
+
+    response = normalize_anthropic_response(
+        {
+            "content": [
+                {"type": "thinking", "thinking": "internal reasoning", "signature": "s"},
+                {"type": "text", "text": "answer"},
+            ],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 2, "output_tokens": 1},
+        }
+    )
+    assert response.blocks == (ModelTextBlock("answer"),)
+    assert response.stop_reason == "end_turn"

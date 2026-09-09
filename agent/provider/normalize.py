@@ -1166,6 +1166,12 @@ def normalize_anthropic_response(
     for raw_block in raw_content:
         block = _object(raw_block, reason="malformed_response")
         block_type = block.get("type")
+        if block_type == "thinking":
+            # 真实端点实证(2026-09-10,bigmodel anthropic 兼容层):带 tool_result
+            # 的多轮请求会违反 thinking:disabled 仍返回 thinking block。opaque
+            # 推理不展示、不持久化、不当内容——显式丢弃而不是让整个响应失败;
+            # text/tool_use 的既有校验不放松,envelope 级 opaque 字段照旧拒绝。
+            continue
         if block_type == "text":
             text = _string(
                 block.get("text"),

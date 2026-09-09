@@ -54,10 +54,14 @@ class AgentProviderConfig:
             return
 
         # Kernel v1 不持久化 provider-specific opaque reasoning continuity。
-        # 仅允许 OpenAI-compatible composition 显式请求关闭这类输出；默认不向
+        # 仅允许 HTTP-compatible composition 显式请求关闭这类输出；默认不向
         # 其他兼容端点添加 vendor-specific 字段，也不允许启用无法安全回放的模式。
+        # anthropic_compatible 自 r19 起允许 disabled:bigmodel 等兼容端点对部分
+        # 模型默认返回 thinking block，normalize 按合同拒绝会使组合完全阻断；
+        # disabled 用 Anthropic 官方 thinking 字段显式关闭，不引入 vendor 扩展。
         if self.thinking_mode is not None and (
-            provider_type != "openai_compatible" or self.thinking_mode != "disabled"
+            self.thinking_mode != "disabled"
+            or provider_type not in {"anthropic_compatible", "openai_compatible"}
         ):
             raise ProviderConfigurationError()
         if self.strict_tools and provider_type != "openai_compatible":

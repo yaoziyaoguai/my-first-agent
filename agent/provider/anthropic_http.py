@@ -86,6 +86,8 @@ class AnthropicCompatibleProvider:
         tools = context_tools_to_anthropic(context)
         if tools:
             body["tools"] = tools
+        if self._config.thinking_mode == "disabled":
+            body["thinking"] = {"type": "disabled"}
 
         try:
             if self._attempt_recorder is not None:

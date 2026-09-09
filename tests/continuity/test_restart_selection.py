@@ -259,3 +259,39 @@ def test_restart_after_answer_grounding_keeps_goal_window_closed_without_user_ac
     assert final_state.goal.goal_id.startswith("goal-v1-"), (
         "the Goal must be Runtime-minted, not model self-reported"
     )
+
+
+def test_force_new_creates_fresh_conversation_keeping_prior_history(
+    tmp_path: Path,
+) -> None:
+    """/new(r19 小步 2):显式新任务必须得到新的 conversation identity,
+    即便旧会话尚无 Goal(无 Goal 会话在 resume 语义下视为 active,普通
+    open 会被 RESUMED 而不是新建)。旧 checkpoint 原样保留在历史中。"""
+    workspace = tmp_path / "w"
+    workspace.mkdir()
+    state_root = tmp_path / "state"
+
+    first = open_workspace_session(workspace, state_root=state_root)
+    assert first.disposition is StartupDisposition.CREATED
+    assert first.snapshot is not None and first.checkpoint_path is not None
+
+    # 无 Goal 的闲聊会话:普通 open 会 RESUMED 同一会话。
+    resumed = open_workspace_session(workspace, state_root=state_root)
+    assert resumed.disposition is StartupDisposition.RESUMED
+    assert resumed.snapshot is not None
+    assert (
+        resumed.snapshot.state.conversation_id
+        == first.snapshot.state.conversation_id
+    )
+
+    # force_new(/new 语义):新 conversation identity,旧 checkpoint 保留。
+    second = open_workspace_session(
+        workspace, state_root=state_root, force_new=True
+    )
+    assert second.disposition is StartupDisposition.CREATED
+    assert second.snapshot is not None
+    assert (
+        second.snapshot.state.conversation_id
+        != first.snapshot.state.conversation_id
+    )
+    assert first.checkpoint_path.exists()

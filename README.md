@@ -118,6 +118,8 @@ digest/request ID。以下 slash command 只保留为高级精确接口：
 - `/approve ID`、`/reject ID`
 - `/resolve-success ID`、`/resolve-failed ID`
 - `/pause`、`/resume`、`/cancel`、`/exit`
+- `/new`（显式开始新任务：旧 Goal 与 checkpoint 原样保留，同一进程内进入新 conversation；
+  有 active run、pending 决策或活跃 Goal 时拒绝并说明原因——CLI 与 TUI 共用同一合法性判断）
 - `/sources`、`/sources --advanced`（只读查看当前来源；advanced 才显示 opaque source ref）
 
 普通文本永远走同一个入口：简单问题直接回答；只有会改变 outcome、target、scope、authority、

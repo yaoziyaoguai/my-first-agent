@@ -17,6 +17,7 @@ from agent.runtime.contracts import (
     CancelRun,
     CompleteBrowserTakeover,
     ConversationState,
+    GoalStatus,
     PauseGoal,
     RecoverUnknownObservation,
     RecoveryResolution,
@@ -27,6 +28,35 @@ from agent.runtime.contracts import (
     RevokeProcessAuthority,
     SubmitMessage,
 )
+
+# /new(r19 小步 2)请求装配层重建 conversation 的 REPL 退出码。
+# 选择 79(NR_UNRESOLVABLE 之外的未占用私人区段)只是进程内信令,不是 errno 声明。
+NEW_SESSION_REQUESTED = 79
+
+_TERMINAL_GOAL_STATUSES = frozenset(
+    {GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED}
+)
+
+
+def new_session_gate(state: ConversationState) -> str | None:
+    """/new 的共享合法性判断(CLI 与 TUI 同一语义)。
+
+    返回 None 允许显式开始新任务;返回拒绝原因字符串时不得切换。
+    - active run(pending approval / takeover / EXECUTING / unknown effect)必须先处置;
+    - 活跃(非终态)Goal 必须先完成或取消——/new 不清空、不重开旧 Goal;
+    - Goal 终态或无 Goal 时允许;旧 checkpoint 与 evidence 由装配层原样保留。
+    """
+    active = state.active_run
+    if active is not None:
+        return (
+            "Resolve the pending run or recovery state before starting a new task."
+        )
+    goal = state.goal
+    if goal is not None and goal.status not in _TERMINAL_GOAL_STATUSES:
+        return (
+            "The current goal is still active; finish or cancel it before /new."
+        )
+    return None
 
 
 def build_complete_browser_takeover(

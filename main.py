@@ -11,6 +11,7 @@ from functools import partial
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from agent.cli.actions import NEW_SESSION_REQUESTED
 from agent.cli.app import run_repl
 from agent.cli.render import TerminalRenderer, terminal_text
 from agent.composition import (
@@ -953,345 +954,362 @@ def main(
     # 唯一 close-stack owner：stdlib ExitStack。所有退出路径（正常、startup 失败、
     # optional-dependency 失败、runtime 异常）都按注册逆序各关闭一次。
     with contextlib.ExitStack() as close_stack:
-        try:
-            workspace = args.workspace.resolve(strict=True)
-            if not workspace.is_dir():
-                raise ValueError("workspace must be a directory")
-            closeables: list[Callable[[], None]] = []
-            web_profile = load_web_profile(args.state_root or default_state_root())
-            web_resources = build_web_resources(
-                web_profile,
-                credential=(
-                    os.environ.get(web_profile.credential_env)
-                    if web_profile is not None
-                    else None
-                ),
-                attempt_recorder=(
-                    TransportAttemptLedger(args.transport_audit_ledger).record
-                    if args.transport_audit_ledger is not None
-                    else None
-                ),
-            )
-            closeables.extend(web_resources.closeables)
-            for closeable in web_resources.closeables:
-                close_stack.callback(closeable)
-            session = open_workspace_session(
-                workspace,
-                state_root=args.state_root,
-            )
-            projection = project_restart(session)
-            if (
-                session.disposition
-                is StartupDisposition.HISTORY_CAPACITY_EXCEEDED
-            ):
-                write_fn(
-                    "Startup stopped: history_capacity_exceeded; existing history "
-                    "was preserved and no new conversation was created."
-                )
-                return 2
-            if session.disposition is StartupDisposition.SELECT_REQUIRED:
-                write_fn("Several unfinished tasks are available:")
-                for index, candidate in enumerate(session.candidates, start=1):
-                    summary = candidate.user_outcome or "Untitled conversation"
-                    status = _goal_status_label(candidate.goal_status)
-                    write_fn(
-                        f"{index}. {terminal_text(summary)} ({terminal_text(status)})"
-                    )
-                if session.history_incomplete:
-                    write_fn(
-                        "Only the first bounded set is shown: "
-                        f"{len(session.candidates)} of {session.total_active_count}."
-                    )
-                try:
-                    raw_selection = input_fn(
-                        f"Choose a task [1-{len(session.candidates)}]: "
-                    ).strip()
-                    selected_index = int(raw_selection) - 1
-                except (EOFError, KeyboardInterrupt, StopIteration, ValueError):
-                    write_fn("That choice is not available; no task was selected.")
-                    return 2
-                if not 0 <= selected_index < len(session.candidates):
-                    write_fn("That choice is not available; no task was selected.")
-                    return 2
-                candidate = session.candidates[selected_index]
-                if candidate.goal_id is None:
-                    write_fn("That choice has no resumable task; no task was selected.")
-                    return 2
-                session = select_workspace_session(
-                    session,
-                    SelectGoal(
-                        conversation_id=candidate.conversation_id,
-                        action_seq=candidate.next_action_seq,
-                        expected_revision=candidate.state_revision,
-                        goal_id=candidate.goal_id,
+        request_new_session_pending = False
+        # r19 小步 2：/new 以 NEW_SESSION_REQUESTED 退出交互层时，在同一进程内
+        # 重新走一遍会话装配（旧 checkpoint 与 evidence 原样保留），不重启进程。
+        while True:
+            # 首轮 False(正常启动投影);/new 重入后 True(force_new 显式
+            # 新任务,不被无 Goal 会话的 resume 语义拉回旧 conversation)。
+            request_new_session = request_new_session_pending
+            request_new_session_pending = False
+            try:
+                workspace = args.workspace.resolve(strict=True)
+                if not workspace.is_dir():
+                    raise ValueError("workspace must be a directory")
+                closeables: list[Callable[[], None]] = []
+                web_profile = load_web_profile(args.state_root or default_state_root())
+                web_resources = build_web_resources(
+                    web_profile,
+                    credential=(
+                        os.environ.get(web_profile.credential_env)
+                        if web_profile is not None
+                        else None
                     ),
-                )
-                projection = project_restart(session)
-            if session.disposition is StartupDisposition.NEEDS_AUTHORITY:
-                write_fn("Startup stopped: workspace or authority binding drifted.")
-                return 2
-            if session.store is None or session.checkpoint_path is None:
-                raise ValueError("startup did not select a checkpoint")
-            store = session.store
-            protected_paths = (session.checkpoint_path,)
-            startup_task_message, startup_status_message = _startup_task_messages(
-                projection
-            )
-            if startup_task_message is not None:
-                write_fn(startup_task_message)
-                if projection.progress_summary:
-                    write_fn(
-                        "Last verified progress: "
-                        f"{terminal_text(projection.progress_summary)}"
-                    )
-            skill_roots = tuple(
-                root.resolve(strict=True) for root in (args.skill_root or ())
-            )
-            # runtime 由应用内部复用并验证自身 interpreter/stdlib/runner；
-            # 无法验证时不注册 entrypoint 工具，仅保留 activation/resource。
-            skill_execution = (
-                build_skill_execution_config(
-                    workspace=workspace,
-                    state_root=session.state_root,
-                )
-                if skill_roots
-                else None
-            )
-            # F5c：默认 composition 只构造一个 LocalConversationArchive，同一实例
-            # 静态注入 HistoryCatalog 与 build_composition，避免双实例各自演进。
-            conversation_archive = LocalConversationArchive(session.state_root)
-            renderer = TerminalRenderer(write_fn)
-            context_limits = ContextLimits(max_input_tokens=100_000, output_reserve=8_000)
-            registrations = list(
-                build_tool_registrations(
-                    workspace=workspace,
-                    skill_roots=skill_roots,
-                    protected_paths=protected_paths,
-                    private_roots=DEFAULT_PRIVATE_ROOTS,
-                    max_tool_result_chars=context_limits.max_tool_result_chars,
-                    skill_execution=skill_execution,
-                    history_catalog=(
-                        HistoryCatalog(
-                            session.checkpoint_path.parent,
-                            session.workspace_binding,
-                            current_conversation_id=(
-                                session.snapshot.state.conversation_id
-                                if session.snapshot is not None
-                                else None
-                            ),
-                            conversation_archive=conversation_archive,
-                        )
-                        if session.workspace_binding is not None
+                    attempt_recorder=(
+                        TransportAttemptLedger(args.transport_audit_ledger).record
+                        if args.transport_audit_ledger is not None
                         else None
                     ),
                 )
-            )
-            sources: list = []
-            registrations.extend(web_resources.registrations)
-            sandbox_resources = build_sandbox_resources(
-                workspace,
-                session.state_root,
-                os.environ.get("PATH", ""),
-                host_home=Path.home(),
-            )
-            registrations.extend(sandbox_resources.registrations)
-            browser_resources = build_browser_resources(
-                workspace,
-                session.state_root,
-                enabled=bool(getattr(args, "browser", False)),
-            )
-            browser_profile_handler = None
-            browser_takeover_handler = None
-            if browser_resources.readiness is BrowserReadiness.READY:
-                from agent.browser.profile_store import BrowserProfileStore
-
-                browser_profile_store = BrowserProfileStore(
-                    root=session.state_root / "browser" / "profiles"
-                )
-                browser_identity_digest = browser_identity_digest_for_state_root(
-                    session.state_root
-                )
-                browser_profile_handler = partial(
-                    browser_profile_user_command,
-                    store=browser_profile_store,
-                    browser_identity_digest=browser_identity_digest,
-                )
-                browser_takeover_handler = browser_resources.complete_takeover
-            registrations.extend(browser_resources.registrations)
-            for browser_closeable in browser_resources.closeables:
-                closeables.append(browser_closeable)
-                close_stack.callback(browser_closeable)
-            context_scope_digest = session.workspace_identity.scope_digest
-            provider_descriptor = _build_provider_descriptor(args)
-            preference_resources = build_owner_preference_resources(
-                session.state_root / "owner-preferences.json",
-                provider_trust_digest=provider_descriptor.identity_digest,
-            )
-            registrations.extend(preference_resources.registrations)
-            sources.append(preference_resources.source)
-            if (args.mcp_catalog is None) != (args.mcp_safety_state is None):
-                raise ValueError("--mcp-catalog and --mcp-safety-state must be used together")
-            if args.mcp_catalog is not None:
-                mcp_resources = build_mcp_resources(
-                    load_mcp_catalog_file(args.mcp_catalog.resolve(strict=True)),
-                    # safety latch 由首次 invocation 惰性创建（文件缺失即 clear），
-                    # 不得要求 composition 时已存在——与 memory store 一样用 strict=False。
-                    args.mcp_safety_state.resolve(strict=False),
-                    env_provider=_mcp_env_provider,
-                )
-                registrations.extend(mcp_resources.registrations)
-                closeables.extend(mcp_resources.closeables)
-                # 立即注册进 close-stack：即使后续 startup 步骤失败也会逆序关闭。
-                for closeable in mcp_resources.closeables:
+                closeables.extend(web_resources.closeables)
+                for closeable in web_resources.closeables:
                     close_stack.callback(closeable)
-            memory_store, memory_scope = _open_memory_store(args, workspace)
-            if memory_store is not None:
-                context_scope_digest = memory_scope
-                memory_resources = build_memory_resources(
-                    memory_store, workspace_scope_digest=context_scope_digest
+                session = open_workspace_session(
+                    workspace,
+                    state_root=args.state_root,
+                    force_new=request_new_session,
                 )
-                registrations.extend(memory_resources.registrations)
-                # workspace-scoped source 比全局 owner preference 更贴近当前问题；
-                # ContextManager 按 composition 顺序保留 source 优先级。
-                sources.insert(0, memory_resources.source)
-            provider = _build_provider(args)
-            if args.subagent:
-                from agent.subagent.contracts import (
-                    ChildProviderSpec,
-                    ProviderDeadlineCapability,
-                )
-
-                cap = ProviderDeadlineCapability.from_provider(provider)
-                if cap is not None and cap.receipt_type == "synchronous":
-                    # provider 结构化保证 generate 同步返回（如本地确定性 provider）→
-                    # in-process runner，synchronous receipt。
-                    runner = ChildAgentRunner(
-                        provider=provider,
-                        profile=_build_child_profile(args, context_scope_digest),
+                projection = project_restart(session)
+                if (
+                    session.disposition
+                    is StartupDisposition.HISTORY_CAPACITY_EXCEEDED
+                ):
+                    write_fn(
+                        "Startup stopped: history_capacity_exceeded; existing history "
+                        "was preserved and no new conversation was created."
                     )
-                else:
-                    # production HTTP provider 无 synchronous deadline_contract；socket
-                    # timeout 不能证明 provider 已终止，故走进程隔离 hard-deadline 路径：
-                    # child 在独立进程运行同一个 AgentRuntime，parent 拥有 process group 并
-                    # 在 hard_deadline 后 killpg + 确认退出。credential 仅按 env name 在子进程
-                    # 内读取，不跨进程序列化。
-                    from agent.subagent.process_runner import ChildProcessRunner
-
-                    if args.provider != "fake" and (not args.model or not args.base_url):
-                        raise ValueError(
-                            "SubAgent over HTTP requires --model and --base-url"
+                    return 2
+                if session.disposition is StartupDisposition.SELECT_REQUIRED:
+                    write_fn("Several unfinished tasks are available:")
+                    for index, candidate in enumerate(session.candidates, start=1):
+                        summary = candidate.user_outcome or "Untitled conversation"
+                        status = _goal_status_label(candidate.goal_status)
+                        write_fn(
+                            f"{index}. {terminal_text(summary)} ({terminal_text(status)})"
                         )
-                    spec = ChildProviderSpec(
-                        kind="http",
-                        provider_type=args.provider,
-                        model=args.model or "fake",
-                        base_url=args.base_url,
-                        credential_env_name=args.credential_env,
-                        timeout=args.timeout,
-                        thinking_mode=args.thinking_mode,
-                        request_path=args.request_path,
-                        strict_tools=bool(args.strict_tools),
+                    if session.history_incomplete:
+                        write_fn(
+                            "Only the first bounded set is shown: "
+                            f"{len(session.candidates)} of {session.total_active_count}."
+                        )
+                    try:
+                        raw_selection = input_fn(
+                            f"Choose a task [1-{len(session.candidates)}]: "
+                        ).strip()
+                        selected_index = int(raw_selection) - 1
+                    except (EOFError, KeyboardInterrupt, StopIteration, ValueError):
+                        write_fn("That choice is not available; no task was selected.")
+                        return 2
+                    if not 0 <= selected_index < len(session.candidates):
+                        write_fn("That choice is not available; no task was selected.")
+                        return 2
+                    candidate = session.candidates[selected_index]
+                    if candidate.goal_id is None:
+                        write_fn("That choice has no resumable task; no task was selected.")
+                        return 2
+                    session = select_workspace_session(
+                        session,
+                        SelectGoal(
+                            conversation_id=candidate.conversation_id,
+                            action_seq=candidate.next_action_seq,
+                            expected_revision=candidate.state_revision,
+                            goal_id=candidate.goal_id,
+                        ),
                     )
-                    runner = ChildProcessRunner(
-                        provider_spec=spec,
-                        profile=_build_child_profile(args, context_scope_digest),
+                    projection = project_restart(session)
+                if session.disposition is StartupDisposition.NEEDS_AUTHORITY:
+                    write_fn("Startup stopped: workspace or authority binding drifted.")
+                    return 2
+                if session.store is None or session.checkpoint_path is None:
+                    raise ValueError("startup did not select a checkpoint")
+                store = session.store
+                protected_paths = (session.checkpoint_path,)
+                startup_task_message, startup_status_message = _startup_task_messages(
+                    projection
+                )
+                if startup_task_message is not None:
+                    write_fn(startup_task_message)
+                    if projection.progress_summary:
+                        write_fn(
+                            "Last verified progress: "
+                            f"{terminal_text(projection.progress_summary)}"
+                        )
+                skill_roots = tuple(
+                    root.resolve(strict=True) for root in (args.skill_root or ())
+                )
+                # runtime 由应用内部复用并验证自身 interpreter/stdlib/runner；
+                # 无法验证时不注册 entrypoint 工具，仅保留 activation/resource。
+                skill_execution = (
+                    build_skill_execution_config(
+                        workspace=workspace,
+                        state_root=session.state_root,
                     )
-                registrations.extend(build_subagent_tool_registrations(runner))
-            # TUI 与 Runtime 共享同一个 QueueingEventSink；terminal renderer 不作
-            # runtime sink，故 model/tool progress 不写入 terminal writer。
-            event_sink = QueueingEventSink() if args.tui else renderer
-            composition = build_composition(
-                provider=provider,
-                provider_descriptor=provider_descriptor,
-                checkpoint_store=store,
-                tool_registrations=tuple(registrations),
-                event_sink=event_sink,
-                system_policy=EVERYDAY_SYSTEM_POLICY,
-                context_limits=context_limits,
-                invocation_limits=EVERYDAY_INVOCATION_LIMITS,
-                closeables=tuple(closeables),
-                sources=tuple(sources),
-                workspace_identity_digest=session.workspace_identity.identity_digest,
-                context_scope_digest=context_scope_digest,
-                strict_control_schema=bool(args.strict_tools),
-                workspace_binding=session.workspace_binding,
-                browser_takeover_complete=browser_takeover_handler,
-                conversation_archive=conversation_archive,
-            )
-            runtime = composition.runtime
-        except (
-            CheckpointError,
-            OSError,
-            ProviderError,
-            ValueError,
-            SkillCatalogError,
-            McpCatalogError,
-            MemoryStoreError,
-            WebProfileError,
-        ) as error:
-            write_fn(f"Startup failed: {error}")
-            return 2
+                    if skill_roots
+                    else None
+                )
+                # F5c：默认 composition 只构造一个 LocalConversationArchive，同一实例
+                # 静态注入 HistoryCatalog 与 build_composition，避免双实例各自演进。
+                conversation_archive = LocalConversationArchive(session.state_root)
+                renderer = TerminalRenderer(write_fn)
+                context_limits = ContextLimits(max_input_tokens=100_000, output_reserve=8_000)
+                registrations = list(
+                    build_tool_registrations(
+                        workspace=workspace,
+                        skill_roots=skill_roots,
+                        protected_paths=protected_paths,
+                        private_roots=DEFAULT_PRIVATE_ROOTS,
+                        max_tool_result_chars=context_limits.max_tool_result_chars,
+                        skill_execution=skill_execution,
+                        history_catalog=(
+                            HistoryCatalog(
+                                session.checkpoint_path.parent,
+                                session.workspace_binding,
+                                current_conversation_id=(
+                                    session.snapshot.state.conversation_id
+                                    if session.snapshot is not None
+                                    else None
+                                ),
+                                conversation_archive=conversation_archive,
+                            )
+                            if session.workspace_binding is not None
+                            else None
+                        ),
+                    )
+                )
+                sources: list = []
+                registrations.extend(web_resources.registrations)
+                sandbox_resources = build_sandbox_resources(
+                    workspace,
+                    session.state_root,
+                    os.environ.get("PATH", ""),
+                    host_home=Path.home(),
+                )
+                registrations.extend(sandbox_resources.registrations)
+                browser_resources = build_browser_resources(
+                    workspace,
+                    session.state_root,
+                    enabled=bool(getattr(args, "browser", False)),
+                )
+                browser_profile_handler = None
+                browser_takeover_handler = None
+                if browser_resources.readiness is BrowserReadiness.READY:
+                    from agent.browser.profile_store import BrowserProfileStore
 
-        write_fn(
-            f"First Agent is ready in: {terminal_text(workspace.name or '/')} "
-            f"(provider: {terminal_text(provider_descriptor.family)}/"
-            f"{terminal_text(provider_descriptor.model)})"
-        )
-        capabilities = "Capabilities: files, history, local programs"
-        if sandbox_resources.readiness is SandboxReadiness.READY:
-            capabilities += ", sandboxed execution"
-        write_fn(capabilities)
-        if web_resources.readiness is WebReadiness.NOT_ENABLED:
-            write_fn("Web: not enabled (run first-agent setup-web)")
-        elif web_resources.readiness is WebReadiness.TEMPORARILY_UNAVAILABLE:
-            write_fn(
-                "Web: temporarily unavailable; set "
-                f"{terminal_text(web_resources.credential_env or 'the configured variable')}"
-            )
-        else:
-            write_fn("Web: ready")
-        for line in _sandbox_status_lines(sandbox_resources):
-            write_fn(line)
-        for line in _browser_status_lines(browser_resources):
-            write_fn(line)
-        if projection.sandbox_recovery is not None:
-            write_fn(
-                _SANDBOX_RECOVERY_MESSAGES.get(
-                    projection.sandbox_recovery,
-                    "A sandbox step needs attention before continuing.",
-                ),
-            )
-        write_fn(startup_status_message)
-        if args.tui:
-            from agent.cli.actions import run_id_factory
-            from agent.tui.adapter import TuiAdapter
-            from agent.tui.app import TextualNotInstalledError, run_tui
+                    browser_profile_store = BrowserProfileStore(
+                        root=session.state_root / "browser" / "profiles"
+                    )
+                    browser_identity_digest = browser_identity_digest_for_state_root(
+                        session.state_root
+                    )
+                    browser_profile_handler = partial(
+                        browser_profile_user_command,
+                        store=browser_profile_store,
+                        browser_identity_digest=browser_identity_digest,
+                    )
+                    browser_takeover_handler = browser_resources.complete_takeover
+                registrations.extend(browser_resources.registrations)
+                for browser_closeable in browser_resources.closeables:
+                    closeables.append(browser_closeable)
+                    close_stack.callback(browser_closeable)
+                context_scope_digest = session.workspace_identity.scope_digest
+                provider_descriptor = _build_provider_descriptor(args)
+                preference_resources = build_owner_preference_resources(
+                    session.state_root / "owner-preferences.json",
+                    provider_trust_digest=provider_descriptor.identity_digest,
+                )
+                registrations.extend(preference_resources.registrations)
+                sources.append(preference_resources.source)
+                if (args.mcp_catalog is None) != (args.mcp_safety_state is None):
+                    raise ValueError("--mcp-catalog and --mcp-safety-state must be used together")
+                if args.mcp_catalog is not None:
+                    mcp_resources = build_mcp_resources(
+                        load_mcp_catalog_file(args.mcp_catalog.resolve(strict=True)),
+                        # safety latch 由首次 invocation 惰性创建（文件缺失即 clear），
+                        # 不得要求 composition 时已存在——与 memory store 一样用 strict=False。
+                        args.mcp_safety_state.resolve(strict=False),
+                        env_provider=_mcp_env_provider,
+                    )
+                    registrations.extend(mcp_resources.registrations)
+                    closeables.extend(mcp_resources.closeables)
+                    # 立即注册进 close-stack：即使后续 startup 步骤失败也会逆序关闭。
+                    for closeable in mcp_resources.closeables:
+                        close_stack.callback(closeable)
+                memory_store, memory_scope = _open_memory_store(args, workspace)
+                if memory_store is not None:
+                    context_scope_digest = memory_scope
+                    memory_resources = build_memory_resources(
+                        memory_store, workspace_scope_digest=context_scope_digest
+                    )
+                    registrations.extend(memory_resources.registrations)
+                    # workspace-scoped source 比全局 owner preference 更贴近当前问题；
+                    # ContextManager 按 composition 顺序保留 source 优先级。
+                    sources.insert(0, memory_resources.source)
+                provider = _build_provider(args)
+                if args.subagent:
+                    from agent.subagent.contracts import (
+                        ChildProviderSpec,
+                        ProviderDeadlineCapability,
+                    )
 
-            adapter = TuiAdapter(
-                runtime,
-                store,
-                event_sink=event_sink,
-                control_inbox=composition.control_inbox,
-            )
-            try:
-                return run_tui(adapter, run_id_factory=run_id_factory("tui-run"))
-            except TextualNotInstalledError as error:
-                write_fn(str(error))
+                    cap = ProviderDeadlineCapability.from_provider(provider)
+                    if cap is not None and cap.receipt_type == "synchronous":
+                        # provider 结构化保证 generate 同步返回（如本地确定性 provider）→
+                        # in-process runner，synchronous receipt。
+                        runner = ChildAgentRunner(
+                            provider=provider,
+                            profile=_build_child_profile(args, context_scope_digest),
+                        )
+                    else:
+                        # production HTTP provider 无 synchronous deadline_contract；socket
+                        # timeout 不能证明 provider 已终止，故走进程隔离 hard-deadline 路径：
+                        # child 在独立进程运行同一个 AgentRuntime，parent 拥有 process group 并
+                        # 在 hard_deadline 后 killpg + 确认退出。credential 仅按 env name 在子进程
+                        # 内读取，不跨进程序列化。
+                        from agent.subagent.process_runner import ChildProcessRunner
+
+                        if args.provider != "fake" and (not args.model or not args.base_url):
+                            raise ValueError(
+                                "SubAgent over HTTP requires --model and --base-url"
+                            )
+                        spec = ChildProviderSpec(
+                            kind="http",
+                            provider_type=args.provider,
+                            model=args.model or "fake",
+                            base_url=args.base_url,
+                            credential_env_name=args.credential_env,
+                            timeout=args.timeout,
+                            thinking_mode=args.thinking_mode,
+                            request_path=args.request_path,
+                            strict_tools=bool(args.strict_tools),
+                        )
+                        runner = ChildProcessRunner(
+                            provider_spec=spec,
+                            profile=_build_child_profile(args, context_scope_digest),
+                        )
+                    registrations.extend(build_subagent_tool_registrations(runner))
+                # TUI 与 Runtime 共享同一个 QueueingEventSink；terminal renderer 不作
+                # runtime sink，故 model/tool progress 不写入 terminal writer。
+                event_sink = QueueingEventSink() if args.tui else renderer
+                composition = build_composition(
+                    provider=provider,
+                    provider_descriptor=provider_descriptor,
+                    checkpoint_store=store,
+                    tool_registrations=tuple(registrations),
+                    event_sink=event_sink,
+                    system_policy=EVERYDAY_SYSTEM_POLICY,
+                    context_limits=context_limits,
+                    invocation_limits=EVERYDAY_INVOCATION_LIMITS,
+                    closeables=tuple(closeables),
+                    sources=tuple(sources),
+                    workspace_identity_digest=session.workspace_identity.identity_digest,
+                    context_scope_digest=context_scope_digest,
+                    strict_control_schema=bool(args.strict_tools),
+                    workspace_binding=session.workspace_binding,
+                    browser_takeover_complete=browser_takeover_handler,
+                    conversation_archive=conversation_archive,
+                )
+                runtime = composition.runtime
+            except (
+                CheckpointError,
+                OSError,
+                ProviderError,
+                ValueError,
+                SkillCatalogError,
+                McpCatalogError,
+                MemoryStoreError,
+                WebProfileError,
+            ) as error:
+                write_fn(f"Startup failed: {error}")
                 return 2
-        # run_repl 对交互生命周期独占负责：每次输入前从 authoritative
-        # snapshot 渲染 pending 决策（含启动期首次），此处不再预渲染。
-        try:
-            return run_repl(
-                runtime,
-                store,
-                input_fn=input_fn,
-                write_fn=write_fn,
-                renderer=renderer,
-                browser_profile_command=browser_profile_handler,
+
+            write_fn(
+                f"First Agent is ready in: {terminal_text(workspace.name or '/')} "
+                f"(provider: {terminal_text(provider_descriptor.family)}/"
+                f"{terminal_text(provider_descriptor.model)})"
             )
-        except (CheckpointError, OSError) as error:
-            write_fn(f"Runtime state failed: {type(error).__name__}")
-            return 2
+            capabilities = "Capabilities: files, history, local programs"
+            if sandbox_resources.readiness is SandboxReadiness.READY:
+                capabilities += ", sandboxed execution"
+            write_fn(capabilities)
+            if web_resources.readiness is WebReadiness.NOT_ENABLED:
+                write_fn("Web: not enabled (run first-agent setup-web)")
+            elif web_resources.readiness is WebReadiness.TEMPORARILY_UNAVAILABLE:
+                write_fn(
+                    "Web: temporarily unavailable; set "
+                    f"{terminal_text(web_resources.credential_env or 'the configured variable')}"
+                )
+            else:
+                write_fn("Web: ready")
+            for line in _sandbox_status_lines(sandbox_resources):
+                write_fn(line)
+            for line in _browser_status_lines(browser_resources):
+                write_fn(line)
+            if projection.sandbox_recovery is not None:
+                write_fn(
+                    _SANDBOX_RECOVERY_MESSAGES.get(
+                        projection.sandbox_recovery,
+                        "A sandbox step needs attention before continuing.",
+                    ),
+                )
+            write_fn(startup_status_message)
+            if args.tui:
+                from agent.cli.actions import run_id_factory
+                from agent.tui.adapter import TuiAdapter
+                from agent.tui.app import TextualNotInstalledError, run_tui
+
+                adapter = TuiAdapter(
+                    runtime,
+                    store,
+                    event_sink=event_sink,
+                    control_inbox=composition.control_inbox,
+                )
+                try:
+                    tui_code = run_tui(adapter, run_id_factory=run_id_factory("tui-run"))
+                except TextualNotInstalledError as error:
+                    write_fn(str(error))
+                    return 2
+                if tui_code == NEW_SESSION_REQUESTED:
+                    request_new_session_pending = True
+                    continue
+                return tui_code
+            # run_repl 对交互生命周期独占负责：每次输入前从 authoritative
+            # snapshot 渲染 pending 决策（含启动期首次），此处不再预渲染。
+            try:
+                repl_code = run_repl(
+                    runtime,
+                    store,
+                    input_fn=input_fn,
+                    write_fn=write_fn,
+                    renderer=renderer,
+                    browser_profile_command=browser_profile_handler,
+                )
+            except (CheckpointError, OSError) as error:
+                write_fn(f"Runtime state failed: {type(error).__name__}")
+                return 2
+            if repl_code == NEW_SESSION_REQUESTED:
+                request_new_session_pending = True
+                continue
+            return repl_code
 
 
 def build_schedule_parser() -> argparse.ArgumentParser:

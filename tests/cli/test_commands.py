@@ -279,3 +279,59 @@ def test_browser_profile_command_is_reachable_without_runtime_mutation() -> None
     assert commands == ["list"]
     assert output == ["Browser profiles:\nprofile-0123456789abcdef"]
     assert runtime.actions == []
+
+
+def test_new_command_with_terminal_goal_requests_new_session() -> None:
+    """/new(r19 小步 2):Goal 终态且无 pending 决策时请求新会话。
+
+    合同性:新建动作本身不进 Runtime(零 run_turn → 零 provider/工具调用);
+    以 NEW_SESSION_REQUESTED 退出码交还装配层重建 conversation;旧 checkpoint
+    不被触碰。"""
+    from agent.cli.app import NEW_SESSION_REQUESTED
+
+    state = conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE)
+    runtime, output, exit_code = _run_once(state, "/new")
+    assert runtime.actions == []
+    assert exit_code == NEW_SESSION_REQUESTED
+    assert any("new task" in item.lower() for item in output)
+
+
+def test_new_command_with_pending_approval_is_refused() -> None:
+    """/new 不得绕开 pending 决策:拒绝切换并说明原因,会话继续。"""
+    from agent.cli.app import NEW_SESSION_REQUESTED
+
+    request = ApprovalRequest(
+        request_id="approval-full-id",
+        run_id="run-1",
+        tool_call_id="call-1",
+        binding_digest="binding-1",
+        preview="write note.txt (5 bytes)",
+    )
+    state = replace(
+        ConversationState.new("conversation-1"),
+        goal=conversation_with_active_goal().goal,
+        active_run=ActiveRun(
+            "run-1",
+            status=ActiveRunStatus.AWAITING_APPROVAL,
+            phase=ContinuationPhase.TOOL,
+            pending_request=request,
+            tool_calls=(ToolCall("call-1", "write_file", {}),),
+        ),
+    )
+    runtime, output, exit_code = _run_once(state, "/new")
+    assert runtime.actions == []
+    assert exit_code == 0  # 拒绝后会话继续(经 /exit 正常退出)
+    assert exit_code != NEW_SESSION_REQUESTED
+    assert any("pending" in item.lower() or "resolve" in item.lower() for item in output)
+
+
+def test_new_command_with_active_goal_is_refused() -> None:
+    """/new 不清空、不重开活跃 Goal:非终态 Goal 必须先完成或取消。"""
+    from agent.cli.app import NEW_SESSION_REQUESTED
+
+    state = conversation_with_active_goal()
+    runtime, output, exit_code = _run_once(state, "/new")
+    assert runtime.actions == []
+    assert exit_code == 0
+    assert exit_code != NEW_SESSION_REQUESTED
+    assert any("goal" in item.lower() for item in output)

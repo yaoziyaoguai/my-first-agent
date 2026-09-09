@@ -81,6 +81,16 @@ def parse_process_command(
     if not text.startswith("/"):
         return None
     command, _, argument = text.partition(" ")
+    if command == "/new":
+        # r19 小步 2:显式新任务入口,与 CLI 共享 new_session_gate 同一合法性
+        # 判断。允许时返回 ("new_session", None) 由 app 以 NEW_SESSION_REQUESTED
+        # 退出码交还装配层重建 conversation;拒绝时如常显示原因并继续。
+        from agent.cli.actions import new_session_gate
+
+        refusal = new_session_gate(state)
+        if refusal is not None:
+            return ("error", refusal)
+        return ("new_session", None)
     if command == "/approve-artifact":
         active = state.active_run
         request = active.pending_request if active is not None else None
@@ -478,6 +488,15 @@ def build_app(
             )
             if command_result is not None:
                 kind, payload = command_result
+                if kind == "new_session":
+                    # /new 允许后以 NEW_SESSION_REQUESTED 退出码交还装配层
+                    # (main 会话循环)重建 conversation;不重启进程。
+                    if self._adapter.is_active:
+                        return
+                    from agent.cli.actions import NEW_SESSION_REQUESTED
+
+                    self.exit(return_code=NEW_SESSION_REQUESTED)
+                    return
                 if kind == "action":
                     if (
                         isinstance(payload, ResolveApproval)
@@ -647,4 +666,6 @@ def build_app(
 def run_tui(adapter: TuiAdapter, *, run_id_factory: Callable[[], str]) -> int:
     app = build_app(adapter, run_id_factory=run_id_factory)
     app.run()
-    return 0
+    # /new 经 self.exit(return_code=NEW_SESSION_REQUESTED) 退出时,App.run()
+    # 返回该码,由 main 会话循环重建 conversation;正常退出仍为 0。
+    return int(app.return_code or 0)

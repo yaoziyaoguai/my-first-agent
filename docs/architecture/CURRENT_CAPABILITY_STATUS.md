@@ -48,8 +48,13 @@ identity 成立。2026-09-09 r18 收尾轮对 consolidated 候选（commit `684f
 - `/compact`、`/context`、`/new` CLI 命令在母计划 Outcome 中出现，但截至冻结未实现
   （`agent/cli/app.py` 无对应命令，typed `CompactConversation` action 不存在）；自动压缩经
   Runtime 安全边界生效。README 能力列表只声称已核对代码的真实实现。
+  **r19 后续（2026-09-10，产品化小步 2）**：`/new` 已实现——CLI 与 TUI 共享
+  `new_session_gate` 合法性判断（active run/pending 决策/活跃 Goal 拒绝；终态或无 Goal
+  允许），以 `NEW_SESSION_REQUESTED` 信令在同一进程内经 `open_workspace_session(force_new=True)`
+  重建 conversation，旧 checkpoint 与 evidence 原样保留；`/compact`、`/context` 仍未实现。
 - 后续重开条件（用户明确授权才生效）：现有支持范围内出现可复现的合同缺陷，或出现能回答新学习
-  问题的具体 reference task。
+  问题的具体 reference task。（2026-09-09 晚用户确认产品化转向，冻结约束由 r19 审计解除；
+  小步 1 基线见 `docs/audits/2026-09-10-product-baseline-tasks.md`。）
 
 | Capability | Current claim (2026-09-09) | Historical evidence（只绑定当时 identity） | 可用条件 / 未验证边界 |
 |---|---|---|---|

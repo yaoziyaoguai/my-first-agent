@@ -8,7 +8,18 @@ Model + Tavily U2 十二旅程连续三轮必须全部通过。最终 promotion 
 `docs/acceptance/016_FIRST_AGENT_1_0_INDEPENDENT_REVIEW.md` 对同一 delivery identity 明确记录 U3 PASS 时，
 该 identity 才是已交付的 First Agent 1.0；文件缺失、pending 或 identity 不匹配时仍是 promotion candidate。
 
-它使用同一个自然语言入口回答问题、讨论想法或完成有界的当前目录文件任务。底层仍刻意保持为一个模型循环、一个上下文管理器、一个受治理的工具执行路径和一个可恢复状态机。它可以在逐次批准后通过固定 Tavily 入口查询公开 Web；015 Governed Local Action 已通过真实 E3、独立评审与 Codex 终裁，作为已交付能力提供受治理的结构化本机执行（`local_process`：exact 同意批准、Goal 限定租约、closed 环境与资源档案）。任意网页直连、浏览器自动化、整机控制与任意 shell 仍不在交付范围内，也不存在第二套 Agent loop。
+它使用同一个自然语言入口回答问题、讨论想法或完成有界的当前目录文件任务。底层仍刻意保持为一个模型循环、一个上下文管理器、一个受治理的工具执行路径和一个可恢复状态机。它可以在逐次批准后通过固定 Tavily 入口查询公开 Web；015 Governed Local Action 已通过真实 E3、独立评审与 Codex 终裁，曾作为已交付能力提供受治理的结构化本机执行（`local_process`：exact 同意批准、Goal 限定租约、closed 环境与资源档案；历史晋级只绑定当时 delivery identity，见下方状态快照）。018 另提供可选的受治理专属隔离 Chromium 能力（candidate）。个人浏览器、任意网站兼容、桌面控制与任意 shell 仍不在交付范围内，也不存在第二套 Agent loop。
+
+## 当前状态快照（2026-09-09）
+
+当前工作树相对任何历史 delivery identity 均已变更：所有曾晋级的能力（七项 v1 capability、015、016、
+017、018、019）对当前 identity 一律是 `implemented-candidate`。历史 PASS——包括 2026-07-25 七项 v1
+reference task 晋级与 016/017/018/019 各 detached independent review 的记录——只对当时绑定的 identity
+有效；旧 seal/check 相对当前工作树全部 drift，fail-closed 校验正常工作。当前 delivery 未 promotion；
+2026-09-09 收尾轮（r18）对 consolidated 候选（commit `684f368` / tree `10d36564`）完成 source full
+gate：3372 passed, 3 skipped、ruff 与 `git diff --check` PASS；这只是 source 报告事实，不是交付证明。
+本仓库自此冻结为学习里程碑，不再自动开启新的优化轮次。权威明细见
+[Current Capability Status](docs/architecture/CURRENT_CAPABILITY_STATUS.md)。
 
 ## 当前能力
 
@@ -17,6 +28,9 @@ Model + Tavily U2 十二旅程连续三轮必须全部通过。最终 promotion 
 - 串行工具调用与精确审批
 - `read_file`、`list_files`、`write_file`、`edit_file`
 - 经 exact approval 的结构化 `local_process`；Goal-scoped 权限租约可过期、限次并可撤销
+- 经同一治理路径的 `sandbox_exec`（macOS Seatbelt，`read-only` / `workspace-write`）与 `shell_exec`（exact shell command string，`/bin/sh -c`，任何模式下 network off）；两者都走 exact approval、`EXECUTING` checkpoint 与 bounded runner
+- 压力触发的自动上下文压缩：只在安全边界（无 pending approval / takeover / unknown effect）分批进行；压缩摘要只作 untrusted context，不替代 Goal、Approval、Recovery、Evidence 或任何 authority
+- owner-only、不可变、按 source checkpoint digest 幂等归档的 pre-compaction transcript archive
 - 当前 workspace 内的有界路径、全文和分段检索
 - 当前 exact workspace 中 First Agent 自己保存的历史检索；不观察其他本机活动
 - 固定 Tavily Search/Extract 公开 Web 工具：每次 exact query/URL batch 单独批准
@@ -33,9 +47,9 @@ Model + Tavily U2 十二旅程连续三轮必须全部通过。最终 promotion 
 history、workspace 文件和 Web 内容都作为 untrusted data 进入模型上下文。来源回执证明的是“观察来自哪里、
 内容与哪次 receipt/digest 绑定”，不证明内容在语义上必然正确，也不代表用户已经接受结果。
 
-Memory、Skill、MCP、SubAgent、Scheduler 和 TUI 不属于 Kernel v1 核心；当前工作树已有六项 implementation candidate，但 2026-07-20 follow-up audit 证明 008 的 delivery final gate 未实现，并发现多项测试只覆盖 source shape、局部 happy path 或安全拒绝，不能宣称全部重接完成。当前声明见 [Current Capability Status](docs/architecture/CURRENT_CAPABILITY_STATUS.md)，证据与修复合同见 [Evidence Closure Audit](docs/audits/2026-07-20-capability-evidence-closure-audit.md)、[Evidence Closure Contract](docs/architecture/CAPABILITY_EVIDENCE_CLOSURE_CONTRACT.md)、[009 Closure Plan](docs/plans/2026-07-20-009-close-capability-evidence-gaps-plan.md) 和 [009 Document Review](docs/audits/2026-07-20-009-document-review.md)。008 artifacts 保留为历史，不再作为晋级依据。
+Memory、Skill、MCP、SubAgent、Scheduler 和 TUI 不属于 Kernel v1 核心；它们对当前工作树 identity 均为 implementation candidate。2026-07-20 follow-up audit 曾证明 008 的 delivery final gate 未实现、多项测试只覆盖 source shape、局部 happy path 或安全拒绝（历史），该缺口随后由 009 合同与 G0–G8 fault matrix 闭合。当前声明见 [Current Capability Status](docs/architecture/CURRENT_CAPABILITY_STATUS.md)，证据与修复合同见 [Evidence Closure Audit](docs/audits/2026-07-20-capability-evidence-closure-audit.md)、[Evidence Closure Contract](docs/architecture/CAPABILITY_EVIDENCE_CLOSURE_CONTRACT.md)、[009 Closure Plan](docs/plans/2026-07-20-009-close-capability-evidence-gaps-plan.md) 和 [009 Document Review](docs/audits/2026-07-20-009-document-review.md)。008 artifacts 保留为历史，不再作为晋级依据。
 
-2026-07-25 已在用户授权的真实 provider（`anthropic_compatible` / `glm-5.2` @ `open.bigmodel.cn/api/anthropic`）下完成七项 capability 的 E3 reference task（Kernel / Skill / MCP / Memory / SubAgent / Scheduler / TUI），全部 pass，bounded 证据见 `docs/acceptance/records/2026-07-25-*.md`；其中 MCP 的真实入口暴露并修复了 `main.py` 的 `--mcp-safety-state` 首次启动 `FileNotFoundError` 缺陷。2026-07-25 经非实现 session 的独立 review（receipt：`docs/acceptance/2026-07-25-E3_INDEPENDENT_REVIEW.md`）通过，七项 capability 已晋级 `accepted`（v1 reference task；非 production-ready，不等于任意 MCP/Skill、语义 Memory、并发 SubAgent、Scheduler CRUD 或跨平台已验证）。
+2026-07-25 曾在用户授权的真实 provider（`anthropic_compatible` / `glm-5.2` @ `open.bigmodel.cn/api/anthropic`）下完成七项 capability 的 E3 reference task（Kernel / Skill / MCP / Memory / SubAgent / Scheduler / TUI），全部 pass，bounded 证据见 `docs/acceptance/records/2026-07-25-*.md`；其中 MCP 的真实入口暴露并修复了 `main.py` 的 `--mcp-safety-state` 首次启动 `FileNotFoundError` 缺陷。同日经非实现 session 的独立 review（receipt：`docs/acceptance/2026-07-25-E3_INDEPENDENT_REVIEW.md`）七项 capability 晋级 `accepted`。这是绑定 2026-07-25 bounded v1 reference identity 的历史结论；当前工作树相对该 identity 已变更，七项能力对当前 identity 均回到 `implemented-candidate`（v1 reference task 本身即非 production-ready，不等于任意 MCP/Skill、语义 Memory、并发 SubAgent、Scheduler CRUD 或跨平台已验证）。
 
 Graphify 和 Understand Anything 是 Coding Agent 理解本仓库时可使用的辅助工具，不是 `my-first-agent` 的运行时能力或依赖。
 
@@ -66,6 +80,11 @@ export FIRST_AGENT_WEB_API_KEY='set-in-your-shell'
 
 `setup-web` 不读取或保存 key，只保存固定 destination、credential 环境变量名、timeout、结果上限和第三方
 处理告知的摘要。未运行 `setup-web` 时，普通对话、历史和 workspace 文件能力照常工作，不会自动联网。
+
+当前本地开发与候选验证不假设 PyPI 已有发布物；可选能力（Skill 的严格 YAML 解析、MCP SDK、Textual
+TUI、018 governed browser）不属于 base 安装闭包，需要时用同一个本地 wheel 的 non-editable extra 语法
+安装，例如 `python -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[tui]"`（各能力的 extra 名见
+对应章节；本仓库尚未声明任何安装 matrix 验证结论）。
 
 setup 只保存 provider、model、base URL、credential 环境变量名、thinking mode、request path、
 strict tools 开关和 timeout；不会读取或保存 key。此后 `first-agent` 默认使用当前目录，不需要再重复
@@ -129,16 +148,17 @@ training exclusion 或 deletion。
 重新验证 source linkage 后，Goal 才可能显示 `VERIFIED_DONE`。默认 Sources 视图显示可读 locator、title、
 时间、完整/截断/失败状态；`/sources --advanced` 只用于诊断。
 
-014 已完成当前物化树的离线 gates、真实 Model + Tavily 三连 E3、mandatory held-out value journey 与 fresh
-review；权威证据见 `docs/implementation/014_EXECUTION_LOG.md` §9.3。FakeProvider 或 MockTransport 仍不能替代
-这些真实边界证据。
+014 曾在当时的物化树上完成离线 gates、真实 Model + Tavily 三连 E3、mandatory held-out value journey 与
+fresh review（历史 PASS，只绑定当时 identity）；权威证据见 `docs/implementation/014_EXECUTION_LOG.md` §9.3。
+FakeProvider 或 MockTransport 仍不能替代这些真实边界证据。
 
 ## 里程碑：受治理的本机行动
 
 015 已让 First Agent 在同一个自然语言入口中请求并运行结构化本机程序，以便完成构建、测试、文档转换、
 数据处理和其他当前 workspace 任务。每个新 command identity 都必须先展示 exact executable、arguments、cwd、
 资源限制、环境策略以及 same-UID 风险；批准只产生 Goal-scoped、有限次数、会过期、可撤销的精确权限租约。
-真实 DeepSeek E3 三连、独立评审与 Codex 终裁均已通过；该能力已晋级为已交付，最终证据见
+真实 DeepSeek E3 三连、独立评审与 Codex 终裁均已通过；该能力曾晋级为已交付，该结论与证据只绑定当时
+delivery identity（当前工作树相对其已 drift，015 现为 `implemented-candidate`），最终证据见
 `docs/implementation/015_EXECUTION_LOG.md`。
 
 这不是 shell。015 本身不接受命令字符串、pipeline、redirection、interactive TTY 或后台任务，也不阻止获批
@@ -154,10 +174,12 @@ executable、argv、cwd、resource profile、mode 与 network，并只接受 Goa
 精确绑定的一次性批准。backend 不可用时 confined mode 零执行、不会回退到 `local_process`；显式
 `danger-full-access` 是单独批准的 unconfined bypass，receipt 会如实记录 `backend=none`。
 
-当前 sealed identity 已通过 clean materialized gate 与三次真实 Seatbelt E3，每次 11 条 journey 全 True；
-最终 promotion 状态只由绑定同一 identity 的 detached
-`docs/acceptance/017_SANDBOXED_WORKSPACE_EXECUTION_INDEPENDENT_REVIEW.md` 决定。017 仍不是任意 shell、浏览器
-自动化、整机控制、后台 daemon 或跨平台 sandbox 保证；Linux/Windows sandbox 不在本阶段合同内。
+旧 sealed identity 曾通过 clean materialized gate 与三次真实 Seatbelt E3，每次 11 条 journey 全 True
+（历史 PASS，只对当时 identity 有效）；当前工作树相对该 identity 已 drift，017 现为
+`implemented-candidate`。最终 promotion 状态只由 detached
+`docs/acceptance/017_SANDBOXED_WORKSPACE_EXECUTION_INDEPENDENT_REVIEW.md` 绑定当前 identity 并记录 PASS
+决定。017 仍不是任意 shell、个人浏览器自动化、整机控制、后台 daemon 或跨平台 sandbox 保证；
+Linux/Windows sandbox 不在本阶段合同内。
 
 ## HTTP Provider
 
@@ -195,6 +217,13 @@ first-agent
 模式。013 的真实验收即在此配置下连续三次通过（见
 [`docs/acceptance/013_EVERYDAY_WORKSPACE_AGENT_E3.md`](docs/acceptance/013_EVERYDAY_WORKSPACE_AGENT_E3.md)）。
 
+`--strict-tools` 有一个组合限制：当本次请求的工具 schema 含开放 object（object 缺失 `properties`，或
+`additionalProperties` 未显式为 `false`）时，OpenAI-compatible strict 投影会在发送请求前以
+`unsupported_strict_open_object` fail closed；不会静默关闭 strict，也不会改写生产 schema。已知含开放
+object 的工具 schema 包括 declared Skill entrypoint 的 `arguments`、`browser_act` 的 `fields`，以及取决于
+server descriptor 的 MCP 工具。触发与模型是否实际调用该工具无关：只要相应工具出现在本次请求的工具
+列表中，请求发送前即失败。
+
 也可使用 `anthropic_compatible`。两个 adapter 都是有限时、非流式的一次请求路径；具体 endpoint
 可由兼容服务的 base URL 决定。第一次外发以及 destination/model/data-class 变化时，Runtime 会先
 显示 destination、model 和 data classes；用户在当前提示下确认后才发送，内部 acknowledgement 仍精确
@@ -205,7 +234,7 @@ first-agent
 Skill v1 是 operator-trusted 的只读 governed 工具，不是 system prompt hook。每个 Skill 是显式 trust root 下的一级目录，目录名必须等于 `SKILL.md` frontmatter 里的 `name`：
 
 ```bash
-python -m pip install -e ".[skill]"   # 提供严格 YAML 解析
+python -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[skill]"   # 先按快速开始构建本地 wheel；提供严格 YAML 解析
 mkdir -p /tmp/skills/code-review
 cat > /tmp/skills/code-review/SKILL.md <<'EOF'
 ---
@@ -225,7 +254,7 @@ first-agent --provider fake --skill-root /tmp/skills
 MCP v1 把 operator-approved 的固定 stdio tool descriptor 映射为具体的 `mcp__<server>__<tool>` governed tool（HIGH + EXTERNAL，每次都需审批）。catalog 是显式 JSON，不含 credential value；transport 由本项目持有 process group 与 commit receipt，并通过 SDK public `ClientSession` 驱动一次有限时 session：`spawn → initialize → tools/list → descriptor verify → tools/call → close`。call 后无法确认结果的失败进入人类 unknown-outcome recovery，绝不自动重试。
 
 ```bash
-python -m pip install -e ".[mcp]"
+python -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[mcp]"
 first-agent --provider fake \
   --mcp-catalog /tmp/mcp-catalog.json \
   --mcp-safety-state /tmp/mcp-safety/latch.json
@@ -285,7 +314,7 @@ provider/effect；approval、recovery 和 host qualification 始终交还人类�
 `--tui` 启动可选的 Textual 界面（与 CLI/headless 共享同一 typed action、reducer、checkpoint 与 recovery 语义）。它通过 single-flight thread worker 调用同一个 Runtime；`RunResult`/checkpoint 始终权威，events 只作 advisory 显示，不提供伪造的 in-flight 取消。
 
 ```bash
-python -m pip install -e ".[tui]"
+python -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[tui]"
 first-agent --provider fake --tui
 ```
 
@@ -302,7 +331,7 @@ git diff --check
 架构与状态语义见 [Kernel Architecture](docs/architecture/KERNEL_ARCHITECTURE.md)。此次重建是 breaking change：旧 CLI、旧状态格式和旧 Python 接口均不兼容，也不会被自动发现或迁移；未跟踪的旧运行数据保持原样。
 ## Browser (018 fail-closed promotion)
 
-An optional governed dedicated-Chromium capability provides public-read sessions, site-bound interactive profiles with exact approvals, explicit user sign-in takeover, an egress guard, and download quarantine. It is disabled by default; enable it with `--browser` after installing the `browser` extra. The authoritative delivery status is the detached `docs/acceptance/018_GOVERNED_BROWSER_TASKS_INDEPENDENT_REVIEW.md`: it is accepted/delivered only when that review binds the current seal, verifier, runner, wheel, browser identity, and 3×13 receipt and records `PASS`; otherwise it remains an implemented candidate. This is not personal-browser or desktop control, arbitrary-site compatibility, background autonomy, or production-ready third-party integration.
+An optional governed dedicated-Chromium capability provides public-read sessions, site-bound interactive profiles with exact approvals, explicit user sign-in takeover, an egress guard, and download quarantine. It is disabled by default; enable it with `--browser` after installing the `browser` extra from the same local wheel built in Quick start (`python -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[browser]"`). The authoritative delivery status is the detached `docs/acceptance/018_GOVERNED_BROWSER_TASKS_INDEPENDENT_REVIEW.md`: it is accepted/delivered only when that review binds the current seal, verifier, runner, wheel, browser identity, and 3×13 receipt and records `PASS`; otherwise it remains an implemented candidate. That review's earlier `PASS` is a historical result bound to the previous delivery identity; the current tree has drifted from that seal, so the current claim is implemented candidate. This is not personal-browser or desktop control, arbitrary-site compatibility, background autonomy, or production-ready third-party integration.
 
 ## Durable automations (019 split delivery)
 
@@ -310,9 +339,12 @@ An optional governed dedicated-Chromium capability provides public-read sessions
 lifecycle, bounded Runtime/ToolRuntime authority, recovery and purge depend only on typed ports;
 they do not select launchd, systemd, Cron, POSIX/Windows process APIs, Seatbelt or Playwright.
 The detached `docs/acceptance/019_CORE_INDEPENDENT_REVIEW.md` promotes that core only when it binds
-the current sealed/materialized 3×13 receipt and both independent review axes pass.
+the current sealed/materialized 3×13 receipt and both independent review axes pass; the earlier core review
+`PASS` binds only the previous identity, and the current tree is an implemented candidate.
 
 That portable receipt does **not** mean unattended execution is runnable on this computer or on
 every OS. A macOS host profile is a separate qualification for real persistence, launchd wake,
-hard-deadline cleanup and sandbox composition. Linux, Windows and cloud profiles require their own
+hard-deadline cleanup and sandbox composition; it also has a historical PASS receipt bound to its
+earlier identity, and the current tree is an implemented candidate. Linux, Windows and cloud profiles
+remain not qualified and require their own
 equivalent receipts; no platform result is generalized to another platform.

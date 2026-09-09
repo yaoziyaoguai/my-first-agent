@@ -18,8 +18,55 @@
 它表示 capability 的 fail-closed boundary 可以被验证，但当前没有可用的生产 adapter/provider。
 G8 之前 SubAgent 属于这种限制（HTTP adapter 无 honest hard-deadline）。G8/G8.1 引入进程隔离
 `ChildProcessRunner`（parent 拥有 process group、killpg+exit-confirm、`process_terminated` receipt）
-并经独立 G8 复核（stderr/temp/stdout-bound 闭合）后，SubAgent 已有真实 hard-deadline provider 路径，
-不再 safe-unavailable，已晋级 `locally-verified`（真实 HTTP provider in child 仍为 E3，pending）。
+并经独立 G8 复核（stderr/temp/stdout-bound 闭合）后，SubAgent 获得真实 hard-deadline provider 路径，
+不再 safe-unavailable。以下均为历史演进事实，仅绑定当时 identity：SubAgent 在 G8/G8.1 复核后达到
+`locally-verified`，随后 2026-07-25 完成真实 HTTP provider in child 的 E3 并经独立 review 晋级
+`accepted`。当前工作树的唯一有效 claim 见下方 Current snapshot。
+
+## Current snapshot (2026-09-09)
+
+本节是唯一权威 current matrix；下方 Historical matrix 与时间线只作历史证据保留。所有 current claim
+均相对当前工作树这一 identity：当前工作树相对 016/017/018/019 的旧 seal/check 全部 drift（016
+manifest 期望 225、实际 508 entries；018 期望 309、实际 495；019 entry_count/root drift），
+fail-closed 校验正常工作，因此没有任何 `locally-verified` / `accepted` / `delivered` 相对当前
+identity 成立。2026-09-09 r18 收尾轮对 consolidated 候选（commit `684f368` / tree `10d36564`）
+完成 source full gate：3372 passed, 3 skipped（ruff 与 `git diff --check` PASS）；这是 source 报告
+事实，不是 delivery promotion，也不证明任何安装 matrix。本仓库自 r18 起冻结为学习里程碑：不再自动
+开启新的优化轮次、promotion 重绑、host port 或能力扩展；历史晋级结论保持原样，仅绑定当时 identity。
+
+## r18 closure record (2026-09-09, 普通实施记录，非 acceptance control)
+
+依据 Oracle r18 咨询（session `first-agent-r18-project-closure-packet-20260909`，档位 Pro 第 5 项，
+裁决 PROCEED-then-freeze）执行的一次本地收尾，不改变任何 promotion 状态：
+
+- C1（commit `684f368`，tree `10d36564`）合并 finish-long-session rounds 004–017 的未提交实现与
+  测试，并新增三项收尾：multi-hop gitdir symlink 行为以 characterize 测试固定为已声明 limitation
+  （`tests/sandbox/test_policy.py`）；工具输出截断事实在模型可见 ToolResult content 中显式标注
+  （`agent/runtime/tools.py::_render_model_visible_output`，receipt/metadata 原有事实不变）；补齐
+  019 wheel-bound pytest 父进程驱动 `run_wheel_bound_pytest`（此前测试已定义合同但实现缺失，
+  首轮 gate 4 failed 均为此根因）。
+- `/compact`、`/context`、`/new` CLI 命令在母计划 Outcome 中出现，但截至冻结未实现
+  （`agent/cli/app.py` 无对应命令，typed `CompactConversation` action 不存在）；自动压缩经
+  Runtime 安全边界生效。README 能力列表只声称已核对代码的真实实现。
+- 后续重开条件（用户明确授权才生效）：现有支持范围内出现可复现的合同缺陷，或出现能回答新学习
+  问题的具体 reference task。
+
+| Capability | Current claim (2026-09-09) | Historical evidence（只绑定当时 identity） | 可用条件 / 未验证边界 |
+|---|---|---|---|
+| Minimal Runtime Kernel（current-directory foundation：对话、上下文、审批、文件 effect、checkpoint/暂停恢复、Web、owner preference） | implemented-candidate | G0–G8 fault matrix 与独立 promotion review；2026-07-25 v1 reference task 晋级 `accepted` | v1 scope；非 production-ready / 非完整通用 Agent；claim 不随 identity 变更复用 |
+| 015 governed local action（`local_process`） | implemented-candidate | 真实 DeepSeek E3 三连 + 独立评审 + Codex 终裁（当时 delivery identity） | POSIX/macOS-first 冻结合同；非任意 shell / 整机控制 |
+| 016 product convergence（First Agent 1.0 安装/setup/默认路径） | implemented-candidate（promotion candidate） | detached 016 review 曾对当时 identity 记录 U3 PASS | U0/U1/U2/U3 需对当前 identity 重新绑定后才可能晋级；本轮未执行 |
+| 017 macOS Seatbelt sandbox（`sandbox_exec`） | implemented-candidate | detached 017 review 曾对当时 sealed identity 记录 PASS（3×11 journey 全 true） | 仅 macOS Seatbelt；非跨平台 sandbox；当前 identity 未复核 |
+| 018 governed browser（专属隔离 Chromium） | implemented-candidate | detached 018 review 曾对当时 identity 记录 PASS（3×13 receipt） | 非个人 Chrome / 桌面控制 / 任意网站兼容 / production-ready 第三方集成；`browser_act.fields` 为开放 object，与 `--strict-tools` 组合 fail closed |
+| 019 portable control core | implemented-candidate | detached 019 core review 曾对当时 identity 两轴 PASS | portable 协议闭合 ≠ 任一 OS 可运行无人值守调度；旧 seal entry_count/root 已 drift |
+| 019 macOS host profile | implemented-candidate | 曾对当时 identity 完成真实 persistence / launchd wake / hard-deadline cleanup / 017 composition / U2B qualification | Linux / Windows / cloud 保持 `not_qualified`，不得从 macOS 证据外推 |
+| Memory | implemented-candidate | 2026-07-25 v1 reference task 晋级 `accepted` | owner-only 明文词汇召回；非语义 Memory、非跨 owner 共享 |
+| MCP | implemented-candidate | 2026-07-25 v1 reference task 晋级 `accepted` | 仅 operator-trusted repo-owned benign stdio fixture；server descriptor schema 含开放 object 时与 `--strict-tools` 组合 fail closed |
+| Skill（read-only governed tools） | implemented-candidate | 2026-07-25 read-only reference task 晋级 `accepted` | 非任意 / 远程 Skill、无 lifecycle / 第二套 loop |
+| Skill（declared entrypoint 执行路径） | implemented-candidate | 无（自 009 起即 candidate，从未晋级） | 仅 owner-local Python entrypoint、network off、observation result；`arguments` 为开放 object，与 `--strict-tools` 组合 fail closed |
+| SubAgent | implemented-candidate | 2026-07-25 v1 reference task 晋级 `accepted`（进程隔离 hard-deadline 路径，真实 HTTP provider in child） | bounded 单 child、非并发；进程边界终止 ≠ 远端服务端撤销推理 |
+| TUI | implemented-candidate | 2026-07-25 v1 reference task 晋级 `accepted` | browser takeover 与 terminal follow-up controls 自始为 candidate |
+| Scheduler | implemented-candidate | 2026-07-25 v1 reference task 晋级 `accepted` | external caller one-shot replay；非 Scheduler CRUD / 持久调度策略 |
 
 ## 016 product convergence status
 
@@ -48,12 +95,28 @@ U3 的 authoritative 状态只由 detached `docs/acceptance/016_FIRST_AGENT_1_0_
 fallback。`danger-full-access` 仅在 exact approval 后作为 unconfined bypass，并在 receipt 中明确记录
 `backend=none / enforcement=unconfined`。
 
-当前 sealed identity 已通过 source gates、clean materialized deny-network gate（3 个需要建立本地 listener 的
-closed loopback controls 在同一 clean interpreter 下单独执行）和三次真实 Seatbelt E3，每次 11 条 journey
-全部为 true。最终 claim 由 detached
-`docs/acceptance/017_SANDBOXED_WORKSPACE_EXECUTION_INDEPENDENT_REVIEW.md` fail-closed 派生：只有它绑定当前 seal、
-verifier、runner、wheel 与 backend identity 并明确 PASS，017 才是 `accepted/delivered`；否则保持
-`implemented-candidate`。范围不包括任意 shell、浏览器自动化、后台 daemon、整机控制或跨平台 sandbox 保证。
+已交付的 017 sealed identity 曾通过 source gates、clean materialized deny-network gate（3 个需要建立本地
+listener 的 closed loopback controls 在同一 clean interpreter 下单独执行）和三次真实 Seatbelt E3，每次
+11 条 journey 全部为 true。当前 working tree 的 Round 013 已补齐默认 composition 的 host-home
+private-root 输入：`sandbox_exec` 与 `shell_exec` 共用一份 closed、模型不可修改的拒读集合，路径不存在时仍进入
+policy identity；真实测试只使用 fake home/sentinel。Round 014 进一步删除 executor 的第二份 raw PATH authority：
+普通 sandbox child 只消费 approval identity 已绑定的 sanitized `prepared.child_path`，structured I/O 仍显式使用
+空 PATH。Round 015 又把经 bounded parser 验证的普通 `.git` gitfile pointer 与 resolved target 一起纳入既有
+可读禁写 metadata policy；真实 Darwin probe 已证明 pointer 覆盖、替换、删除及 writable-workspace 内 target 写入
+都被 Seatbelt 拒绝且 bytes 不变，同时 genuine linked worktree 的读取与 `git status` 仍可用。Round 016 进一步
+修复共享 foreground runner 将 stdout/stderr 双 EOF 误作 direct child 已退出的生命周期缺口：关闭输出后仍在批准
+deadline 内工作的同一 child 现在可自然完成；双 EOF 后的真实 timeout 仍走既有 TERM→KILL/group proof，select/read
+采集失败则经既有 `ProcessCleanupError` 进入 unknown recovery，不再铸造正常空结果。这些改动会改变
+source identity，在新的 detached seal/E3/independent review 绑定完成前，当前 tree 只能
+视为 `implemented-candidate`，不能复用旧 delivery claim。
+
+最终 claim 仍由 detached `docs/acceptance/017_SANDBOXED_WORKSPACE_EXECUTION_INDEPENDENT_REVIEW.md`
+fail-closed 派生：只有它绑定当前 seal、verifier、runner、wheel 与 backend identity 并明确 PASS，017 才是
+`accepted/delivered`；否则保持 `implemented-candidate`。013 不声称自动识别所有秘密，014 也不承诺 pin 所有
+传递依赖，015 也不解决 gitfile symlink/TOCTOU、病态 target 几何或 transitive `commondir`，016 不解决同步
+cleanup grace 的输出背压或 post-timeout tail 完整性；尚未关闭的后续问题是 multi-hop symlink 与 truncation
+facts。017 本身不提供浏览器自动化、后台 daemon、整机控制或跨平台 sandbox 保证；这些边界是 017 的
+能力范围限定，不代表产品其他能力（如 018 governed browser）不存在。
 
 ## 018 governed browser tasks status
 
@@ -88,9 +151,13 @@ launchd wake、hard-deadline process cleanup、017 sandbox composition 和 U2B r
 声明“bounded background execution on macOS”。它的缺失或失败不降级 portable core；Linux、Windows、
 cloud 仍保持 `not_qualified`，不得从 macOS 证据外推。
 
-## Current matrix
+## Historical matrix（2026-07-25 bounded v1 reference identity）
 
-| Capability | Current claim | Trusted evidence | Blocking closure | Permitted wording |
+本表是 2026-07-25 bounded v1 reference identity 的历史结论快照，不再描述当前工作树；当前 claim 以上方
+Current snapshot (2026-09-09) 为准。表中 `accepted` / `locally-verified` 与 Trusted evidence 只对当时
+绑定的 identity 成立。本节及其后时间线段落中的 gate 数字与“当前工作树”字样均为写作时点的历史记录。
+
+| Capability | Claim（当时 identity） | Trusted evidence | Blocking closure | Permitted wording |
 |---|---|---|---|---|
 | Minimal Runtime Kernel | accepted | unique loop/ContextManager/ToolRuntime owners；kernel effect-ordering/recovery/CAS/limits/event fault matrix；materialized `--content` gate 通过；独立 G0–G7 promotion review 完成 | v1 scope only（非 production-ready / 非完整通用 Agent） | minimal foundation；v1 reference task accepted（2026-07-25 独立 review）；非 production-ready、非任意 provider/MCP/Skill 语义 |
 | MCP | accepted | governed registration/session seam；spawn 前 executable/ancestor/cwd identity+digest 复验；bounded transport + 持续 stderr drain；execution receipt + unknown-outcome + process-group cleanup + durable safety latch matrix（G2）；materialized gate + 独立 review 通过 | v1 scope only（仅 operator-trusted repo-owned benign stdio fixture） | governed stdio MCP seam；identity/transport closure done；v1 reference task accepted；不等于任意第三方/网络 MCP server |
@@ -98,7 +165,7 @@ cloud 仍保持 `not_qualified`，不得从 macOS 证据外推。
 | SubAgent | accepted | 同一 `AgentRuntime` child seam；G8.1 进程隔离 hard-deadline 路径（`ChildProcessRunner`：parent 拥有 process group、killpg+exit-confirm、`process_terminated` receipt；stderr DEVNULL deadlock-safe、per-run temp 目录 rmdir 清理、stdout 有界 overflow→UNCONFIRMED；TERMINATED/UNCONFIRMED 经确定性故障注入证明，UNCONFIRMED 覆盖 normalization→parent recovery）；同步 receipt 路径（`ChildAgentRunner`）保留给声明 synchronous `deadline_contract` 的 provider；materialized gate + 独立 G8 review 通过 | v1 scope only（bounded 单 child，非并发） | bounded child seam + 真实 hard-deadline provider 路径（HTTP adapter 经进程隔离可用）；E2 正向（process-isolated fake provider 经真实进程边界）已证；v1 reference task accepted（真实 HTTP provider in child）；非并发 SubAgent、非任意 child provider |
 | Scheduler | accepted | external caller；calendar-valid UTC occurrence identity；conversation_busy + checkpoint_conflict 同一 one-shot reconciliation；needs-human→CLI/TUI 解决→duplicate 报告 authoritative terminal（G5）；materialized gate + 独立 review 通过 | v1 scope only（external caller replay，非 CRUD/持久调度策略） | deterministic external caller；fault matrix closed；v1 reference task accepted；非 Scheduler CRUD、非持久化调度 |
 | Skill | accepted（read-only）；implemented-candidate（declared entrypoint） | strict frontmatter/read-only governed tools；声明脚本固定 directory/file identity、size、digest，经 exact approval 与既有 structured sandbox 执行；无 lifecycle/第二套 loop | executable path 尚无真实 release runtime E3；仅 owner-local Python entrypoint、network off、observation result | governed Skill seam；read-only reference task accepted；declared local Python execution 为 candidate，不等于任意/远程 Skill |
-| TUI | accepted | Textual optional adapter；纯键盘 submit/approve/reject/recovery 成功+失败/resume/cancel、authoritative reopen（零 provider/tool call）、shared event sink/lifecycle、event-fault advisory oracle（R19/R20 + N2 + G6 recovery s/f）；materialized gate + 独立 review 通过 | v1 scope only（单平台键盘 adapter） | 全键盘 adapter；fault matrix closed；v1 reference task accepted；CLI parity 已证；非跨平台/并发会话已验证 |
+| TUI | accepted（v1）；implemented-candidate（browser takeover + terminal follow-up controls） | Textual optional adapter；纯键盘 submit/approve/reject/recovery 成功+失败/resume/cancel、authoritative reopen（零 provider/tool call）、shared event sink/lifecycle、event-fault advisory oracle（R19/R20 + N2 + G6 recovery s/f）；010 补充 displayed-snapshot decision binding；011 增加 state-only browser waiting form、exact Browser done/cancel、recovery-first、A→B stale rejection 与 fresh-owner failure→显式 cancel；012 恢复 terminal Goal discussion，同时保留 claim/evidence、终态零 product tools，并以 hostile registered read/write calls 证明 admission 前拒绝 | 012 的晋级边界为本轮独立 review + final full gate；不提供 browser liveness dashboard、重启旧 browser session、`/new` 或 terminal follow-up 跨重启恢复 | v1 reference task accepted；新增 controls 仅为 candidate；所有 gesture 仍经唯一 Runtime；关闭 Goal 可继续 prose discussion 但不运行 product tools或开始新任务；非跨平台/并发会话或网页副作用回滚保证 |
 
 七项 capability 均已 `accepted`（v1 reference task，2026-07-25 经非实现 session 独立 review 晋级；receipt 见 `docs/acceptance/2026-07-25-E3_INDEPENDENT_REVIEW.md`）。
 `accepted` 仅对各自 v1 reference task 的 bounded 任务成立：不是 production-ready，不等于任意 MCP/Skill、语义 Memory、并发 SubAgent、Scheduler CRUD 或跨平台已验证。
@@ -110,8 +177,8 @@ G0 已闭合两个 P2 residual：delivery 的 console-entrypoint origin 断言�
 G1–G6 随后闭合了五项 extension capability 的完整 fault matrix（Skill/MCP/Memory/Scheduler/TUI）。
 G8 为 SubAgent 引入进程隔离 hard-deadline 路径（`ChildProcessRunner`），使 production HTTP provider
 经进程边界获得 honest hard deadline（不再 safe-unavailable）。G8.1 修复了独立复审提出的 stderr
-不 drain（F-G8-1，改 DEVNULL）与 temp 目录泄漏（F-G8-2，rmdir 清理）并加 stdout 有界。当前工作树的
-materialized `--content` gate 通过（357 passed，未截断，deny-network 边界内）。
+不 drain（F-G8-1，改 DEVNULL）与 temp 目录泄漏（F-G8-2，rmdir 清理）并加 stdout 有界。当时工作树的
+materialized `--content` gate 通过（357 passed，未截断，deny-network 边界内；历史记录）。
 
 G0–G6 fault matrix 与 G7 materialized delivery 已由非实现 executor session 的独立 promotion
 reviewer 复核（见 `docs/implementation/009_G0_G7_PROMOTION_REVIEW.md`）。reviewer 在写 controls
@@ -172,7 +239,8 @@ control file；并清理了 executor E3 遗留的两个孤儿 sleeper 进程（m
 
 ## Active freeze
 
-009 candidate 已封存；七项 capability 已经独立 review 晋级 `accepted`（v1 reference task）。以下保守约束持续生效，避免在 v1 scope 之外被误读为 production-ready：
+009 candidate 已封存；七项 capability 曾于 2026-07-25 经独立 review 晋级 `accepted`（v1 reference
+task；历史结论，仅绑定当时 identity）。以下保守约束持续生效，避免在 v1 scope 之外被误读为 production-ready：
 
 - 不增加新的 product capability。
 - 不扩展六项 v1 scope。

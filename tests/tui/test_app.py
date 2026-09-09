@@ -1130,7 +1130,7 @@ class _BlockingProvider:
         self.event = threading.Event()
         self.calls = 0
 
-    def generate(self, context):
+    def generate(self, context, *, delta_observer=None):
         self.calls += 1
         self.event.wait(timeout=10)
         return ModelResponse((ModelTextBlock("done after release"),))

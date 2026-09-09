@@ -31,7 +31,10 @@ class FakeProvider:
         self._scripted = scripted_responses is not None
         self._responses = deque(scripted_responses or ())
 
-    def generate(self, context: ContextPack) -> ModelResponse:
+    def generate(
+        self, context: ContextPack, *, delta_observer=None  # noqa: ANN001, ARG001
+    ) -> ModelResponse:
+        # 非流式 provider:接受窄观察合同但不发增量(r19 小步 3)。
         validate_context_pack(context)
         if not self._scripted:
             return ModelResponse((ModelTextBlock(latest_user_text(context)),))

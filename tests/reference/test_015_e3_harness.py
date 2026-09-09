@@ -627,7 +627,7 @@ def test_015_counting_seam_records_send_through_real_adapter() -> None:
         e3._provider_send_count(object())
 
     class _BareProvider:  # 有 generate 但无 send_count seam
-        def generate(self, context):  # noqa: ANN001, ANN201
+        def generate(self, context, *, delta_observer=None):
             return None
 
     with pytest.raises(TypeError):
@@ -1055,7 +1055,7 @@ def test_015_counting_provider_records_exception_and_derives_blocker() -> None:
     """
 
     class _RaisingDelegate:  # noqa: D106
-        def generate(self, context):  # noqa: ANN001, ANN201
+        def generate(self, context, *, delta_observer=None):
             raise ValueError("boom")
 
     cp = e3._CountingProvider(_RaisingDelegate())
@@ -1252,7 +1252,7 @@ def test_015_j2_driver_keeps_rejecting_rejected_fingerprint(tmp_path: Path) -> N
         def send_count(self) -> int:
             return len(self.calls)
 
-        def generate(self, context):  # noqa: ANN001, ANN201
+        def generate(self, context, *, delta_observer=None):
             from agent.runtime.contracts import (
                 GoalFrame,
                 GoalStatus,
@@ -1682,7 +1682,7 @@ class _J3SemanticDraftProvider:
     def send_count(self) -> int:
         return len(self.calls)
 
-    def generate(self, context):  # noqa: ANN001, ANN201
+    def generate(self, context, *, delta_observer=None):
         from agent.runtime.contracts import (
             EvidenceOracleKind,
             GoalFrame,
@@ -1866,7 +1866,7 @@ def test_015_j2_provider_timeout_resumes_via_retryable_path(tmp_path: Path) -> N
                     }
                 )
 
-        def generate(self, context):  # noqa: ANN001, ANN201
+        def generate(self, context, *, delta_observer=None):
             from agent.runtime.contracts import (
                 GoalFrame,
                 GoalStatus,

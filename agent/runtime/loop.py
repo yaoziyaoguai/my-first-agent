@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 from collections.abc import Callable
 from contextvars import ContextVar
@@ -1593,7 +1594,10 @@ class AgentRuntime:
                     )
             try:
                 if not recovering_persisted_response:
-                    response = self._provider.generate(context)
+                    response = self._provider.generate(
+                        context,
+                        delta_observer=self._delta_observer_for(current),
+                    )
             except InvalidProviderResponseError as error:
                 if background_binding is not None:
                     return self._finish_background_model_unknown(
@@ -4185,6 +4189,40 @@ class AgentRuntime:
             raise RuntimeError("runtime event emitted outside an invocation")
         event_buffer.append(event)
         return []
+
+    def _delta_observer_for(self, current):  # noqa: ANN001
+        """r19 小步 3:流式文本增量的窄观察实现(advisory)。
+
+        直写 event_sink 绕过 invocation 事件缓冲,保证增量在生成期间到达
+        界面;事件不携带权威状态语义——丢失、重复或乱序不改变 checkpoint、
+        审批与执行顺序,最终显示可由权威结果校正。
+        """
+        state = current.state
+        conversation_id = state.conversation_id
+        run_id = state.active_run.run_id if state.active_run is not None else None
+        revision = state.revision
+        causation_id = f"model-delta:{run_id or conversation_id}:{revision}"
+        sink = self._event_sink
+        counter = itertools.count(start=1)
+
+        class _TextDeltaObserver:
+            def on_text_delta(self, text: str) -> None:
+                event = RuntimeEvent(
+                    event_id=(
+                        f"event:model-delta:{conversation_id}:{revision}"
+                        f":{next(counter)}"
+                    ),
+                    kind=RuntimeEventKind.MODEL_TEXT_DELTA,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    revision=revision,
+                    causation_id=causation_id,
+                    payload={"text": text},
+                    advisory=True,
+                )
+                sink.emit(event)
+
+        return _TextDeltaObserver()
 
     def _deliver_events(
         self,

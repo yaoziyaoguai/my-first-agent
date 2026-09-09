@@ -156,7 +156,7 @@ class _ScriptedFakeProvider:
         self._sleep_seconds = sleep_seconds
         self._stderr_chars = stderr_chars
 
-    def generate(self, context):  # noqa: ARG002
+    def generate(self, context, *, delta_observer=None):
         if self._stderr_chars > 0:
             import sys
 

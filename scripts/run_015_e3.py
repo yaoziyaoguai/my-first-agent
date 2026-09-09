@@ -581,7 +581,7 @@ class _CountingProvider:
         self.response_shapes: list = []
         self.untrusted_process_receipt_digests_seen: set[str] = set()
 
-    def generate(self, context):  # noqa: ANN001, ANN201
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN201, ARG001
         self.send_count += 1  # count before delegate — send attempted regardless of outcome
         self.untrusted_process_receipt_digests_seen.update(
             _context_process_frame_digests(context)
@@ -1472,7 +1472,7 @@ class _J1JourneyProvider:
     def send_count(self) -> int:
         return len(self.calls)
 
-    def generate(self, context):  # noqa: ANN001, ANN201
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN201, ARG001
         from agent.runtime.contracts import (
             EvidenceOracleKind,
             GoalFrame,
@@ -1583,7 +1583,7 @@ class _J5JourneyProvider:
     def send_count(self) -> int:
         return len(self.calls)
 
-    def generate(self, context):  # noqa: ANN001, ANN201
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN201, ARG001
         from agent.runtime.contracts import (
             EvidenceOracleKind,
             GoalFrame,
@@ -1678,7 +1678,7 @@ class _J3JourneyProvider:
     def send_count(self) -> int:
         return len(self.calls)
 
-    def generate(self, context):  # noqa: ANN001, ANN201
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN201, ARG001
         from agent.runtime.contracts import (
             EvidenceOracleKind,
             GoalFrame,
@@ -1758,7 +1758,7 @@ class _J2JourneyProvider:
     def send_count(self) -> int:
         return len(self.calls)
 
-    def generate(self, context):  # noqa: ANN001, ANN201
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN201, ARG001
         from agent.runtime.contracts import (
             EvidenceOracleKind,
             GoalFrame,
@@ -1865,7 +1865,7 @@ class _J4JourneyProvider:
     def send_count(self) -> int:
         return len(self.calls)
 
-    def generate(self, context):  # noqa: ANN001, ANN201
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN201, ARG001
         from agent.runtime.contracts import (
             EvidenceOracleKind,
             GoalFrame,

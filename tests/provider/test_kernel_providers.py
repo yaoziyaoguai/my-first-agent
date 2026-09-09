@@ -1406,3 +1406,132 @@ def test_anthropic_thinking_block_is_dropped_not_fatal() -> None:
     )
     assert response.blocks == (ModelTextBlock("answer"),)
     assert response.stop_reason == "end_turn"
+
+
+class _RecordingObserver:
+    """窄观察合同的最小记录实现(仅公开回答文本增量)。"""
+
+    def __init__(self) -> None:
+        self.deltas: list[str] = []
+
+    def on_text_delta(self, text: str) -> None:
+        self.deltas.append(text)
+
+
+def _sse(*lines: str) -> bytes:
+    return "\n".join(f"data: {line}" for line in lines).encode("utf-8") + b"\n\n"
+
+
+def test_anthropic_streaming_forwards_text_deltas_and_rebuilds_response() -> None:
+    """r19 小步 3:SSE text 增量在到达时转发 observer;最终响应由流重建后走唯一
+    normalize(delta 丢失/重复不影响权威 ModelResponse)。"""
+    observer = _RecordingObserver()
+    stream = _sse(
+        '{"type":"message_start","message":{"usage":{"input_tokens":7}}}',
+        '{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+        '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}',
+        '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}',
+        '{"type":"content_block_stop","index":0}',
+        '{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}',
+        '{"type":"message_stop"}',
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["stream"] is True
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, content=stream
+        )
+
+    config = AgentProviderConfig(
+        provider_type="anthropic_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid",
+        credential="fixture-secret",
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        response = AnthropicCompatibleProvider(config=config, http_client=client).generate(
+            _context(), delta_observer=observer
+        )
+
+    assert observer.deltas == ["Hel", "lo"]
+    assert response == ModelResponse(
+        (ModelTextBlock("Hello"),), stop_reason="end_turn", input_tokens=7, output_tokens=2
+    )
+
+
+def test_anthropic_streaming_tool_input_json_delta_rebuilds_tool_use() -> None:
+    """tool_use 的 partial JSON 只在流收束后解析重建;不完整参数绝不中途执行。"""
+    observer = _RecordingObserver()
+    stream = _sse(
+        '{"type":"message_start","message":{"usage":{"input_tokens":3}}}',
+        '{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call-1","name":"read_file","input":{}}}',
+        '{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"pa"}}',
+        '{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta",'
+        '"partial_json":"th\\": \\"a.md\\"}"}}',
+        '{"type":"content_block_stop","index":0}',
+        '{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":9}}',
+        '{"type":"message_stop"}',
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, content=stream
+        )
+
+    config = AgentProviderConfig(
+        provider_type="anthropic_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid",
+        credential="fixture-secret",
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        response = AnthropicCompatibleProvider(config=config, http_client=client).generate(
+            _context(), delta_observer=observer
+        )
+
+    assert observer.deltas == []
+    assert response.blocks == (
+        ModelToolCall("call-1", "read_file", {"path": "a.md"}),
+    )
+    assert response.stop_reason == "tool_use"
+
+
+def test_anthropic_stream_interrupted_partial_does_not_mint_response() -> None:
+    """故障合同 1:流中途断开——已到增量可被观察,但不得铸造最终响应/自动补发。"""
+    observer = _RecordingObserver()
+
+    def broken_stream():
+        yield _sse(
+            '{"type":"message_start","message":{"usage":{"input_tokens":5}}}',
+            '{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+            '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"part"}}',
+        )
+        raise httpx.ReadError("connection reset mid-stream")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=broken_stream(),
+        )
+
+    config = AgentProviderConfig(
+        provider_type="anthropic_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid",
+        credential="fixture-secret",
+    )
+    calls: list[int] = []
+
+    def counting_handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return handler(request)
+
+    with httpx.Client(transport=httpx.MockTransport(counting_handler)) as client:
+        provider = AnthropicCompatibleProvider(config=config, http_client=client)
+        with pytest.raises(ProviderTransportError):
+            provider.generate(_context(), delta_observer=observer)
+
+    # 断流后:不再自动补发第二次请求;partial 不构成 ModelResponse。
+    assert len(calls) == 1
+    assert observer.deltas == ["part"]

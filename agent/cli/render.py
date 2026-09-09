@@ -24,14 +24,33 @@ from agent.runtime.views import (
 
 
 class TerminalRenderer:
-    def __init__(self, write_fn: Callable[[str], None] = print) -> None:
+    def __init__(
+        self,
+        write_fn: Callable[[str], None] = print,
+        *,
+        delta_write_fn: Callable[[str], None] | None = None,
+    ) -> None:
         self._write = write_fn
+        self._delta_write = delta_write_fn
         self._seen_event_ids: set[str] = set()
+        # r19 小步 3:已流式呈现的回答文本;与最终权威 message 完全一致时
+        # 不再重复打印(显示可由权威结果校正,而不是双份输出)。
+        self._streamed_answer = ""
 
     def emit(self, event: RuntimeEvent) -> None:
         if event.event_id in self._seen_event_ids:
             return
         self._seen_event_ids.add(event.event_id)
+        if event.kind is RuntimeEventKind.MODEL_TEXT_DELTA:
+            text = str(event.payload.get("text", ""))
+            if not text:
+                return
+            self._streamed_answer += text
+            if self._delta_write is not None:
+                self._delta_write(text)
+            else:
+                self._write(text)
+            return
         message = self._event_message(event)
         if message is not None:
             self._write(message)
@@ -152,9 +171,11 @@ class TerminalRenderer:
             return None
         return None
 
-    @staticmethod
-    def _result_message(result: RunResult) -> str | None:
+    def _result_message(self, result: RunResult) -> str | None:
         if result.status is RunStatus.COMPLETED:
+            if result.message and result.message == self._streamed_answer:
+                # 流式已逐字呈现同一文本;不重复打印(权威校正留给不一致时)。
+                return None
             return result.message
         if result.status is RunStatus.AWAITING_APPROVAL:
             return None

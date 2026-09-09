@@ -52,6 +52,13 @@ identity 成立。2026-09-09 r18 收尾轮对 consolidated 候选（commit `684f
   `new_session_gate` 合法性判断（active run/pending 决策/活跃 Goal 拒绝；终态或无 Goal
   允许），以 `NEW_SESSION_REQUESTED` 信令在同一进程内经 `open_workspace_session(force_new=True)`
   重建 conversation，旧 checkpoint 与 evidence 原样保留；`/compact`、`/context` 仍未实现。
+  **r19 后续（2026-09-10，产品化小步 3）**：anthropic_compatible adapter 改为 SSE 流式
+  （`ModelDeltaObserver` 窄观察合同，`MODEL_TEXT_DELTA` advisory 事件直写 EventSink 绕过
+  invocation 缓冲）；最终响应仍由流结束后的完整重建走唯一 normalize 路径，断流不铸造响应、
+  不自动补发，tool_use partial JSON 只在流收束后解析；含既有 thinking-block 丢弃合同。
+  CLI 实时增量显示（与最终 message 完全一致时不重复打印）；TUI 周期 drain 显示。
+  不含即时取消/工具抢占/后台化。受管 E3 脚本（013/014/015/018/019）的 provider 包装
+  签名随产品合同同步。
 - 后续重开条件（用户明确授权才生效）：现有支持范围内出现可复现的合同缺陷，或出现能回答新学习
   问题的具体 reference task。（2026-09-09 晚用户确认产品化转向，冻结约束由 r19 审计解除；
   小步 1 基线见 `docs/audits/2026-09-10-product-baseline-tasks.md`。）

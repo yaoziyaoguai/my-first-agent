@@ -122,7 +122,7 @@ def test_provider_without_deadline_contract_rejected() -> None:
     construction, not silently accepted."""
 
     class _NoDeadlineProvider:
-        def generate(self, context):
+        def generate(self, context, *, delta_observer=None):
             return ModelResponse((ModelTextBlock("ok"),))
 
     # Provider must have a structural deadline capability attribute, not just be any object.
@@ -140,7 +140,7 @@ def test_supported_fake_provider_satisfies_contract() -> None:
             receipt_type="synchronous",
         )
 
-        def generate(self, context):
+        def generate(self, context, *, delta_observer=None):
             return ModelResponse((ModelTextBlock("ok"),))
 
     provider = _SupportedFake()

@@ -38,7 +38,7 @@ class _CleanupFailProvider:
         self.executable = executable
         self.calls: list = []
 
-    def generate(self, context) -> ModelResponse:  # noqa: ANN001
+    def generate(self, context, *, delta_observer=None) -> ModelResponse:
         self.calls.append(context)
         index = len(self.calls)
         if index == 1:

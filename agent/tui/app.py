@@ -38,6 +38,7 @@ from agent.runtime.contracts import (
     GoalStatus,
     RecoveryResolution,
     ResolveApproval,
+    RuntimeEventKind,
 )
 from agent.runtime.views import project_visible_source_views
 from agent.tui.adapter import TuiAdapter
@@ -214,7 +215,29 @@ def build_app(
             )
 
         def on_mount(self) -> None:
+            # r19 小步 3:周期 drain 流式增量事件,worker 运行期间也能在状态区
+            # 看到回答片段(advisory;权威结果仍由 _refresh 从 checkpoint 投影)。
+            self._streamed_answer = ""
+            self.set_interval(0.5, self._drain_delta_events)
             self._refresh()
+
+        def _drain_delta_events(self) -> None:
+            drained = self._adapter.event_sink.drain()
+            deltas = [
+                str(event.payload.get("text", ""))
+                for event in drained
+                if event.kind is RuntimeEventKind.MODEL_TEXT_DELTA
+            ]
+            text = "".join(deltas)
+            if not text:
+                return
+            self._streamed_answer += text
+            from rich.text import Text
+
+            tail = self._streamed_answer[-2000:]
+            self.query_one("#status", Static).update(
+                Text(safe_display("· 生成中 · " + tail))
+            )
 
         def _current_projection(self) -> TuiProjection:
             return project(self._adapter.load_view().snapshot.state)

@@ -1070,7 +1070,12 @@ def main(
                 # F5c：默认 composition 只构造一个 LocalConversationArchive，同一实例
                 # 静态注入 HistoryCatalog 与 build_composition，避免双实例各自演进。
                 conversation_archive = LocalConversationArchive(session.state_root)
-                renderer = TerminalRenderer(write_fn)
+                # r19 小步 3:流式回答增量无换行直写并立即 flush;与最终权威
+                # message 完全一致时 renderer 不再重复渲染。
+                renderer = TerminalRenderer(
+                    write_fn,
+                    delta_write_fn=partial(print, end="", flush=True),
+                )
                 context_limits = ContextLimits(max_input_tokens=100_000, output_reserve=8_000)
                 registrations = list(
                     build_tool_registrations(

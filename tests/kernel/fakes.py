@@ -271,7 +271,7 @@ class ScriptedProvider:
         self._responses = deque(responses)
         self.calls: list[ContextPack] = []
 
-    def generate(self, context: ContextPack) -> ModelResponse:
+    def generate(self, context, *, delta_observer=None) -> ModelResponse:
         self.calls.append(context)
         if not self._responses:
             raise AssertionError("provider script exhausted")

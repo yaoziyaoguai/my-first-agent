@@ -98,7 +98,7 @@ class _RecordingProvider:
         self.delegate = delegate
         self.last_error: ProviderError | None = None
 
-    def generate(self, context):  # noqa: ANN001, ANN201
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN201, ARG001
         self.last_error = None
         try:
             return self.delegate.generate(context)

@@ -205,7 +205,7 @@ class _RequestingProvider:
         self.kind = kind
         self.calls = []
 
-    def generate(self, context):  # noqa: ANN001
+    def generate(self, context, *, delta_observer=None):
         self.calls.append(context)
         binding = self.inbox.current("conversation-1")
         assert binding is not None

@@ -72,7 +72,10 @@ class OpenAICompatibleProvider:
             raise ProviderConfigurationError()
         return headers
 
-    def generate(self, context: ContextPack) -> ModelResponse:
+    def generate(
+        self, context: ContextPack, *, delta_observer=None  # noqa: ANN001, ARG001
+    ) -> ModelResponse:
+        # 非流式 adapter:接受窄观察合同但不发增量(r19 小步 3)。
         body: dict[str, Any] = {
             "model": self._config.model,
             "max_tokens": self._config.max_tokens,

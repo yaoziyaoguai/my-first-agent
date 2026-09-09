@@ -367,7 +367,9 @@ class _TakeoverProvider:
             raise RuntimeError("J6 provider requires one trusted Goal projection")
         return matches[0]
 
-    def generate(self, context: ContextPack) -> ModelResponse:
+    def generate(
+        self, context: ContextPack, *, delta_observer=None  # noqa: ARG001
+    ) -> ModelResponse:
         self.calls += 1
         self._counters["provider_calls"] += 1
         if self.calls == 1:

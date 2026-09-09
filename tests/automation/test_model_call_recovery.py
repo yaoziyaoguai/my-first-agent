@@ -61,7 +61,7 @@ class _CrashAfterSendProvider:
     def __init__(self) -> None:
         self.calls = 0
 
-    def generate(self, _context):  # noqa: ANN001
+    def generate(self, _context, *, delta_observer=None):
         self.calls += 1
         raise _SimulatedProcessCrash
 

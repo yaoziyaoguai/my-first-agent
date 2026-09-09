@@ -4475,6 +4475,7 @@ class RunResult:
 
 class RuntimeEventKind(StrEnum):
     MODEL_PROGRESS = "model_progress"
+    MODEL_TEXT_DELTA = "model_text_delta"
     TOOL_REQUESTED = "tool_requested"
     TOOL_RESULT = "tool_result"
     APPROVAL_REQUESTED = "approval_requested"

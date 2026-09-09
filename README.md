@@ -36,7 +36,9 @@ gate：3372 passed, 3 skipped、ruff 与 `git diff --check` PASS；这只是 sou
 - 固定 Tavily Search/Extract 公开 Web 工具：每次 exact query/URL batch 单独批准
 - Runtime 铸造的来源回执、统一 Sources 视图、citation sidecar 与 provenance evidence
 - 本地 v1 checkpoint、暂停、恢复与未知工具结果处置
-- FakeProvider，以及 Anthropic-compatible / OpenAI-compatible 非流式 HTTP adapter
+- FakeProvider；OpenAI-compatible 非流式 HTTP adapter；Anthropic-compatible **流式** HTTP adapter
+  （SSE：回答文本增量在生成期间实时到达 CLI/TUI，最终响应仍由 Runtime 一次接纳——增量只是
+  advisory 显示，丢失/重复/断流不改变权威结果与 durable state）
 - 同一套 typed action / event / result 合同下的 CLI 与 headless 调用
 - 同一自然语言入口中的直接回答、最小澄清与 durable Goal
 - Goal pause/resume/cancel/correction、确定性重启与 unknown-effect recovery
@@ -217,9 +219,9 @@ object 的工具 schema 包括 declared Skill entrypoint 的 `arguments`、`brow
 server descriptor 的 MCP 工具。触发与模型是否实际调用该工具无关：只要相应工具出现在本次请求的工具
 列表中，请求发送前即失败。
 
-也可使用 `anthropic_compatible`。两个 adapter 都是有限时、非流式的一次请求路径；具体 endpoint
-可由兼容服务的 base URL 决定。第一次外发以及 destination/model/data-class 变化时，Runtime 会先
-显示 destination、model 和 data classes；用户在当前提示下确认后才发送，内部 acknowledgement 仍精确
+也可使用 `anthropic_compatible`。两个 adapter 都是有限时的一次请求路径（anthropic 侧为 SSE 流式）；
+具体 endpoint 可由兼容服务的 base URL 决定。第一次外发以及 destination/model/data-class 变化时，Runtime
+会先显示 destination、model 和 data classes；用户在当前提示下确认后才发送，内部 acknowledgement 仍精确
 绑定 digest。ack receipt 持久化在 checkpoint，配置或实际数据类别漂移会自动失效。
 
 ## Skills

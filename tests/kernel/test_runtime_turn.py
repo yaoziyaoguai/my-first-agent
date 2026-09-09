@@ -195,3 +195,38 @@ def test_text_with_tool_call_is_preamble_not_completion() -> None:
 
     assert result.message == "final"
     assert len(provider.calls) == 3
+
+
+def test_model_text_delta_events_stream_to_sink_advisory_only() -> None:
+    """r19 小步 3:流式文本增量直写 event_sink(advisory),不进 invocation
+    事件交付;丢失/重复不影响权威结果与 checkpoint(checkpoint 语义不变)。"""
+    from agent.runtime.contracts import (
+        ModelResponse,
+        ModelTextBlock,
+        RuntimeEventKind,
+    )
+
+    class _StreamingProvider:
+        def __init__(self) -> None:
+            self.seen_observers: list[object] = []
+
+        def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN001
+            self.seen_observers.append(delta_observer)
+            if delta_observer is not None:
+                delta_observer.on_text_delta("Hello ")
+                delta_observer.on_text_delta("world")
+            return ModelResponse((ModelTextBlock("Hello world"),))
+
+    provider = _StreamingProvider()
+    sink = CollectingSink()
+    store = InMemoryCheckpointStore(ConversationState.new("conversation-1"))
+    runtime = _runtime(provider, store, sink=sink)
+    result = runtime.run_turn(_submit(store.state), store.load())
+    assert result.status is RunStatus.COMPLETED
+    # observer 在 generate 调用期间被传入(实时前提)
+    assert len(provider.seen_observers) == 1
+    deltas = [e for e in sink.events if e.kind is RuntimeEventKind.MODEL_TEXT_DELTA]
+    assert [e.payload["text"] for e in deltas] == ["Hello ", "world"]
+    assert all(e.advisory for e in deltas)
+    # 权威结果不受增量影响:final message 即模型文本。
+    assert result.message == "Hello world"

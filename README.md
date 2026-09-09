@@ -2,11 +2,11 @@
 
 一个从当前目录开始工作的 local-first 日常 Agent。
 
-`1.0.0` 的目标不是增加更多能力，而是让第一次安装、guided setup、无参数启动、可选 Web、暂停与恢复
-形成一条普通用户可理解的默认路径。当前 delivery identity 的 U0/U1、materialized clean-room 与真实
-Model + Tavily U2 十二旅程连续三轮必须全部通过。最终 promotion 状态 fail closed：只有 detached
-`docs/acceptance/016_FIRST_AGENT_1_0_INDEPENDENT_REVIEW.md` 对同一 delivery identity 明确记录 U3 PASS 时，
-该 identity 才是已交付的 First Agent 1.0；文件缺失、pending 或 identity 不匹配时仍是 promotion candidate。
+`1.0.0` 的定位不是增加更多能力，而是让第一次安装、guided setup、无参数启动、可选 Web、暂停与恢复
+形成一条普通用户可理解的默认路径。该交付曾按 fail-closed 机制验收（detached
+`docs/acceptance/016_FIRST_AGENT_1_0_INDEPENDENT_REVIEW.md` 只对当时 delivery identity 记录 U3 PASS）。
+本仓库已于 2026-09-09 冻结为学习里程碑（tag `study-freeze-2026-09-09-candidate`，指向 `901bc55`）：
+不再自动开启新的优化轮次或 promotion 重绑，全部能力对当前 identity 保持 `implemented-candidate`。
 
 它使用同一个自然语言入口回答问题、讨论想法或完成有界的当前目录文件任务。底层仍刻意保持为一个模型循环、一个上下文管理器、一个受治理的工具执行路径和一个可恢复状态机。它可以在逐次批准后通过固定 Tavily 入口查询公开 Web；015 Governed Local Action 已通过真实 E3、独立评审与 Codex 终裁，曾作为已交付能力提供受治理的结构化本机执行（`local_process`：exact 同意批准、Goal 限定租约、closed 环境与资源档案；历史晋级只绑定当时 delivery identity，见下方状态快照）。018 另提供可选的受治理专属隔离 Chromium 能力（candidate）。个人浏览器、任意网站兼容、桌面控制与任意 shell 仍不在交付范围内，也不存在第二套 Agent loop。
 
@@ -18,7 +18,7 @@ reference task 晋级与 016/017/018/019 各 detached independent review 的记�
 有效；旧 seal/check 相对当前工作树全部 drift，fail-closed 校验正常工作。当前 delivery 未 promotion；
 2026-09-09 收尾轮（r18）对 consolidated 候选（commit `684f368` / tree `10d36564`）完成 source full
 gate：3372 passed, 3 skipped、ruff 与 `git diff --check` PASS；这只是 source 报告事实，不是交付证明。
-本仓库自此冻结为学习里程碑，不再自动开启新的优化轮次。权威明细见
+本仓库冻结于本地 annotated tag `study-freeze-2026-09-09-candidate`（指向 `901bc55`）。权威明细见
 [Current Capability Status](docs/architecture/CURRENT_CAPABILITY_STATUS.md)。
 
 ## 当前能力
@@ -148,38 +148,29 @@ training exclusion 或 deletion。
 重新验证 source linkage 后，Goal 才可能显示 `VERIFIED_DONE`。默认 Sources 视图显示可读 locator、title、
 时间、完整/截断/失败状态；`/sources --advanced` 只用于诊断。
 
-014 曾在当时的物化树上完成离线 gates、真实 Model + Tavily 三连 E3、mandatory held-out value journey 与
-fresh review（历史 PASS，只绑定当时 identity）；权威证据见 `docs/implementation/014_EXECUTION_LOG.md` §9.3。
-FakeProvider 或 MockTransport 仍不能替代这些真实边界证据。
+## 历史里程碑（012–019）
 
-## 里程碑：受治理的本机行动
+以下里程碑均已按 fail-closed 机制完成过验收，历史 PASS 只绑定当时 delivery identity；当前工作树相对
+各旧 identity 均已 drift，全部能力对当前 identity 为 `implemented-candidate`。权威状态矩阵与完整边界见
+[Current Capability Status](docs/architecture/CURRENT_CAPABILITY_STATUS.md)；本节只保留一句话能力与
+关键边界。
 
-015 已让 First Agent 在同一个自然语言入口中请求并运行结构化本机程序，以便完成构建、测试、文档转换、
-数据处理和其他当前 workspace 任务。每个新 command identity 都必须先展示 exact executable、arguments、cwd、
-资源限制、环境策略以及 same-UID 风险；批准只产生 Goal-scoped、有限次数、会过期、可撤销的精确权限租约。
-真实 DeepSeek E3 三连、独立评审与 Codex 终裁均已通过；该能力曾晋级为已交付，该结论与证据只绑定当时
-delivery identity（当前工作树相对其已 drift，015 现为 `implemented-candidate`），最终证据见
-`docs/implementation/015_EXECUTION_LOG.md`。
-
-这不是 shell。015 本身不接受命令字符串、pipeline、redirection、interactive TTY 或后台任务，也不阻止获批
-子进程读取同一用户可访问的文件、联网或派生子进程。已交付结论只覆盖
-`docs/plans/2026-08-09-001-feat-governed-local-action-plan.md` 冻结的 POSIX/macOS-first 合同，不扩大为
-任意 shell 或整机控制。017 在不改变这条结构化命令边界的前提下，另加下面的 macOS native sandbox。
-
-## 里程碑：macOS native sandbox
-
-017 为结构化 `sandbox_exec` 增加 macOS Seatbelt 隔离。默认 `workspace-write` 只写当前 workspace（敏感
-carveout 除外）和本次临时目录，`read-only` 不写；两者默认 `network=off`。每个请求仍展示 exact
-executable、argv、cwd、resource profile、mode 与 network，并只接受 Goal/revision/workspace/command/policy
-精确绑定的一次性批准。backend 不可用时 confined mode 零执行、不会回退到 `local_process`；显式
-`danger-full-access` 是单独批准的 unconfined bypass，receipt 会如实记录 `backend=none`。
-
-旧 sealed identity 曾通过 clean materialized gate 与三次真实 Seatbelt E3，每次 11 条 journey 全 True
-（历史 PASS，只对当时 identity 有效）；当前工作树相对该 identity 已 drift，017 现为
-`implemented-candidate`。最终 promotion 状态只由 detached
-`docs/acceptance/017_SANDBOXED_WORKSPACE_EXECUTION_INDEPENDENT_REVIEW.md` 绑定当前 identity 并记录 PASS
-决定。017 仍不是任意 shell、个人浏览器自动化、整机控制、后台 daemon 或跨平台 sandbox 保证；
-Linux/Windows sandbox 不在本阶段合同内。
+- **012 Trusted Continuity**：离线 reference suite 覆盖 answer/clarify、task→approval→restart→
+  read-back→`VERIFIED_DONE`、unknown effect、Goal controls 与 owner preference oracle；真实 Provider E3
+  需四个 `FIRST_AGENT_E3_*` 变量运行 `scripts/run_012_e3.py`，Mock/Fake 不能冒充。协议见
+  [`012_TRUSTED_CONTINUITY_E3.md`](docs/acceptance/012_TRUSTED_CONTINUITY_E3.md)。
+- **014 Grounded Personal Knowledge**：曾完成离线 gates、真实 Model + Tavily 三连 E3、mandatory
+  held-out value journey 与 fresh review；证据 `docs/implementation/014_EXECUTION_LOG.md` §9.3。
+- **015 Governed Local Action（`local_process`）**：exact executable/argv/cwd/资源与环境展示后，批准
+  产生 Goal-scoped、限次、会过期、可撤销的租约。这不是 shell：不接受命令字符串、pipeline、
+  redirection、TTY 或后台任务；合同为 POSIX/macOS-first
+  （`docs/plans/2026-08-09-001-feat-governed-local-action-plan.md`）。证据
+  `docs/implementation/015_EXECUTION_LOG.md`。
+- **017 macOS Seatbelt sandbox（`sandbox_exec`）**：`workspace-write` 只写 workspace 与本次临时目录，
+  `read-only` 不写，默认 `network=off`；一次性精确批准；backend 不可用时 confined mode 零执行、不回退
+  `local_process`。状态由
+  [`017_SANDBOXED_WORKSPACE_EXECUTION_INDEPENDENT_REVIEW.md`](docs/acceptance/017_SANDBOXED_WORKSPACE_EXECUTION_INDEPENDENT_REVIEW.md)
+  决定。
 
 ## HTTP Provider
 
@@ -279,15 +270,6 @@ owner preference 与 workspace Memory 分权：它使用默认 state root 下固
 确认或纠正；project/web/tool/model 内容不能晋升为跨 workspace preference。forget 只停止未来本机
 active recall，并保留 tombstone/provenance；不声称擦除历史或已发送给 remote Provider 的副本。
 
-## 012 验收状态
-
-离线 reference suite 覆盖 answer/clarify、task→approval→restart→read-back→`VERIFIED_DONE`、
-unknown effect、multiple-candidate selection、Goal controls、真实 HTTP adapter 的 disclosure send-count、
-owner preference poisoning/correct/forget 和 false-completion mutation oracle。真实 Provider E3 必须另行用
-四个显式 `FIRST_AGENT_E3_*` 环境变量运行 `scripts/run_012_e3.py`；Mock/Fake 结果不能冒充 E3，
-也不能据此宣称 production-ready。操作步骤见
-[`docs/acceptance/012_TRUSTED_CONTINUITY_E3.md`](docs/acceptance/012_TRUSTED_CONTINUITY_E3.md)。
-
 ## SubAgent delegation
 
 `--subagent` 开启 `subagent__delegate`（HIGH + EXTERNAL，每次审批）。它把一个 bounded 只读 objective 交给一个 isolated child：child 复用同一个 `AgentRuntime.run_turn` 实现，但拥有独立 in-memory state、空 ToolRuntime、无 ContextSource、最多一次 model call，且不继承 parent history/Memory/Skill/MCP/workspace/credential。只有 child 返回 `COMPLETED` 才是成功；其他明确终态成为已知失败，runner/provider 无法分类的异常进入 parent unknown-outcome recovery。
@@ -329,22 +311,20 @@ git diff --check
 ```
 
 架构与状态语义见 [Kernel Architecture](docs/architecture/KERNEL_ARCHITECTURE.md)。此次重建是 breaking change：旧 CLI、旧状态格式和旧 Python 接口均不兼容，也不会被自动发现或迁移；未跟踪的旧运行数据保持原样。
-## Browser (018 fail-closed promotion)
+## Browser（018，可选治理 Chromium）
 
-An optional governed dedicated-Chromium capability provides public-read sessions, site-bound interactive profiles with exact approvals, explicit user sign-in takeover, an egress guard, and download quarantine. It is disabled by default; enable it with `--browser` after installing the `browser` extra from the same local wheel built in Quick start (`python -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[browser]"`). The authoritative delivery status is the detached `docs/acceptance/018_GOVERNED_BROWSER_TASKS_INDEPENDENT_REVIEW.md`: it is accepted/delivered only when that review binds the current seal, verifier, runner, wheel, browser identity, and 3×13 receipt and records `PASS`; otherwise it remains an implemented candidate. That review's earlier `PASS` is a historical result bound to the previous delivery identity; the current tree has drifted from that seal, so the current claim is implemented candidate. This is not personal-browser or desktop control, arbitrary-site compatibility, background autonomy, or production-ready third-party integration.
+可选的受治理专属隔离 Chromium 能力：public-read 会话、site-bound 交互 profile、exact approval、
+显式 user takeover、egress guard 与 download quarantine。默认关闭；在快速开始构建的本地 wheel 上安装
+`browser` extra 后用 `--browser` 启用。历史 PASS 只绑定当时 identity，当前为
+`implemented-candidate`，状态由
+[`018_GOVERNED_BROWSER_TASKS_INDEPENDENT_REVIEW.md`](docs/acceptance/018_GOVERNED_BROWSER_TASKS_INDEPENDENT_REVIEW.md)
+决定。不是个人浏览器、桌面控制、任意网站兼容、后台自治或 production-ready 第三方集成。
 
-## Durable automations (019 split delivery)
+## Durable automations（019，split delivery）
 
-019 keeps the scheduling control plane portable. Definitions, canonical UTC scheduling, CAS
-lifecycle, bounded Runtime/ToolRuntime authority, recovery and purge depend only on typed ports;
-they do not select launchd, systemd, Cron, POSIX/Windows process APIs, Seatbelt or Playwright.
-The detached `docs/acceptance/019_CORE_INDEPENDENT_REVIEW.md` promotes that core only when it binds
-the current sealed/materialized 3×13 receipt and both independent review axes pass; the earlier core review
-`PASS` binds only the previous identity, and the current tree is an implemented candidate.
-
-That portable receipt does **not** mean unattended execution is runnable on this computer or on
-every OS. A macOS host profile is a separate qualification for real persistence, launchd wake,
-hard-deadline cleanup and sandbox composition; it also has a historical PASS receipt bound to its
-earlier identity, and the current tree is an implemented candidate. Linux, Windows and cloud profiles
-remain not qualified and require their own
-equivalent receipts; no platform result is generalized to another platform.
+调度控制面保持 portable：definition、canonical UTC scheduling、CAS lifecycle、bounded authority、
+recovery/purge 只依赖 typed ports，不选择 launchd/systemd/Cron/POSIX-Windows API/Seatbelt/Playwright。
+macOS host profile（真实 persistence、launchd wake、hard-deadline cleanup、sandbox composition）是独立
+qualification；Linux/Windows/cloud 保持 `not_qualified`，不从 macOS 证据外推。当前均为
+`implemented-candidate`，核心状态由
+[`019_CORE_INDEPENDENT_REVIEW.md`](docs/acceptance/019_CORE_INDEPENDENT_REVIEW.md) 决定。

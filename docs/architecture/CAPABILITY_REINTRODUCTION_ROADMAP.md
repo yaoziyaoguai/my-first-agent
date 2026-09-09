@@ -6,6 +6,11 @@ type: architecture
 
 # Capability Reintroduction Roadmap
 
+> 状态（2026-09-09）：本路线图的 Implementation order（Skill → MCP → Memory → SubAgent →
+> Scheduler → TUI）与 G0–G8 阶段已全部执行并验收完毕（历史结论只绑定当时 identity）。当前状态
+> 权威见 [CURRENT_CAPABILITY_STATUS.md](CURRENT_CAPABILITY_STATUS.md)；仓库已冻结为学习里程碑
+> （tag `study-freeze-2026-09-09-candidate`），本文件保留为历史路线图与边界依据。
+
 ## Objective
 
 本路线图规定 `my-first-agent` 如何在不破坏 Minimal Runtime Kernel 的前提下，重新接入 Skill、MCP、Memory、SubAgent、Scheduler 和 TUI。

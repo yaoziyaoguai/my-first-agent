@@ -54,9 +54,5 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["agent", "scripts", "tests"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-addopts = ["-v", "--tb=short"]
-markers = []
+# pytest 配置以仓库根 pytest.ini 为准（testpaths/markers/filterwarnings/addopts）；
+# 此处不再重复定义，避免双份配置互相遮蔽。

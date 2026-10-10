@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 from agent.runtime.compaction_rules import validate_compaction_removal
 from agent.runtime.contracts import (
+    GOAL_TARGET_AUTHORIZATION_EXPIRY_MINUTES,
     SANDBOX_EXPIRY_MINUTES,
     AbandonUnknownModelOutcome,
     AcknowledgeProviderDisclosure,
@@ -23,6 +24,7 @@ from agent.runtime.contracts import (
     ActiveRunStatus,
     ApprovalGrant,
     ApprovalRequest,
+    AuthoritySourceKind,
     BackgroundActionAuthorityV1,
     BeginAnswer,
     BlockedClaim,
@@ -51,6 +53,8 @@ from agent.runtime.contracts import (
     ExecutingIntentRecord,
     ExecutionAuthorityClass,
     FactKind,
+    GoalAuthorizationBinding,
+    GoalAuthorizationScope,
     GoalBootstrap,
     GoalDelta,
     GoalDeltaProposal,
@@ -66,6 +70,7 @@ from agent.runtime.contracts import (
     ProcessAuthorityLeaseV1,
     ProposedCriterion,
     ProviderCallIntentV1,
+    ProviderContinuationV1,
     ProviderDisclosureRequest,
     RecordedRunResult,
     RecoverUnknownObservation,
@@ -75,6 +80,7 @@ from agent.runtime.contracts import (
     ResolveUnknownToolOutcome,
     Resume,
     ResumeGoal,
+    RevokeGoalTargetAuthority,
     RevokeProcessAuthority,
     RunStatus,
     SandboxAuthorityLeaseV1,
@@ -85,8 +91,10 @@ from agent.runtime.contracts import (
     ToolCall,
     canonical_action_digest,
     canonical_json_digest,
+    safe_goal_authorization_target,
     source_result_since_latest_user,
 )
+from agent.runtime.resource_lifecycle import active_task_resources
 
 
 class GoalRevisionConflictError(ValueError):
@@ -131,6 +139,7 @@ _EXPLICIT_LOCAL_PROCESS_PATTERNS = (
     re.compile(
         r"\b(?:run|execute|build|test|validate|check)\b.{0,40}"
         r"(?:test|tests|validator|command|script|build|format|project)\b|"
+        r"\b(?:make|ensure)\b.{0,24}\btests?\s+pass\b|"
         r"\b(?:run|execute)\s+(?:\./|/)[^\s,;]+",
         re.IGNORECASE,
     ),
@@ -400,7 +409,11 @@ def _looks_like_invented_process_artifact(
 
 def _uses_runtime_owned_obligation_id(criterion: ProposedCriterion) -> bool:
     return criterion.criterion_id.startswith(
-        ("criterion:required-public-web:", "criterion:required-local-process:")
+        (
+            "criterion:required-public-web:",
+            "criterion:required-local-process:",
+            "criterion:required-governed-tool:",
+        )
     )
 
 
@@ -411,6 +424,9 @@ def _is_runtime_owned_obligation(criterion: ProposedCriterion) -> bool:
     ) or (
         criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
         and criterion.criterion_id.startswith("criterion:required-local-process:")
+    ) or (
+        criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+        and criterion.criterion_id.startswith("criterion:required-governed-tool:")
     )
 
 
@@ -1207,8 +1223,11 @@ def pause_goal(
         goal=replace(goal, status=GoalStatus.PAUSED),
         active_run=active_run,
         last_safe_result=result,
+        goal_authorizations=(),
         process_leases=(),
         sandbox_leases=(),
+        browser_leases=(),
+        browser_takeover_pending=None,
     )
 
 
@@ -1263,6 +1282,7 @@ def cancel_goal(
         completion_claim=None,
         active_run=active_run,
         last_safe_result=result,
+        goal_authorizations=(),
         process_leases=(),
         sandbox_leases=(),
         browser_leases=(),
@@ -1328,6 +1348,12 @@ def apply_control_request(
             completion_claim=None,
             interaction_state=InteractionState.CLARIFYING,
             active_run=None,
+            # S3-C（DU-24，2026-10-09）：correct 会 bump Goal revision；既有
+            # one-shot 租约绑定旧 revision，状态不变量（leases 必须绑定当前
+            # revision）会在下一次 checkpoint 校验时 fail closed。与 cancel 的
+            # 清理语义对齐：旧租约随纠正作废，新效果需重新批准/租约。
+            process_leases=(),
+            sandbox_leases=(),
             browser_leases=(),
             last_safe_result=RecordedRunResult(
                 status=RunStatus.COMPLETED,
@@ -1486,6 +1512,9 @@ def verify_goal_completion(state: ConversationState) -> ConversationState:
         raise ValueError("goal status is not eligible for completion verification")
     if claim.goal_id != goal.goal_id or claim.goal_revision != goal.revision:
         raise GoalRevisionConflictError("completion claim is stale")
+    if state.browser_takeover_pending is not None:
+        raise ValueError("browser takeover must be resolved before goal verification")
+    active_task_resources(state.facts).require_closed()
     referenced = {
         record.evidence_id: record
         for record in state.evidence_records
@@ -1548,8 +1577,11 @@ def verify_goal_completion(state: ConversationState) -> ConversationState:
         state,
         revision=state.revision + 1,
         goal=replace(goal, status=GoalStatus.VERIFIED_DONE, next_step=None),
+        goal_authorizations=(),
         process_leases=(),
         sandbox_leases=(),
+        browser_leases=(),
+        browser_takeover_pending=None,
     )
 
 
@@ -1590,6 +1622,46 @@ def _append_replay_record(
         replay_floor=replay_floor,
         replay_records=tuple(records),
     )
+
+
+def _goal_target_authorization_scope(
+    state: ConversationState,
+    pending: ApprovalRequest,
+    active: ActiveRun,
+    *,
+    directory: bool,
+) -> str | None:
+    goal = state.goal
+    call = active.tool_calls[active.batch_cursor]
+    target = call.arguments.get("path")
+    if not (
+        goal is not None
+        and pending.tool_name in {"write_file", "edit_file"}
+        and call.name == pending.tool_name
+        and pending.side_effect == SideEffectClass.WRITE.value
+        and pending.egress in {None, EgressClass.NONE.value}
+        and isinstance(target, str)
+    ):
+        return None
+    if not directory:
+        return (
+            target
+            if target in goal.targets and safe_goal_authorization_target(target)
+            else None
+        )
+    target_parts = target.split("/")
+    candidates = []
+    for goal_target in goal.targets:
+        goal_parts = goal_target.split("/")
+        if (
+            len(target_parts) > len(goal_parts)
+            and safe_goal_authorization_target(target)
+            and safe_goal_authorization_target(goal_target)
+            and all(part not in {"", ".", ".."} for part in (*target_parts, *goal_parts))
+            and target_parts[: len(goal_parts)] == goal_parts
+        ):
+            candidates.append(goal_target)
+    return max(candidates, key=lambda item: len(item.split("/")), default=None)
 
 
 def _action_is_legal(state: ConversationState, action: Action) -> tuple[bool, str | None]:
@@ -1676,11 +1748,13 @@ def _action_is_legal(state: ConversationState, action: Action) -> tuple[bool, st
             return False, "browser_takeover_mismatch"
         return True, None
 
-    if isinstance(action, RevokeProcessAuthority):
+    if isinstance(action, (RevokeProcessAuthority, RevokeGoalTargetAuthority)):
         # revoke 是独立 authority action；expected_revision CAS 由 accept_action 通用处理。
         # unknown-effect recovery 优先，revoke 不假装取消已可能的 in-flight effect。
         if _has_unknown_effect(state):
             return False, "unknown_effect_recovery_required"
+        if isinstance(action, RevokeGoalTargetAuthority) and not state.goal_authorizations:
+            return False, "goal_target_authorization_missing"
         return True, None
 
     if isinstance(action, AbandonUnknownModelOutcome):
@@ -1729,6 +1803,22 @@ def _action_is_legal(state: ConversationState, action: Action) -> tuple[bool, st
             or action.binding_digest != pending.binding_digest
         ):
             return False, "pending_request_mismatch"
+        if (
+            action.authorize_goal_target
+            and _goal_target_authorization_scope(
+                state, pending, active, directory=False
+            )
+            is None
+        ):
+            return False, "goal_target_authorization_mismatch"
+        if (
+            action.authorize_goal_directory
+            and _goal_target_authorization_scope(
+                state, pending, active, directory=True
+            )
+            is None
+        ):
+            return False, "goal_directory_authorization_mismatch"
         return True, None
 
     if isinstance(action, ResolveUnknownToolOutcome):
@@ -1830,8 +1920,11 @@ def _mint_process_authority_lease(
     if approved_at is None:
         raise ValueError("approved_at is required for process approval")
     lease_issued_at = _require_zoned_rfc3339(approved_at)
+    # lease_id 绑定批准请求身份：同一命令的第二次批准（修复后重跑验证的正常
+    # 任务路径）铸造新租约而不是撞 state 的 lease_id 唯一性不变量；容量
+    # MAX_PROCESS_LEASES 仍 fail closed。
     lease = ProcessAuthorityLeaseV1.create(
-        lease_id=f"process-lease:{candidate.candidate_id}",
+        lease_id=f"process-lease:{pending.request_id}:{candidate.candidate_id}",
         candidate_digest=candidate.candidate_digest,
         goal_id=candidate.goal_id,
         goal_revision=candidate.goal_revision,
@@ -2005,8 +2098,10 @@ def _mint_sandbox_authority_lease(
     if approved_at is None:
         raise ValueError("approved_at is required for sandbox approval")
     lease_issued_at = _require_zoned_rfc3339(approved_at)
+    # 同 _mint_process_authority_lease：lease_id 绑定批准请求身份，二次批准
+    # 同一验证命令不再撞唯一性不变量（2026-10-04 真实 D01 运行暴露）。
     lease = SandboxAuthorityLeaseV1.create(
-        lease_id=f"sandbox-lease:{candidate.candidate_id}",
+        lease_id=f"sandbox-lease:{pending.request_id}",
         candidate_digest=candidate.candidate_digest,
         goal_id=candidate.goal_id,
         goal_revision=candidate.goal_revision,
@@ -2023,6 +2118,198 @@ def _mint_sandbox_authority_lease(
         expires_at=_add_minutes_rfc3339(lease_issued_at, SANDBOX_EXPIRY_MINUTES),
     )
     return replace(state, sandbox_leases=(*state.sandbox_leases, lease))
+
+
+def _admit_approved_read_only_validation_criterion(
+    state: ConversationState,
+    pending: ApprovalRequest,
+) -> ConversationState:
+    """R1（2026-10-03 follow-up）：read-only sandbox 批准时即固化验证义务。
+
+    对齐 process 审批准入（恢复路径不得绕过）：批准 read-only ``sandbox_exec``
+    验证命令时，把 Runtime 义务绑定为 native_sandbox_v1 无 digest 谓词（receipt
+    尚不存在，candidate 的 fingerprint/policy/mode/network 已可绑定）。多项验证
+    的共存路径由此在生产链上成立；旧 process_v1 义务不变造。仅 read-only 准入：
+    workspace-write/danger 会失效先前证据，不得充当共存验证。
+    """
+
+    candidate = pending.sandbox_authority_candidate
+    goal = state.goal
+    if candidate is None or goal is None or candidate.mode != "read-only":
+        return state
+    active = state.active_run
+    call = (
+        next(
+            (
+                item
+                for item in active.tool_calls
+                if item.tool_call_id == pending.tool_call_id
+            ),
+            None,
+        )
+        if active is not None
+        else None
+    )
+    if call is None or call.name != "sandbox_exec":
+        return state
+    if (
+        candidate.goal_id != goal.goal_id
+        or candidate.goal_revision != goal.revision
+        or candidate.workspace_identity_digest != goal.workspace_identity_digest
+    ):
+        raise ValueError("sandbox candidate does not bind the current Goal")
+    admitted_ids = {item.criterion_id for item in goal.admitted_criteria}
+    proposed_requirement = next(
+        (
+            item
+            for item in goal.proposed_criteria
+            if item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+            and item.criterion_id not in admitted_ids
+        ),
+        None,
+    )
+    if (
+        proposed_requirement is not None
+        and _is_runtime_owned_obligation(proposed_requirement)
+    ):
+        executable = (
+            call.arguments.get("executable")
+            if isinstance(call.arguments, dict)
+            else None
+        )
+        if (
+            not isinstance(executable, str)
+            or not process_entrypoint_matches_authority(state, executable)
+        ):
+            # 与 process 审批同界：approval 不能把另一条命令改写成用户明示
+            # validator 的完成证据。
+            return state
+    criterion_id = (
+        proposed_requirement.criterion_id
+        if proposed_requirement is not None
+        else (
+            f"criterion:sandbox-receipt:{goal.goal_id}:{goal.revision}:"
+            f"{pending.tool_call_id}"
+        )
+    )
+    if any(
+        item.criterion_id == criterion_id
+        and item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+        for item in goal.admitted_criteria
+    ):
+        return state
+    source = next(
+        (
+            fact
+            for fact in state.facts
+            if fact.fact_id in goal.created_from_fact_ids
+            and fact.kind is FactKind.USER_MESSAGE
+        ),
+        None,
+    )
+    if source is None:
+        raise ValueError("sandbox validation criterion requires the authoritative user fact")
+    source_digest = canonical_json_digest(
+        {"fact_id": source.fact_id, "kind": source.kind, "content": source.content}
+    )
+    predicate = {
+        "receipt_kind": "native_sandbox_v1",
+        "command_fingerprint": candidate.original_command_fingerprint,
+        "policy_digest": candidate.policy_digest,
+        "mode": candidate.mode,
+        "network": candidate.network,
+        "backend": "seatbelt",
+        "enforcement": "confined",
+        "outcome": "exited",
+    }
+    binding = CriterionAdmissionBinding.create(
+        binding_id=(
+            f"criterion-admission:sandbox-receipt:{pending.request_id}:"
+            f"{pending.tool_call_id}"
+        ),
+        goal_id=goal.goal_id,
+        goal_revision=goal.revision,
+        workspace_identity_digest=goal.workspace_identity_digest,
+        criterion_id=criterion_id,
+        user_outcome_fact_id=source.fact_id,
+        user_outcome_digest=source_digest,
+        oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+        predicate=predicate,
+        required_evidence_class="native_sandbox_receipt",
+    )
+    admitted = binding.admit(
+        proposed_requirement.description
+        if proposed_requirement is not None
+        else "approved read-only sandbox_exec must produce the exact Kernel receipt"
+    )
+    return replace(
+        state,
+        goal=replace(
+            goal,
+            admitted_criteria=(*goal.admitted_criteria, admitted),
+        ),
+        completion_claim=None,
+    )
+
+
+def _mint_goal_target_authorization(
+    state: ConversationState,
+    pending: ApprovalRequest,
+    action: ResolveApproval,
+    *,
+    active: ActiveRun,
+) -> ConversationState:
+    """把用户 opt-in 绑定为当前 Goal 的文件或明确目录目标。"""
+
+    if not (action.authorize_goal_target or action.authorize_goal_directory):
+        return state
+    directory = action.authorize_goal_directory
+    authorized_target = _goal_target_authorization_scope(
+        state,
+        pending,
+        active,
+        directory=directory,
+    )
+    if authorized_target is None:
+        raise ValueError(
+            "goal authorization requires a current Goal file or directory target"
+        )
+    goal = state.goal
+    assert goal is not None
+    if action.approved_at is None:
+        raise ValueError("approved_at is required for goal target authorization")
+    issued_at = _require_zoned_rfc3339(action.approved_at)
+    binding = GoalAuthorizationBinding.create(
+        binding_id=f"goal-target-authority:{pending.request_id}",
+        goal_id=goal.goal_id,
+        goal_revision=goal.revision,
+        workspace_identity_digest=goal.workspace_identity_digest,
+        operation=pending.tool_name,
+        normalized_target=authorized_target,
+        scope=(
+            GoalAuthorizationScope.DIRECTORY
+            if directory
+            else GoalAuthorizationScope.EXACT_FILE
+        ),
+        source_kind=AuthoritySourceKind.HUMAN_APPROVAL,
+        source_id=pending.request_id,
+        source_digest=canonical_action_digest(action),
+        issued_at=issued_at,
+        expires_at=_add_minutes_rfc3339(
+            issued_at,
+            GOAL_TARGET_AUTHORIZATION_EXPIRY_MINUTES,
+        ),
+    )
+    retained = tuple(
+        item
+        for item in state.goal_authorizations
+        if not (
+            item.operation == binding.operation
+            and item.normalized_target == binding.normalized_target
+            and item.scope is binding.scope
+        )
+    )
+    return replace(state, goal_authorizations=(*retained, binding))
 
 
 def _apply_action(state: ConversationState, action: Action) -> ConversationState:
@@ -2181,6 +2468,8 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                 if lease.lease_id != action.lease_id
             )
         return replace(state, process_leases=retained)
+    if isinstance(action, RevokeGoalTargetAuthority):
+        return replace(state, goal_authorizations=())
     if isinstance(action, AbandonUnknownModelOutcome):
         return end_run(
             state,
@@ -2217,8 +2506,17 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
             updated_state = _mint_sandbox_authority_lease(
                 updated_state, pending, approved_at=action.approved_at
             )
+            updated_state = _admit_approved_read_only_validation_criterion(
+                updated_state, pending
+            )
             updated_state = _mint_browser_authority_lease(
                 updated_state, pending, approved_at=action.approved_at
+            )
+            updated_state = _mint_goal_target_authorization(
+                updated_state,
+                pending,
+                action,
+                active=active,
             )
             updated_state = _admit_process_artifact_criterion(
                 updated_state, pending, action=action,
@@ -2227,6 +2525,11 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                 updated_state,
                 pending,
                 action=action,
+            )
+            updated_state = _add_approved_governed_tool_requirement(
+                updated_state,
+                pending,
+                active=active,
             )
             updated_state = _admit_approved_file_criterion(
                 updated_state,
@@ -2261,29 +2564,23 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                 ),
             },
         )
-        updated = replace(
-            active,
-            status=ActiveRunStatus.RUNNABLE,
-            phase=(
-                ContinuationPhase.TOOL
-                if active.batch_cursor + 1 < len(active.tool_calls)
-                else ContinuationPhase.MODEL
-            ),
-            pending_request=None,
-            approval_grant=None,
-            rejected_request_ids=(
-                (*active.rejected_request_ids, pending.request_id)
-                if active.invocation_origin is InvocationOrigin.MODEL
-                else active.rejected_request_ids
-            ),
-            batch_cursor=active.batch_cursor + 1,
-            tool_calls=(
-                active.tool_calls
-                if active.batch_cursor + 1 < len(active.tool_calls)
-                else ()
+        # 拒绝是用户的强控制信号：结束当前 run，把控制权交还用户。不能继续
+        # 同一 model batch 的剩余工具，也不能再调用 provider 来游说或换命令。
+        # Goal 与此前已持久化的结果保留；后续新指令会形成新的 run 和新绑定。
+        return replace(
+            state,
+            active_run=None,
+            facts=(*state.facts, rejection),
+            last_safe_result=RecordedRunResult(
+                status=RunStatus.CANCELLED,
+                run_id=active.run_id,
+                message=(
+                    "The requested action was declined and this run stopped without "
+                    "executing it. The goal remains available for a new instruction."
+                ),
+                error_code="approval_declined",
             ),
         )
-        return replace(state, active_run=updated, facts=(*state.facts, rejection))
 
     if isinstance(action, ResolveUnknownToolOutcome):
         pending = active.pending_request
@@ -2409,7 +2706,7 @@ def _admit_approved_file_criterion(
     pending = active.pending_request
     path = call.arguments.get("path")
     if (
-        call.name not in {"write_file", "edit_file"}
+        call.name not in {"write_file", "edit_file", "confirm_file"}
         or not isinstance(path, str)
         or not isinstance(pending, ApprovalRequest)
         or pending.new_content_digest is None
@@ -2656,6 +2953,24 @@ def _admit_approved_process_receipt_criterion(
     candidate = pending.process_authority_candidate
     if goal is None or candidate is None:
         return state
+    active = state.active_run
+    call = (
+        next(
+            (
+                item
+                for item in active.tool_calls
+                if item.tool_call_id == pending.tool_call_id
+            ),
+            None,
+        )
+        if active is not None
+        else None
+    )
+    # 该完成义务只描述 foreground validator 的 exited/0 receipt。受管开发服务
+    # 由 browser evidence + managed_web_stop/composition cleanup 闭合，不能伪装成
+    # 一次已退出的 local_process，也不能因此留下永远无法满足的 criterion。
+    if call is None or call.name != "local_process":
+        return state
     if (
         candidate.goal_id != goal.goal_id
         or candidate.goal_revision != goal.revision
@@ -2676,22 +2991,9 @@ def _admit_approved_process_receipt_criterion(
         proposed_requirement is not None
         and _is_runtime_owned_obligation(proposed_requirement)
     ):
-        active = state.active_run
-        call = (
-            next(
-                (
-                    item
-                    for item in active.tool_calls
-                    if item.tool_call_id == pending.tool_call_id
-                ),
-                None,
-            )
-            if active is not None
-            else None
-        )
         executable = (
             call.arguments.get("executable")
-            if call is not None and call.name == "local_process"
+            if call.name == "local_process"
             else None
         )
         if not isinstance(executable, str):
@@ -2766,6 +3068,46 @@ def _admit_approved_process_receipt_criterion(
     )
 
 
+def _add_approved_governed_tool_requirement(
+    state: ConversationState,
+    pending: ApprovalRequest,
+    *,
+    active: ActiveRun,
+) -> ConversationState:
+    """把已批准的 MCP/SubAgent 调用固化为 Runtime-owned 完成义务。"""
+
+    goal = state.goal
+    if goal is None or active.batch_cursor >= len(active.tool_calls):
+        return state
+    call = active.tool_calls[active.batch_cursor]
+    if (
+        call.tool_call_id != pending.tool_call_id
+        or not call.name.startswith(("mcp__", "subagent__"))
+    ):
+        return state
+    criterion_id = (
+        f"criterion:required-governed-tool:{goal.goal_id}:{goal.revision}:"
+        f"{call.tool_call_id}"
+    )
+    if any(
+        item.criterion_id == criterion_id
+        for item in (*goal.proposed_criteria, *goal.admitted_criteria)
+    ):
+        return state
+    requirement = ProposedCriterion(
+        criterion_id=criterion_id,
+        description=(
+            f"the approved {call.name} call returns an exact Kernel-governed receipt"
+        ),
+        oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+    )
+    return replace(
+        state,
+        goal=replace(goal, proposed_criteria=(*goal.proposed_criteria, requirement)),
+        completion_claim=None,
+    )
+
+
 def _admit_process_artifact_criterion(
     state: ConversationState,
     pending: ApprovalRequest,
@@ -2795,6 +3137,14 @@ def _admit_process_artifact_criterion(
         raise ValueError(
             "artifact confirmation requirement does not match a current Goal criterion"
         )
+    if action.defer_artifact_confirmation:
+        if requirement is None:
+            raise ValueError(
+                "artifact confirmation can be deferred only for a pending requirement"
+            )
+        # 这里只批准生成 effect。未铸造 FILESYSTEM_DIGEST criterion；未来字节必须
+        # 由 confirm_file 重新读取、展示并经独立 approval 后才可成为完成证据。
+        return state
     if requirement is not None and (
         ea_path is None
         or ea_sha is None
@@ -2934,6 +3284,151 @@ def admit_process_receipt_criterion(
             goal,
             admitted_criteria=(*goal.admitted_criteria, admitted),
         ),
+        completion_claim=None,
+    )
+
+
+def admit_sandbox_receipt_criterion(
+    state: ConversationState,
+    *,
+    tool_call_id: str,
+    receipt_digest: str,
+    command_fingerprint: str,
+    policy_digest: str,
+    mode: str,
+    network: str,
+    action_seq: int,
+) -> ConversationState:
+    """R1（2026-10-03）：成功 read-only sandbox receipt 的兼容结果时准入。
+
+    正常路径已在批准时铸造无 digest 义务；同 criterion_id 时保持原义务。
+    仅 read-only 模式准入（与共存的失效规则一致）。
+    """
+
+    goal = state.goal
+    if goal is None or mode != "read-only":
+        return state
+    criterion_id = f"criterion:sandbox-receipt:{goal.goal_id}:{goal.revision}:{tool_call_id}"
+    if any(
+        item.criterion_id == criterion_id
+        and item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+        for item in goal.admitted_criteria
+    ):
+        return state
+    source = next(
+        (
+            fact
+            for fact in state.facts
+            if fact.fact_id in goal.created_from_fact_ids
+            and fact.kind is FactKind.USER_MESSAGE
+        ),
+        None,
+    )
+    if source is None:
+        return state
+    source_digest = canonical_json_digest(
+        {"fact_id": source.fact_id, "kind": source.kind, "content": source.content}
+    )
+    predicate = {
+        "receipt_kind": "native_sandbox_v1",
+        "receipt_digest": receipt_digest,
+        "command_fingerprint": command_fingerprint,
+        "policy_digest": policy_digest,
+        "mode": mode,
+        "network": network,
+        "backend": "seatbelt",
+        "enforcement": "confined",
+        "outcome": "exited",
+    }
+    binding = CriterionAdmissionBinding.create(
+        binding_id=f"criterion-admission:sandbox-receipt:{action_seq}:{tool_call_id}",
+        goal_id=goal.goal_id,
+        goal_revision=goal.revision,
+        workspace_identity_digest=goal.workspace_identity_digest,
+        criterion_id=criterion_id,
+        user_outcome_fact_id=source.fact_id,
+        user_outcome_digest=source_digest,
+        oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+        predicate=predicate,
+        required_evidence_class="native_sandbox_receipt",
+    )
+    admitted = binding.admit("read-only sandbox command contract satisfied by Kernel receipt")
+    return replace(
+        state,
+        goal=replace(
+            goal,
+            admitted_criteria=(*goal.admitted_criteria, admitted),
+        ),
+        completion_claim=None,
+    )
+
+
+def admit_governed_tool_receipt_criterion(
+    state: ConversationState,
+    *,
+    tool_call_id: str,
+    tool_name: str,
+    receipt_digest: str,
+    action_seq: int,
+) -> ConversationState:
+    """把 Kernel 铸造的通用 effect receipt 绑定到一个待完成工具 criterion。"""
+
+    goal = state.goal
+    if (
+        goal is None
+        or not tool_call_id
+        or not tool_name.startswith(("mcp__", "subagent__"))
+        or len(receipt_digest) != 64
+        or any(character not in "0123456789abcdef" for character in receipt_digest)
+    ):
+        return state
+    criterion_id = (
+        f"criterion:required-governed-tool:{goal.goal_id}:{goal.revision}:"
+        f"{tool_call_id}"
+    )
+    requirement = next(
+        (
+            item
+            for item in goal.proposed_criteria
+            if item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+            and item.criterion_id == criterion_id
+        ),
+        None,
+    )
+    if requirement is None:
+        return state
+    source = next(
+        (
+            fact
+            for fact in state.facts
+            if fact.fact_id in goal.created_from_fact_ids
+            and fact.kind is FactKind.USER_MESSAGE
+        ),
+        None,
+    )
+    if source is None:
+        return state
+    source_digest = canonical_json_digest(
+        {"fact_id": source.fact_id, "kind": source.kind, "content": source.content}
+    )
+    binding = CriterionAdmissionBinding.create(
+        binding_id=f"criterion-admission:governed-tool:{action_seq}:{tool_call_id}",
+        goal_id=goal.goal_id,
+        goal_revision=goal.revision,
+        workspace_identity_digest=goal.workspace_identity_digest,
+        criterion_id=criterion_id,
+        user_outcome_fact_id=source.fact_id,
+        user_outcome_digest=source_digest,
+        oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+        predicate={"receipt_digest": receipt_digest},
+        required_evidence_class="governed_tool_receipt",
+    )
+    admitted = binding.admit(
+        f"{tool_name} completed with the exact Kernel-governed result receipt"
+    )
+    return replace(
+        state,
+        goal=replace(goal, admitted_criteria=(*goal.admitted_criteria, admitted)),
         completion_claim=None,
     )
 
@@ -3130,18 +3625,39 @@ def finalize_action(
     )
 
 
-def complete_run(state: ConversationState, *, message: str | None = None) -> ConversationState:
+def _provider_continuation_payload(
+    continuation: ProviderContinuationV1 | None,
+) -> dict[str, str] | None:
+    if continuation is None:
+        return None
+    return {
+        "provider_identity_digest": continuation.provider_identity_digest,
+        "opaque_payload": continuation.opaque_payload,
+        "opaque_payload_digest": continuation.opaque_payload_digest,
+    }
+
+
+def complete_run(
+    state: ConversationState,
+    *,
+    message: str | None = None,
+    provider_continuation: ProviderContinuationV1 | None = None,
+) -> ConversationState:
     active = state.active_run
     if active is None:
         raise ValueError("active run required")
     facts = state.facts
     if message is not None:
+        content = {"text": message}
+        continuation_payload = _provider_continuation_payload(provider_continuation)
+        if continuation_payload is not None:
+            content["provider_continuation"] = continuation_payload
         facts = (
             *facts,
             ConversationFact(
                 fact_id=f"run:{active.run_id}:assistant:{state.revision + 1}",
                 kind=FactKind.ASSISTANT_MESSAGE,
-                content={"text": message},
+                content=content,
             ),
         )
     return replace(
@@ -3207,6 +3723,36 @@ def begin_provider_call(
             provider_call_intent=intent,
             persisted_model_response=None,
             model_calls_used=intent.provider_call_index,
+            input_tokens_used=active.input_tokens_used + input_tokens,
+        ),
+    )
+
+
+def record_foreground_model_attempt(
+    state: ConversationState,
+    *,
+    input_tokens: int,
+) -> ConversationState:
+    """发送前持久化前台 run 的累计模型调用；Resume 不重置该预算。"""
+
+    active = state.active_run
+    if (
+        active is None
+        or state.background_occurrence_binding is not None
+        or active.status is not ActiveRunStatus.RUNNABLE
+        or active.phase is not ContinuationPhase.MODEL
+        or active.owner_invocation_id is None
+        or not isinstance(input_tokens, int)
+        or isinstance(input_tokens, bool)
+        or input_tokens < 0
+    ):
+        raise ValueError("foreground model attempt requires an owned runnable model phase")
+    return replace(
+        state,
+        revision=state.revision + 1,
+        active_run=replace(
+            active,
+            model_calls_used=active.model_calls_used + 1,
             input_tokens_used=active.input_tokens_used + input_tokens,
         ),
     )
@@ -3371,6 +3917,7 @@ def start_tool_batch(
     calls: tuple[ToolCall, ...],
     *,
     preamble: str | None = None,
+    provider_continuation: ProviderContinuationV1 | None = None,
 ) -> ConversationState:
     active = state.active_run
     if active is None or active.status is not ActiveRunStatus.RUNNABLE:
@@ -3393,6 +3940,9 @@ def start_tool_batch(
     content = {"calls": serialized_calls}
     if preamble:
         content["preamble"] = preamble
+    continuation_payload = _provider_continuation_payload(provider_continuation)
+    if continuation_payload is not None:
+        content["provider_continuation"] = continuation_payload
     fact = ConversationFact(
         fact_id=f"run:{active.run_id}:tool-batch:{state.revision + 1}",
         kind=FactKind.TOOL_CALLS,
@@ -3552,6 +4102,7 @@ def mark_executing(
     process_lease_id: str | None = None,
     sandbox_lease_id: str | None = None,
     browser_lease_id: str | None = None,
+    goal_authorization_id: str | None = None,
     background_action_authority: BackgroundActionAuthorityV1 | None = None,
 ) -> ConversationState:
     if not isinstance(request_identity, str) or not request_identity:
@@ -3675,9 +4226,23 @@ def mark_executing(
         if not consumed_browser:
             raise ValueError("browser lease use could not bind the executing intent")
         browser_leases = tuple(incremented_browser)
+    goal_authorizations = state.goal_authorizations
+    if goal_authorization_id is not None:
+        incremented_authorizations: list[GoalAuthorizationBinding] = []
+        consumed_authorization = False
+        for binding in goal_authorizations:
+            if binding.binding_id == goal_authorization_id and not consumed_authorization:
+                incremented_authorizations.append(binding.with_use_consumed())
+                consumed_authorization = True
+            else:
+                incremented_authorizations.append(binding)
+        if not consumed_authorization:
+            raise ValueError("goal authorization use could not bind the executing intent")
+        goal_authorizations = tuple(incremented_authorizations)
     return replace(
         state,
         revision=state.revision + 1,
+        goal_authorizations=goal_authorizations,
         process_leases=process_leases,
         sandbox_leases=sandbox_leases,
         browser_leases=browser_leases,

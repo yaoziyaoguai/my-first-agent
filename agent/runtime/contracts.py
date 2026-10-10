@@ -282,6 +282,11 @@ class AuthoritySourceKind(StrEnum):
     DURABLE_GRANT = "durable_grant"
 
 
+class GoalAuthorizationScope(StrEnum):
+    EXACT_FILE = "exact_file"
+    DIRECTORY = "directory"
+
+
 class FactAdmissionClass(StrEnum):
     WORKSPACE_FACT = "workspace_fact"
     VERIFIED_DERIVED_NOTE = "verified_derived_note"
@@ -723,6 +728,37 @@ class GoalDelta:
         object.__setattr__(self, "updates", _freeze_json_dict(self.updates))
 
 
+GOAL_TARGET_AUTHORIZATION_MAX_USES = 16
+GOAL_TARGET_AUTHORIZATION_EXPIRY_MINUTES = 60
+_GOAL_AUTHORIZATION_SENSITIVE_COMPONENTS = frozenset(
+    {
+        ".aws",
+        ".claude",
+        ".codex",
+        ".git",
+        ".gnupg",
+        ".kube",
+        ".ssh",
+        ".ua",
+        "credentials",
+        "graphify-out",
+    }
+)
+
+
+def safe_goal_authorization_target(target: str) -> bool:
+    if not isinstance(target, str) or target.startswith("/"):
+        return False
+    parts = target.split("/")
+    return bool(parts) and all(
+        part not in {"", ".", ".."}
+        and part.casefold() not in _GOAL_AUTHORIZATION_SENSITIVE_COMPONENTS
+        and not part.casefold().startswith(".env")
+        and not part.casefold().endswith((".pem", ".key", ".p12", ".pfx"))
+        for part in parts
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class GoalAuthorizationBinding:
     binding_id: str
@@ -734,7 +770,12 @@ class GoalAuthorizationBinding:
     source_kind: AuthoritySourceKind
     source_id: str
     source_digest: str
+    issued_at: str
+    expires_at: str
+    max_uses: int
+    uses_consumed: int
     binding_digest: str
+    scope: GoalAuthorizationScope = GoalAuthorizationScope.EXACT_FILE
 
     def __post_init__(self) -> None:
         if not isinstance(self.source_kind, AuthoritySourceKind):
@@ -748,13 +789,21 @@ class GoalAuthorizationBinding:
                 self.normalized_target,
                 self.source_id,
                 self.source_digest,
+                self.issued_at,
+                self.expires_at,
                 self.binding_digest,
             )
         ):
             raise ValueError("goal authorization binding fields must not be empty")
         if self.goal_revision < 1:
             raise ValueError("goal authorization revision must be positive")
-        if self.normalized_target.startswith(("/", "../")) or "/../" in self.normalized_target:
+        if not isinstance(self.scope, GoalAuthorizationScope):
+            raise ValueError("goal authorization scope must be closed")
+        if self.max_uses != GOAL_TARGET_AUTHORIZATION_MAX_USES:
+            raise ValueError("goal authorization max_uses must use the fixed bound")
+        if not 0 <= self.uses_consumed <= self.max_uses:
+            raise ValueError("goal authorization uses_consumed is outside its bound")
+        if not safe_goal_authorization_target(self.normalized_target):
             raise ValueError("authorization target must be normalized and workspace-relative")
         if self.binding_digest != self._expected_digest():
             raise ValueError("goal authorization binding digest mismatch")
@@ -771,6 +820,11 @@ class GoalAuthorizationBinding:
                 "source_kind": self.source_kind,
                 "source_id": self.source_id,
                 "source_digest": self.source_digest,
+                "issued_at": self.issued_at,
+                "expires_at": self.expires_at,
+                "max_uses": self.max_uses,
+                "uses_consumed": self.uses_consumed,
+                "scope": self.scope,
             }
         )
 
@@ -787,6 +841,11 @@ class GoalAuthorizationBinding:
         source_kind: AuthoritySourceKind,
         source_id: str,
         source_digest: str,
+        issued_at: str,
+        expires_at: str,
+        max_uses: int = GOAL_TARGET_AUTHORIZATION_MAX_USES,
+        uses_consumed: int = 0,
+        scope: GoalAuthorizationScope = GoalAuthorizationScope.EXACT_FILE,
     ) -> GoalAuthorizationBinding:
         if not isinstance(source_kind, AuthoritySourceKind):
             raise ValueError("authority source must be authoritative user or durable state")
@@ -800,8 +859,39 @@ class GoalAuthorizationBinding:
             "source_kind": source_kind,
             "source_id": source_id,
             "source_digest": source_digest,
+            "issued_at": issued_at,
+            "expires_at": expires_at,
+            "max_uses": max_uses,
+            "uses_consumed": uses_consumed,
+            "scope": scope,
         }
         return cls(**values, binding_digest=canonical_json_digest(values))
+
+    @property
+    def remaining_uses(self) -> int:
+        return self.max_uses - self.uses_consumed
+
+    def with_use_consumed(self) -> GoalAuthorizationBinding:
+        values = {
+            "binding_id": self.binding_id,
+            "goal_id": self.goal_id,
+            "goal_revision": self.goal_revision,
+            "workspace_identity_digest": self.workspace_identity_digest,
+            "operation": self.operation,
+            "normalized_target": self.normalized_target,
+            "source_kind": self.source_kind,
+            "source_id": self.source_id,
+            "source_digest": self.source_digest,
+            "issued_at": self.issued_at,
+            "expires_at": self.expires_at,
+            "max_uses": self.max_uses,
+            "uses_consumed": self.uses_consumed + 1,
+            "scope": self.scope,
+        }
+        return GoalAuthorizationBinding(
+            **values,
+            binding_digest=canonical_json_digest(values),
+        )
 
     def authorizes(
         self,
@@ -817,9 +907,28 @@ class GoalAuthorizationBinding:
             and self.goal_revision == goal_revision
             and self.workspace_identity_digest == workspace_identity_digest
             and self.operation == operation
-            and self.normalized_target == normalized_target
+            and (
+                self.normalized_target == normalized_target
+                if self.scope is GoalAuthorizationScope.EXACT_FILE
+                else _path_is_within_directory(
+                    normalized_target,
+                    self.normalized_target,
+                )
+            )
             and self.binding_digest == self._expected_digest()
         )
+
+
+def _path_is_within_directory(target: str, directory: str) -> bool:
+    target_parts = target.split("/")
+    directory_parts = directory.split("/")
+    if (
+        any(part in {"", ".", ".."} for part in target_parts)
+        or any(part in {"", ".", ".."} for part in directory_parts)
+        or len(target_parts) < len(directory_parts)
+    ):
+        return False
+    return target_parts[: len(directory_parts)] == directory_parts
 
 
 @dataclass(frozen=True, slots=True)
@@ -2330,6 +2439,11 @@ class SandboxAuthorityCandidateV1:
         trust_notice_digest: str,
         issued_at: str,
     ) -> SandboxAuthorityCandidateV1:
+        # R1（2026-10-03 follow-up）：issued_at 不进 candidate digest——审批后的
+        # 重 prepare 会携带新 issued_at；digest 漂移会让 exact lease 永远 miss
+        # 并把 stale grant 变成 invariant 冲突。digest 只绑定批准面（命令/策略/
+        # 模式/网络/预览），同绑定 ⇒ 同 digest；同 fingerprint 的 timeout 变更仍
+        # 改变 digest（wall deadline 在 binding/digest 输入内），保持重批语义。
         values = {
             "candidate_id": candidate_id,
             "goal_id": goal_id,
@@ -2342,7 +2456,6 @@ class SandboxAuthorityCandidateV1:
             "readable_command": readable_command,
             "trust_notice_id": trust_notice_id,
             "trust_notice_digest": trust_notice_digest,
-            "issued_at": issued_at,
             "execution_authority": ExecutionAuthorityClass.ISOLATED_SANDBOX.value,
         }
         return cls(
@@ -2352,9 +2465,11 @@ class SandboxAuthorityCandidateV1:
                 key: value for key, value in values.items()
                 if key not in ("goal_revision", "execution_authority")
             },
+            issued_at=issued_at,
         )
 
     def _digest_values(self) -> dict[str, JSONValue]:
+        # R1（2026-10-03 follow-up）：与 create() 一致，issued_at 不参与 digest。
         return {
             "candidate_id": self.candidate_id,
             "goal_id": self.goal_id,
@@ -2367,7 +2482,6 @@ class SandboxAuthorityCandidateV1:
             "readable_command": self.readable_command,
             "trust_notice_id": self.trust_notice_id,
             "trust_notice_digest": self.trust_notice_digest,
-            "issued_at": self.issued_at,
             "execution_authority": self.execution_authority.value,
         }
 
@@ -2839,7 +2953,11 @@ class SandboxReceiptV1:
 # 018 governed browser tasks：mode/consequence 的 closed 字符串值
 #（runtime 不 import browser 包——依赖方向只能是 browser → runtime）。
 BROWSER_MODE_VALUES = frozenset(
-    {"public_read_ephemeral", "site_bound_interactive"}
+    {
+        "public_read_ephemeral",
+        "site_bound_interactive",
+        "task_loopback_ephemeral",
+    }
 )
 BROWSER_CONSEQUENCE_VALUES = frozenset(
     {"observe", "disclose", "download", "upload", "commit"}
@@ -2864,7 +2982,14 @@ def _require_browser_datetime(value: str, field: str) -> None:
 
 
 def _parse_browser_datetime(value: str, field: str):
-    if not isinstance(value, str) or "T" not in value or value[-6] not in "+-":
+    # 2026-10-05 真实 D06 运行暴露：产品时钟产出 "…Z"（_default_utc_now），而
+    # browser binding 用 isoformat 的 "…+00:00"；两种 zoned RFC3339 形式都必须
+    # 接受（原 value[-6] 检查误拒 Z 形式，真实审批路径直接崩）。
+    if not isinstance(value, str) or "T" not in value:
+        raise ValueError(f"browser {field} must be a zoned RFC3339 string")
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    if len(value) < 6 or value[-6] not in "+-":
         raise ValueError(f"browser {field} must be a zoned RFC3339 string")
     from datetime import datetime
 
@@ -3374,6 +3499,8 @@ class ProviderCallIntentV1:
 @dataclass(frozen=True, slots=True)
 class ActiveRun:
     run_id: str
+    # 由 Runtime 在首次接管 run 时写入；Resume 只复用，不能重置任务总时限。
+    run_started_at: str | None = None
     status: ActiveRunStatus = ActiveRunStatus.RUNNABLE
     phase: ContinuationPhase = ContinuationPhase.MODEL
     owner_invocation_id: str | None = None
@@ -3397,6 +3524,11 @@ class ActiveRun:
     def __post_init__(self) -> None:
         if not self.run_id:
             raise ValueError("run_id must not be empty")
+        if self.run_started_at is not None and (
+            not isinstance(self.run_started_at, str)
+            or _RFC3339_Z.fullmatch(self.run_started_at) is None
+        ):
+            raise ValueError("run_started_at must be zoned RFC3339")
         if not isinstance(self.invocation_origin, InvocationOrigin):
             raise TypeError("active run invocation origin must be closed")
         if self.batch_cursor < 0:
@@ -3528,6 +3660,11 @@ class RecordedRunResult:
     message: str | None = None
     request_id: str | None = None
     error_code: str | None = None
+    # 2026-10-10：终态记录保留本次 run 的模型 usage（费用可观测性）。
+    # None 表示旧 checkpoint / 非 run 终态路径；解码对缺失键向后兼容。
+    model_calls_used: int | None = None
+    input_tokens_used: int | None = None
+    output_tokens_used: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -4223,6 +4360,30 @@ class ResolveApproval(RuntimeAction):
     # 模型无法自供（local_process schema 已回 closed 4 字段）。malformed fail closed。
     confirmed_artifact_path: str | None = None
     confirmed_artifact_sha256: str | None = None
+    # 对程序尚未生成的产物，用户只能先批准 command effect；不能被迫猜未来摘要。
+    # 该位只延后 FILESYSTEM_DIGEST 准入，绝不等于确认产物，后续仍需 confirm_file。
+    defer_artifact_confirmation: bool = False
+    # 显式 opt-in：把当前文件批准提升为当前 Goal/revision、同一 workspace、
+    # 同一工具与同一精确目标的授权。默认 False 保持逐笔批准。
+    authorize_goal_target: bool = False
+    # 只有当前调用位于 Goal 明确列出的目录 target 下时才可铸造；不从文件父目录猜测。
+    authorize_goal_directory: bool = False
+
+    def __post_init__(self) -> None:
+        if self.defer_artifact_confirmation and (
+            not self.approved
+            or self.confirmed_artifact_path is not None
+            or self.confirmed_artifact_sha256 is not None
+        ):
+            raise ValueError(
+                "deferred artifact confirmation requires approval without a supplied digest"
+            )
+        if self.authorize_goal_target and not self.approved:
+            raise ValueError("goal target authorization requires approval")
+        if self.authorize_goal_directory and not self.approved:
+            raise ValueError("goal directory authorization requires approval")
+        if self.authorize_goal_target and self.authorize_goal_directory:
+            raise ValueError("choose either exact target or directory authorization")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -4235,6 +4396,13 @@ class RevokeProcessAuthority(RuntimeAction):
     """
 
     lease_id: str | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RevokeGoalTargetAuthority(RuntimeAction):
+    """撤销当前 Goal 的全部精确文件目标授权；不影响已完成 effect。"""
+
+    pass
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -4418,6 +4586,7 @@ Action: TypeAlias = (
     | CancelGoal
     | ConfirmCriterion
     | RevokeProcessAuthority
+    | RevokeGoalTargetAuthority
     | CompleteBrowserTakeover
     | CancelBrowserTakeover
     | ExecuteOperatorTool
@@ -4471,6 +4640,13 @@ class RunResult:
     replayed: bool = False
     error_code: str | None = None
     delivery_warnings: tuple[str, ...] = ()
+    model_calls_used: int = 0
+
+    def __post_init__(self) -> None:
+        for name in ("model_calls_used",):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"{name} must be non-negative")
 
 
 class RuntimeEventKind(StrEnum):
@@ -4505,11 +4681,53 @@ class RuntimeEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderContinuationV1:
+    """只供同一 provider 回放的 opaque 连续性；不属于可展示的模型内容。"""
+
+    provider_identity_digest: str
+    opaque_payload: str = field(repr=False)
+    opaque_payload_digest: str
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        provider_identity_digest: str,
+        opaque_payload: str,
+    ) -> ProviderContinuationV1:
+        return cls(
+            provider_identity_digest=provider_identity_digest,
+            opaque_payload=opaque_payload,
+            opaque_payload_digest=hashlib.sha256(
+                opaque_payload.encode("utf-8")
+            ).hexdigest(),
+        )
+
+    def __post_init__(self) -> None:
+        if not _is_lower_hex(self.provider_identity_digest, length=64):
+            raise ValueError("provider continuation identity digest is malformed")
+        if not isinstance(self.opaque_payload, str) or not self.opaque_payload:
+            raise ValueError("provider continuation payload must be non-empty text")
+        if len(self.opaque_payload.encode("utf-8")) > 4_000_000:
+            raise ValueError("provider continuation payload exceeds its bound")
+        if not _is_lower_hex(self.opaque_payload_digest, length=64):
+            raise ValueError("provider continuation payload digest is malformed")
+        expected = hashlib.sha256(self.opaque_payload.encode("utf-8")).hexdigest()
+        if self.opaque_payload_digest != expected:
+            raise ValueError("provider continuation payload digest mismatch")
+
+
+@dataclass(frozen=True, slots=True)
 class ModelMessage:
     role: str
     content: tuple[dict[str, JSONValue], ...]
+    provider_continuation: ProviderContinuationV1 | None = None
 
     def __post_init__(self) -> None:
+        if self.provider_continuation is not None and not isinstance(
+            self.provider_continuation, ProviderContinuationV1
+        ):
+            raise TypeError("model message provider continuation is invalid")
         _assert_json_compatible(self.content, path="model_message.content")
         object.__setattr__(
             self,
@@ -4827,6 +5045,7 @@ class ModelResponse:
     stop_reason: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    provider_continuation: ProviderContinuationV1 | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "blocks", tuple(self.blocks))
@@ -4838,6 +5057,10 @@ class ModelResponse:
             isinstance(block, ModelToolCall) for block in self.blocks
         ):
             raise ValueError("model control cannot be combined with callable tool calls")
+        if self.provider_continuation is not None and not isinstance(
+            self.provider_continuation, ProviderContinuationV1
+        ):
+            raise TypeError("model response provider continuation is invalid")
         for label, value in (
             ("input_tokens", self.input_tokens),
             ("output_tokens", self.output_tokens),
@@ -4868,6 +5091,19 @@ class ModelResponse:
                     "type": "control",
                     "name": type(self.control).__name__,
                     "payload": _canonical_json_value(asdict(self.control)),
+                }
+            )
+        if self.provider_continuation is not None:
+            payload.append(
+                {
+                    "type": "provider_continuation",
+                    "provider_identity_digest": (
+                        self.provider_continuation.provider_identity_digest
+                    ),
+                    "opaque_payload": self.provider_continuation.opaque_payload,
+                    "opaque_payload_digest": (
+                        self.provider_continuation.opaque_payload_digest
+                    ),
                 }
             )
         encoded = json.dumps(
@@ -4913,6 +5149,19 @@ def model_response_payload(response: ModelResponse) -> dict[str, JSONValue]:
         "stop_reason": response.stop_reason,
         "input_tokens": response.input_tokens,
         "output_tokens": response.output_tokens,
+        "provider_continuation": (
+            None
+            if response.provider_continuation is None
+            else {
+                "provider_identity_digest": (
+                    response.provider_continuation.provider_identity_digest
+                ),
+                "opaque_payload": response.provider_continuation.opaque_payload,
+                "opaque_payload_digest": (
+                    response.provider_continuation.opaque_payload_digest
+                ),
+            }
+        ),
     }
 
 
@@ -4938,7 +5187,14 @@ def _payload_int(value: object, label: str) -> int:
 def model_response_from_payload(value: object) -> ModelResponse:
     raw = _exact_payload(
         value,
-        {"blocks", "control", "stop_reason", "input_tokens", "output_tokens"},
+        {
+            "blocks",
+            "control",
+            "stop_reason",
+            "input_tokens",
+            "output_tokens",
+            "provider_continuation",
+        },
         "model_response",
     )
     if not isinstance(raw["blocks"], list):
@@ -5140,12 +5396,36 @@ def model_response_from_payload(value: object) -> ModelResponse:
     stop_reason = raw["stop_reason"]
     if stop_reason is not None and not isinstance(stop_reason, str):
         raise ValueError("stop_reason must be a string or null")
+    provider_continuation = None
+    if raw["provider_continuation"] is not None:
+        continuity = _exact_payload(
+            raw["provider_continuation"],
+            {
+                "provider_identity_digest",
+                "opaque_payload",
+                "opaque_payload_digest",
+            },
+            "provider_continuation",
+        )
+        provider_continuation = ProviderContinuationV1(
+            provider_identity_digest=_payload_string(
+                continuity["provider_identity_digest"],
+                "provider_identity_digest",
+            ),
+            opaque_payload=_payload_string(
+                continuity["opaque_payload"], "opaque_payload"
+            ),
+            opaque_payload_digest=_payload_string(
+                continuity["opaque_payload_digest"], "opaque_payload_digest"
+            ),
+        )
     return ModelResponse(
         blocks=tuple(blocks),
         control=control,
         stop_reason=stop_reason,
         input_tokens=optional_int(raw["input_tokens"], "input_tokens"),
         output_tokens=optional_int(raw["output_tokens"], "output_tokens"),
+        provider_continuation=provider_continuation,
     )
 
 

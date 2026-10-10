@@ -48,3 +48,4 @@ CLAUDE.md
 .DS_Store
 node_modules/
 .tui_audit_log*
+.local/

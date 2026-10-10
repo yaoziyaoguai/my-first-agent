@@ -35,6 +35,74 @@ from agent.runtime.state import (
 )
 
 
+def sandbox_receipt_projection(receipt: SandboxReceiptV1) -> dict[str, str | int]:
+    """receipt → fact metadata 的统一投影（evidence 与 loop 抑制折叠共用）。"""
+
+    return {
+        "sandbox_receipt_kind": "native_sandbox_v1",
+        "receipt_digest": receipt.receipt_digest,
+        "execution_authority": "isolated_sandbox",
+        "outcome": receipt.outcome,
+        "original_command_fingerprint": receipt.original_command_fingerprint,
+        "policy_digest": receipt.policy_digest,
+        "mode": receipt.mode,
+        "network": receipt.network,
+        "backend": receipt.backend,
+        "enforcement": receipt.enforcement,
+        "profile_digest": receipt.profile_digest,
+        "lease_id": receipt.lease_id,
+    }
+
+
+def trusted_readonly_native_sandbox_success(
+    fact: ConversationFact,
+    *,
+    workspace_identity_digest: str | None = None,
+) -> bool:
+    """判定已执行 TOOL_RESULT fact 是否为可信只读 native sandbox 验证成功。
+
+    S1-A（2026-10-09）：loop 的请求抑制折叠与 evidence 的失效判断必须共用
+    这一严格分类，不能只信 metadata 的 ``mode`` 字段：``from_json`` 严格解析
+    （含 digest 重算）、metadata 投影与 receipt 一致、read-only/off/
+    seatbelt/confined、outcome=exited 且 exit_code=0 全部成立才算可信；
+    fake/mock/synthetic 标记与无法证明只读的组合一律不算。传入
+    ``workspace_identity_digest`` 时还要求 receipt 的 workspace 绑定一致。
+    """
+
+    if fact.kind is not FactKind.TOOL_RESULT:
+        return False
+    if (
+        fact.content.get("executed") is not True
+        or fact.content.get("is_error") is not False
+    ):
+        return False
+    metadata = fact.content.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    if any(metadata.get(key) for key in ("fake", "mock", "synthetic")):
+        return False
+    try:
+        receipt = SandboxReceiptV1.from_json(metadata.get("sandbox_receipt"))
+    except ValueError:
+        return False
+    projection = sandbox_receipt_projection(receipt)
+    if any(metadata.get(key) != value for key, value in projection.items()):
+        return False
+    if (
+        workspace_identity_digest is not None
+        and receipt.workspace_identity_digest != workspace_identity_digest
+    ):
+        return False
+    return (
+        receipt.mode == "read-only"
+        and receipt.network == "off"
+        and receipt.backend == "seatbelt"
+        and receipt.enforcement == "confined"
+        and receipt.outcome == "exited"
+        and metadata.get("exit_code") == 0
+    )
+
+
 class EvidenceVerificationError(ValueError):
     pass
 
@@ -57,6 +125,10 @@ _GENERIC_GAP_INSTRUCTION = (
     "Do not repeat completion. Call the concrete tools needed to create the "
     "missing evidence, or send blocked_claim if no safe action can advance the Goal."
 )
+
+# 使既有 workspace 验证失效的治理写入工具（evidence 失效判断与 loop 抑制折叠
+# 共用同一清单，不能两边各自漂移）。
+WORKSPACE_WRITE_TOOLS = frozenset({"write_file", "edit_file", "make_directory"})
 
 
 @dataclass(frozen=True)
@@ -423,6 +495,7 @@ class ClosedEvidenceRegistry:
         }
         run_prefix = f"run:{active.run_id}:"
         attempted_names: set[str] = set()
+        process_call_ids: set[str] = set()
         attempted_process_entrypoints: set[str] = set()
         attempted_workspace_entrypoints: set[str] = set()
         path_action_by_call_id: dict[str, tuple[str, str]] = {}
@@ -444,6 +517,8 @@ class ClosedEvidenceRegistry:
                     and isinstance(arguments, dict)
                     and isinstance(arguments.get("executable"), str)
                 ):
+                    if isinstance(call_id, str):
+                        process_call_ids.add(call_id)
                     executable = arguments["executable"]
                     normalized = normalize_process_entrypoint(executable)
                     attempted_process_entrypoints.add(normalized)
@@ -452,7 +527,7 @@ class ClosedEvidenceRegistry:
                 if (
                     isinstance(call_id, str)
                     and isinstance(name, str)
-                    and name in {"read_file", "write_file", "edit_file"}
+                    and name in {"read_file", "confirm_file", "write_file", "edit_file"}
                     and isinstance(arguments, dict)
                     and isinstance(arguments.get("path"), str)
                 ):
@@ -467,6 +542,14 @@ class ClosedEvidenceRegistry:
             and isinstance((call_id := fact.content.get("tool_call_id")), str)
             and call_id in path_action_by_call_id
         }
+        successful_process = any(
+            fact.kind is FactKind.TOOL_RESULT
+            and fact.fact_id.startswith(run_prefix)
+            and fact.content.get("executed") is True
+            and fact.content.get("is_error") is False
+            and fact.content.get("tool_call_id") in process_call_ids
+            for fact in state.facts
+        )
         available = set(available_tools)
         requested_process_entrypoints = authoritative_process_entrypoints(state)
         process_attempt_is_relevant = bool(attempted_process_entrypoints) and (
@@ -487,7 +570,12 @@ class ClosedEvidenceRegistry:
                     # 成功的 exact write/edit/read 已把下一步收敛为 evidence
                     # read-back 或 completion；失败的预读则不能替代仍可执行的写入。
                     continue
-                for name in ("write_file", "edit_file"):
+                preferred = (
+                    ("confirm_file", "write_file", "edit_file")
+                    if successful_process
+                    else ("write_file", "edit_file", "confirm_file")
+                )
+                for name in preferred:
                     if name in available:
                         required.append(name)
                         break
@@ -818,7 +906,7 @@ class ClosedEvidenceRegistry:
                 continue
             call_id = fact.content.get("tool_call_id")
             call = calls.get(call_id) if isinstance(call_id, str) else None
-            if call is None or call.get("name") != "read_file":
+            if call is None or call.get("name") not in {"read_file", "confirm_file"}:
                 continue
             arguments = call.get("arguments")
             if not isinstance(arguments, dict) or arguments.get("path") != path:
@@ -960,12 +1048,12 @@ class ClosedEvidenceRegistry:
             raise EvidenceVerificationError("filesystem predicate is malformed")
         calls = self._calls(facts)
         source: list[ConversationFact] = []
-        for fact in facts:
+        for fact_index, fact in enumerate(facts):
             if fact.kind is not FactKind.TOOL_RESULT:
                 continue
             call_id = fact.content.get("tool_call_id")
             call = calls.get(call_id) if isinstance(call_id, str) else None
-            if call is None or call.get("name") != "read_file":
+            if call is None or call.get("name") not in {"read_file", "confirm_file"}:
                 continue
             arguments = call.get("arguments")
             if not isinstance(arguments, dict) or arguments.get("path") != path:
@@ -1003,6 +1091,11 @@ class ClosedEvidenceRegistry:
             ):
                 proved = True
             if not proved:
+                continue
+            if any(
+                self._may_invalidate_workspace_validation(later)
+                for later in facts[fact_index + 1 :]
+            ):
                 continue
             source.extend((call["fact"], fact))
             break
@@ -1272,7 +1365,7 @@ class ClosedEvidenceRegistry:
                 )
             digest_expectations[label] = expected_output_digest
         source: list[ConversationFact] = []
-        for fact in facts:
+        for fact_index, fact in enumerate(facts):
             metadata = fact.content.get("metadata")
             if (
                 fact.kind is not FactKind.TOOL_RESULT
@@ -1325,6 +1418,13 @@ class ClosedEvidenceRegistry:
                 )
             ):
                 continue
+            if any(
+                self._may_invalidate_workspace_validation(later)
+                for later in facts[fact_index + 1 :]
+            ):
+                # 验证之后又发生 workspace mutation 或另一次本地执行时，无法
+                # 证明旧测试仍对应最终候选。保守要求重新跑最终验证。
+                continue
             source.append(fact)
         if not source:
             raise EvidenceVerificationError(
@@ -1340,6 +1440,35 @@ class ClosedEvidenceRegistry:
             observed_at=observed_at,
         )
 
+    @staticmethod
+    def _may_invalidate_workspace_validation(fact: ConversationFact) -> bool:
+        if (
+            fact.kind is not FactKind.TOOL_RESULT
+            or fact.content.get("executed") is not True
+        ):
+            return False
+        metadata = fact.content.get("metadata")
+        if not isinstance(metadata, dict):
+            return False
+        if metadata.get("tool_name") in WORKSPACE_WRITE_TOOLS:
+            return True
+        if "process_receipt" in metadata:
+            # F1（2026-10-02）：成功退出不等于无写入。same-UID process 可改写验证
+            # 输入；任何已执行 result（成功/失败/超时）都保守失效其前的验证证据，
+            # 完成前必须重新取得受影响验证。同一可信输入上无 mutation 的多项验证
+            # 仍可由 read-only native sandbox 路径共同成立（host 实际隔离强制）。
+            return True
+        if (
+            "sandbox_receipt" in metadata
+            or metadata.get("sandbox_receipt_kind") == "native_sandbox_v1"
+        ):
+            # S1-A（2026-10-09）：失效例外必须用与 loop 抑制折叠相同的严格分类
+            # （from_json 严格解析 + 投影一致 + read-only/off/seatbelt/confined），
+            # 不能只信 metadata 的 mode=read-only 字段；其余组合即使成功也可能
+            # 改写验证输入，更不能据 exit code 假定无副作用。
+            return not trusted_readonly_native_sandbox_success(fact)
+        return False
+
     def _native_sandbox_tool_receipt(
         self,
         facts: tuple[ConversationFact, ...],
@@ -1350,11 +1479,15 @@ class ClosedEvidenceRegistry:
         evidence_id: str,
         observed_at: str,
     ) -> EvidenceRecord:
-        """017 native receipt oracle；host artifact 仍需独立 read-back。"""
+        """017 native receipt oracle；host artifact 仍需独立 read-back。
+
+        R1（2026-10-03 follow-up）：predicate 的 ``receipt_digest`` 可选——
+        义务在批准时铸造（receipt 尚不存在），缺省按其余 pinned 字段匹配。
+        """
+
         predicate = criterion.predicate
         required = {
             "receipt_kind",
-            "receipt_digest",
             "command_fingerprint",
             "policy_digest",
             "mode",
@@ -1363,19 +1496,26 @@ class ClosedEvidenceRegistry:
             "enforcement",
             "outcome",
         }
-        if set(predicate) != required:
+        if set(predicate) != required and set(predicate) != required | {
+            "receipt_digest"
+        }:
             raise EvidenceVerificationError("native sandbox receipt predicate must be exact")
         if predicate.get("receipt_kind") != "native_sandbox_v1":
             raise EvidenceVerificationError("native sandbox receipt kind mismatch")
+        # R1（2026-10-03 follow-up）：receipt_digest 可选——批准时义务只有
+        # candidate 的 fingerprint/policy/mode/network 可绑（receipt 尚不存在）。
+        # 缺省时按剩余 pinned 字段匹配；read-only 模式经 enforcement matrix
+        # 唯一决定 backend/enforcement，digest 在投影与逐条匹配中如实核对。
         expected_digest = predicate.get("receipt_digest")
-        if (
+        if expected_digest is not None and (
             not isinstance(expected_digest, str)
             or len(expected_digest) != 64
             or any(c not in "0123456789abcdef" for c in expected_digest)
         ):
             raise EvidenceVerificationError("native sandbox receipt digest is malformed")
+        digest_pinned = expected_digest is not None
         source: list[ConversationFact] = []
-        for fact in facts:
+        for fact_index, fact in enumerate(facts):
             metadata = fact.content.get("metadata")
             if (
                 fact.kind is not FactKind.TOOL_RESULT
@@ -1391,26 +1531,13 @@ class ClosedEvidenceRegistry:
                 receipt = SandboxReceiptV1.from_json(metadata.get("sandbox_receipt"))
             except ValueError:
                 continue
-            projection = {
-                "sandbox_receipt_kind": "native_sandbox_v1",
-                "receipt_digest": receipt.receipt_digest,
-                "execution_authority": "isolated_sandbox",
-                "outcome": receipt.outcome,
-                "original_command_fingerprint": receipt.original_command_fingerprint,
-                "policy_digest": receipt.policy_digest,
-                "mode": receipt.mode,
-                "network": receipt.network,
-                "backend": receipt.backend,
-                "enforcement": receipt.enforcement,
-                "profile_digest": receipt.profile_digest,
-                "lease_id": receipt.lease_id,
-            }
+            projection = sandbox_receipt_projection(receipt)
             if any(metadata.get(key) != value for key, value in projection.items()):
                 continue
             if (
                 receipt.goal_id != goal_id
                 or receipt.goal_revision != goal_revision
-                or receipt.receipt_digest != expected_digest
+                or (digest_pinned and receipt.receipt_digest != expected_digest)
                 or receipt.original_command_fingerprint
                 != predicate["command_fingerprint"]
                 or receipt.policy_digest != predicate["policy_digest"]
@@ -1421,6 +1548,11 @@ class ClosedEvidenceRegistry:
                 or receipt.outcome != predicate["outcome"]
                 or receipt.outcome != "exited"
                 or metadata.get("exit_code") != 0
+            ):
+                continue
+            if any(
+                self._may_invalidate_workspace_validation(later)
+                for later in facts[fact_index + 1 :]
             ):
                 continue
             source.append(fact)

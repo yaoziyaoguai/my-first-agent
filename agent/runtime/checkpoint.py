@@ -20,6 +20,7 @@ from agent.runtime.contracts import (
     AdmittedCriterion,
     ApprovalGrant,
     ApprovalRequest,
+    ArchivedConversation,
     ArtifactConfirmationRequirementV1,
     AuthoritySourceKind,
     BackgroundOccurrenceBindingV1,
@@ -40,6 +41,7 @@ from agent.runtime.contracts import (
     ExecutionAuthorityClass,
     FactKind,
     GoalAuthorizationBinding,
+    GoalAuthorizationScope,
     GoalFrame,
     GoalStatus,
     InteractionState,
@@ -60,12 +62,13 @@ from agent.runtime.contracts import (
     SandboxAuthorityLeaseV1,
     SideEffectClass,
     ToolCall,
+    canonical_json_digest,
     model_response_from_payload,
     model_response_payload,
 )
 from agent.runtime.ports import CheckpointCASConflictError, CheckpointUsage
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 # v3 是 process-authority migration source；v4 是旧 strict process schema；v5 加入
 # artifact confirmation。v6 绑定 candidate/lease 全部 immutable authority 字段，并把
 # readable command 持久化到 lease。旧版本显式重算收窄后的 digest；v6 漂移 fail closed。
@@ -75,6 +78,7 @@ ARTIFACT_SCHEMA_VERSION = 5
 PROCESS_SCHEMA_VERSION = 6
 BROWSER_SCHEMA_VERSION = 7
 BACKGROUND_SCHEMA_VERSION = 8
+ORIGIN_SCHEMA_VERSION = 9
 LEGACY_SCHEMA_VERSION = 2
 DEFAULT_MAX_STATE_BYTES = 8 * 1024 * 1024
 
@@ -207,6 +211,27 @@ class LocalCheckpointStore:
                 os.close(lock_fd)
                 os.close(directory_fd)
                 return None
+            # F4（2026-10-03）：flock 持有后重验 pathname↔fd 的 inode/设备。
+            # 孤儿锁清扫/锁文件重建后，凭旧 inode fd 不得取得该 checkpoint 的
+            # 修改权；不一致 fail closed 返回 None，调用方重试即打开当前锁节点。
+            try:
+                path_info = os.stat(
+                    self._lock_name, dir_fd=directory_fd, follow_symlinks=False
+                )
+            except FileNotFoundError:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
+                os.close(directory_fd)
+                return None
+            fd_info = os.fstat(lock_fd)
+            if (path_info.st_dev, path_info.st_ino) != (
+                fd_info.st_dev,
+                fd_info.st_ino,
+            ):
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
+                os.close(directory_fd)
+                return None
             state = _decode_state(self._read_bytes(directory_fd))
             if state.conversation_id != conversation_id:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
@@ -283,6 +308,43 @@ class LocalCheckpointStore:
         if reserve_bytes < 0:
             raise ValueError("reserve_bytes must be non-negative")
         return len(_encode_state(snapshot.state)) + reserve_bytes <= self._max_state_bytes
+
+    def retire_archived_snapshot(
+        self,
+        snapshot: LoadedSnapshot,
+        archive: ArchivedConversation,
+    ) -> None:
+        """在持有 exact checkpoint lease 时释放一个已验证归档的会话。
+
+        本方法不创建归档；调用方必须先按同一 token 完成不可变归档并
+        重读校验。锁文件故意保留为 owner-only 稳定锁节点，恢复同一
+        conversation 时可安全复用；workspace 枚举只把 JSON checkpoint 计入容量。
+        """
+
+        lease = self._active_lease
+        if lease is None or lease.released:
+            raise CheckpointConflictError("mutation lease is not held")
+        current_data = self._read_bytes(lease.directory_fd)
+        current = _decode_state(current_data)
+        if (
+            _token(current_data) != snapshot.token
+            or current.revision != snapshot.state.revision
+            or current != snapshot.state
+        ):
+            raise CheckpointConflictError(
+                "snapshot token or revision changed",
+                LoadedSnapshot(current, _token(current_data)),
+            )
+        binding = current.workspace_binding
+        if (
+            archive.conversation_id != current.conversation_id
+            or archive.source_checkpoint_digest != snapshot.token
+            or binding is None
+            or archive.workspace_scope_digest != binding.workspace_scope_digest
+        ):
+            raise CheckpointConflictError("archive does not bind the current checkpoint")
+        os.unlink(self._name, dir_fd=lease.directory_fd)
+        os.fsync(lease.directory_fd)
 
     def usage(self, snapshot: LoadedSnapshot) -> CheckpointUsage:
         # 只读度量：通过 store 自身的受保护读路径核对 token/revision，
@@ -497,6 +559,7 @@ def _encode_state(state: ConversationState) -> bytes:
         if (
             state.workspace_binding is not None
             or state.active_run is not None
+            or state.goal_authorizations
             or state.process_leases
             or state.sandbox_leases
             or state.browser_leases
@@ -537,6 +600,7 @@ def _decode_state(data: bytes) -> ConversationState:
         PROCESS_SCHEMA_VERSION,
         BROWSER_SCHEMA_VERSION,
         BACKGROUND_SCHEMA_VERSION,
+        ORIGIN_SCHEMA_VERSION,
         SCHEMA_VERSION,
     }:
         raise CheckpointVersionError(f"unsupported checkpoint schema version: {version}")
@@ -551,6 +615,7 @@ def _decode_state(data: bytes) -> ConversationState:
                 PROCESS_SCHEMA_VERSION,
                 BROWSER_SCHEMA_VERSION,
                 BACKGROUND_SCHEMA_VERSION,
+                ORIGIN_SCHEMA_VERSION,
                 SCHEMA_VERSION,
             },
             process_contract_current=version
@@ -558,13 +623,20 @@ def _decode_state(data: bytes) -> ConversationState:
                 PROCESS_SCHEMA_VERSION,
                 BROWSER_SCHEMA_VERSION,
                 BACKGROUND_SCHEMA_VERSION,
+                ORIGIN_SCHEMA_VERSION,
                 SCHEMA_VERSION,
             },
             sandbox_contract_current=version
-            in {BROWSER_SCHEMA_VERSION, BACKGROUND_SCHEMA_VERSION, SCHEMA_VERSION},
+            in {
+                BROWSER_SCHEMA_VERSION,
+                BACKGROUND_SCHEMA_VERSION,
+                ORIGIN_SCHEMA_VERSION,
+                SCHEMA_VERSION,
+            },
             background_contract_current=version
-            in {BACKGROUND_SCHEMA_VERSION, SCHEMA_VERSION},
-            origin_contract_current=version == SCHEMA_VERSION,
+            in {BACKGROUND_SCHEMA_VERSION, ORIGIN_SCHEMA_VERSION, SCHEMA_VERSION},
+            origin_contract_current=version in {ORIGIN_SCHEMA_VERSION, SCHEMA_VERSION},
+            timing_contract_current=version == SCHEMA_VERSION,
         )
     except CheckpointVersionError:
         raise
@@ -642,6 +714,7 @@ def _state_from_dict(
     sandbox_contract_current: bool = False,
     background_contract_current: bool = False,
     origin_contract_current: bool = False,
+    timing_contract_current: bool = False,
 ) -> ConversationState:
     keys = {
         "conversation_id",
@@ -713,6 +786,7 @@ def _state_from_dict(
             sandbox_contract_current=sandbox_contract_current,
             background_contract_current=background_contract_current,
             origin_contract_current=origin_contract_current,
+            timing_contract_current=timing_contract_current,
         ),
         last_safe_result=_result_from_dict(value["last_safe_result"]),
         goal=_goal_from_dict(
@@ -720,7 +794,10 @@ def _state_from_dict(
             proposed_contract_current=proposed_contract_current,
         ),
         goal_authorizations=tuple(
-            _goal_authorization_from_dict(_object(item, "goal_authorization"))
+            _goal_authorization_from_dict(
+                _object(item, "goal_authorization"),
+                scope_current=timing_contract_current,
+            )
             for item in _array(value["goal_authorizations"], "goal_authorizations")
         ),
         evidence_records=tuple(
@@ -992,14 +1069,23 @@ def _goal_authorization_to_dict(value: GoalAuthorizationBinding) -> dict:
         "workspace_identity_digest": value.workspace_identity_digest,
         "operation": value.operation,
         "normalized_target": value.normalized_target,
+        "scope": value.scope.value,
         "source_kind": value.source_kind.value,
         "source_id": value.source_id,
         "source_digest": value.source_digest,
+        "issued_at": value.issued_at,
+        "expires_at": value.expires_at,
+        "max_uses": value.max_uses,
+        "uses_consumed": value.uses_consumed,
         "binding_digest": value.binding_digest,
     }
 
 
-def _goal_authorization_from_dict(value: dict) -> GoalAuthorizationBinding:
+def _goal_authorization_from_dict(
+    value: dict,
+    *,
+    scope_current: bool,
+) -> GoalAuthorizationBinding:
     keys = {
         "binding_id",
         "goal_id",
@@ -1010,31 +1096,62 @@ def _goal_authorization_from_dict(value: dict) -> GoalAuthorizationBinding:
         "source_kind",
         "source_id",
         "source_digest",
+        "issued_at",
+        "expires_at",
+        "max_uses",
+        "uses_consumed",
         "binding_digest",
     }
+    if scope_current:
+        keys.add("scope")
     _expect_keys(value, keys, "goal_authorization")
-    return GoalAuthorizationBinding(
-        binding_id=_string(value["binding_id"], "goal_authorization.binding_id"),
-        goal_id=_string(value["goal_id"], "goal_authorization.goal_id"),
-        goal_revision=_integer(value["goal_revision"], "goal_authorization.goal_revision"),
-        workspace_identity_digest=_string(
+    parsed = {
+        "binding_id": _string(value["binding_id"], "goal_authorization.binding_id"),
+        "goal_id": _string(value["goal_id"], "goal_authorization.goal_id"),
+        "goal_revision": _integer(
+            value["goal_revision"], "goal_authorization.goal_revision"
+        ),
+        "workspace_identity_digest": _string(
             value["workspace_identity_digest"],
             "goal_authorization.workspace_identity_digest",
         ),
-        operation=_string(value["operation"], "goal_authorization.operation"),
-        normalized_target=_string(
+        "operation": _string(value["operation"], "goal_authorization.operation"),
+        "normalized_target": _string(
             value["normalized_target"],
             "goal_authorization.normalized_target",
         ),
-        source_kind=AuthoritySourceKind(
+        "source_kind": AuthoritySourceKind(
             _string(value["source_kind"], "goal_authorization.source_kind")
         ),
-        source_id=_string(value["source_id"], "goal_authorization.source_id"),
-        source_digest=_string(value["source_digest"], "goal_authorization.source_digest"),
-        binding_digest=_string(
-            value["binding_digest"],
-            "goal_authorization.binding_digest",
+        "source_id": _string(value["source_id"], "goal_authorization.source_id"),
+        "source_digest": _string(
+            value["source_digest"], "goal_authorization.source_digest"
         ),
+        "issued_at": _string(value["issued_at"], "goal_authorization.issued_at"),
+        "expires_at": _string(value["expires_at"], "goal_authorization.expires_at"),
+        "max_uses": _integer(value["max_uses"], "goal_authorization.max_uses"),
+        "uses_consumed": _integer(
+            value["uses_consumed"], "goal_authorization.uses_consumed"
+        ),
+    }
+    stored_digest = _string(
+        value["binding_digest"],
+        "goal_authorization.binding_digest",
+    )
+    if not scope_current:
+        if stored_digest != canonical_json_digest(parsed):
+            raise ValueError("legacy goal authorization binding digest mismatch")
+        return GoalAuthorizationBinding.create(
+            **parsed,
+            scope=GoalAuthorizationScope.EXACT_FILE,
+        )
+    scope = GoalAuthorizationScope(
+        _string(value["scope"], "goal_authorization.scope")
+    )
+    return GoalAuthorizationBinding(
+        **parsed,
+        scope=scope,
+        binding_digest=stored_digest,
     )
 
 
@@ -1385,29 +1502,59 @@ def _fact_from_dict(value: dict) -> ConversationFact:
     )
 
 
+_RESULT_USAGE_KEYS = ("model_calls_used", "input_tokens_used", "output_tokens_used")
+
+
 def _result_to_dict(result: RecordedRunResult | None) -> dict | None:
     if result is None:
         return None
-    return {
+    encoded = {
         "status": result.status.value,
         "run_id": result.run_id,
         "message": result.message,
         "request_id": result.request_id,
         "error_code": result.error_code,
     }
+    # usage 键只在有值时写入；旧 reader 仍按 strict 解码会拒绝未知键，因此
+    # 仅对携带 usage 的新 checkpoint 生效（本仓单一产品，无跨版本读取）。
+    for key in _RESULT_USAGE_KEYS:
+        value = getattr(result, key)
+        if value is not None:
+            encoded[key] = value
+    return encoded
 
 
 def _result_from_dict(value) -> RecordedRunResult | None:
     if value is None:
         return None
     value = _object(value, "result")
-    _expect_keys(value, {"status", "run_id", "message", "request_id", "error_code"}, "result")
+    # 旧 checkpoint 只有 5 个基础键；新 checkpoint 额外携带可选 usage 键。
+    base = {"status", "run_id", "message", "request_id", "error_code"}
+    unknown = set(value) - base - set(_RESULT_USAGE_KEYS)
+    missing = base - set(value)
+    if unknown or missing:
+        raise CheckpointVersionError(
+            f"result has unknown fields {sorted(unknown)} or missing fields "
+            f"{sorted(missing)}"
+        )
+
+    def _optional_int(key: str) -> int | None:
+        raw = value.get(key)
+        if raw is None:
+            return None
+        if not isinstance(raw, int) or isinstance(raw, bool) or raw < 0:
+            raise ValueError(f"result.{key} must be a non-negative int or null")
+        return raw
+
     return RecordedRunResult(
         status=RunStatus(_string(value["status"], "result.status")),
         run_id=_optional_string(value["run_id"], "result.run_id"),
         message=_optional_string(value["message"], "result.message"),
         request_id=_optional_string(value["request_id"], "result.request_id"),
         error_code=_optional_string(value["error_code"], "result.error_code"),
+        model_calls_used=_optional_int("model_calls_used"),
+        input_tokens_used=_optional_int("input_tokens_used"),
+        output_tokens_used=_optional_int("output_tokens_used"),
     )
 
 
@@ -1433,6 +1580,7 @@ def _active_to_dict(active: ActiveRun | None) -> dict | None:
         return None
     return {
         "run_id": active.run_id,
+        "run_started_at": active.run_started_at,
         "status": active.status.value,
         "phase": active.phase.value,
         "owner_invocation_id": active.owner_invocation_id,
@@ -1468,6 +1616,7 @@ def _active_from_dict(
     sandbox_contract_current: bool = False,
     background_contract_current: bool = False,
     origin_contract_current: bool = False,
+    timing_contract_current: bool = False,
 ) -> ActiveRun | None:
     if value is None:
         return None
@@ -1500,9 +1649,16 @@ def _active_from_dict(
         )
     if origin_contract_current:
         keys.add("invocation_origin")
+    if timing_contract_current:
+        keys.add("run_started_at")
     _expect_keys(value, keys, "active_run")
     return ActiveRun(
         run_id=_string(value["run_id"], "active_run.run_id"),
+        run_started_at=(
+            _optional_string(value["run_started_at"], "active_run.run_started_at")
+            if timing_contract_current
+            else None
+        ),
         status=ActiveRunStatus(_string(value["status"], "active_run.status")),
         phase=ContinuationPhase(_string(value["phase"], "active_run.phase")),
         owner_invocation_id=_optional_string(

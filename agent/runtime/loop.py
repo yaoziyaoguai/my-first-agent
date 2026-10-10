@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import threading
+import time
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
@@ -74,7 +76,9 @@ from agent.runtime.contracts import (
     ProviderDisclosureRequest,
     RecordedRunResult,
     RecoveryRequest,
+    ResolveApproval,
     ResumeGoal,
+    RevokeGoalTargetAuthority,
     RunResult,
     RunStatus,
     RuntimeEvent,
@@ -92,7 +96,12 @@ from agent.runtime.contracts import (
     context_pack_digest,
 )
 from agent.runtime.control import ControlBinding, ControlInbox, ControlRequestKind
-from agent.runtime.evidence import ClosedEvidenceRegistry, EvidenceVerificationError
+from agent.runtime.evidence import (
+    WORKSPACE_WRITE_TOOLS,
+    ClosedEvidenceRegistry,
+    EvidenceVerificationError,
+    trusted_readonly_native_sandbox_success,
+)
 from agent.runtime.ports import (
     CheckpointCASConflictError,
     CheckpointStore,
@@ -100,6 +109,7 @@ from agent.runtime.ports import (
     ConversationArchive,
     EventSink,
     InvalidProviderResponseError,
+    ModelAttemptBudgetExhaustedError,
     ModelProvider,
     RetryableContextSourceError,
     RetryableProviderError,
@@ -113,7 +123,9 @@ from agent.runtime.state import (
     accept_goal_delta_proposal,
     accept_goal_draft_proposal,
     acknowledge_noop_goal_delta,
+    admit_governed_tool_receipt_criterion,
     admit_process_receipt_criterion,
+    admit_sandbox_receipt_criterion,
     admit_web_source_criterion,
     append_policy_result,
     apply_compaction_summary,
@@ -139,6 +151,7 @@ from agent.runtime.state import (
     reclaim_background_run,
     record_completion_claim,
     record_evidence,
+    record_foreground_model_attempt,
     record_goal_progress,
     record_nonexecuted_tool_result,
     record_provider_response,
@@ -149,7 +162,14 @@ from agent.runtime.state import (
 )
 
 _WORKSPACE_OBSERVATION_TOOLS = frozenset(
-    {"read_file", "read_file_chunk", "list_files", "search_paths", "search_text"}
+    {
+        "read_file",
+        "confirm_file",
+        "read_file_chunk",
+        "list_files",
+        "search_paths",
+        "search_text",
+    }
 )
 # 可变观察：结果依赖外部世界当前状态（workspace 文件、live browser session），
 # 在任何实际执行的 effect 之后都可能过期，因此允许同参数重新观察。
@@ -159,10 +179,18 @@ _MUTABLE_OBSERVATION_TOOLS = _WORKSPACE_OBSERVATION_TOOLS | {"browser_observe"}
 @dataclass(frozen=True, slots=True)
 class InvocationLimits:
     max_model_calls: int | None = 16
+    # 单次 run 跨 /resume 的 durable 上限；与上面的 invocation-local 分片分开。
+    # caller 可显式提高后继续，但恢复本身不会重置已经消费的模型调用。
+    max_run_model_calls: int | None = None
+    # 当前 durable run 的墙钟上限；首次接管时起算，Resume/重启不清零。
+    max_run_wall_seconds: int | None = None
     max_tool_calls: int | None = 32
     max_input_tokens: int | None = 100_000
     max_output_tokens: int | None = 20_000
     max_invalid_repairs: int = 1
+    # 只在前台、且 provider 已明确归类为 timeout/transport/unavailable 时
+    # 允许有限自动重试；429/认证/额度与 background unknown outcome 不走这里。
+    max_retryable_provider_retries: int = 0
     durable_effect_reserve_bytes: int = 65_536
     # 这是“第 N 次连续同指纹停滞即熔断”的阈值。默认 2 保留一次纠偏机会；
     # Everyday 显式设为 16，在第 16 次命中后暂停而不是再多发送一次。
@@ -171,6 +199,8 @@ class InvocationLimits:
     def __post_init__(self) -> None:
         for name, value in (
             ("max_model_calls", self.max_model_calls),
+            ("max_run_model_calls", self.max_run_model_calls),
+            ("max_run_wall_seconds", self.max_run_wall_seconds),
             ("max_tool_calls", self.max_tool_calls),
             ("max_input_tokens", self.max_input_tokens),
             ("max_output_tokens", self.max_output_tokens),
@@ -181,6 +211,8 @@ class InvocationLimits:
             raise ValueError("durable_effect_reserve_bytes must be positive")
         if self.max_invalid_repairs < 0:
             raise ValueError("max_invalid_repairs must be non-negative")
+        if self.max_retryable_provider_retries < 0:
+            raise ValueError("max_retryable_provider_retries must be non-negative")
         if self.max_no_progress_replans < 0:
             raise ValueError("max_no_progress_replans must be non-negative")
 
@@ -228,6 +260,15 @@ class _ToolBatchConvergence:
     eligible: bool = True
 
 
+class _CheckpointWriteError(RuntimeError):
+    """保留失败写入前的显式 CAS cursor，不从 store 隐式重载状态。"""
+
+    def __init__(self, cause: Exception, current: LoadedSnapshot) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.current = current
+
+
 @dataclass(frozen=True, slots=True)
 class _CompactionCallResult:
     """一次成功 compaction 调用的内部结果（020）。
@@ -243,6 +284,14 @@ class _CompactionCallResult:
     context: ContextPack
 
 
+@dataclass(slots=True)
+class _ProviderProgressReporter:
+    stop: threading.Event
+    thread: threading.Thread
+    started_at: float
+    next_sequence: Callable[[], int]
+
+
 class AgentRuntime:
     def __init__(
         self,
@@ -252,6 +301,7 @@ class AgentRuntime:
         tool_runtime: ToolRuntime,
         checkpoint_store: CheckpointStore,
         event_sink: EventSink,
+        progress_event_sink: EventSink | None = None,
         limits: InvocationLimits,
         invocation_id_factory: Callable[[], str] | None = None,
         control_inbox: ControlInbox | None = None,
@@ -263,12 +313,19 @@ class AgentRuntime:
         | None = None,
         background_execution_authority: BackgroundExecutionAuthorityV1 | None = None,
         conversation_archive: ConversationArchive | None = None,
+        provider_progress_interval_seconds: float = 15.0,
+        run_time_factory: Callable[[], str] | None = None,
     ) -> None:
+        if provider_progress_interval_seconds <= 0:
+            raise ValueError("provider progress interval must be positive")
         self._provider = provider
         self._context_manager = context_manager
         self._tool_runtime = tool_runtime
         self._checkpoint_store = checkpoint_store
         self._event_sink = event_sink
+        # 运行中 advisory 与锁后交付的权威 Runtime events 使用不同端口。
+        # 只有能接受并发、不可重放提示的 caller 才显式注入此 sink。
+        self._progress_event_sink = progress_event_sink
         self._limits = limits
         self._invocation_id_factory = invocation_id_factory or (lambda: str(uuid4()))
         self._control_inbox = control_inbox
@@ -283,6 +340,10 @@ class AgentRuntime:
         # 020 自动 compaction：archive 在缩减 CAS 前无损原样存档完整 state；
         # None 时无 compaction 能力，普通 run 路径完全不变。
         self._conversation_archive = conversation_archive
+        self._provider_progress_interval_seconds = provider_progress_interval_seconds
+        self._run_time_factory = run_time_factory or (
+            lambda: datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        )
         self._event_buffer: ContextVar[list[RuntimeEvent] | None] = ContextVar(
             "agent_runtime_event_buffer",
             default=None,
@@ -458,6 +519,17 @@ class AgentRuntime:
                     outcome_state=transition.state,
                 )
 
+            if isinstance(action, RevokeGoalTargetAuthority):
+                return self._finish(
+                    current,
+                    action,
+                    status=RunStatus.COMPLETED,
+                    warnings=warnings,
+                    event_kind=RuntimeEventKind.COMPLETED,
+                    message="Current task file permissions revoked.",
+                    outcome_state=transition.state,
+                )
+
             if isinstance(action, AbandonUnknownModelOutcome):
                 return self._finish(
                     current,
@@ -471,6 +543,20 @@ class AgentRuntime:
                 )
 
             active = transition.state.active_run
+            if isinstance(action, ResolveApproval) and not action.approved:
+                return self._finish(
+                    current,
+                    action,
+                    status=RunStatus.CANCELLED,
+                    warnings=warnings,
+                    event_kind=RuntimeEventKind.CANCELLED,
+                    message=(
+                        "The requested action was declined. It was not executed; the "
+                        "current goal remains available for a new instruction or /cancel."
+                    ),
+                    error_code="approval_declined",
+                    outcome_state=transition.state,
+                )
             if active is None:
                 return self._finish(
                     current,
@@ -511,8 +597,9 @@ class AgentRuntime:
                     outcome_state=recovering,
                 )
 
+            transition_state = self._ensure_run_started(transition.state)
             try:
-                current = self._save(current, transition.state)
+                current = self._save(current, transition_state)
             except CheckpointCASConflictError as error:
                 newest = error.current
                 if newest is None:
@@ -535,66 +622,100 @@ class AgentRuntime:
                 state=newest.state,
                 error_code="checkpoint_conflict",
             )
-        except Exception as error:
-            state = current.state
-            active = state.active_run
-            executing = active.executing_intent if active is not None else None
-            if (
-                active is not None
-                and executing is not None
-                and active.phase is ContinuationPhase.EXECUTING
-            ):
-                request = RecoveryRequest(
-                    request_id=f"recovery-{executing.intent_digest[:16]}",
-                    run_id=active.run_id,
-                    tool_call_id=executing.tool_call_id,
-                    binding_digest=executing.intent_digest,
-                    summary="Tool outcome is unknown; classify it before continuing.",
-                )
-                try:
-                    recovering = pause_for_recovery(current.state, request)
-                    return self._finish_pending(
-                        current,
-                        action,
-                        warnings,
-                        outcome_state=recovering,
-                    )
-                except Exception as recovery_error:
-                    warnings.append(
-                        "recovery persistence failed: "
-                        f"{type(recovery_error).__name__}: {recovery_error}"
-                    )
-            if state.active_run is not None:
-                try:
-                    failed = fail_run(
-                        state,
-                        code="runtime_failure",
-                        message=f"{type(error).__name__}: {error}",
-                    )
-                    return self._finish(
-                        current,
-                        action,
-                        status=RunStatus.FAILED_FATAL,
-                        warnings=warnings,
-                        event_kind=RuntimeEventKind.FAILED,
-                        error_code="runtime_failure",
-                        message=f"{type(error).__name__}: {error}",
-                        outcome_state=failed,
-                    )
-                except Exception as persistence_error:
-                    warnings.append(f"fatal persistence failed: {type(persistence_error).__name__}")
-            return RunResult(
-                status=RunStatus.FAILED_FATAL,
-                state=current.state,
-                run_id=(
-                    current.state.active_run.run_id
-                    if current.state.active_run is not None
-                    else None
-                ),
-                error_code="runtime_failure",
-                message=f"{type(error).__name__}: {error}",
-                delivery_warnings=tuple(warnings),
+        except _CheckpointWriteError as failure:
+            return self._handle_unexpected_error(
+                action,
+                failure.current,
+                warnings,
+                failure.cause,
             )
+        except Exception as error:
+            return self._handle_unexpected_error(action, current, warnings, error)
+
+    def _ensure_run_started(self, state: ConversationState) -> ConversationState:
+        active = state.active_run
+        if active is None or active.run_started_at is not None:
+            return state
+        started_at = self._run_time_factory()
+        try:
+            datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        except (AttributeError, ValueError) as error:
+            raise ValueError("run_time_factory must return zoned RFC3339") from error
+        return replace(
+            state,
+            active_run=replace(active, run_started_at=started_at),
+        )
+
+    def _handle_unexpected_error(
+        self,
+        action: Action,
+        current: LoadedSnapshot,
+        warnings: list[str],
+        error: Exception,
+    ) -> RunResult:
+        """只基于显式传入的最新 CAS cursor 收尾；不得向 store hidden reload。"""
+
+        state = current.state
+        active = state.active_run
+        executing = active.executing_intent if active is not None else None
+        if (
+            active is not None
+            and executing is not None
+            and active.phase is ContinuationPhase.EXECUTING
+        ):
+            request = RecoveryRequest(
+                request_id=f"recovery-{executing.intent_digest[:16]}",
+                run_id=active.run_id,
+                tool_call_id=executing.tool_call_id,
+                binding_digest=executing.intent_digest,
+                summary="Tool outcome is unknown; classify it before continuing.",
+            )
+            try:
+                recovering = pause_for_recovery(current.state, request)
+                return self._finish_pending(
+                    current,
+                    action,
+                    warnings,
+                    outcome_state=recovering,
+                )
+            except Exception as recovery_error:
+                warnings.append(
+                    "recovery persistence failed: "
+                    f"{type(recovery_error).__name__}: {recovery_error}"
+                )
+        if state.active_run is not None:
+            try:
+                failed = fail_run(
+                    state,
+                    code="runtime_failure",
+                    message=f"{type(error).__name__}: {error}",
+                )
+                return self._finish(
+                    current,
+                    action,
+                    status=RunStatus.FAILED_FATAL,
+                    warnings=warnings,
+                    event_kind=RuntimeEventKind.FAILED,
+                    error_code="runtime_failure",
+                    message=f"{type(error).__name__}: {error}",
+                    outcome_state=failed,
+                )
+            except Exception as persistence_error:
+                warnings.append(
+                    f"fatal persistence failed: {type(persistence_error).__name__}"
+                )
+        return RunResult(
+            status=RunStatus.FAILED_FATAL,
+            state=current.state,
+            run_id=(
+                current.state.active_run.run_id
+                if current.state.active_run is not None
+                else None
+            ),
+            error_code="runtime_failure",
+            message=f"{type(error).__name__}: {error}",
+            delivery_warnings=tuple(warnings),
+        )
 
     def _resume_background_replay(
         self,
@@ -738,11 +859,13 @@ class AgentRuntime:
         output_tokens = 0
         compaction_batches = 0
         invalid_repairs = 0
+        retryable_provider_retries = 0
         no_progress = _NoProgressTracker()
         no_progress_since_product_action = False
         (
             successful_product_requests,
             successful_workspace_observations,
+            native_validation_successes,
         ) = self._successful_product_request_inventory(current.state)
         tool_batch = self._resumed_tool_batch_convergence(current.state)
 
@@ -772,6 +895,21 @@ class AgentRuntime:
             controlled = self._poll_control(action, current, warnings)
             if controlled is not None:
                 return controlled
+
+            if (
+                active.status is ActiveRunStatus.RUNNABLE
+                and self._run_wall_budget_expired(active.run_started_at)
+            ):
+                paused = pause_for_limit(current.state)
+                return self._finish(
+                    current,
+                    action,
+                    status=RunStatus.LIMIT_REACHED,
+                    warnings=warnings,
+                    event_kind=RuntimeEventKind.LIMIT_REACHED,
+                    error_code="run_wall_time_limit",
+                    outcome_state=paused,
+                )
 
             if active.phase is ContinuationPhase.TOOL:
                 if active.batch_cursor >= len(active.tool_calls):
@@ -824,8 +962,8 @@ class AgentRuntime:
                 request_digest = self._product_request_digest(call.name, call.arguments)
                 if (
                     active.invocation_origin is InvocationOrigin.MODEL
-                    and
-                    request_digest in successful_product_requests
+                    and request_digest
+                    in successful_product_requests | native_validation_successes
                     and not self._is_lease_governed_tool(call.name)
                 ):
                     duplicate_guidance = self._duplicate_product_request_guidance(
@@ -1103,6 +1241,11 @@ class AgentRuntime:
                         if prepared.browser_lease is not None
                         else None
                     ),
+                    goal_authorization_id=(
+                        prepared.goal_authorization.binding_id
+                        if prepared.goal_authorization is not None
+                        else None
+                    ),
                     background_action_authority=(
                         prepared.background_action_authority
                     ),
@@ -1147,6 +1290,41 @@ class AgentRuntime:
                             tool_call_id=prepared.tool_call_id,
                             receipt_digest=_meta["receipt_digest"],
                             command_fingerprint=_meta["command_fingerprint"],
+                            action_seq=action.action_seq,
+                        )
+                    # R1：成功 read-only sandbox receipt 的结果时准入（镜像 process）。
+                    if (
+                        _meta.get("sandbox_receipt_kind") == "native_sandbox_v1"
+                        and _meta.get("outcome") == "exited"
+                        and _meta.get("exit_code") == 0
+                        and _meta.get("mode") == "read-only"
+                        and _meta.get("receipt_digest")
+                        and _meta.get("command_fingerprint")
+                        and isinstance(_meta.get("policy_digest"), str)
+                        and isinstance(_meta.get("network"), str)
+                    ):
+                        post_result_state = admit_sandbox_receipt_criterion(
+                            post_result_state,
+                            tool_call_id=prepared.tool_call_id,
+                            receipt_digest=_meta["receipt_digest"],
+                            command_fingerprint=_meta["command_fingerprint"],
+                            policy_digest=_meta["policy_digest"],
+                            mode=_meta["mode"],
+                            network=_meta["network"],
+                            action_seq=action.action_seq,
+                        )
+                    if (
+                        tool_result.executed
+                        and not tool_result.is_error
+                        and _meta.get("governed_tool_receipt_kind")
+                        == "governed_tool_v1"
+                        and isinstance(_meta.get("receipt_digest"), str)
+                    ):
+                        post_result_state = admit_governed_tool_receipt_criterion(
+                            post_result_state,
+                            tool_call_id=prepared.tool_call_id,
+                            tool_name=prepared.tool_name,
+                            receipt_digest=_meta["receipt_digest"],
                             action_seq=action.action_seq,
                         )
                     if _meta.get("source_receipts"):
@@ -1201,6 +1379,16 @@ class AgentRuntime:
                         message="browser takeover waiting for user",
                         outcome_state=current.state,
                 )
+                if tool_result.executed:
+                    # S1-A（2026-10-09）：三个集合由 durable fact fold 在每次已执行
+                    # result checkpoint 保存成功后统一重建（operator 结果同样参与
+                    # 失效判断）；不再维护 live 增量副本。checkpoint 保存失败走
+                    # 上方 recovery，不会提前更新成功缓存。
+                    (
+                        successful_product_requests,
+                        successful_workspace_observations,
+                        native_validation_successes,
+                    ) = self._successful_product_request_inventory(current.state)
                 if active.invocation_origin is InvocationOrigin.MODEL:
                     if tool_result.executed and not tool_result.is_error:
                         verified = self._finish_if_durable_evidence_is_complete(
@@ -1211,20 +1399,7 @@ class AgentRuntime:
                         )
                         if verified is not None:
                             return verified
-                    # 实际执行的非 READ_ONLY result（含 is_error=True）可能已经
-                    # 改变外部状态：按 ToolSpec 声明的 SideEffectClass 保守使
-                    # 先前成功的可变观察过期，允许同参数重新观察/read。失效
-                    # 发生在 result checkpoint 成功之后；结果未知仍走既有
-                    # recovery，effectful 请求自身的 exact dedup 不受影响。
-                    if tool_result.executed and self._is_effectful_tool(call.name):
-                        successful_product_requests.difference_update(
-                            successful_workspace_observations
-                        )
-                        successful_workspace_observations.clear()
                     if tool_result.executed and not tool_result.is_error:
-                        successful_product_requests.add(request_digest)
-                        if call.name in _MUTABLE_OBSERVATION_TOOLS:
-                            successful_workspace_observations.add(request_digest)
                         tool_batch.has_success = True
                     else:
                         tool_batch.failure_signatures.append(
@@ -1292,6 +1467,22 @@ class AgentRuntime:
                     warnings=warnings,
                     event_kind=RuntimeEventKind.LIMIT_REACHED,
                     error_code="model_call_limit",
+                    outcome_state=paused,
+                )
+            if (
+                not recovering_persisted_response
+                and background_binding is None
+                and self._limits.max_run_model_calls is not None
+                and active.model_calls_used >= self._limits.max_run_model_calls
+            ):
+                paused = pause_for_limit(current.state)
+                return self._finish(
+                    current,
+                    action,
+                    status=RunStatus.LIMIT_REACHED,
+                    warnings=warnings,
+                    event_kind=RuntimeEventKind.LIMIT_REACHED,
+                    error_code="run_model_call_limit",
                     outcome_state=paused,
                 )
 
@@ -1374,8 +1565,36 @@ class AgentRuntime:
                             error_code="input_token_limit",
                             outcome_state=paused,
                         )
+                    # compaction 也是一次真实模型尝试：必须与普通调用一样在
+                    # 发送前持久化扣账。失败不退款，Resume 也不会重置。
+                    compaction_source = current
+                    current = self._save(
+                        current,
+                        record_foreground_model_attempt(
+                            current.state,
+                            input_tokens=context.budget.estimated_input_tokens,
+                        ),
+                    )
+                    model_calls += 1
+                    input_tokens += context.budget.estimated_input_tokens
                     try:
-                        result = self._perform_compaction(current, plan, context)
+                        result = self._perform_compaction(
+                            current,
+                            plan,
+                            context,
+                            source_snapshot=compaction_source,
+                        )
+                    except ModelAttemptBudgetExhaustedError:
+                        paused = pause_for_limit(current.state)
+                        return self._finish(
+                            current,
+                            action,
+                            status=RunStatus.LIMIT_REACHED,
+                            warnings=warnings,
+                            event_kind=RuntimeEventKind.LIMIT_REACHED,
+                            error_code="model_attempt_budget_exhausted",
+                            outcome_state=paused,
+                        )
                     except RetryableProviderError as error:
                         # 压缩批次的 provider 失败与普通模型调用同语义：
                         # pause_for_retryable + FAILED_RETRYABLE，等待显式
@@ -1427,8 +1646,6 @@ class AgentRuntime:
                             outcome_state=paused,
                         )
                     current = result.snapshot
-                    model_calls += 1
-                    input_tokens += result.input_tokens
                     output_tokens += result.output_tokens
                     compaction_batches += 1
                     if (
@@ -1592,12 +1809,33 @@ class AgentRuntime:
                             input_tokens=context.budget.estimated_input_tokens,
                         ),
                     )
+                else:
+                    current = self._save(
+                        current,
+                        record_foreground_model_attempt(
+                            current.state,
+                            input_tokens=context.budget.estimated_input_tokens,
+                        ),
+                    )
+            progress_reporter = None
             try:
                 if not recovering_persisted_response:
+                    progress_reporter = self._start_provider_progress(current)
                     response = self._provider.generate(
                         context,
                         delta_observer=self._delta_observer_for(current),
                     )
+            except ModelAttemptBudgetExhaustedError:
+                paused = pause_for_limit(current.state)
+                return self._finish(
+                    current,
+                    action,
+                    status=RunStatus.LIMIT_REACHED,
+                    warnings=warnings,
+                    event_kind=RuntimeEventKind.LIMIT_REACHED,
+                    error_code="model_attempt_budget_exhausted",
+                    outcome_state=paused,
+                )
             except InvalidProviderResponseError as error:
                 if background_binding is not None:
                     return self._finish_background_model_unknown(
@@ -1691,6 +1929,24 @@ class AgentRuntime:
                     )
                 paused = pause_for_retryable(current.state)
                 provider_code = getattr(error, "code", "provider_retryable")
+                if provider_code == "provider_stream_cancelled":
+                    controlled = self._poll_control(action, current, warnings)
+                    if controlled is not None:
+                        return controlled
+                    failed = fail_run(
+                        current.state,
+                        code="provider_stream_cancelled_without_control",
+                        message="Provider stream stopped without a bound control request.",
+                    )
+                    return self._finish(
+                        current,
+                        action,
+                        status=RunStatus.FAILED_FATAL,
+                        warnings=warnings,
+                        event_kind=RuntimeEventKind.FAILED,
+                        error_code="provider_stream_cancelled_without_control",
+                        outcome_state=failed,
+                    )
                 if provider_code == "provider_http_retryable":
                     provider_code = (
                         "provider_rate_limit"
@@ -1701,10 +1957,35 @@ class AgentRuntime:
                     "provider_retryable",
                     "provider_timeout",
                     "provider_transport",
+                    "provider_stream_interrupted",
                     "provider_rate_limit",
                     "provider_unavailable",
                 }:
                     provider_code = "provider_retryable"
+                safely_retryable = provider_code in {
+                    "provider_timeout",
+                    "provider_transport",
+                    "provider_unavailable",
+                }
+                if (
+                    safely_retryable
+                    and retryable_provider_retries
+                    < self._limits.max_retryable_provider_retries
+                ):
+                    retryable_provider_retries += 1
+                    current = self._save(
+                        current,
+                        append_policy_result(
+                            current.state,
+                            code="provider_transient_retry",
+                            message=(
+                                "A transient provider failure occurred before a usable "
+                                "response. Runtime is retrying within the caller's bounded "
+                                "attempt budget."
+                            ),
+                        ),
+                    )
+                    continue
                 return self._finish(
                     current,
                     action,
@@ -1745,7 +2026,11 @@ class AgentRuntime:
                     message=str(error),
                     outcome_state=failed,
                 )
+            finally:
+                if progress_reporter is not None:
+                    self._stop_provider_progress(progress_reporter, current)
 
+            retryable_provider_retries = 0
             if background_binding is not None and not recovering_persisted_response:
                 active_after_send = current.state.active_run
                 if active_after_send is None or active_after_send.provider_call_intent is None:
@@ -2040,7 +2325,11 @@ class AgentRuntime:
                     )
                     continue
                 current = self._save(current, clarified)
-                completed = complete_run(current.state, message=control.question)
+                completed = complete_run(
+                    current.state,
+                    message=control.question,
+                    provider_continuation=response.provider_continuation,
+                )
                 return self._finish(
                     current,
                     action,
@@ -2090,7 +2379,11 @@ class AgentRuntime:
                 continue
             if isinstance(control, DirectResponse):
                 run_id = active.run_id
-                completed = complete_run(current.state, message=control.text)
+                completed = complete_run(
+                    current.state,
+                    message=control.text,
+                    provider_continuation=response.provider_continuation,
+                )
                 return self._finish(
                     current,
                     action,
@@ -2365,6 +2658,7 @@ class AgentRuntime:
                     completed = complete_run(
                         current.state,
                         message="Goal correction requires user authority before another effect.",
+                        provider_continuation=response.provider_continuation,
                     )
                     return self._finish(
                         current,
@@ -2679,9 +2973,19 @@ class AgentRuntime:
                     )
                     continue
                 run_id = active.run_id
+                completion_text = "\n".join(
+                    block.text
+                    for block in response.blocks
+                    if isinstance(block, ModelTextBlock)
+                ).strip()
+                completion_message = (
+                    completion_text
+                    or "Goal completion verified by closed evidence oracles."
+                )
                 completed = complete_run(
                     current.state,
-                    message="Goal completion verified by closed evidence oracles.",
+                    message=completion_message,
+                    provider_continuation=response.provider_continuation,
                 )
                 return self._finish(
                     current,
@@ -2690,7 +2994,7 @@ class AgentRuntime:
                     warnings=warnings,
                     event_kind=RuntimeEventKind.COMPLETED,
                     run_id=run_id,
-                    message="Goal completion verified by closed evidence oracles.",
+                    message=completion_message,
                     outcome_state=completed,
                 )
 
@@ -2779,6 +3083,7 @@ class AgentRuntime:
                         current.state,
                         calls,
                         preamble="\n".join(texts) or None,
+                        provider_continuation=response.provider_continuation,
                     ),
                 )
                 tool_batch = _ToolBatchConvergence(failure_signatures=[])
@@ -2874,7 +3179,11 @@ class AgentRuntime:
                     )
                 continue
             run_id = active.run_id
-            completed = complete_run(current.state, message=final_text)
+            completed = complete_run(
+                current.state,
+                message=final_text,
+                provider_continuation=response.provider_continuation,
+            )
             return self._finish(
                 current,
                 action,
@@ -3644,10 +3953,18 @@ class AgentRuntime:
     def _successful_product_request_inventory(
         self,
         state: ConversationState,
-    ) -> tuple[set[str], set[str]]:
-        # 从 durable facts 重建与 _drive 内相同的失效语义：实际执行（含
-        # is_error=True）的非 READ_ONLY 工具使先前可变观察过期，判定依据
-        # 是当前 ToolRuntime 注册声明的 SideEffectClass。
+    ) -> tuple[set[str], set[str], set[str]]:
+        # S1-A（2026-10-09）：三个集合由同一 durable fact fold 重建——
+        # ordinary（普通成功请求）、mutable_observation（ordinary 子集，沿用
+        # 原文件/browser 可变观察失效语义）、native_validation（可信只读
+        # native sandbox 验证成功；与 ordinary 不重叠，不先放 ordinary 再删）。
+        # 参数级抑制查询 ordinary ∪ native_validation。已执行的
+        # write/edit/mkdir、same-UID process，以及不能被严格分类证明只读的
+        # 已执行 sandbox（含失败/超时/非零退出），使 native_validation 清空，
+        # 这就是“检查→修改→同命令复测”的释放路径；A/B 两个可信验证可共存。
+        # operator 请求不进入成功集合（不读取被隐去的参数），但其已执行
+        # mutation 结果同样参与失效判断。每次调用都从 retained facts 全量折叠，
+        # 不维护另一份 live 增量副本；summary 不作为执行凭据。
         state_changing_tools = frozenset(
             definition.name
             for definition in self._tool_runtime.definitions()
@@ -3655,51 +3972,90 @@ class AgentRuntime:
         )
         active = state.active_run
         if active is None:
-            return set(), set()
+            return set(), set(), set()
+        goal = state.goal
+        workspace_digest = (
+            goal.workspace_identity_digest if goal is not None else None
+        )
         run_prefix = f"run:{active.run_id}:"
-        request_by_call_id: dict[str, tuple[str, str]] = {}
-        successful: set[str] = set()
-        workspace_observations: set[str] = set()
+        request_by_call_id: dict[str, tuple[str | None, str]] = {}
+        ordinary: set[str] = set()
+        mutable_observation: set[str] = set()
+        native_validation: set[str] = set()
         for fact in state.facts:
-            if self._is_operator_fact(fact):
-                continue
             if not fact.fact_id.startswith(run_prefix):
                 continue
             if fact.kind is FactKind.TOOL_CALLS:
                 raw_calls = fact.content.get("calls")
                 if not isinstance(raw_calls, list):
                     continue
+                operator_origin = (
+                    fact.content.get("invocation_origin")
+                    == InvocationOrigin.OPERATOR.value
+                )
                 for raw_call in raw_calls:
                     if not isinstance(raw_call, dict):
                         continue
                     call_id = raw_call.get("tool_call_id")
                     name = raw_call.get("name")
+                    if not (isinstance(call_id, str) and isinstance(name, str)):
+                        continue
+                    if operator_origin:
+                        # operator 参数被隐去：只留工具身份供失效判断，不记 digest。
+                        request_by_call_id[call_id] = (None, name)
+                        continue
                     arguments = raw_call.get("arguments")
-                    if (
-                        isinstance(call_id, str)
-                        and isinstance(name, str)
-                        and isinstance(arguments, dict)
-                    ):
+                    if isinstance(arguments, dict):
                         request_by_call_id[call_id] = (
                             self._product_request_digest(name, arguments),
                             name,
                         )
                 continue
-            if (
-                fact.kind is FactKind.TOOL_RESULT
-                and fact.content.get("executed") is True
+            if fact.kind is not FactKind.TOOL_RESULT:
+                continue
+            call_id = fact.content.get("tool_call_id")
+            if not isinstance(call_id, str) or call_id not in request_by_call_id:
+                continue
+            request_digest, tool_name = request_by_call_id[call_id]
+            if fact.content.get("executed") is not True:
+                # executed=false 的拒绝不产生新豁免，也不构成失效。
+                continue
+            metadata = fact.content.get("metadata")
+            metadata_dict = metadata if isinstance(metadata, dict) else None
+            if tool_name in WORKSPACE_WRITE_TOOLS or (
+                metadata_dict is not None and "process_receipt" in metadata_dict
             ):
-                call_id = fact.content.get("tool_call_id")
-                if isinstance(call_id, str) and call_id in request_by_call_id:
-                    request_digest, tool_name = request_by_call_id[call_id]
-                    if tool_name in state_changing_tools:
-                        successful.difference_update(workspace_observations)
-                        workspace_observations.clear()
-                    if fact.content.get("is_error") is False:
-                        successful.add(request_digest)
-                        if tool_name in _MUTABLE_OBSERVATION_TOOLS:
-                            workspace_observations.add(request_digest)
-        return successful, workspace_observations
+                # 写入与 same-UID process 的已执行结果（成功/失败/超时）都可能
+                # 已改写验证输入；先失效再记录本次成功。
+                native_validation.clear()
+            trusted_sandbox = False
+            if metadata_dict is not None and (
+                "sandbox_receipt" in metadata_dict
+                or metadata_dict.get("sandbox_receipt_kind") == "native_sandbox_v1"
+            ):
+                trusted_sandbox = (
+                    workspace_digest is not None
+                    and trusted_readonly_native_sandbox_success(
+                        fact,
+                        workspace_identity_digest=workspace_digest,
+                    )
+                )
+                if not trusted_sandbox:
+                    native_validation.clear()
+            if tool_name in state_changing_tools:
+                ordinary.difference_update(mutable_observation)
+                mutable_observation.clear()
+            if (
+                request_digest is not None
+                and fact.content.get("is_error") is False
+            ):
+                if trusted_sandbox:
+                    native_validation.add(request_digest)
+                else:
+                    ordinary.add(request_digest)
+                    if tool_name in _MUTABLE_OBSERVATION_TOOLS:
+                        mutable_observation.add(request_digest)
+        return ordinary, mutable_observation, native_validation
 
     def _finish(
         self,
@@ -3716,6 +4072,11 @@ class AgentRuntime:
         outcome_state: ConversationState | None = None,
     ) -> RunResult:
         state = outcome_state if outcome_state is not None else current.state
+        # terminal reducer 会清空 active_run；用 reducer 前的 current 保留本次 run 用量。
+        usage_active = current.state.active_run or state.active_run
+        model_calls_used = (
+            usage_active.model_calls_used if usage_active is not None else 0
+        )
         if run_id is None and state.active_run is not None:
             run_id = state.active_run.run_id
         if run_id is None and state.last_safe_result is not None:
@@ -3726,6 +4087,16 @@ class AgentRuntime:
             message=message,
             request_id=request.request_id if request is not None else None,
             error_code=error_code,
+            # 2026-10-10：终态记录保留本次 run 的模型 usage（费用可观测性）。
+            model_calls_used=(
+                usage_active.model_calls_used if usage_active is not None else None
+            ),
+            input_tokens_used=(
+                usage_active.input_tokens_used if usage_active is not None else None
+            ),
+            output_tokens_used=(
+                usage_active.output_tokens_used if usage_active is not None else None
+            ),
         )
         finalized = finalize_action(
             state,
@@ -3782,10 +4153,18 @@ class AgentRuntime:
             request=request,
             error_code=error_code,
             delivery_warnings=tuple(warnings),
+            model_calls_used=model_calls_used,
         )
 
     def _save(self, snapshot: LoadedSnapshot, state) -> LoadedSnapshot:
-        return self._checkpoint_store.compare_and_swap(snapshot, state)
+        try:
+            return self._checkpoint_store.compare_and_swap(snapshot, state)
+        except CheckpointCASConflictError:
+            raise
+        except Exception as error:
+            # 调用者提供的 snapshot 就是本次失败写入前的显式最新 cursor。
+            # 将它随错误上送，避免 run_turn 为恢复而偷偷再次 load store。
+            raise _CheckpointWriteError(error, snapshot) from error
 
     def _finish_context_limit(
         self,
@@ -3816,6 +4195,8 @@ class AgentRuntime:
         current: LoadedSnapshot,
         plan: CompactionPlanV1,
         context: ContextPack,
+        *,
+        source_snapshot: LoadedSnapshot | None = None,
     ) -> _CompactionCallResult:
         """执行一次长会话压缩（020 内部成功路径）。
 
@@ -3830,14 +4211,20 @@ class AgentRuntime:
             raise RuntimeError("compaction requires a conversation archive")
         if not plan.actionable:
             raise RuntimeError("compaction requires an actionable plan")
+        source = source_snapshot or current
         response = self._provider.generate(context)
         summary = parse_compaction_response(
             response,
-            source_checkpoint_digest=current.token.removeprefix("sha256:"),
+            source_checkpoint_digest=source.token.removeprefix("sha256:"),
             source_fact_ids_digest=canonical_json_digest(list(plan.removable_fact_ids)),
         )
         reduced = apply_compaction_summary(current.state, summary, plan.removable_fact_ids)
-        archive_compaction_source(self._conversation_archive, current, reduced)
+        archive_compaction_source(
+            self._conversation_archive,
+            source,
+            reduced,
+            model_attempt_recorded=source_snapshot is not None,
+        )
         saved = self._save(current, reduced)
         return _CompactionCallResult(
             snapshot=saved,
@@ -3852,6 +4239,20 @@ class AgentRuntime:
             definition.name == tool_name and definition.side_effect is not SideEffectClass.READ_ONLY
             for definition in self._tool_runtime.definitions()
         )
+
+    def _run_wall_budget_expired(self, started_at: str | None) -> bool:
+        limit = self._limits.max_run_wall_seconds
+        if limit is None:
+            return False
+        if started_at is None:
+            raise RuntimeError("bounded run is missing its durable start time")
+        now = datetime.fromisoformat(self._run_time_factory().replace("Z", "+00:00"))
+        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        if now.tzinfo is None or started.tzinfo is None:
+            raise RuntimeError("run wall budget requires zoned timestamps")
+        elapsed = (now - started).total_seconds()
+        # 系统时钟回拨时无法证明还有预算，按到界处理而不是获得额外执行时间。
+        return elapsed < 0 or elapsed >= limit
 
     def _is_lease_governed_tool(self, tool_name: str) -> bool:
         # 015：LOCAL_SAME_UID_PROCESS 工具的 exact reuse 由 durable lease 治理（F2/R9，
@@ -4222,7 +4623,110 @@ class AgentRuntime:
                 )
                 sink.emit(event)
 
+            def cancellation_requested(self) -> bool:
+                if (
+                    self_control_inbox is None
+                    or state.goal is None
+                    or state.active_run is None
+                    or state.active_run.owner_invocation_id is None
+                ):
+                    return False
+                binding = ControlBinding(
+                    conversation_id=state.conversation_id,
+                    goal_id=state.goal.goal_id,
+                    goal_revision=state.goal.revision,
+                    invocation_id=state.active_run.owner_invocation_id,
+                )
+                return self_control_inbox.pending(binding)
+
+        self_control_inbox = self._control_inbox
         return _TextDeltaObserver()
+
+    def _start_provider_progress(
+        self,
+        current: LoadedSnapshot,
+    ) -> _ProviderProgressReporter | None:
+        """在非流式 provider 阻塞期间只发送 advisory 活性事件。"""
+
+        if self._progress_event_sink is None:
+            return None
+
+        stop = threading.Event()
+        started_at = time.monotonic()
+        counter = itertools.count(start=1)
+        next_sequence = counter.__next__
+        self._emit_provider_progress_advisory(
+            current,
+            phase="provider_started",
+            elapsed_seconds=0.0,
+            sequence=next_sequence(),
+        )
+
+        def report_waiting() -> None:
+            while not stop.wait(self._provider_progress_interval_seconds):
+                self._emit_provider_progress_advisory(
+                    current,
+                    phase="provider_waiting",
+                    elapsed_seconds=time.monotonic() - started_at,
+                    sequence=next_sequence(),
+                )
+
+        thread = threading.Thread(
+            target=report_waiting,
+            name="first-agent-provider-progress",
+            daemon=True,
+        )
+        thread.start()
+        return _ProviderProgressReporter(stop, thread, started_at, next_sequence)
+
+    def _stop_provider_progress(
+        self,
+        reporter: _ProviderProgressReporter,
+        current: LoadedSnapshot,
+    ) -> None:
+        reporter.stop.set()
+        reporter.thread.join(timeout=1.0)
+        self._emit_provider_progress_advisory(
+            current,
+            phase="provider_finished",
+            elapsed_seconds=time.monotonic() - reporter.started_at,
+            sequence=reporter.next_sequence(),
+        )
+
+    def _emit_provider_progress_advisory(
+        self,
+        current: LoadedSnapshot,
+        *,
+        phase: str,
+        elapsed_seconds: float,
+        sequence: int,
+    ) -> None:
+        state = current.state
+        active = state.active_run
+        run_id = active.run_id if active is not None else None
+        event = RuntimeEvent(
+            event_id=(
+                f"event:model-progress:{state.conversation_id}:{run_id}:"
+                f"{state.revision}:{sequence}"
+            ),
+            kind=RuntimeEventKind.MODEL_PROGRESS,
+            conversation_id=state.conversation_id,
+            run_id=run_id,
+            revision=state.revision,
+            causation_id=f"provider:{run_id or state.conversation_id}",
+            payload={
+                "phase": phase,
+                "elapsed_seconds": round(max(0.0, elapsed_seconds), 1),
+            },
+            advisory=True,
+        )
+        try:
+            sink = self._progress_event_sink
+            if sink is not None:
+                sink.emit(event)
+        except Exception:
+            # advisory 失败不能改变 provider 调用或权威结果。
+            return
 
     def _deliver_events(
         self,

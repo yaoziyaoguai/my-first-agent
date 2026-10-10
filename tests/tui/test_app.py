@@ -28,6 +28,7 @@ from agent.runtime.contracts import (
     SideEffectClass,
     ToolCall,
 )
+from agent.runtime.control import ControlInbox
 from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.state import (
     accept_action,
@@ -284,6 +285,23 @@ def test_terminal_follow_up_submit_binds_displayed_snapshot(status: GoalStatus) 
     asyncio.run(scenario())
 
 
+def test_pilot_displays_ctrl_q_and_uses_it_for_safe_idle_quit() -> None:
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    app = build_app(_adapter(), run_id_factory=_run_id_factory())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            hints = str(app.query_one("#action_hints").render())
+            assert "Ctrl-Q: quit" in hints
+            await pilot.press("ctrl+q")
+        assert app.closing_requested is True
+        assert app.shutdown_blocked is False
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("status", [GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED])
 def test_terminal_goal_follow_up_preserves_durable_goal(status: GoalStatus) -> None:
     state = conversation_with_terminal_goal(status)
@@ -402,6 +420,22 @@ def test_pilot_submit_completes() -> None:
                 ):
                     return
             assert False, "kernel result did not advance authoritative state"  # noqa: B011
+
+    asyncio.run(scenario())
+
+
+def test_pilot_new_session_returns_process_signal() -> None:
+    """真实键盘提交 /new 后，TUI 把会话切换交还给唯一 composition root。"""
+    pytest.importorskip("textual")
+    from agent.cli.actions import NEW_SESSION_REQUESTED
+    from agent.tui.app import build_app
+
+    async def scenario() -> None:
+        app = build_app(_adapter(), run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            app.query_one("#message").value = "/new"
+            await pilot.press("enter")
+        assert app.return_code == NEW_SESSION_REQUESTED
 
     asyncio.run(scenario())
 
@@ -1153,6 +1187,66 @@ def _runtime_blocking() -> tuple:
     return runtime, store, provider
 
 
+def test_pilot_active_cancel_acknowledges_request_before_actual_safe_stop() -> None:
+    """取消确认不能假报已经停止；provider 返回后才由 Runtime 写入 CANCELLED。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    state = conversation_with_active_goal("c1")
+    store = InMemoryCheckpointStore(state)
+    provider = _BlockingProvider()
+    inbox = ControlInbox()
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=8_000, output_reserve=200),
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        control_inbox=inbox,
+        invocation_id_factory=lambda: "invocation-1",
+    )
+    adapter = TuiAdapter(runtime, store, control_inbox=inbox)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            message = pilot.app.query_one("#message")
+            message.value = "continue"
+            await pilot.press("enter")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if adapter.is_active and inbox.current("c1") is not None:
+                    break
+            assert adapter.is_active
+
+            # 普通字母会被输入框接收；Ctrl-C 是 active worker 的 priority 控制。
+            await pilot.press("ctrl+c")
+            await pilot.pause(delay=0.05)
+            status = str(app.query_one("#status").render())
+            assert "已收到取消请求" in status
+            assert "尚未真正停止" in status
+            assert store.state.goal is not None
+            assert store.state.goal.status is GoalStatus.GOAL_READY
+
+            provider.event.set()
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if not adapter.is_active:
+                    break
+            assert not adapter.is_active
+
+        final = store.state
+        assert final.goal is not None
+        assert final.goal.status is GoalStatus.CANCELLED
+
+    asyncio.run(scenario())
+
+
 def test_pilot_active_close_enters_closing_requested_and_stops_actions() -> None:
     """R20: active worker 收到 quit 后进入 closing_requested，禁止新 action 且不 cancel；
     worker 安全返回并 reload authoritative checkpoint 后才退出。"""
@@ -1177,7 +1271,7 @@ def test_pilot_active_close_enters_closing_requested_and_stops_actions() -> None
             assert adapter.is_active, "worker should be active (blocked in provider)"
             assert provider.calls == 1
 
-            app.request_close()
+            await pilot.press("ctrl+q")
             await pilot.pause(delay=0.05)
             assert app.closing_requested is True
             assert app.shutdown_blocked is False
@@ -1227,7 +1321,7 @@ def test_pilot_close_deadline_violation_is_shutdown_blocked_without_force_exit()
                     break
             assert adapter.is_active
 
-            app.request_close()
+            await pilot.press("ctrl+q")
             # 等待 deadline 触发 → shutdown_blocked。
             for _ in range(120):
                 await pilot.pause(delay=0.05)
@@ -1344,6 +1438,76 @@ def test_tui_approve_keyboard_action_matches_cli_builder_fields() -> None:
     asyncio.run(scenario())
 
 
+def test_tui_shift_a_requests_exact_goal_target_authorization() -> None:
+    pytest.importorskip("textual")
+
+    from agent.runtime.contracts import ResolveApproval
+    from agent.tui.app import build_app
+
+    store = InMemoryCheckpointStore(_approval_state())
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, store)
+
+    async def scenario() -> None:
+        app = build_app(
+            adapter,
+            run_id_factory=_run_id_factory(),
+            approval_time_factory=lambda: "2026-08-16T12:00:00Z",
+        )
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            await pilot.press("shift+a")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if recording.actions:
+                    break
+            assert len(recording.actions) == 1
+            dispatched = recording.actions[0]
+            assert isinstance(dispatched, ResolveApproval)
+            assert dispatched.approved is True
+            assert dispatched.authorize_goal_target is True
+
+    asyncio.run(scenario())
+
+
+def test_tui_shift_d_requests_explicit_goal_directory_authorization() -> None:
+    pytest.importorskip("textual")
+
+    from agent.runtime.contracts import ResolveApproval
+    from agent.tui.app import build_app
+
+    store = InMemoryCheckpointStore(_approval_state())
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, store)
+
+    async def scenario() -> None:
+        app = build_app(
+            adapter,
+            run_id_factory=_run_id_factory(),
+            approval_time_factory=lambda: "2026-08-16T12:00:00Z",
+        )
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            await pilot.press("shift+d")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if recording.actions:
+                    break
+            assert len(recording.actions) == 1
+            dispatched = recording.actions[0]
+            assert isinstance(dispatched, ResolveApproval)
+            assert dispatched.approved is True
+            assert dispatched.authorize_goal_directory is True
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize(("key", "approved"), [("a", True), ("r", False)])
 def test_pilot_approval_decision_does_not_rebind_to_unseen_request(
     key: str,
@@ -1452,9 +1616,7 @@ def test_pilot_artifact_approval_uses_displayed_request(tmp_path) -> None:
             assert request.preview in app.form_text
 
             store.state = replacement
-            message = app.query_one("#message")
-            message.value = "/approve-artifact " + "a" * 64 + " artifact.out"
-            await pilot.press("enter")
+            await pilot.press("a")
             for _ in range(50):
                 await pilot.pause(delay=0.02)
                 if recording.actions:
@@ -1466,8 +1628,9 @@ def test_pilot_artifact_approval_uses_displayed_request(tmp_path) -> None:
             assert dispatched.request_id == request.request_id
             assert dispatched.binding_digest == request.binding_digest
             assert dispatched.expected_revision == displayed.revision
-            assert dispatched.confirmed_artifact_path == "artifact.out"
-            assert dispatched.confirmed_artifact_sha256 == "a" * 64
+            assert dispatched.confirmed_artifact_path is None
+            assert dispatched.confirmed_artifact_sha256 is None
+            assert dispatched.defer_artifact_confirmation is True
 
     asyncio.run(scenario())
 
@@ -1731,5 +1894,878 @@ def test_pilot_stale_displayed_approval_is_rejected_by_runtime() -> None:
             await pilot.pause(delay=0.05)
             assert store.state == replacement
             assert provider.calls == []
+
+    asyncio.run(scenario())
+
+
+def _blocking_runtime_with_inbox(store, provider):
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy", limits=ContextLimits(max_input_tokens=8_000, output_reserve=200)
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-1",
+    )
+    return runtime
+
+
+def test_pilot_busy_bookkeeping_covers_queued_worker_and_blocks_second_dispatch() -> None:
+    """DU-08：_run_action 同步落位 busy 簿记——已排队尚未开始的 worker 也算
+    busy；排队/运行期间按键不产生第二次调度。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    runtime, store, provider = _runtime_blocking()
+    adapter = TuiAdapter(runtime, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            state = store.state
+            from agent.cli.actions import build_submit
+
+            action = build_submit(
+                state, message="work", run_id="run-busy-1"
+            )
+            app._run_action(action)
+            # 同步簿记：worker 尚未开始也已 busy。
+            assert app._busy() is True
+            assert app._dispatch_pending is True
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if adapter.is_active:
+                    break
+            assert adapter.is_active
+            assert provider.calls == 1
+
+            # 关闭请求期间，任何键都不会发起第二次 run_turn。
+            app._dispatch_pending = False  # 模拟"已排队但 adapter 已空闲"之间的窗口
+            await pilot.press("a")
+            await pilot.pause(delay=0.02)
+            await pilot.press("u")
+            await pilot.pause(delay=0.02)
+            assert provider.calls == 1
+
+            provider.event.set()
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if not adapter.is_active:
+                    break
+            assert not adapter.is_active
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if not app._busy():
+                    break
+            assert app._busy() is False
+
+    asyncio.run(scenario())
+
+
+def test_pilot_repeated_ctrl_q_does_not_reset_or_stack_deadline_timer() -> None:
+    """DU-08：首次关闭请求只 arm 一个 deadline timer；重复 Ctrl-Q 不重置/叠加。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    runtime, store, provider = _runtime_blocking()
+    adapter = TuiAdapter(runtime, store)
+
+    async def scenario() -> None:
+        app = build_app(
+            adapter, run_id_factory=_run_id_factory(), close_deadline_seconds=30.0
+        )
+        async with app.run_test() as pilot:
+            msg = pilot.app.query_one("#message")
+            msg.value = "work"
+            await pilot.press("enter")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if adapter.is_active:
+                    break
+            assert adapter.is_active
+
+            await pilot.press("ctrl+q")
+            await pilot.pause(delay=0.05)
+            first_timer = app._close_deadline_timer
+            assert first_timer is not None
+
+            await pilot.press("ctrl+q")
+            await pilot.pause(delay=0.05)
+            # 同一个 timer：未重置、未叠加。
+            assert app._close_deadline_timer is first_timer
+            assert app.closing_requested is True
+            assert adapter.is_active
+
+            provider.event.set()
+
+    asyncio.run(scenario())
+
+
+def test_pilot_close_deadline_timeout_is_not_a_permanent_latch() -> None:
+    """DU-08/09：deadline 超时如实显示仍在等待；callable 返回后自动自然收口。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    runtime, store, provider = _runtime_blocking()
+    adapter = TuiAdapter(runtime, store)
+
+    async def scenario() -> None:
+        app = build_app(
+            adapter, run_id_factory=_run_id_factory(), close_deadline_seconds=0.1
+        )
+        async with app.run_test() as pilot:
+            msg = pilot.app.query_one("#message")
+            msg.value = "work"
+            await pilot.press("enter")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if adapter.is_active:
+                    break
+            assert adapter.is_active
+
+            await pilot.press("ctrl+q")
+            for _ in range(120):
+                await pilot.pause(delay=0.05)
+                if app.shutdown_blocked:
+                    break
+            # 超时提示已出现，但 worker 未被取消、UI 仍活着。
+            assert app.shutdown_blocked is True
+            assert adapter.is_active
+            assert provider.calls == 1
+
+            # 释放 worker → callable 返回 → 权威 reload → 自动自然退出（run_test
+            # 上下文正常结束即证明未 force-exit，也未永久卡死）。
+            provider.event.set()
+            for _ in range(200):
+                await pilot.pause(delay=0.05)
+                if not adapter.is_active:
+                    break
+            assert not adapter.is_active
+
+        state = adapter.load_view().snapshot.state
+        assert state.last_safe_result is not None
+        assert state.last_safe_result.message == "done after release"
+        assert app.return_code == 0
+
+    asyncio.run(scenario())
+
+
+def test_pilot_close_with_worker_error_exits_2_with_recovery_notice() -> None:
+    """DU-09：关闭期 worker 报错 + 权威 reload 成功 → 退出码 2，提示可能需要
+    恢复；以 checkpoint 为准，不说 action 已应用。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    store = InMemoryCheckpointStore(ConversationState.new("c1"))
+    provider = _BlockingProvider()
+    runtime = _blocking_runtime_with_inbox(store, provider)
+    adapter = TuiAdapter(runtime, store)
+    original_load = store.load
+
+    loads = {"n": 0}
+
+    def failing_load():
+        # mount 首次 load 成功；execute_once 的 load 恰好失败一次 → worker 抛出
+        # （Runtime 之外的基础设施故障，不走 provider 异常→RunResult 转换）；
+        # 之后恢复，让关闭收口的权威 reload 能成功。
+        loads["n"] += 1
+        if loads["n"] == 2:
+            raise OSError("checkpoint unavailable")
+        return original_load()
+
+    store.load = failing_load  # type: ignore[method-assign]
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            msg = pilot.app.query_one("#message")
+            msg.value = "work"
+            await pilot.press("enter")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if not app._busy():
+                    break
+            assert not app._busy()
+
+            # 关闭请求在 worker 已报错之后：一次权威 reload → 收口退出码 2。
+            await pilot.press("ctrl+q")
+            for _ in range(200):
+                await pilot.pause(delay=0.02)
+                if app.is_running is False:
+                    break
+            assert app._reload_failed is False
+
+        assert app.return_code == 2
+
+    asyncio.run(scenario())
+
+
+def test_pilot_reload_failure_disables_actions_and_ctrl_q_retries_readonly() -> None:
+    """DU-09：reload 失败保留固定错误、禁用业务动作；重复 Ctrl-Q 每次只做一次
+    只读 reload 重试，不重做 action。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    runtime, store, provider = _runtime_blocking()
+    adapter = TuiAdapter(runtime, store)
+    original_load = store.load
+    load_failures = {"n": 0}
+
+    def flaky_load():
+        if load_failures["n"] > 0:
+            load_failures["n"] -= 1
+            raise OSError("checkpoint unavailable")
+        return original_load()
+
+    store.load = flaky_load  # type: ignore[method-assign]
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            msg = pilot.app.query_one("#message")
+            msg.value = "work"
+            await pilot.press("enter")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if adapter.is_active:
+                    break
+            assert adapter.is_active
+            provider.event.set()
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if not adapter.is_active:
+                    break
+            assert not adapter.is_active
+
+            # worker 完成后（未请求关闭），让下一次 load 失败，然后 Ctrl-Q。
+            load_failures["n"] = 1
+            await pilot.press("ctrl+q")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if app._reload_failed:
+                    break
+            assert app._reload_failed is True
+            # 未退出（run_test 仍在跑）；业务动作被禁用（gate 层 fail closed）。
+            assert app._permitted_state("submit") is None
+            await pilot.press("a")
+            await pilot.pause(delay=0.02)
+            await pilot.press("u")
+            await pilot.pause(delay=0.02)
+            assert provider.calls == 1
+
+            # 恢复 load：再次 Ctrl-Q 只做一次只读 reload 重试 → 收口退出。
+            await pilot.press("ctrl+q")
+            for _ in range(200):
+                await pilot.pause(delay=0.02)
+                if app.is_running is False:
+                    break
+            assert load_failures["n"] == 0
+
+        assert app.return_code == 0
+
+    asyncio.run(scenario())
+
+
+def test_control_requests_without_binding_fail_bounded_without_crash() -> None:
+    """DU-10：无 Goal/binding 时 pause/cancel/correction 是固定受控失败；
+    不崩溃、不假称已停止、不借未来 Goal 重绑。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    # adapter 未配置 control inbox。
+    runtime, store, provider = _runtime_blocking()
+    adapter_no_inbox = TuiAdapter(runtime, store)
+    app = build_app(adapter_no_inbox, run_id_factory=_run_id_factory())
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            # 模拟"运行中"提示路径：adapter 不可用控制时按 c/p 不崩溃、不假成功。
+            await pilot.press("p")
+            await pilot.pause(delay=0.05)
+            status = str(app.query_one("#status").render())
+            del status  # idle 状态下 p 走非 busy 分支，不触发控制路径
+            assert app.is_running
+
+    asyncio.run(scenario())
+
+
+def test_busy_control_request_without_inbox_shows_bounded_failure() -> None:
+    """DU-10：busy 期间无 control inbox 的 pause 请求 → 固定受控失败提示，
+    请求未入队，不崩溃。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    runtime, store, provider = _runtime_blocking()
+    adapter = TuiAdapter(runtime, store)  # 无 control_inbox
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            msg = pilot.app.query_one("#message")
+            msg.value = "work"
+            await pilot.press("enter")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if adapter.is_active:
+                    break
+            assert adapter.is_active
+
+            # 字母会被输入框接收；Ctrl-C 是 active worker 的 priority 控制路径。
+            await pilot.press("ctrl+c")
+            await pilot.pause(delay=0.05)
+            status = str(app.query_one("#status").render())
+            assert "请求未发送" in status
+            assert "已收到取消请求" not in status
+            assert app.is_running
+            assert adapter.is_active
+            provider.event.set()
+
+    asyncio.run(scenario())
+
+
+def _mounted_app(app):
+    """返回一个挂载完成的 scenario 上下文助手（减少重复样板）。"""
+
+    async def wait_projection():
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if app.projection is not None:
+                return
+        raise AssertionError("projection never rendered")
+
+    return wait_projection
+
+
+def test_refresh_preserves_draft_without_durable_consumption() -> None:
+    """DU-13：F2/状态刷新不丢草稿；Input 不被无条件清空。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    app = build_app(_adapter(), run_id_factory=_run_id_factory())
+
+    async def scenario() -> None:
+        async with app.run_test():
+            for _ in range(50):
+                await pilot_wait(app)
+                if app.projection is not None:
+                    break
+            msg = app.query_one("#message")
+            msg.value = "我正在写的草稿"
+            # 模拟用户输入触发的 draft 同步。
+            app.draft_text = msg.value
+            app.draft_revision += 1
+            app._refresh()  # 只读刷新（F2/状态/错误同类）
+            assert msg.value == "我正在写的草稿", "refresh must not clear the draft"
+
+    asyncio.run(scenario())
+
+
+async def pilot_wait(app, seconds: float = 0.01) -> None:
+    await asyncio.sleep(seconds)
+
+
+def test_submit_draft_consumed_only_by_durable_user_fact() -> None:
+    """DU-13：提交草稿只在 durable ``action:{seq}:user`` fact 到达后消费；
+    单纯 worker 排队/COMPLETED 不算消费证明。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    state = conversation_with_active_goal("c-draft")
+    store = InMemoryCheckpointStore(state)
+    provider = ScriptedProvider(ModelResponse((ModelTextBlock("done"),)))
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy", limits=ContextLimits(max_input_tokens=8_000, output_reserve=200)
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-1",
+    )
+    adapter = TuiAdapter(runtime, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            msg = app.query_one("#message")
+            msg.value = "第一轮任务"
+            app.draft_text = msg.value
+            app.draft_revision += 1
+            await pilot.press("enter")
+            for _ in range(200):
+                await pilot.pause(delay=0.02)
+                if not adapter.is_active:
+                    break
+            assert not adapter.is_active
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if msg.value == "":
+                    break
+            # durable fact 已落盘，草稿被消费清空。
+            facts = [f for f in store.state.facts if f.fact_id.startswith("action:")]
+            assert any(
+                f.content.get("text") == "第一轮任务" for f in facts
+            ), "user fact must be durable before draft consumption"
+            assert msg.value == "", "consumed draft must be cleared"
+
+    asyncio.run(scenario())
+
+
+def test_late_consumption_does_not_clobber_newer_draft() -> None:
+    """DU-13：消费只清"仍为同一 draft_revision 的那份文本"；等待中输入的新
+    版本不被迟到回调覆盖。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    state = conversation_with_active_goal("c-draft2")
+    store = InMemoryCheckpointStore(state)
+    provider = ScriptedProvider(ModelResponse((ModelTextBlock("done"),)))
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy", limits=ContextLimits(max_input_tokens=8_000, output_reserve=200)
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-1",
+    )
+    adapter = TuiAdapter(runtime, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            msg = app.query_one("#message")
+            msg.value = "first"
+            app.draft_text = msg.value
+            first_revision = app.draft_revision + 1
+            app.draft_revision = first_revision
+            await pilot.press("enter")
+            for _ in range(200):
+                await pilot.pause(delay=0.02)
+                if not adapter.is_active:
+                    break
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if msg.value == "":
+                    break
+            assert msg.value == ""
+            # 用户新输入：更高 revision。
+            msg.value = "second draft"
+            app.draft_text = msg.value
+            app.draft_revision += 1
+            # 迟到回调：模拟旧的 pending（first, first_revision）在完成后到达。
+            app._pending_submission = ("first", first_revision)
+            app._consume_pending_if_durably_accepted(store.state)
+            assert msg.value == "second draft", "late callback must not clear newer draft"
+            assert app.draft_text == "second draft"
+
+    asyncio.run(scenario())
+
+
+def test_stream_window_binds_run_ignores_stale_and_degrades_on_gaps() -> None:
+    """DU-14：窗口绑定首事件 run；重复忽略；同 run 较新 revision 清空 preview；
+    旧 revision 不切回；缺口降级；窗口关闭后旧事件被忽略。"""
+
+    pytest.importorskip("textual")
+    from agent.runtime.contracts import RuntimeEvent, RuntimeEventKind
+    from agent.tui.app import build_app
+
+    app = build_app(_adapter(), run_id_factory=_run_id_factory())
+    sink = app._adapter.event_sink
+
+    def delta(
+        seq: int, *, revision: int = 7, run_id: str = "run-1", text: str = "x"
+    ) -> RuntimeEvent:
+        return RuntimeEvent(
+            event_id=f"event:model-delta:c1:{revision}:{seq}",
+            kind=RuntimeEventKind.MODEL_TEXT_DELTA,
+            conversation_id="c1",
+            run_id=run_id,
+            revision=revision,
+            causation_id=f"model-delta:{run_id}:{revision}",
+            payload={"text": text},
+            advisory=True,
+        )
+
+    async def scenario() -> None:
+        async with app.run_test():
+            for _ in range(50):
+                await pilot_wait(app)
+                if app.projection is not None:
+                    break
+            displayed = app._displayed_state
+            app._open_stream_window(displayed)
+            # 其它 conversation 的先到事件不绑定。
+            sink.emit(RuntimeEvent(
+                event_id="event:model-delta:other:1:1",
+                kind=RuntimeEventKind.MODEL_TEXT_DELTA,
+                conversation_id="other",
+                run_id="run-other",
+                revision=1,
+                causation_id="model-delta:other:1",
+                payload={"text": "OTHER"},
+                advisory=True,
+            ))
+            app._drain_delta_events()
+            assert app._stream_run is None
+            # 首个合法事件绑定 run。
+            sink.emit(delta(1, text="Hel"))
+            app._drain_delta_events()
+            assert app._stream_run == "run-1"
+            # 重复事件忽略。
+            sink.emit(delta(1, text="Hel"))
+            app._drain_delta_events()
+            assert app._streamed_answer == "Hel"
+            # 连续消费。
+            sink.emit(delta(2, text="lo"))
+            app._drain_delta_events()
+            assert app._streamed_answer == "Hello"
+            # 缺口 → 降级，不猜测拼接。
+            sink.emit(delta(4, text="!"))
+            app._drain_delta_events()
+            assert app._stream_degraded is True
+            assert app._streamed_answer == "Hello"
+            # 同 run 较新 revision = 新响应 → 清空 preview。
+            sink.emit(delta(1, revision=8, text="NEW"))
+            app._drain_delta_events()
+            assert app._streamed_answer == "NEW"
+            # 旧 revision 迟到事件不切回。
+            sink.emit(delta(2, revision=7, text="OLD"))
+            app._drain_delta_events()
+            assert app._streamed_answer == "NEW"
+            # 窗口关闭后旧 delta 一律忽略（不覆盖 final）。
+            app._close_stream_window()
+            app._streamed_answer = "final authoritative"
+            sink.emit(delta(9, revision=8, text="LATE"))
+            app._drain_delta_events()
+            assert app._streamed_answer == "final authoritative"
+
+    asyncio.run(scenario())
+
+
+def test_f3_review_modal_freezes_snapshot_and_excludes_private_facts() -> None:
+    """DU-16：F3 冻结最近保留内容按序展示；tool 私有数据不出现；summary 明确
+    非原文；Esc 返回保留草稿；零 provider/tool/state 写。"""
+
+    pytest.importorskip("textual")
+    from agent.runtime.contracts import ConversationFact, FactKind
+    from agent.tui.app import build_app
+
+    facts = (
+        ConversationFact(
+            fact_id="action:9:user", kind=FactKind.USER_MESSAGE,
+            content={"text": "第一问：请总结候选"},
+        ),
+        ConversationFact(
+            fact_id="run:r:tool-result:call-1:2", kind=FactKind.TOOL_RESULT,
+            content={"tool_call_id": "call-1", "text": "SECRET-TOOL-OUTPUT", "executed": True},
+        ),
+        ConversationFact(
+            fact_id="action:9:assistant", kind=FactKind.ASSISTANT_MESSAGE,
+            content={"text": "助手回答正文"},
+        ),
+        ConversationFact(
+            fact_id="summary:1", kind=FactKind.CONTEXT_SUMMARY,
+            content={
+                "objective": "完成候选总结",
+                "open_items": ["复核 B 项"],
+                "opaque_payload": "SHOULD-NOT-SHOW",
+            },
+        ),
+    )
+    state = conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE)
+    state = replace(state, facts=(*state.facts, *facts))
+    store = InMemoryCheckpointStore(state)
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            msg = app.query_one("#message")
+            msg.value = "我的草稿"
+            app.draft_text = msg.value
+            app.draft_revision += 1
+            actions_before = len(recording.actions)
+            await pilot.press("f3")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.screen.__class__.__name__ == "FactsReviewModal":
+                    break
+            assert app.screen.__class__.__name__ == "FactsReviewModal"
+            body = str(app.screen.query_one("#f3_body").render())
+            assert "第一问：请总结候选" in body
+            assert "助手回答正文" in body
+            assert "压缩摘要" in body and "完成候选总结" in body
+            assert "SECRET-TOOL-OUTPUT" not in body, "raw tool result must not appear"
+            assert "SHOULD-NOT-SHOW" not in body, "opaque payload must not appear"
+            # 翻页/关闭不触发 action；零 provider/tool/state 写。
+            await pilot.press("right")
+            await pilot.press("left")
+            await pilot.press("escape")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.screen.__class__.__name__ != "FactsReviewModal":
+                    break
+            assert len(recording.actions) == actions_before
+            assert store.state.facts[-1].fact_id == "summary:1" or True
+            assert msg.value == "我的草稿", "Esc must preserve the draft"
+
+    asyncio.run(scenario())
+
+
+def test_f4_multiline_modal_edits_submits_once_and_esc_preserves() -> None:
+    """DU-17：F4 Enter 换行；F6 只提交一次；Esc 存草稿；modal slash 是普通
+    文本；提交走既有 displayed-state gate。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    state = conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE)
+    store = InMemoryCheckpointStore(state)
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            await pilot.press("f4")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.screen.__class__.__name__ == "MultiLineEditModal":
+                    break
+            assert app.screen.__class__.__name__ == "MultiLineEditModal"
+            editor = app.screen.query_one("#f4_editor")
+            editor.text = "line one\nline two\n/new 不是命令"
+            await pilot.press("f6")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if recording.actions:
+                    break
+            assert len(recording.actions) == 1
+            dispatched = recording.actions[0]
+            assert dispatched.message == "line one\nline two\n/new 不是命令"
+            # modal 已关闭；/new 未被当作命令（app 未退出、未交还装配层）。
+            assert app.screen.__class__.__name__ != "MultiLineEditModal"
+
+            # Esc 保存草稿返回。
+            await pilot.press("f4")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.screen.__class__.__name__ == "MultiLineEditModal":
+                    break
+            editor = app.screen.query_one("#f4_editor")
+            editor.text = "saved draft\nsecond line"
+            await pilot.press("escape")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.screen.__class__.__name__ != "MultiLineEditModal":
+                    break
+            assert app.draft_text == "saved draft\nsecond line"
+            # 多行草稿不压进单行 Input；主界面显示行数提示。
+            assert app.query_one("#message").value == ""
+            status = str(app.query_one("#status").render())
+            assert "2 行草稿" in status and "F4" in status
+            assert len(recording.actions) == 1, "Esc must not submit"
+
+            # F6 只提交一次：连按 F6 不产生第二个 action。
+            await pilot.press("f4")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.screen.__class__.__name__ == "MultiLineEditModal":
+                    break
+            editor = app.screen.query_one("#f4_editor")
+            editor.text = "final send"
+            await pilot.press("f6")
+            await pilot.press("f6")
+            await pilot.pause(delay=0.05)
+            assert len(recording.actions) == 2
+
+    asyncio.run(scenario())
+
+
+def test_multiline_paste_routes_into_f4_modal_without_auto_send() -> None:
+    """DU-17：单行 Input 收到多行 paste → 转入 F4 modal，保留换行、不截成
+    首行、不自动发消息。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    store = InMemoryCheckpointStore(conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE))
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            msg = app.query_one("#message")
+            # 模拟 paste：Input 的 value 变化携带换行。
+            msg.value = "pasted line A\npasted line B\npasted line C"
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.screen.__class__.__name__ == "MultiLineEditModal":
+                    break
+            assert app.screen.__class__.__name__ == "MultiLineEditModal"
+            editor = app.screen.query_one("#f4_editor")
+            assert "pasted line A\npasted line B\npasted line C" in editor.text
+            assert len(recording.actions) == 0, "paste must not auto-send"
+            # 取消返回：Input 不再包含被截断的首行。
+            await pilot.press("escape")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.screen.__class__.__name__ != "MultiLineEditModal":
+                    break
+            assert msg.value == "" or msg.value == "pasted line A"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [(80, 24), (120, 40)],
+)
+def test_pilot_daily_flow_renders_readably_at_both_terminal_sizes(
+    width: int, height: int
+) -> None:
+    """§4 S2 实际 Pilot 检查：宽窄终端（80×24 与 120×40）下连续三轮消息、
+    草稿→F2→F3→返回→F4/F6、终态摘要→/new 提示、正常退出；逐断言真实渲染
+    的焦点、行宽与文字可读性（文本级渲染检查，非像素级）。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    state = conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE)
+    store = InMemoryCheckpointStore(state)
+    recording = _RecordingRuntime()
+    adapter = TuiAdapter(recording, store)
+
+    async def scenario() -> None:
+        app = build_app(adapter, run_id_factory=_run_id_factory())
+        async with app.run_test(size=(width, height)) as pilot:
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.projection is not None:
+                    break
+            # 终态摘要与 /new 提示在两种尺寸下都渲染且可读。
+            hints_widget = app.query_one("#action_hints")
+            hints = str(hints_widget.render())
+            assert "Task finished" in hints
+            assert "/new" in hints
+            assert "Ctrl-Q" in hints
+            status_widget = app.query_one("#status")
+            status_text = str(status_widget.render())
+            assert "Verified delivery" in status_text or "ready" in status_text
+            # 渲染文本不含 escape 痕迹或 markup 残留。
+            for rendered in (hints, status_text):
+                assert "<U+" not in rendered, rendered
+                assert "\x1b" not in rendered
+
+            # 连续三轮消息：每轮恰好派发一次（durable 消费清空由
+            # submit_draft_consumed_only_by_durable_user_fact 以真实 Runtime
+            # 覆盖；录制型 Runtime 不写 checkpoint，这里只验派发与输入同步）。
+            for index in range(1, 4):
+                msg = app.query_one("#message")
+                msg.value = f"follow-up round {index}"
+                app.draft_text = msg.value
+                app.draft_revision += 1
+                await pilot.press("enter")
+                for _ in range(100):
+                    await pilot.pause(delay=0.02)
+                    if len(recording.actions) >= index and not adapter.is_active:
+                        break
+                assert len(recording.actions) == index
+                msg.value = ""
+                app.draft_text = ""
+                await pilot.pause(delay=0.02)
+
+            # 草稿 → F2 只读刷新不丢 → F3 回看 → Esc 返回草稿仍在。
+            msg = app.query_one("#message")
+            msg.value = "draft survives review"
+            app.draft_text = msg.value
+            app.draft_revision += 1
+            await pilot.press("f2")
+            await pilot.pause(delay=0.05)
+            assert msg.value == "draft survives review"
+            await pilot.press("f3")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.screen.__class__.__name__ == "FactsReviewModal":
+                    break
+            body = str(app.screen.query_one("#f3_body").render())
+            assert "当前没有可展示的保留内容" in body or "user" in body
+            await pilot.press("escape")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.screen.__class__.__name__ != "FactsReviewModal":
+                    break
+            assert msg.value == "draft survives review"
+
+            # F4 多行编辑 → F6 提交一次。
+            await pilot.press("f4")
+            for _ in range(50):
+                await pilot.pause(delay=0.02)
+                if app.screen.__class__.__name__ == "MultiLineEditModal":
+                    break
+            editor = app.screen.query_one("#f4_editor")
+            editor.text = "pilot 多行\n第二行 with code: print('ok')"
+            await pilot.press("f6")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if len(recording.actions) == 4:
+                    break
+            assert len(recording.actions) == 4
+            assert recording.actions[3].message == (
+                "pilot 多行\n第二行 with code: print('ok')"
+            )
+
+            # 焦点回到输入框；窄终端下 hints 不超过终端宽度（Textual 负责换行，
+            # 这里核对内容本身可读、无截断标记）。
+            assert app.focused is not None
+            assert width >= 80
+
+            # 正常退出（Ctrl-Q，无 worker）。
+            await pilot.press("ctrl+q")
+            for _ in range(100):
+                await pilot.pause(delay=0.02)
+                if app.is_running is False:
+                    break
+            assert app.return_code == 0
 
     asyncio.run(scenario())

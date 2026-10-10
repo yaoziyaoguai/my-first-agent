@@ -219,3 +219,86 @@ def test_advisory_events_loss_duplicate_reorder_do_not_change_authoritative_cont
         assert provider.calls == [], f"{fault_name}: events must not invoke runtime"
         # queue 排空：advisory 消费幂等，再次 drain 无残余。
         assert adapter.event_sink.drain() == [], fault_name
+
+def test_control_submit_rejected_when_displayed_binding_was_replaced() -> None:
+    """DU-10 子条件（2026-10-10 审计补证）：display 与 submit 之间绑定被
+    关闭/更换——request_control 必须窄失败，不向新绑定发送旧意图，也不借
+    未来 Goal 重绑。"""
+
+    import pytest
+
+    from agent.runtime.contracts import (
+        ControlBinding,
+        ControlRequestKind,
+    )
+    from agent.runtime.control import ControlInbox
+    from agent.tui.adapter import AdapterControlUnavailableError, TuiAdapter
+    from tests.kernel.fakes import InMemoryCheckpointStore
+
+    state = _state_with_goal_and_owned_run("c-bind", "goal-A", revision=1)
+    store = InMemoryCheckpointStore(state)
+    inbox = ControlInbox()
+    provider = ScriptedProvider(ModelResponse((ModelTextBlock("unused"),)))
+    adapter = TuiAdapter(_runtime_for(store, provider), store, control_inbox=inbox)
+
+    binding_a = ControlBinding(
+        conversation_id="c-bind",
+        goal_id="goal-A",
+        goal_revision=1,
+        invocation_id="inv-1",
+    )
+    inbox.open(binding_a)
+
+    # 正常路径：display 后绑定未变 → 提交成功绑定 goal-A。
+    request = adapter.request_control(
+        ControlRequestKind.PAUSE,
+        expected=("c-bind", "goal-A", 1),
+    )
+    assert request.goal_id == "goal-A"
+    inbox.poll(binding_a)  # 消费掉，保持 inbox 干净
+
+    # 反例：display 时看到 goal-A/rev1，submit 前绑定被 Runtime 更换为
+    # goal-B/rev2（安全边界上 revision bump 或新 Goal 接管）。
+    inbox.close(binding_a)
+    binding_b = ControlBinding(
+        conversation_id="c-bind",
+        goal_id="goal-B",
+        goal_revision=2,
+        invocation_id="inv-2",
+    )
+    inbox.open(binding_b)
+    with pytest.raises(AdapterControlUnavailableError):
+        adapter.request_control(
+            ControlRequestKind.PAUSE,
+            expected=("c-bind", "goal-A", 1),
+        )
+    # 新绑定不得收到旧意图：goal-B 队列里没有 PAUSE。
+    assert inbox.pending(binding_b) is False
+
+    # 绑定被关闭（无活跃 invocation）同样窄失败。
+    inbox.close(binding_b)
+    with pytest.raises(AdapterControlUnavailableError):
+        adapter.request_control(
+            ControlRequestKind.PAUSE,
+            expected=("c-bind", "goal-A", 1),
+        )
+
+
+def _state_with_goal_and_owned_run(conversation_id, goal_id, *, revision):
+    """goal + owner_invocation_id 已取得的 RUNNABLE/MODEL 状态（控制绑定前提）。"""
+
+    from dataclasses import replace as _replace
+
+    from agent.runtime.contracts import ActiveRun, ActiveRunStatus, ContinuationPhase
+    from tests.kernel.fakes import conversation_with_active_goal
+
+    state = conversation_with_active_goal(conversation_id)
+    goal = _replace(state.goal, goal_id=goal_id, revision=revision)
+    active = ActiveRun(
+        run_id="run-bind",
+        run_started_at="2026-10-10T00:00:00Z",
+        status=ActiveRunStatus.RUNNABLE,
+        phase=ContinuationPhase.MODEL,
+        owner_invocation_id="inv-1",
+    )
+    return _replace(state, goal=goal, active_run=active)

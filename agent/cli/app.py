@@ -6,12 +6,16 @@ from collections.abc import Callable
 from uuid import uuid4
 
 from agent.cli.actions import (
+    NEW_SESSION_REQUESTED,
+    build_cancel_browser_takeover,
     build_cancel_goal,
+    build_complete_browser_takeover,
     build_pause_goal,
     build_recover_unknown_observation,
     build_resolve_approval,
     build_resume_goal,
     build_revoke_process_authority,
+    new_session_gate,
     parse_artifact_confirmation,
     utc_now_rfc3339,
 )
@@ -21,9 +25,7 @@ from agent.runtime.contracts import (
     Action,
     ActiveRunStatus,
     ApprovalRequest,
-    CancelBrowserTakeover,
     CancelRun,
-    CompleteBrowserTakeover,
     ConversationState,
     EgressClass,
     GoalStatus,
@@ -115,6 +117,16 @@ def run_repl(
             return 0
         if raw == "/exit":
             return 0
+        if raw == "/new":
+            # r19 小步 2:显式新任务入口。合法性判断与 TUI 共享(new_session_gate);
+            # 新建动作本身不进 Runtime(零 provider/工具调用),以专用退出码把
+            # conversation 重建交还装配层,旧 checkpoint 与 evidence 原样保留。
+            refusal = new_session_gate(snapshot.state)
+            if refusal is not None:
+                write_fn(refusal)
+                continue
+            write_fn("Starting a new task in this workspace (previous task kept).")
+            return NEW_SESSION_REQUESTED
         if not raw.strip():
             continue
         if raw.strip().startswith("/browser-profiles"):
@@ -378,38 +390,22 @@ def _parse_action(
     if command == "/browser-done":
         if separator:
             return None, "/browser-done does not accept arguments."
-        pending = state.browser_takeover_pending
-        if pending is None:
+        if state.browser_takeover_pending is None:
             return None, "No browser takeover is pending."
-        return (
-            CompleteBrowserTakeover(
-                **common,
-                request_id=pending.request_id,
-                session_ref=pending.session_ref,
-                expected_profile_revision=pending.profile_revision,
-            ),
-            None,
-        )
+        return build_complete_browser_takeover(state), None
 
     if command == "/browser-cancel":
         if separator:
             return None, "/browser-cancel does not accept arguments."
-        pending = state.browser_takeover_pending
-        if pending is None:
+        if state.browser_takeover_pending is None:
             return None, "No browser takeover is pending."
-        return CancelBrowserTakeover(**common, request_id=pending.request_id), None
+        return build_cancel_browser_takeover(state), None
 
     if command == "/cancel":
         if separator:
             return None, "/cancel does not accept arguments."
         if state.browser_takeover_pending is not None:
-            return (
-                CancelBrowserTakeover(
-                    **common,
-                    request_id=state.browser_takeover_pending.request_id,
-                ),
-                None,
-            )
+            return build_cancel_browser_takeover(state), None
         if state.goal is not None and state.goal.status not in {
             GoalStatus.CANCELLED,
             GoalStatus.VERIFIED_DONE,

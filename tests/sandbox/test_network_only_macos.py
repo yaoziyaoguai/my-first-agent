@@ -16,6 +16,7 @@ import platform
 import secrets
 import shlex
 import socket
+import subprocess
 import threading
 from types import SimpleNamespace
 
@@ -141,7 +142,12 @@ def _emit_evidence(probe: str, **facts: object) -> None:
     )
 
 
-def _policy(roots, *, mode=SandboxMode.DANGER_FULL_ACCESS):  # noqa: ANN001, ANN202
+def _policy(
+    roots,
+    *,
+    mode=SandboxMode.DANGER_FULL_ACCESS,
+    private_roots=(),
+):  # noqa: ANN001, ANN202
     return build_sandbox_policy(
         mode=mode,
         network=SandboxNetworkMode.OFF,
@@ -149,7 +155,7 @@ def _policy(roots, *, mode=SandboxMode.DANGER_FULL_ACCESS):  # noqa: ANN001, ANN
         temp_root=roots["temp_root"],
         state_root=roots["state_root"],
         home=roots["home"],
-        private_roots=(),
+        private_roots=private_roots,
     )
 
 
@@ -165,7 +171,7 @@ def _prepared(executable: str, argv: list[str], roots):  # noqa: ANN001, ANN202
 
 def _executor():  # noqa: ANN202
     return NativeSandboxExecutor(
-        confiner=SeatbeltConfiner(), captured_path=CAPTURED_PATH,
+        confiner=SeatbeltConfiner(),
     )
 
 
@@ -183,6 +189,8 @@ def _run_shell(
     *,
     mode: str = "workspace-write",
     timeout_seconds: int = 120,
+    private_roots=(),
+    captured_path: str = CAPTURED_PATH,
 ):  # noqa: ANN001, ANN202
     """真实 shell registration → confiner → runner 一次。"""
 
@@ -191,8 +199,9 @@ def _run_shell(
         temp_root=roots["temp_root"],
         state_root=roots["state_root"],
         home=roots["home"],
-        captured_path=CAPTURED_PATH,
+        captured_path=captured_path,
         confiner=SeatbeltConfiner(),
+        private_roots=private_roots,
     )
     arguments = {
         "command": command,
@@ -205,6 +214,13 @@ def _run_shell(
     )
     assert isinstance(draft, KnownNotExecuted) is False, draft
     return draft
+
+
+def _assert_operation_denied(draft) -> None:  # noqa: ANN001
+    assert draft.outcome is SandboxDraftOutcome.EXITED
+    assert draft.exit_code != 0
+    error = f"{draft.stdout_projection}\n{draft.stderr_projection}"
+    assert "Operation not permitted" in error or "Permission denied" in error
 
 
 @darwin_only
@@ -400,6 +416,254 @@ def test_shell_registration_workspace_write_and_read_only_are_real(tmp_path):
     assert not readonly.exists()
 
 
+@darwin_only
+def test_shell_workspace_write_protects_gitfile_and_writable_target(tmp_path):
+    roots = _roots(tmp_path)
+    target = roots["workspace"] / ".git-target"
+    target.mkdir()
+    target_head = target / "HEAD"
+    target_head.write_text("ref: refs/heads/main\n", encoding="utf-8")
+    pointer = roots["workspace"] / ".git"
+    pointer.write_text("gitdir: .git-target\n", encoding="utf-8")
+    pointer_bytes = pointer.read_bytes()
+    target_bytes = target_head.read_bytes()
+
+    danger_workspace = tmp_path / "danger"
+    danger_workspace.mkdir()
+    danger_roots = _roots(danger_workspace)
+    danger_target = danger_roots["workspace"] / ".git-target"
+    danger_target.mkdir()
+    danger_head = danger_target / "HEAD"
+    danger_head.write_text("danger-head\n", encoding="utf-8")
+    danger_pointer = danger_roots["workspace"] / ".git"
+    danger_pointer.write_text("gitdir: .git-target\n", encoding="utf-8")
+    danger = _run_shell(
+        "printf 'gitdir: .git-other\\n' > .git; printf changed > .git-target/HEAD",
+        danger_roots,
+        mode="danger-full-access",
+    )
+    assert danger.outcome is SandboxDraftOutcome.EXITED
+    assert danger.exit_code == 0
+    assert danger_pointer.read_text(encoding="utf-8") == "gitdir: .git-other\n"
+    assert danger_head.read_text(encoding="utf-8") == "changed"
+    assert danger.enforcement.backend == "seatbelt"
+    assert danger.enforcement.network is SandboxNetworkMode.OFF
+
+    ordinary = roots["workspace"] / "ordinary.txt"
+    write = _run_shell("printf ordinary-ok > ordinary.txt", roots)
+    assert write.outcome is SandboxDraftOutcome.EXITED
+    assert write.exit_code == 0
+    assert ordinary.read_text(encoding="utf-8") == "ordinary-ok"
+
+    readable = _run_shell("/bin/cat .git .git-target/HEAD", roots)
+    assert readable.outcome is SandboxDraftOutcome.EXITED
+    assert readable.exit_code == 0
+    assert "gitdir: .git-target" in readable.stdout_projection
+    assert "ref: refs/heads/main" in readable.stdout_projection
+
+    overwrite = _run_shell("printf 'gitdir: .git-other\\n' > .git", roots)
+    _assert_operation_denied(overwrite)
+    assert pointer.is_file() and not pointer.is_symlink()
+    assert pointer.read_bytes() == pointer_bytes
+
+    replacement = roots["workspace"] / "replacement.git"
+    replacement_bytes = b"gitdir: .git-other\n"
+    replacement.write_bytes(replacement_bytes)
+    replace = _run_shell("/bin/mv replacement.git .git", roots)
+    _assert_operation_denied(replace)
+    assert pointer.is_file() and not pointer.is_symlink()
+    assert pointer.read_bytes() == pointer_bytes
+    assert replacement.read_bytes() == replacement_bytes
+
+    unlink = _run_shell("/bin/rm -f .git", roots)
+    _assert_operation_denied(unlink)
+    assert pointer.is_file() and not pointer.is_symlink()
+    assert pointer.read_bytes() == pointer_bytes
+
+    target_overwrite = _run_shell("printf changed > .git-target/HEAD", roots)
+    _assert_operation_denied(target_overwrite)
+    assert target_head.read_bytes() == target_bytes
+    target_create = _run_shell("printf new > .git-target/new-metadata", roots)
+    _assert_operation_denied(target_create)
+    assert not (target / "new-metadata").exists()
+
+    _emit_evidence(
+        "gitfile_pointer_and_target_denial",
+        command="/bin/sh -c <workspace and git metadata probes>",
+        pointer_overwrite_denied=True,
+        pointer_replace_denied=True,
+        pointer_unlink_denied=True,
+        pointer_bytes_preserved=True,
+        target_write_denied=True,
+        target_bytes_preserved=True,
+        danger_control_succeeded=True,
+        profile_digest=overwrite.enforcement.profile_digest,
+    )
+
+
+@darwin_only
+def test_shell_linked_worktree_status_remains_usable(tmp_path):
+    roots = _roots(tmp_path)
+    roots["workspace"].rmdir()
+    repository = tmp_path / "main-repository"
+    subprocess.run(
+        ["/usr/bin/git", "init", "-q", str(repository)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (repository / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+    subprocess.run(
+        ["/usr/bin/git", "-C", str(repository), "add", "tracked.txt"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            str(repository),
+            "-c",
+            "user.name=Round 015",
+            "-c",
+            "user.email=round015@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            str(repository),
+            "worktree",
+            "add",
+            "-qb",
+            "round015",
+            str(roots["workspace"]),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    pointer = roots["workspace"] / ".git"
+    pointer_bytes = pointer.read_bytes()
+    (roots["workspace"] / "untracked.txt").write_text("new\n", encoding="utf-8")
+
+    status = _run_shell("/usr/bin/git status --porcelain=v1", roots)
+    assert status.outcome is SandboxDraftOutcome.EXITED
+    assert status.exit_code == 0, status.stderr_projection
+    assert "?? untracked.txt" in status.stdout_projection
+
+    readable = _run_shell("/bin/cat .git; /bin/cat $(sed -n 's/^gitdir: //p' .git)/HEAD", roots)
+    assert readable.outcome is SandboxDraftOutcome.EXITED
+    assert readable.exit_code == 0
+    assert "gitdir:" in readable.stdout_projection
+    assert "refs/heads/round015" in readable.stdout_projection
+
+    overwrite = _run_shell("printf 'gitdir: ../other\\n' > .git", roots)
+    _assert_operation_denied(overwrite)
+    assert pointer.read_bytes() == pointer_bytes
+
+    _emit_evidence(
+        "linked_worktree_status_and_pointer_denial",
+        command="/bin/sh -c </usr/bin/git status and pointer probes>",
+        status_marker="?? untracked.txt",
+        pointer_readable=True,
+        target_readable=True,
+        pointer_write_denied=True,
+        pointer_bytes_preserved=True,
+        profile_digest=overwrite.enforcement.profile_digest,
+    )
+
+
+@darwin_only
+def test_shell_uses_the_approved_sanitized_path_for_helper_selection(tmp_path):
+    roots = _roots(tmp_path)
+    relative_bin = roots["workspace"] / "relative-bin"
+    approved_bin = tmp_path / "approved-bin"
+    relative_bin.mkdir()
+    approved_bin.mkdir()
+    excluded_helper = relative_bin / "first-agent-path-probe"
+    approved_helper = approved_bin / "first-agent-path-probe"
+    excluded_helper.write_text("#!/bin/sh\nprintf excluded-relative\n", encoding="utf-8")
+    approved_helper.write_text("#!/bin/sh\nprintf approved-absolute\n", encoding="utf-8")
+    excluded_helper.chmod(0o700)
+    approved_helper.chmod(0o700)
+    assert subprocess.run(
+        [str(excluded_helper)], check=True, capture_output=True, text=True
+    ).stdout == "excluded-relative"
+    assert subprocess.run(
+        [str(approved_helper)], check=True, capture_output=True, text=True
+    ).stdout == "approved-absolute"
+    dirty_path = os.pathsep.join(
+        ("relative-bin", str(approved_bin), "/usr/bin", "/bin")
+    )
+
+    draft = _run_shell(
+        "first-agent-path-probe",
+        roots,
+        captured_path=dirty_path,
+    )
+
+    assert draft.outcome is SandboxDraftOutcome.EXITED
+    assert draft.exit_code == 0
+    assert draft.stdout_projection == "approved-absolute"
+    assert "excluded-relative" not in draft.stdout_projection
+
+
+@darwin_only
+@pytest.mark.parametrize("mode", [SandboxMode.READ_ONLY, SandboxMode.WORKSPACE_WRITE])
+def test_both_public_tools_deny_fake_private_root_but_read_ordinary_host_fixture(
+    tmp_path,
+    mode,
+):
+    roots = _roots(tmp_path)
+    host_home = tmp_path / "host-home"
+    private_root = host_home / ".ssh"
+    private_root.mkdir(parents=True)
+    sentinel = private_root / "id_ed25519"
+    secret = f"fixture-secret-{secrets.token_hex(8)}"
+    sentinel.write_text(secret, encoding="utf-8")
+    ordinary = tmp_path / "ordinary" / "plain.txt"
+    ordinary.parent.mkdir()
+    ordinary.write_text("ordinary-ok", encoding="utf-8")
+
+    assert sentinel.read_text(encoding="utf-8") == secret
+    private_roots = (str(private_root),)
+    policy = _policy(roots, mode=mode, private_roots=private_roots)
+    structured_denied = _run("/bin/cat", [str(sentinel)], policy, roots)
+    structured_allowed = _run("/bin/cat", [str(ordinary)], policy, roots)
+    shell_denied = _run_shell(
+        f"/bin/cat {shlex.quote(str(sentinel))}",
+        roots,
+        mode=mode.value,
+        private_roots=private_roots,
+    )
+    shell_allowed = _run_shell(
+        f"/bin/cat {shlex.quote(str(ordinary))}",
+        roots,
+        mode=mode.value,
+        private_roots=private_roots,
+    )
+
+    for denied in (structured_denied, shell_denied):
+        assert denied.outcome is SandboxDraftOutcome.EXITED
+        assert denied.exit_code != 0
+        assert denied.enforcement.backend == "seatbelt"
+        assert secret not in denied.stdout_projection
+        assert secret not in denied.stderr_projection
+    for allowed in (structured_allowed, shell_allowed):
+        assert allowed.outcome is SandboxDraftOutcome.EXITED
+        assert allowed.exit_code == 0
+        assert "ordinary-ok" in allowed.stdout_projection
+
+
 def test_missing_backend_reaches_zero_target_runner(tmp_path):
     """缺 backend：qualification fail closed，零目标 runner（host 无关）。"""
 
@@ -413,7 +677,6 @@ def test_missing_backend_reaches_zero_target_runner(tmp_path):
 
     executor = NativeSandboxExecutor(
         confiner=SeatbeltConfiner(platform_system="Linux"),
-        captured_path=CAPTURED_PATH,
         runner=spy_runner,
     )
     prepared = _prepared("/usr/bin/python3", ["-c", "print('must-not-run')"], roots)

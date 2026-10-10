@@ -156,7 +156,7 @@ def test_structured_execute_uses_one_runner_and_returns_owner_readback(tmp_path)
     confiner = FakeConfiner()
     runner = FakeRunner(_write_valid_result)
     executor = NativeSandboxExecutor(
-        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner
+        confiner=confiner, runner=runner
     )
 
     draft = executor.execute(prepared, policy, io_plan=plan)
@@ -174,6 +174,26 @@ def test_structured_execute_uses_one_runner_and_returns_owner_readback(tmp_path)
     assert confiner.environments == [runner.calls[0]["environment"]]
 
 
+def test_structured_confiner_cannot_hide_in_place_environment_mutation(tmp_path):
+    prepared, policy = _prepared_and_policy(tmp_path)
+
+    class MutatingConfiner(FakeConfiner):
+        def confine(self, command, active_policy, environment):  # noqa: ANN001, ANN202
+            environment["INJECTED"] = "ambient"
+            return super().confine(command, active_policy, environment)
+
+    runner = FakeRunner(lambda _environment: None)
+    executor = NativeSandboxExecutor(
+        confiner=MutatingConfiner(), runner=runner
+    )
+
+    outcome = executor.execute(prepared, policy, io_plan=_plan())
+
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "enforcement_facts_mismatch"
+    assert runner.calls == []
+
+
 def test_structured_spawn_failure_is_not_read_and_never_reads_outputs(tmp_path):
     prepared, policy = _prepared_and_policy(tmp_path)
     plan = _plan()
@@ -182,7 +202,7 @@ def test_structured_spawn_failure_is_not_read_and_never_reads_outputs(tmp_path):
         draft=_process_draft(ProcessDraftOutcome.SPAWN_FAILED),
     )
     executor = NativeSandboxExecutor(
-        confiner=FakeConfiner(), captured_path="/usr/bin:/bin", runner=runner
+        confiner=FakeConfiner(), runner=runner
     )
 
     draft = executor.execute(prepared, policy, io_plan=plan)
@@ -204,7 +224,7 @@ def test_structured_pre_spawn_confine_failure_is_known_not_executed(tmp_path):
 
     runner = FakeRunner(lambda _environment: pytest.fail("runner must not execute"))
     executor = NativeSandboxExecutor(
-        confiner=UnavailableConfiner(), captured_path="/usr/bin:/bin", runner=runner
+        confiner=UnavailableConfiner(), runner=runner
     )
 
     result = executor.execute(prepared, policy, io_plan=_plan())
@@ -224,7 +244,7 @@ def test_structured_confine_exception_is_known_not_executed_before_runner(tmp_pa
 
     runner = FakeRunner(lambda _environment: pytest.fail("runner must not execute"))
     executor = NativeSandboxExecutor(
-        confiner=RaisingConfiner(), captured_path="/usr/bin:/bin", runner=runner
+        confiner=RaisingConfiner(), runner=runner
     )
 
     result = executor.execute(prepared, policy, io_plan=_plan())
@@ -246,7 +266,7 @@ def test_structured_runtime_confine_failure_is_known_not_executed_before_runner(
 
     runner = FakeRunner(lambda _environment: pytest.fail("runner must not execute"))
     executor = NativeSandboxExecutor(
-        confiner=RaisingConfiner(), captured_path="/usr/bin:/bin", runner=runner
+        confiner=RaisingConfiner(), runner=runner
     )
 
     result = executor.execute(prepared, policy, io_plan=_plan())
@@ -263,7 +283,7 @@ def test_structured_session_setup_failure_is_known_not_executed(
     prepared, policy = _prepared_and_policy(tmp_path)
     runner = FakeRunner(lambda _environment: pytest.fail("runner must not execute"))
     executor = NativeSandboxExecutor(
-        confiner=FakeConfiner(), captured_path="/usr/bin:/bin", runner=runner
+        confiner=FakeConfiner(), runner=runner
     )
 
     def unavailable_session(*_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202
@@ -287,7 +307,6 @@ def test_structured_cleanup_uncertainty_after_runner_enters_recovery_path(tmp_pa
 
     executor = NativeSandboxExecutor(
         confiner=FakeConfiner(),
-        captured_path="/usr/bin:/bin",
         runner=FakeRunner(add_unexpected_output),
     )
 

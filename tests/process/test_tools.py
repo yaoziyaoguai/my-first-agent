@@ -763,3 +763,50 @@ def test_015_child_path_cannot_use_relative_interpreter(tmp_path) -> None:
     assert result.is_error is False
     assert (workspace / "safe-interpreter-ran").exists()
     assert not (workspace / "malicious-interpreter-ran").exists()
+
+
+def test_015_truncated_output_must_be_visible_to_model(tmp_path) -> None:  # noqa: ANN001
+    """r18 分级(r17 后续)：cap 截断的事实必须出现在模型可见 content 中。
+
+    receipt/metadata 已如实携带 stdout_truncated；但 content 只是裸 projection
+    时,模型会把有界输出当完整输出继续推理（虚假完整性）。截断发生时 content
+    尾部必须显式标注；未截断输出不得加标注（正向对照）。
+    """
+
+    _require()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    big = b"#!/bin/sh\nyes capped-r18 | head -c 300000\n"
+    rel, _ = _make_executable(workspace, name="big-out", content=big)
+    arguments = {"executable": rel, "argv": [], "cwd": ".", "profile": "short"}
+
+    registration = build_local_process_registration(
+        workspace=workspace, captured_path="/usr/bin:/bin"
+    )
+    runtime = KernelToolRuntime((registration,))
+    lease = _lease_for_invoke(runtime, arguments, workspace)
+    intent = runtime.prepare(
+        ToolCall("call-trunc", "local_process", arguments),
+        _goal_context(runtime, process_leases=(lease,)),
+    )
+    assert isinstance(intent, ExecutionIntent)
+    result = runtime.invoke(intent)
+    assert isinstance(result, ToolResult)
+    # receipt 事实先确认(既有行为):SHORT cap 262144 < 300000 输出必然截断。
+    assert result.metadata.get("stdout_truncated") is True
+    # Red 断言:模型可见 content 必须携带截断事实,不许伪装完整输出。
+    assert "truncated" in result.content
+    assert result.content.rstrip().endswith("]")
+
+    # 正向对照:未截断输出原样呈现,不带截断标注。
+    quiet, _ = _make_executable(workspace, name="quiet-out")
+    quiet_arguments = {"executable": quiet, "argv": [], "cwd": ".", "profile": "short"}
+    quiet_lease = _lease_for_invoke(runtime, quiet_arguments, workspace)
+    quiet_intent = runtime.prepare(
+        ToolCall("call-quiet", "local_process", quiet_arguments),
+        _goal_context(runtime, process_leases=(quiet_lease,)),
+    )
+    quiet_result = runtime.invoke(quiet_intent)
+    assert isinstance(quiet_result, ToolResult)
+    assert quiet_result.content == "hi\n"
+    assert "truncated" not in quiet_result.content

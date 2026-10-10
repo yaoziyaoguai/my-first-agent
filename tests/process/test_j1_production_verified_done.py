@@ -50,7 +50,7 @@ class _J1ProductionProvider:
         self.executable = executable
         self.calls: list[ContextPack] = []
 
-    def generate(self, context: ContextPack) -> ModelResponse:
+    def generate(self, context, *, delta_observer=None) -> ModelResponse:
         self.calls.append(context)
         index = len(self.calls)
         if index == 1:

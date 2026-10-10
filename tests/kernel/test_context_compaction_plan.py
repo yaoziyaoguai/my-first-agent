@@ -236,7 +236,7 @@ def test_usage_budget_equals_build_budget_without_sources() -> None:
     pack = tight.build(state, _action(), tools)
 
     assert report == pack.budget
-    assert report.excluded_ids == ("assistant-1",)
+    assert report.excluded_ids == ("user-1",)
     assert report.clipped_ids == ("result-1",)
     assert report.input_limit == full_cost
     assert report.output_reserve == 30
@@ -666,17 +666,16 @@ def test_plan_compaction_prefers_excluded_history_over_token_and_checkpoint() ->
     assert plan.usage == report
 
 
-def test_plan_compaction_ignores_excluded_ids_outside_candidates() -> None:
-    # assistant-5 在 retain 窗内：被预算挤出但不是候选，不能报 EXCLUDED_HISTORY。
+def test_plan_compaction_maps_oldest_first_exclusion_to_candidate() -> None:
+    # 即使压力由 retain 窗内的巨大 assistant-5 造成，普通上下文也应先淘汰
+    # 最旧历史；该历史正是 compaction 候选，因此必须报 EXCLUDED_HISTORY。
     state = _huge_turn_state(huge_index=5)
     full = _full_input_cost(state)
-    # available 远高于保留基线：挤出只触及窗内 recent 组，且挤出后 estimated 低于
-    # 70% 阈值（token 不触发）。
     manager = _available_manager(full - 3_000)
     report = manager.usage(state, _action(), _tools())
-    # 前置：excluded 非空但与候选不相交，且 token 未过阈。
+    candidates = {"user-1", "assistant-1"}
     assert report.excluded_ids
-    assert set(report.excluded_ids).isdisjoint({"user-1", "assistant-1"})
+    assert set(report.excluded_ids) & candidates
     assert report.estimated_input_tokens < _token_threshold(report)
 
     plan = manager.plan_compaction(
@@ -687,9 +686,9 @@ def test_plan_compaction_ignores_excluded_ids_outside_candidates() -> None:
         soft_threshold_bytes=1,
     )
 
-    assert plan.trigger is CompactionTrigger.NONE
-    assert plan.removable_fact_ids == ()
-    assert plan.actionable is False
+    assert plan.trigger is CompactionTrigger.EXCLUDED_HISTORY
+    assert plan.removable_fact_ids == ("user-1", "assistant-1")
+    assert plan.actionable is True
     assert plan.usage == report
 
 

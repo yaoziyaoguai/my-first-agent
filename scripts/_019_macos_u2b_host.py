@@ -157,7 +157,9 @@ class _U2BProvider:
         self._calls = 0
         self._event_sink = event_sink
 
-    def generate(self, context: ContextPack) -> ModelResponse:
+    def generate(
+        self, context: ContextPack, *, delta_observer=None  # noqa: ARG001
+    ) -> ModelResponse:
         self._calls += 1
         if self._event_sink is not None:
             self._event_sink(self._calls)

@@ -63,9 +63,10 @@ sequenceDiagram
 `ContextManager` 窗口、provider 单次输出、工具 I/O、deadline、checkpoint 容量或 effect approval 的有限边界。
 
 协议/结构错误与任务停滞是两个独立熔断器。`max_invalid_repairs` 约束无法严格归一化或不合法的 control；
-`max_no_progress_replans` 只累计连续独立 model response 中语义相同的停滞指纹。同一 response 的并行 tool batch
-只提供一次 replan opportunity，不能在模型看到 ToolResult 前耗尽 allowance；换工具/参数/错误原因、产生真实
-产品结果或新增验证 evidence 都重置停滞指纹。默认 Everyday 的 16 次相同停滞是紧急熔断，不是正常调用预算。
+`max_no_progress_replans` 只累计连续独立 model response 中语义相同的停滞指纹。一个已接纳的 tool batch 会继续
+逐项执行和 checkpoint，但只有全部普通结果产生后才提供一次 replan opportunity；policy 或 no-progress pause 不得
+插入这些结果之间。批次任意位置出现真实成功就重置停滞；全失败批次则按有序的稳定结果组合计数。换工具/参数/
+错误原因或新增验证 evidence 同样重置停滞指纹。默认 Everyday 的 16 次相同停滞是紧急熔断，不是正常调用预算。
 
 ## 上下文管理
 

@@ -88,8 +88,11 @@ def run_local_process(
         # ESRCH：函数返回 pid（group identity 仍由 start_new_session 钉死），
         # killpg(pgid) 可达存活 descendant，清理与确认都按真实 group 进行。
         pgid = process_group.verified_group_identity(proc.pid)
-        while not (out_done and err_done):
+        while True:
             now = time.monotonic()
+            # pipe EOF 只证明写端已关闭；direct child 仍可能在批准期限内工作。
+            if proc.poll() is not None and out_done and err_done:
+                break
             if not timed_out and now >= deadline:
                 timed_out = True
                 term_sent, kill_sent = process_group.terminate_group(
@@ -99,28 +102,35 @@ def run_local_process(
                     kill_grace_seconds=profile.kill_grace_seconds,
                 )
                 group_confirmed_gone = True
-            if now > hard_drain_deadline:
+                # 同步 cleanup 可能消耗 grace/verification budget；后续 drain 必须
+                # 使用刷新后的 monotonic 时间，不能沿用 cleanup 前的 now。
+                now = time.monotonic()
+                if proc.poll() is not None and out_done and err_done:
+                    break
+            if now >= hard_drain_deadline:
                 break
             watch = []
             if not out_done:
                 watch.append(out_fd)
             if not err_done:
                 watch.append(err_fd)
+            effective_deadline = hard_drain_deadline if timed_out else deadline
+            remaining = effective_deadline - now
+            if remaining <= 0:
+                continue
+            timeout = min(_SELECT_SLICE, remaining)
             if not watch:
-                break
-            if timed_out or proc.poll() is not None:
-                timeout = _SELECT_SLICE
-            else:
-                timeout = max(0.0, min(_SELECT_SLICE, deadline - time.monotonic()))
+                time.sleep(timeout)
+                continue
             try:
                 readable, _, _ = select.select(watch, [], [], timeout)
-            except (OSError, ValueError):
-                break
+            except (OSError, ValueError) as exc:
+                _raise_collection_failure(proc, pgid, profile, exc)
             for fd in readable:
                 try:
                     chunk = os.read(fd, _CHUNK)
-                except OSError:
-                    chunk = b""
+                except OSError as exc:
+                    _raise_collection_failure(proc, pgid, profile, exc)
                 if not chunk:
                     if fd == out_fd:
                         out_done = True
@@ -196,6 +206,33 @@ def run_local_process(
         kill_sent=kill_sent,
         error_code=None,
     )
+
+
+def _raise_collection_failure(
+    proc: subprocess.Popen,
+    pgid: int,
+    profile: ResourceProfileV1,
+    error: OSError | ValueError,
+) -> None:
+    """采集失败后治理原 group，并保留原始 I/O cause 进入 unknown recovery。"""
+
+    try:
+        needs_cleanup = process_group.group_alive(pgid)
+    except ProcessCleanupError:
+        needs_cleanup = True
+    if needs_cleanup:
+        try:
+            process_group.terminate_group(
+                proc,
+                pgid,
+                term_grace_seconds=profile.term_grace_seconds,
+                kill_grace_seconds=profile.kill_grace_seconds,
+            )
+        except ProcessCleanupError as cleanup_error:
+            raise ProcessCleanupError(
+                f"process output collection failed; cleanup unconfirmed: {cleanup_error}"
+            ) from error
+    raise ProcessCleanupError("process output collection failed") from error
 
 
 def _append_capped(

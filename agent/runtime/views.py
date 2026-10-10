@@ -445,7 +445,13 @@ def _run_actions(state: ConversationState) -> tuple[str, ...]:
 
 def _goal_actions(state: ConversationState) -> tuple[str, ...]:
     goal = state.goal
-    if goal is None or goal.status in {GoalStatus.CANCELLED, GoalStatus.VERIFIED_DONE}:
+    if goal is None:
+        return ()
+    if goal.status in {GoalStatus.CANCELLED, GoalStatus.VERIFIED_DONE}:
+        # Goal 生命周期已经结束，但 conversation 仍可接受普通追问；这只复用既有
+        # SubmitMessage，不恢复/替换 Goal，也不能越过待处理的 browser takeover。
+        if state.active_run is None and state.browser_takeover_pending is None:
+            return ("submit",)
         return ()
     active = state.active_run
     if (

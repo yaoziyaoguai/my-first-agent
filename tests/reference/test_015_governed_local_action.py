@@ -95,7 +95,7 @@ def test_governed_local_action_marked_delivered_without_sandbox_overclaim() -> N
     assert "下一里程碑 015" not in readme
     assert "尚未提供本机进程执行" not in readme
     assert "作为已交付能力提供受治理的结构化本机执行" in readme
-    assert "真实 DeepSeek E3 三连、独立评审与 Codex 终裁均已通过" in readme
+    assert "已通过真实 E3、独立评审与 Codex 终裁" in readme  # 压缩后等价句
     strategy = (ROOT / "STRATEGY.md").read_text(encoding="utf-8")
     assert "（已交付并验证）" in strategy
     assert "不宣称 OS sandbox" in strategy

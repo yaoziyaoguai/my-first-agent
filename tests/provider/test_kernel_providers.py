@@ -27,7 +27,9 @@ from agent.provider.protocol import (
     ProviderTimeoutError,
     ProviderTransportError,
 )
+from agent.runtime.context_control import reserved_control_schema
 from agent.runtime.contracts import (
+    RESERVED_CONTROL_NAME,
     BudgetReport,
     ContextPack,
     ExecutionAuthorityClass,
@@ -86,6 +88,7 @@ def _context(*, block_type: str | None = None) -> ContextPack:
                     "type": "object",
                     "properties": {"path": {"type": "string"}},
                     "required": ["path"],
+                    "additionalProperties": False,
                 },
             ),
         ),
@@ -652,6 +655,7 @@ def test_openai_strict_tools_project_deepseek_portable_closed_schemas() -> None:
                     "fresh": {"type": "boolean"},
                 },
                 "required": ["tags"],
+                "additionalProperties": False,
             },
             "selector": {
                 "anyOf": [
@@ -663,11 +667,13 @@ def test_openai_strict_tools_project_deepseek_portable_closed_schemas() -> None:
                             "exact": {"type": "boolean"},
                         },
                         "required": ["name"],
+                        "additionalProperties": False,
                     },
                 ]
             },
         },
         "required": ["query"],
+        "additionalProperties": False,
     }
     expected_original = json.loads(json.dumps(original_schema))
     base = _context()
@@ -716,6 +722,372 @@ def test_openai_strict_tools_project_deepseek_portable_closed_schemas() -> None:
     ] == expected_original
 
 
+def test_openai_strict_projection_keeps_keyword_named_properties_and_literals() -> None:
+    """strict 投影按角色行走：同名业务属性与 literal data 逐字保留。
+
+    旧 walker 对每个 dict 无差别删除六个 unsupported keyword，会误删
+    properties map 中同名业务属性，并清洗 enum/default/examples 内的
+    literal 数据；这里把两种伤害都钉死为合同。
+    """
+
+    original_schema = {
+        "type": "object",
+        "properties": {
+            # 业务属性名与 schema keyword 同名：名字必须逐字保留，
+            # 只有子 schema 自己的 constraint 位置被删除。
+            "minLength": {"type": "string", "minLength": 1},
+            "maxLength": {"type": "integer", "maximum": 9},
+            "mode": {
+                "type": "string",
+                "enum": ["minLength", "maxLength", {"minItems": 2, "maxItems": 4}],
+                "default": "maxLength",
+                "examples": [{"minProperties": 3}],
+            },
+            "limits": {
+                "type": "object",
+                "properties": {
+                    "minItems": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                    },
+                    "examples": {"type": "integer"},
+                },
+                "additionalProperties": False,
+            },
+            "selector": {
+                "anyOf": [
+                    {"type": "string", "const": "minLength"},
+                    {
+                        "type": "object",
+                        "properties": {"exact": {"type": "boolean"}},
+                        "additionalProperties": False,
+                    },
+                ]
+            },
+        },
+        "required": ["minLength"],
+        "additionalProperties": False,
+    }
+    expected_original = json.loads(json.dumps(original_schema))
+    base = _context()
+    context = ContextPack(
+        system=base.system,
+        messages=base.messages,
+        tools=(
+            ToolDefinition(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+                name="portable_projection",
+                description="Exercise role-aware strict projection",
+                input_schema=original_schema,
+            ),
+        ),
+        budget=base.budget,
+    )
+
+    parameters = context_tools_to_openai(context, strict=True)[0]["function"][
+        "parameters"
+    ]
+
+    assert set(parameters["properties"]) == {
+        "minLength",
+        "maxLength",
+        "mode",
+        "limits",
+        "selector",
+    }
+    # 子 schema 自己的 constraint 被删，业务属性名与兄弟约束保留。
+    assert parameters["properties"]["minLength"] == {"type": "string"}
+    assert parameters["properties"]["maxLength"] == {
+        "type": "integer",
+        "maximum": 9,
+    }
+    # enum/default/examples 是 literal data，必须原样复制，不当成 schema 清洗。
+    assert parameters["properties"]["mode"]["enum"] == [
+        "minLength",
+        "maxLength",
+        {"minItems": 2, "maxItems": 4},
+    ]
+    assert parameters["properties"]["mode"]["default"] == "maxLength"
+    assert parameters["properties"]["mode"]["examples"] == [{"minProperties": 3}]
+    limits = parameters["properties"]["limits"]
+    assert set(limits["properties"]) == {"minItems", "examples"}
+    assert limits["properties"]["minItems"] == {
+        "type": "array",
+        "items": {"type": "string"},
+    }
+    assert limits["required"] == ["minItems", "examples"]
+    assert limits["additionalProperties"] is False
+    selector = parameters["properties"]["selector"]["anyOf"]
+    assert selector[0] == {"type": "string", "const": "minLength"}
+    assert selector[1]["required"] == ["exact"]
+    assert selector[1]["additionalProperties"] is False
+    # 明确封闭 object 继续写入完整 required 并在 wire 保持封闭。
+    assert parameters["required"] == [
+        "minLength",
+        "maxLength",
+        "mode",
+        "limits",
+        "selector",
+    ]
+    assert parameters["additionalProperties"] is False
+    # 原始 schema 与非 strict 路径都不被改写。
+    assert original_schema == expected_original
+    assert context.tools[0].input_schema == expected_original
+    assert (
+        context_tools_to_openai(context, strict=False)[0]["function"]["parameters"]
+        == expected_original
+    )
+
+
+@pytest.mark.parametrize(
+    ("open_schema", "expected_path"),
+    [
+        # 旧 strict 正例的原始开放形状：AP 缺省，不可静默补 False。
+        (
+            {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+            "$",
+        ),
+        # AP 为 True。
+        (
+            {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "additionalProperties": True,
+            },
+            "$",
+        ),
+        # AP 为 schema-valued：同样是开放 object。
+        (
+            {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "additionalProperties": {"type": "string"},
+            },
+            "$",
+        ),
+        # 缺失 properties：不可补 {} 后伪装封闭。
+        ({"type": "object", "additionalProperties": False}, "$"),
+        # 嵌套开放 object：顶层封闭不够，逐层都必须明确封闭。
+        (
+            {
+                "type": "object",
+                "properties": {
+                    "filters": {
+                        "type": "object",
+                        "properties": {"tags": {"type": "string"}},
+                    }
+                },
+                "required": ["filters"],
+                "additionalProperties": False,
+            },
+            "$.properties.filters",
+        ),
+        # anyOf 分支里的开放 object 同样 fail closed。
+        (
+            {
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "anyOf": [
+                            {"type": "string"},
+                            {
+                                "type": "object",
+                                "properties": {"name": {"type": "string"}},
+                            },
+                        ]
+                    }
+                },
+                "additionalProperties": False,
+            },
+            "$.properties.selector.anyOf[1]",
+        ),
+    ],
+)
+def test_open_object_strict_schemas_fail_closed_with_safe_locator(
+    open_schema: dict[str, object],
+    expected_path: str,
+) -> None:
+    """strict 下开放 object 必须原本就封闭；拒绝只携带安全定位。"""
+
+    open_schema = {
+        "description": "fixture-open-shape-sentinel",
+        **open_schema,
+    }
+    expected_original = json.loads(json.dumps(open_schema))
+    base = _context()
+    context = ContextPack(
+        system=base.system,
+        messages=base.messages,
+        tools=(
+            ToolDefinition(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+                name="open_fixture_tool",
+                description="Exercise open-object strict rejection",
+                input_schema=open_schema,
+            ),
+        ),
+        budget=base.budget,
+    )
+
+    with pytest.raises(ProviderProtocolError) as caught:
+        context_tools_to_openai(context, strict=True)
+
+    assert caught.value.reason == "unsupported_strict_open_object"
+    detail = caught.value.detail or ""
+    assert "open_fixture_tool" in detail
+    assert expected_path in detail
+    # detail 不得携带 schema 数据，只允许安全定位。
+    assert "fixture-open-shape-sentinel" not in detail
+    # 拒绝后原始 schema 不变。
+    assert open_schema == expected_original
+    assert context.tools[0].input_schema == expected_original
+
+
+def test_explicitly_closed_empty_object_remains_strict_portable() -> None:
+    """properties={} + additionalProperties=False 是合法的封闭空 object。"""
+
+    original_schema = {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    }
+    expected_original = json.loads(json.dumps(original_schema))
+    base = _context()
+    context = ContextPack(
+        system=base.system,
+        messages=base.messages,
+        tools=(
+            ToolDefinition(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+                name="closed_empty_tool",
+                description="Exercise closed empty object projection",
+                input_schema=original_schema,
+            ),
+        ),
+        budget=base.budget,
+    )
+
+    function = context_tools_to_openai(context, strict=True)[0]["function"]
+
+    assert function["strict"] is True
+    assert function["parameters"] == {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": False,
+    }
+    assert original_schema == expected_original
+
+
+def test_openai_strict_request_fails_before_http_on_open_object_tool() -> None:
+    """不兼容 schema 必须在 HTTP 前拒绝整个请求：零请求、不静默删工具。"""
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "done"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    config = AgentProviderConfig(
+        provider_type="openai_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid/beta",
+        request_path="/chat/completions",
+        credential="fixture-secret",
+        strict_tools=True,
+    )
+    base = _context()
+    context = ContextPack(
+        system=base.system,
+        messages=base.messages,
+        tools=(
+            ToolDefinition(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+                name="open_wire_tool",
+                description="Top closed, nested arguments-style open object",
+                input_schema={
+                    "type": "object",
+                    "properties": {"payload": {"type": "object"}},
+                    "required": ["payload"],
+                    "additionalProperties": False,
+                },
+            ),
+        ),
+        budget=base.budget,
+    )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleProvider(config=config, http_client=client)
+        with pytest.raises(ProviderProtocolError) as caught:
+            provider.generate(context)
+
+    assert caught.value.reason == "unsupported_strict_open_object"
+    assert caught.value.detail is not None
+    assert "open_wire_tool:$.properties.payload" in caught.value.detail
+    assert requests == []
+
+
+def test_openai_strict_control_schema_and_closed_tool_reach_wire() -> None:
+    """strict control schema 与明确封闭产品工具继续原样上 wire。"""
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "done"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    config = AgentProviderConfig(
+        provider_type="openai_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid/beta",
+        request_path="/chat/completions",
+        credential="fixture-secret",
+        strict_tools=True,
+    )
+    context = replace(_context(), control_schema=reserved_control_schema(strict=True))
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        OpenAICompatibleProvider(config=config, http_client=client).generate(context)
+
+    body = json.loads(requests[0].content)
+    assert body["tool_choice"] == "required"
+    functions = {tool["function"]["name"]: tool["function"] for tool in body["tools"]}
+    assert set(functions) == {"read_file", RESERVED_CONTROL_NAME}
+    assert all(function["strict"] is True for function in functions.values())
+    read_file = functions["read_file"]["parameters"]
+    assert read_file["required"] == ["path"]
+    assert read_file["additionalProperties"] is False
+    assert (
+        functions[RESERVED_CONTROL_NAME]["parameters"]
+        == context.control_schema["strict_input_schema"]
+    )
+
+
 @pytest.mark.parametrize("provider_type", ["fake", "anthropic_compatible"])
 def test_strict_tools_are_rejected_outside_openai_compatible(provider_type: str) -> None:
     kwargs = {} if provider_type == "fake" else {"base_url": "https://provider.invalid"}
@@ -723,8 +1095,43 @@ def test_strict_tools_are_rejected_outside_openai_compatible(provider_type: str)
         AgentProviderConfig(provider_type=provider_type, strict_tools=True, **kwargs)
 
 
-@pytest.mark.parametrize("provider_type", ["fake", "anthropic_compatible"])
-def test_thinking_mode_is_rejected_outside_openai_compatible(provider_type: str) -> None:
+def test_anthropic_provider_can_explicitly_disable_opaque_thinking_mode() -> None:
+    """r19 基线实证:bigmodel anthropic 端点对 glm-5.2 默认返回 thinking block,
+    normalize 层按合同拒绝 → 组合完全阻断。显式 disabled(Anthropic 官方字段)
+    让端点不返回 thinking block,组合恢复可用。"""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "content": [{"type": "text", "text": "done"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 3, "output_tokens": 1},
+            },
+        )
+
+    config = AgentProviderConfig(
+        provider_type="anthropic_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid",
+        credential="fixture-secret",
+        thinking_mode="disabled",
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        response = AnthropicCompatibleProvider(config=config, http_client=client).generate(
+            _context()
+        )
+
+    assert response == ModelResponse(
+        (ModelTextBlock("done"),), stop_reason="end_turn", input_tokens=3, output_tokens=1
+    )
+    assert json.loads(requests[0].content)["thinking"] == {"type": "disabled"}
+
+
+@pytest.mark.parametrize("provider_type", ["fake"])
+def test_thinking_mode_is_rejected_outside_http_compatible(provider_type: str) -> None:
     kwargs = (
         {}
         if provider_type == "fake"
@@ -977,3 +1384,154 @@ def test_oversized_response_is_rejected_before_json_parsing(
 
     with client, pytest.raises(ProviderProtocolError, match="response_too_large"):
         provider.generate(_context())
+
+
+def test_anthropic_thinking_block_is_dropped_not_fatal() -> None:
+    """r19 基线实证(2026-09-10):bigmodel anthropic 端点在带 tool_result 的多轮
+    请求中违反 thinking:disabled 仍返回 thinking block。normalize 必须丢弃
+    opaque 推理 block(不展示、不持久化、不当内容)并接纳同响应中的 text;
+    不得因 thinking block 存在而使整个响应失败。"""
+
+    from agent.provider.normalize import normalize_anthropic_response
+
+    response = normalize_anthropic_response(
+        {
+            "content": [
+                {"type": "thinking", "thinking": "internal reasoning", "signature": "s"},
+                {"type": "text", "text": "answer"},
+            ],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 2, "output_tokens": 1},
+        }
+    )
+    assert response.blocks == (ModelTextBlock("answer"),)
+    assert response.stop_reason == "end_turn"
+
+
+class _RecordingObserver:
+    """窄观察合同的最小记录实现(仅公开回答文本增量)。"""
+
+    def __init__(self) -> None:
+        self.deltas: list[str] = []
+
+    def on_text_delta(self, text: str) -> None:
+        self.deltas.append(text)
+
+
+def _sse(*lines: str) -> bytes:
+    return "\n".join(f"data: {line}" for line in lines).encode("utf-8") + b"\n\n"
+
+
+def test_anthropic_streaming_forwards_text_deltas_and_rebuilds_response() -> None:
+    """r19 小步 3:SSE text 增量在到达时转发 observer;最终响应由流重建后走唯一
+    normalize(delta 丢失/重复不影响权威 ModelResponse)。"""
+    observer = _RecordingObserver()
+    stream = _sse(
+        '{"type":"message_start","message":{"usage":{"input_tokens":7}}}',
+        '{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+        '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}',
+        '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}',
+        '{"type":"content_block_stop","index":0}',
+        '{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}',
+        '{"type":"message_stop"}',
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["stream"] is True
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, content=stream
+        )
+
+    config = AgentProviderConfig(
+        provider_type="anthropic_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid",
+        credential="fixture-secret",
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        response = AnthropicCompatibleProvider(config=config, http_client=client).generate(
+            _context(), delta_observer=observer
+        )
+
+    assert observer.deltas == ["Hel", "lo"]
+    assert response == ModelResponse(
+        (ModelTextBlock("Hello"),), stop_reason="end_turn", input_tokens=7, output_tokens=2
+    )
+
+
+def test_anthropic_streaming_tool_input_json_delta_rebuilds_tool_use() -> None:
+    """tool_use 的 partial JSON 只在流收束后解析重建;不完整参数绝不中途执行。"""
+    observer = _RecordingObserver()
+    stream = _sse(
+        '{"type":"message_start","message":{"usage":{"input_tokens":3}}}',
+        '{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call-1","name":"read_file","input":{}}}',
+        '{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"pa"}}',
+        '{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta",'
+        '"partial_json":"th\\": \\"a.md\\"}"}}',
+        '{"type":"content_block_stop","index":0}',
+        '{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":9}}',
+        '{"type":"message_stop"}',
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, content=stream
+        )
+
+    config = AgentProviderConfig(
+        provider_type="anthropic_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid",
+        credential="fixture-secret",
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        response = AnthropicCompatibleProvider(config=config, http_client=client).generate(
+            _context(), delta_observer=observer
+        )
+
+    assert observer.deltas == []
+    assert response.blocks == (
+        ModelToolCall("call-1", "read_file", {"path": "a.md"}),
+    )
+    assert response.stop_reason == "tool_use"
+
+
+def test_anthropic_stream_interrupted_partial_does_not_mint_response() -> None:
+    """故障合同 1:流中途断开——已到增量可被观察,但不得铸造最终响应/自动补发。"""
+    observer = _RecordingObserver()
+
+    def broken_stream():
+        yield _sse(
+            '{"type":"message_start","message":{"usage":{"input_tokens":5}}}',
+            '{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+            '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"part"}}',
+        )
+        raise httpx.ReadError("connection reset mid-stream")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=broken_stream(),
+        )
+
+    config = AgentProviderConfig(
+        provider_type="anthropic_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid",
+        credential="fixture-secret",
+    )
+    calls: list[int] = []
+
+    def counting_handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return handler(request)
+
+    with httpx.Client(transport=httpx.MockTransport(counting_handler)) as client:
+        provider = AnthropicCompatibleProvider(config=config, http_client=client)
+        with pytest.raises(ProviderTransportError):
+            provider.generate(_context(), delta_observer=observer)
+
+    # 断流后:不再自动补发第二次请求;partial 不构成 ModelResponse。
+    assert len(calls) == 1
+    assert observer.deltas == ["part"]

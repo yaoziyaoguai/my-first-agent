@@ -103,6 +103,7 @@ def _context() -> ContextPack:
                     "type": "object",
                     "properties": {"path": {"type": "string"}},
                     "required": ["path"],
+                    "additionalProperties": False,
                 },
             ),
         ),

@@ -124,7 +124,7 @@ def test_recording_provider_clears_stale_error_after_success() -> None:
     class FailThenSucceed:
         calls = 0
 
-        def generate(self, _context):  # noqa: ANN001, ANN201
+        def generate(self, _context, *, delta_observer=None):
             self.calls += 1
             if self.calls == 1:
                 raise ProviderProtocolError("malformed_control")

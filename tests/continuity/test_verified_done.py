@@ -215,6 +215,75 @@ def test_fresh_successful_read_back_closes_fully_derivable_goal_without_model_ch
     assert store.state.goal.status is GoalStatus.VERIFIED_DONE
     assert store.state.completion_claim is not None
     assert store.state.completion_claim.correlation_id.startswith("runtime-completion:")
+    assert len(provider.calls) == 1
+
+
+def test_readback_completion_waits_for_remaining_read(tmp_path) -> None:
+    """中间 read-back 即使闭合证据，也必须先完成已接纳批次。"""
+
+    workspace = tmp_path / "workspace"
+    (workspace / "reports").mkdir(parents=True)
+    (workspace / "reports" / "final.md").write_text(CONTENT, encoding="utf-8")
+    (workspace / "notes.md").write_text("supporting notes\n", encoding="utf-8")
+    seed = _state()
+    state = replace(
+        seed,
+        facts=(seed.facts[0],),
+        active_run=ActiveRun("run-batched-readback"),
+    )
+    store = InMemoryCheckpointStore(state)
+    sink = CollectingSink()
+    provider = ScriptedProvider(
+        ModelResponse(
+            (
+                ModelToolCall(
+                    "read-final",
+                    "read_file",
+                    {"path": "reports/final.md"},
+                ),
+                ModelToolCall(
+                    "read-notes",
+                    "read_file",
+                    {"path": "notes.md"},
+                ),
+            )
+        )
+    )
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=10_000, output_reserve=200),
+        ),
+        tool_runtime=build_file_tool_runtime(workspace),
+        checkpoint_store=store,
+        event_sink=sink,
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-batched-readback",
+    )
+    action = Resume(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+    )
+
+    result = runtime.run_turn(action, store.load())
+
+    assert result.status is RunStatus.COMPLETED
+    result_ids = tuple(
+        fact.content.get("tool_call_id")
+        for fact in store.state.facts
+        if fact.kind is FactKind.TOOL_RESULT
+    )
+    assert result_ids == ("read-final", "read-notes")
+    assert len(provider.calls) == 1
+    assert store.state.goal is not None
+    assert store.state.goal.status is GoalStatus.VERIFIED_DONE
+    assert tuple(event.kind.value for event in sink.events)[-3:] == (
+        "tool_result",
+        "tool_result",
+        "completed",
+    )
 
 
 def test_unadmitted_explicit_process_requirement_cannot_verify_done() -> None:

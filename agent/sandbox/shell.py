@@ -188,7 +188,7 @@ def build_shell_exec_registration(
     }
     boundary = WorkspaceBoundary(roots["workspace"])
     executor = NativeSandboxExecutor(
-        confiner=confiner, captured_path=str(captured_path), runner=runner,
+        confiner=confiner, runner=runner,
     )
 
     def _admit(arguments: dict):  # noqa: ANN202

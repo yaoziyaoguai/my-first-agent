@@ -1,6 +1,6 @@
 """Optional Textual TUI app（lazy import）。
 
-base install、headless、普通 CLI 不导入 Textual。App 表达全部 typed actions：
+base install、headless、普通 CLI 不导入 Textual。App 表达当前 v1 键盘 adapter 的 actions：
 submit（Enter）、approve（a）、reject（r）、mark succeeded（s）、mark failed（f）、
 resume（u）、合法 paused cancel（c）。所有 action 经 shared ``agent.cli.actions``
 builder 从 authoritative state 构造，并由 projection 的可用 action 集合 gate——只有
@@ -17,13 +17,16 @@ from collections.abc import Callable
 from agent.cli.actions import (
     build_ack_provider,
     build_cancel,
+    build_cancel_browser_takeover,
     build_cancel_goal,
+    build_complete_browser_takeover,
     build_pause_goal,
     build_recover_unknown_observation,
     build_resolve_approval,
     build_resolve_recovery,
     build_resume,
     build_resume_goal,
+    build_revoke_goal_target_authority,
     build_revoke_process_authority,
     build_submit,
     parse_artifact_confirmation,
@@ -33,11 +36,15 @@ from agent.runtime.contracts import (
     Action,
     ControlRequestKind,
     ConversationState,
+    FactKind,
+    GoalStatus,
     RecoveryResolution,
     ResolveApproval,
+    RuntimeEventKind,
 )
-from agent.runtime.views import project_visible_source_views
-from agent.tui.adapter import TuiAdapter
+from agent.runtime.views import project_visible_source_views, verification_scope_message
+from agent.tui.adapter import AdapterControlUnavailableError, TuiAdapter
+from agent.tui.dialogs import build_f3_pages, build_facts_review_screen, build_multiline_edit_screen
 from agent.tui.render import (
     SafeDisplayTooLargeError,
     TuiProjection,
@@ -78,6 +85,16 @@ def parse_process_command(
     if not text.startswith("/"):
         return None
     command, _, argument = text.partition(" ")
+    if command == "/new":
+        # r19 小步 2:显式新任务入口,与 CLI 共享 new_session_gate 同一合法性
+        # 判断。允许时返回 ("new_session", None) 由 app 以 NEW_SESSION_REQUESTED
+        # 退出码交还装配层重建 conversation;拒绝时如常显示原因并继续。
+        from agent.cli.actions import new_session_gate
+
+        refusal = new_session_gate(state)
+        if refusal is not None:
+            return ("error", refusal)
+        return ("new_session", None)
     if command == "/approve-artifact":
         active = state.active_run
         request = active.pending_request if active is not None else None
@@ -114,6 +131,13 @@ def parse_process_command(
             return ("action", build_revoke_process_authority(state, lease_id=target))
         except ValueError as error:
             return ("error", str(error))
+    if command == "/revoke-goal-target":
+        if argument.strip():
+            return ("error", "/revoke-goal-target does not accept arguments.")
+        try:
+            return ("action", build_revoke_goal_target_authority(state))
+        except ValueError as error:
+            return ("error", str(error))
     return None
 
 
@@ -147,6 +171,7 @@ def build_app(
     _require_textual()
     from textual import work
     from textual.app import App, ComposeResult
+    from textual.binding import Binding
     from textual.containers import Vertical
     from textual.widgets import Footer, Input, Static
 
@@ -159,6 +184,8 @@ def build_app(
         CSS = ""
         BINDINGS = [
             ("a", "approve", "Approve"),
+            ("shift+a", "approve_goal_target", "Approve exact task target"),
+            ("shift+d", "approve_goal_directory", "Approve task directory"),
             ("r", "reject", "Reject"),
             ("s", "mark_succeeded", "Mark Succeeded"),
             ("f", "mark_failed", "Mark Failed"),
@@ -166,8 +193,13 @@ def build_app(
             ("u", "resume", "Resume"),
             ("p", "pause_goal", "Pause Goal"),
             ("c", "cancel", "Cancel"),
+            Binding("ctrl+c", "cancel", "Cancel active task", priority=True),
             ("d", "ack_provider", "Acknowledge Provider"),
+            ("b", "browser_done", "Browser done — return control"),
             ("f2", "toggle_source_refs", "Toggle Source Refs"),
+            ("f3", "review_facts", "Review recent content"),
+            ("f4", "multiline_edit", "Multi-line edit"),
+            ("ctrl+q", "quit", "Quit"),
         ]
 
         def __init__(self) -> None:
@@ -176,16 +208,49 @@ def build_app(
             self._run_id_factory = run_id_factory
             self.close_deadline_seconds = close_deadline_seconds
             self.projection: TuiProjection | None = None
+            # 用户手势必须绑定到实际展示的 immutable snapshot；执行时 adapter 仍会
+            # fresh-load checkpoint，让 Kernel 以 revision/request binding 拒绝 stale action。
+            self._displayed_state: ConversationState | None = None
             self.form_text: str = ""
             # 最近一次 worker 失败的有界提示（observability）；成功刷新会清回 None。
             self._last_worker_error: str | None = None
             # approval preview 是否超过显示 cap：True 时 approve 被 fail-closed gate 屏蔽。
             self._preview_too_large: bool = False
             self._advanced_sources: bool = False
-            # lifecycle：active worker 收到 quit 后进入 closing_requested；不能安全收口则
-            # shutdown_blocked，且不提前关闭 resources。
+            # lifecycle：active worker 收到 quit 后进入 closing_requested；不 cancel
+            # worker；deadline 到仍未收口时如实提示超时等待（不是永久 latch）；
+            # callable 真正返回且权威 reload 成功后自动自然退出。
             self.closing_requested = False
+            # S1-B（2026-10-09）：提交簿记在 _run_action 内同步落位——已排队尚未
+            # 开始的 worker 也算 busy；deadline timer 只在首次关闭请求时 arm 一次；
+            # reload 失败时业务动作禁用，重复 Ctrl-Q 每次仅做一次只读 reload 重试。
+            self._dispatch_pending = False
+            self._close_deadline_armed = False
+            self._reload_failed = False
+            self._close_deadline_timer = None
+            # S1-C：已排队未应用的 pause/cancel（同一 binding 上合并重复点击）。
+            self._pending_control_kinds: set[str] = set()
+            # deadline 曾超时的如实提示（display-only；不阻止后续自然收口）。
             self.shutdown_blocked = False
+            # 最近一次完成的 worker 是否报错（决定关闭收口退出码 0/2）。
+            self._last_worker_had_error = False
+            # S2-A（2026-10-09）：UI 本地草稿。只有 durable 接收证明（action replay
+            # 的 user fact 文本 / 匹配的 ControlReceipt）才消费草稿；_refresh 是展示，
+            # 不无条件清 Input；等待中输入的新版本不被迟到回调覆盖。
+            self.draft_text: str = ""
+            self.draft_revision: int = 0
+            self._pending_submission: tuple[str, int] | None = None
+            self._pending_control_texts: dict[str, tuple[str, int]] = {}
+            self._restoring_draft = False
+            # S2-A 流式展示窗口：每次 UI dispatch 打开，run_turn 结果 reload 后关闭；
+            # 窗口外旧 delta/waiting 一律忽略（advisory）。
+            self._stream_open = False
+            self._stream_conversation: str | None = None
+            self._stream_run: str | None = None
+            self._stream_identity: tuple[str, str | None, int, str] | None = None
+            self._stream_watermark = 0
+            self._stream_seen: set[str] = set()
+            self._stream_degraded = False
 
         def compose(self) -> ComposeResult:
             yield Vertical(
@@ -197,7 +262,217 @@ def build_app(
             )
 
         def on_mount(self) -> None:
+            # r19 小步 3:周期 drain 流式增量事件,worker 运行期间也能在状态区
+            # 看到回答片段(advisory;权威结果仍由 _refresh 从 checkpoint 投影)。
+            self._streamed_answer = ""
+            self.set_interval(0.5, self._drain_delta_events)
             self._refresh()
+
+        def on_input_changed(self, event) -> None:  # noqa: ANN001
+            # S2-A：用户输入即同步 UI 草稿（programmatic restore 的回声不计新
+            # 版本：值与当前草稿一致时忽略）。
+            if self._restoring_draft:
+                return
+            if getattr(event, "control", None) is not self.query_one("#message", Input):
+                return
+            if event.value == self.draft_text:
+                return
+            if "\n" in event.value:
+                # F4：单行 Input 收到多行 paste → 转入同一多行 modal，保留换行、
+                # 不截成首行、不自动发消息。
+                multiline = event.value
+                self._restoring_draft = True
+                try:
+                    event.control.value = ""
+                finally:
+                    self._restoring_draft = False
+                self.draft_text = ""
+                self.push_screen(
+                    build_multiline_edit_screen(multiline),
+                    self._on_multiline_result,
+                )
+                return
+            self.draft_text = event.value
+            self.draft_revision += 1
+
+        def _restore_draft(self) -> None:
+            # 展示恢复：把 UI 草稿放回 Input，不触发新的 draft revision。
+            msg_input = self.query_one("#message", Input)
+            if msg_input.value != self.draft_text:
+                self._restoring_draft = True
+                try:
+                    msg_input.value = self.draft_text
+                finally:
+                    self._restoring_draft = False
+
+        def _consume_pending_if_durably_accepted(self, state) -> None:  # noqa: ANN001
+            # S2-A：只有 durable 接收证明才消费草稿——SubmitMessage 需要 replay 的
+            # ``action:{seq}:user`` fact 实际文本；correction 需要匹配 request_id 的
+            # ControlReceipt。排队、worker 已调度、RunStatus.COMPLETED、无异常都不
+            # 是消费证明。消费只清除"仍为同一 draft_revision 的那份文本"；等待中
+            # 输入的新版本不被迟到回调覆盖。接收情况未知时保留草稿，不自动重发。
+            pending = self._pending_submission
+            if pending is not None:
+                text, revision = pending
+                if any(
+                    fact.kind is FactKind.USER_MESSAGE
+                    and fact.fact_id.startswith("action:")
+                    and fact.fact_id.endswith(":user")
+                    and fact.content.get("text") == text
+                    for fact in state.facts
+                ):
+                    self._pending_submission = None
+                    if self.draft_revision == revision:
+                        self.draft_text = ""
+            for request_id, entry in list(self._pending_control_texts.items()):
+                message, revision = entry
+                if any(
+                    receipt.correlation_id == request_id
+                    for receipt in state.control_receipts
+                ):
+                    del self._pending_control_texts[request_id]
+                    if self.draft_revision == revision and self.draft_text == message:
+                        self.draft_text = ""
+
+        def _open_stream_window(self, displayed_state) -> None:  # noqa: ANN001
+            # S2-A：每次 UI dispatch 打开流式展示窗口；只保存 expected conversation，
+            # 首个合法事件再精确绑定 run。新 run 只可绑定本次合法 action 的首个事件。
+            self._stream_conversation = (
+                displayed_state.conversation_id
+                if displayed_state is not None
+                else None
+            )
+            self._stream_run = None
+            self._stream_identity = None
+            self._stream_open = True
+            self._stream_watermark = 0
+            self._stream_seen = set()
+            self._stream_degraded = False
+            self._streamed_answer = ""
+
+        def _close_stream_window(self) -> None:
+            # run_turn 结果/错误返回并处理权威 reload 后关闭窗口；之后到达的
+            # 旧 delta/waiting 一律忽略，不能覆盖 final。
+            self._stream_open = False
+            self._stream_run = None
+            self._stream_identity = None
+            self._streamed_answer = ""
+
+        def _stream_update_status(self) -> None:
+            from rich.text import Text
+
+            if self._stream_degraded:
+                display = "· 流式预览不完整，等待最终结果 ·"
+            elif self._streamed_answer:
+                tail = self._streamed_answer[-2000:]
+                display = f"· 生成中 · {tail}"
+            else:
+                return
+            self.query_one("#status", Static).update(Text(safe_display(display)))
+
+        def _drain_delta_events(self) -> None:
+            drained = self._adapter.event_sink.drain()
+            if not drained:
+                return
+            # S1-C 状态优先级：关闭等待/读取失败/控制请求待确认的反馈优先于
+            # provider waiting。
+            priority_status = (
+                self.closing_requested
+                or self._reload_failed
+                or bool(self._pending_control_kinds)
+            )
+            from rich.text import Text
+
+            for event in drained:
+                if not self._stream_open:
+                    return  # 窗口外旧 delta/waiting 一律忽略
+                if (
+                    self._stream_conversation is not None
+                    and event.conversation_id != self._stream_conversation
+                ):
+                    continue  # 其它 conversation 的先到事件不绑定本窗口
+                if (
+                    self._stream_run is not None
+                    and event.run_id != self._stream_run
+                ):
+                    continue  # 精确 run 绑定后拒绝其它 run 的事件
+                if event.kind is RuntimeEventKind.MODEL_PROGRESS:
+                    if self._stream_run is None and event.run_id is not None:
+                        self._stream_run = event.run_id
+                    phase = str(event.payload.get("phase", ""))
+                    if priority_status:
+                        continue
+                    if phase == "provider_waiting":
+                        elapsed = event.payload.get("elapsed_seconds", 0)
+                        self.query_one("#status", Static).update(
+                            Text(
+                                safe_display(
+                                    f"· 模型仍在工作 · 已等待 {elapsed} 秒"
+                                )
+                            )
+                        )
+                    elif phase == "provider_finished":
+                        self._stream_update_status()
+                    continue
+                if event.kind is not RuntimeEventKind.MODEL_TEXT_DELTA:
+                    continue
+                if self._stream_run is None:
+                    if event.run_id is None:
+                        continue  # 新 run 只绑定带 run 身份的首个事件
+                    self._stream_run = event.run_id
+                    self._streamed_answer = ""
+                    self._stream_watermark = 0
+                    self._stream_seen = set()
+                    self._stream_degraded = False
+                identity = (
+                    event.conversation_id,
+                    event.run_id,
+                    event.revision,
+                    event.causation_id,
+                )
+                if (
+                    self._stream_identity is not None
+                    and identity != self._stream_identity
+                ):
+                    if event.revision > self._stream_identity[2]:
+                        # 同 run 较新 revision = 新响应：清空当前 preview。
+                        self._stream_identity = identity
+                        self._streamed_answer = ""
+                        self._stream_watermark = 0
+                        self._stream_seen = set()
+                        self._stream_degraded = False
+                    else:
+                        continue  # 较旧 revision/已封闭 identity 的迟到事件不切回
+                elif self._stream_identity is None:
+                    self._stream_identity = identity
+                # 有限 cache 去重（cap 256，溢出降级；序号水位避免无限集合）。
+                if event.event_id in self._stream_seen:
+                    continue
+                if len(self._stream_seen) >= 256:
+                    self._stream_degraded = True
+                    self._stream_update_status()
+                    continue
+                self._stream_seen.add(event.event_id)
+                try:
+                    sequence = int(event.event_id.rsplit(":", 1)[1])
+                except (IndexError, ValueError):
+                    self._stream_degraded = True
+                    self._stream_update_status()
+                    continue
+                if sequence == self._stream_watermark:
+                    continue  # 重复忽略
+                if sequence != self._stream_watermark + 1:
+                    # 缺口/逆序：降级为不完整预览，不猜测拼接。
+                    self._stream_degraded = True
+                    self._stream_update_status()
+                    continue
+                self._stream_watermark = sequence
+                text = str(event.payload.get("text", ""))
+                if priority_status:
+                    continue
+                if text:
+                    self._streamed_answer += text
+                self._stream_update_status()
 
         def _current_projection(self) -> TuiProjection:
             return project(self._adapter.load_view().snapshot.state)
@@ -210,13 +485,38 @@ def build_app(
             self._last_worker_error = worker_error
 
             view = self._adapter.load_view()
+            # reload 成功即解除"读取失败"停用态；后续 Ctrl-Q 不再是重试路径。
+            self._reload_failed = False
+            # S2-A：先用 durable facts 消费草稿账，再渲染（消费后的文本不再展示）。
+            self._consume_pending_if_durably_accepted(view.snapshot.state)
             projection = project(view.snapshot.state, result)
-            self.projection = projection
 
             main_text = projection.main_text
-            if result is not None:
+            if (
+                result is not None
+                and projection.form_kind == "browser_takeover"
+                and result.error_code == "browser_takeover_completion_failed"
+            ):
+                main_text = (
+                    f"{projection.main_text}\nCompletion could not be confirmed; this "
+                    "takeover is still pending. Use Browser cancel after restarting or "
+                    "when the original browser window is unavailable."
+                )
+            elif result is not None and projection.form_kind is None:
+                # S2-A（UI-04）：snapshot 是状态权威。approval/recovery/disclosure/
+                # takeover 等 pending 表单与 paused 状态不被旧 result 覆盖；结果
+                # 文本只在无表单的终端/继续态上叠加。
                 label = run_status_label(result.status)
                 main_text = f"{label}: {result.message or projection.main_text}"
+                if (
+                    result.message
+                    and projection.goal is not None
+                    and projection.goal.verification_scope
+                ):
+                    main_text = (
+                        f"{main_text}\n"
+                        f"{verification_scope_message(projection.goal.verification_scope)}"
+                    )
             sources = (
                 project_visible_source_views(view.snapshot.state, advanced=True)
                 if self._advanced_sources
@@ -252,17 +552,25 @@ def build_app(
                 self._preview_too_large = False
             except SafeDisplayTooLargeError:
                 self._preview_too_large = True
-                escaped_form = safe_display(
-                    "approval preview exceeds display cap; approve disabled "
+                overflow_message = (
+                    "browser takeover details exceed display cap; Browser done disabled "
+                    "— use Browser cancel"
+                    if projection.form_kind == "browser_takeover"
+                    else "approval preview exceeds display cap; approve disabled "
                     "— reject or reduce the effect"
                 )
+                escaped_form = safe_display(overflow_message)
             self.query_one("#form", Static).update(Text(escaped_form))
 
             # preview 过大时从 hints 移除 approve，避免误导用户以为可批准。
             display_actions = projection.actions
             if self._preview_too_large:
-                display_actions = tuple(a for a in display_actions if a != "approve")
-            hints = self._format_hints(display_actions)
+                display_actions = tuple(
+                    action
+                    for action in display_actions
+                    if action not in {"approve", "browser_done"}
+                )
+            hints = self._format_hints(projection, display_actions)
             self.query_one("#action_hints", Static).update(Text(safe_display(hints)))
 
             msg_input = self.query_one("#message", Input)
@@ -272,7 +580,9 @@ def build_app(
                 or projection.focus == "input"
             ) and not self.closing_requested:
                 msg_input.disabled = False
-                msg_input.value = ""
+                # S2-A：_refresh 是展示，不无条件清 Input；草稿只在 durable 消费
+                # 后清除（F2/回看/审批/状态/错误刷新都不消费草稿）。
+                self._restore_draft()
                 msg_input.focus()
             else:
                 msg_input.disabled = True
@@ -280,16 +590,23 @@ def build_app(
                 if projection.form_kind is not None:
                     self.query_one("#form", FocusStatic).focus()
 
+            # 只有 status/form/hints/focus 都成功更新后，才让后续手势观察这份 state。
+            # 这不是 UI-owned mutation authority，只是“用户刚刚看到了什么”的绑定。
+            self.projection = projection
+            self._displayed_state = view.snapshot.state
+
             # events 只 advisory：drain queue 后不写入 terminal renderer。
             self._adapter.event_sink.drain()
 
-            # closing 收口：worker 已安全返回且 reload 完 authoritative checkpoint 后才退出。
+            # closing 收口：worker 已安全返回且 reload 完 authoritative checkpoint 后
+            # 才退出。退出码：worker 曾报错 → 2（可能需要恢复）；正常 → 0。
             if (
                 self.closing_requested
-                and not self.shutdown_blocked
+                and not self._dispatch_pending
                 and not self._adapter.is_active
+                and not self._reload_failed
             ):
-                self.exit()
+                self.exit(return_code=2 if self._last_worker_had_error else 0)
 
         @staticmethod
         def _render_form(projection: TuiProjection) -> str:
@@ -298,7 +615,24 @@ def build_app(
             return "\n".join(f"{label}: {value}" for label, value in projection.form_fields)
 
         @staticmethod
-        def _format_hints(actions: tuple[str, ...]) -> str:
+        def _format_hints(
+            projection: TuiProjection,
+            actions: tuple[str, ...],
+        ) -> str:
+            goal = projection.goal
+            if goal is not None and actions == ("submit",):
+                if goal.status == GoalStatus.VERIFIED_DONE.value:
+                    return (
+                        "Task finished · Enter: ask a follow-up "
+                        "(does not start a new task) | /new: start a new task "
+                        "(keeps this task's records) | Ctrl-Q: quit"
+                    )
+                if goal.status == GoalStatus.CANCELLED.value:
+                    return (
+                        "Task cancelled · Enter: ask a follow-up "
+                        "(task remains cancelled; does not start a new task) | "
+                        "/new: start a new task | Ctrl-Q: quit"
+                    )
             labels = {
                 "submit": "Enter: submit",
                 "approve": "a: approve",
@@ -313,24 +647,32 @@ def build_app(
                 "correct_goal": "Enter: correct goal",
                 "cancel_goal": "c: cancel goal",
                 "ack_provider": "d: acknowledge provider",
+                "browser_done": "b: Browser done — return control",
+                "browser_cancel": "c: Browser cancel — cancel this takeover",
             }
             parts = [labels.get(a, a) for a in actions]
-            return " | ".join(parts) if parts else "no actions"
+            action_text = " | ".join(parts) if parts else "no actions"
+            return f"{action_text} | Ctrl-Q: quit"
+
+        def _busy(self) -> bool:
+            # S1-B：已排队尚未开始（pending）与 adapter single-flight 都算 busy。
+            return self._dispatch_pending or self._adapter.is_active
 
         def _permitted_state(self, name: str) -> ConversationState | None:
             """只有当前 authoritative 投影允许、且未进入 closing 时才返回 state。"""
-            if self.closing_requested or self.shutdown_blocked:
+            if self.closing_requested or self._reload_failed:
                 return None
-            if self._adapter.is_active:
-                # worker 在跑：禁止新 action，避免撞 single-flight 或绕过 unknown effect。
+            if self._busy():
+                # 已排队/运行中的 worker：禁止新 action，避免撞 single-flight 或绕过
+                # unknown effect。
                 return None
-            if self._preview_too_large and name == "approve":
-                # approval preview 超过显示 cap → fail closed：approve 明确不可批准，
-                # 不能让用户批准无法完整查看关键内容的 effect。reject 不受影响（不执行 effect）。
+            if self._preview_too_large and name in {"approve", "browser_done"}:
+                # approval/takeover effect 详情超过显示 cap → fail closed；对应的
+                # approve/done 不可用，仍保留 reject/browser cancel 这类非完成选择。
                 return None
-            state = self._adapter.load_view().snapshot.state
-            projection = project(state)
-            if name not in projection.actions:
+            state = self._displayed_state
+            projection = self.projection
+            if state is None or projection is None or name not in projection.actions:
                 return None
             return state
 
@@ -339,12 +681,14 @@ def build_app(
 
             if (
                 self.closing_requested
-                or self.shutdown_blocked
-                or self._adapter.is_active
+                or self._reload_failed
+                or self._busy()
                 or self._preview_too_large
             ):
                 return None
-            state = self._adapter.load_view().snapshot.state
+            state = self._displayed_state
+            if state is None or self.projection is None:
+                return None
             active = state.active_run
             request = active.pending_request if active is not None else None
             if getattr(request, "artifact_confirmation_requirement", None) is None:
@@ -352,34 +696,73 @@ def build_app(
             return state
 
         def request_close(self) -> None:
-            """active worker 收到 quit 时的优雅收口入口。
+            """S1-B 关闭收口：不 cancel worker，分四种情况如实收口。
 
-            不 cancel worker；若 worker 已返回则立即 reload authoritative checkpoint
-            再退出，否则进入 closing_requested 并 arm deadline——deadline 超时仍未收口
-            则 shutdown_blocked，UI 与 resources 保持存活，不 force-exit。
+            - 已排队/运行中：closing_requested + 只在首次请求时 arm 一个 deadline
+              timer；重复 Ctrl-Q 不重置/叠加 timer。
+            - deadline 超时：如实显示仍在等待（display-only，非永久 latch）；
+              callable 返回后仍会自动收口。
+            - callable 已返回：一次权威 reload 后按结果收口（成功 0 / worker 报错 2）。
+            - reload 失败：保留固定错误、禁用业务动作；重复 Ctrl-Q 每次只做一次
+              只读 reload 重试，不重做 action。
             """
-            if self.shutdown_blocked:
-                return
             self.closing_requested = True
-            if self._adapter.is_active:
-                self.set_timer(self.close_deadline_seconds, self._on_close_deadline)
-            else:
-                self._safe_exit()
+            if self._busy():
+                if not self._close_deadline_armed:
+                    self._close_deadline_armed = True
+                    self._close_deadline_timer = self.set_timer(
+                        self.close_deadline_seconds, self._on_close_deadline
+                    )
+                self._show_control_request_received(
+                    "关闭请求已记录；等待当前调用收口，不代表已取消。"
+                )
+                return
+            try:
+                self._refresh()
+            except Exception:
+                self._on_reload_failed()
 
         def action_quit(self) -> None:  # type: ignore[override]
             # 覆盖默认 quit：走优雅收口，避免在 active worker 上 force-exit。
             self.request_close()
 
         def _on_close_deadline(self) -> None:
-            if self.closing_requested and self._adapter.is_active:
+            # deadline 到仍未收口：如实提示仍在等待；不是永久 latch——callable
+            # 返回后的完成回调仍会自动收口。
+            if self.closing_requested and self._busy():
                 self.shutdown_blocked = True
-                self._refresh()
+                self._show_control_request_received(
+                    "关闭等待已超过时限：仍在等待当前调用收口（不会强制取消；"
+                    "调用返回后会自动继续关闭）。"
+                )
 
-        def _safe_exit(self) -> None:
-            self._refresh()
-            self.exit()
+        def _on_reload_failed(self) -> None:
+            self._reload_failed = True
+            self._show_control_request_received(
+                "无法从 checkpoint 读取当前状态；业务操作已停用。"
+                "再次按 Ctrl-Q 仅重试读取状态。"
+            )
 
-        @work(thread=True, exclusive=True)
+        def _on_action_worker_finished(self, result, worker_error: str | None) -> None:
+            # S1-B：UI 线程在对应 worker 完成（callable 已返回/抛错）后统一清除
+            # 提交簿记，再 reload/render/close。意外 CANCELLED 不会进入本回调，
+            # 簿记保持 busy，不会在无证据时收口。
+            self._dispatch_pending = False
+            # 已排队控制请求已到达安全边界（被 Runtime 消费或丢弃），解除合并。
+            self._pending_control_kinds.clear()
+            # S2-A：run_turn 已返回，关闭流式窗口；旧事件一律忽略。
+            self._close_stream_window()
+            self._last_worker_had_error = worker_error is not None
+            try:
+                self._refresh(result, worker_error)
+            except Exception:
+                self._on_reload_failed()
+            finally:
+                # 提交账只在完成时释放：refresh 已按 durable 事实消费并清草稿；
+                # 未消费说明 action 未落盘（草稿保留，允许用户手动重发）。
+                self._pending_submission = None
+
+        @work(thread=True)
         def _execute(self, action: Action) -> object:
             result = None
             worker_error: str | None = None
@@ -396,32 +779,168 @@ def build_app(
                 worker_error = _bounded_worker_error(error)
                 _LOG.error("tui worker failure: %s", worker_error)
                 result = None
-            # worker 完成后回到 app 线程刷新；handler 不阻塞 await，UI 在 worker 在跑时
-            # 仍可响应（request_close 才能观察到 closing_requested）。
-            self.call_from_thread(self._refresh, result, worker_error)
+            # S1-B：worker 只返回有界 outcome；不在返回前触发 exit。UI 线程在完成
+            # 通知里统一 reload/render/close。
+            self.call_from_thread(self._on_action_worker_finished, result, worker_error)
             return result
 
         def _run_action(self, action: Action) -> None:
+            # S1-B：提交即落位 busy 簿记——已排队尚未开始的 worker 也算 busy，
+            # 阻止二次调度；完成回调统一清除。
+            self._dispatch_pending = True
+            # S2-A：打开本 dispatch 的流式展示窗口。
+            self._open_stream_window(self._displayed_state)
             self._execute(action)
 
+        def _displayed_control_identity(self) -> tuple[str, str, int] | None:
+            # S1-C：界面意图对应的 conversation/Goal/revision；invocation 由
+            # adapter 用最新 binding 核对。
+            state = self._displayed_state
+            if state is None or state.goal is None:
+                return None
+            return (state.conversation_id, state.goal.goal_id, state.goal.revision)
+
+        def _request_control_safely(
+            self,
+            kind: ControlRequestKind,
+            message: str | None = None,
+        ):
+            """S1-C：仅 exact 当前 binding 的 submit 成功才返回请求对象。
+
+            无 Goal/binding、已关闭/被替换的 binding、store.load 失败都转成固定
+            受控失败反馈并返回 None；不崩溃、不借未来 Goal 重绑重发、不把未入队
+            请求当成功。同一 binding 的重复 pause/cancel 在 UI 合并；不同纠正内容
+            不合并。
+            """
+            if (
+                kind in {ControlRequestKind.PAUSE, ControlRequestKind.CANCEL}
+                and kind.value in self._pending_control_kinds
+            ):
+                return "already-pending"
+            try:
+                request = self._adapter.request_control(
+                    kind,
+                    message=message,
+                    expected=self._displayed_control_identity(),
+                )
+            except AdapterControlUnavailableError:
+                self._show_control_request_received(
+                    "当前没有可接受该请求的安全边界（无进行中的调用或绑定已变化）；"
+                    "请求未发送。"
+                )
+                return None
+            except Exception:
+                self._show_control_request_received(
+                    "控制请求暂时不可用（基础设施错误）；请求未发送。"
+                )
+                return None
+            if kind in {ControlRequestKind.PAUSE, ControlRequestKind.CANCEL}:
+                self._pending_control_kinds.add(kind.value)
+            elif message is not None:
+                # S2-A：纠正消费账——durable ControlReceipt 到达前保留原文与版本。
+                self._pending_control_texts[request.request_id] = (
+                    message,
+                    self.draft_revision,
+                )
+            return request
+
+        def _show_control_request_received(self, message: str) -> None:
+            """只确认请求已入队；真正状态仍由 Runtime 在安全边界写入。"""
+
+            from rich.text import Text
+
+            self.query_one("#status", Static).update(Text(safe_display(message)))
+
         async def on_input_submitted(self, event: Input.Submitted) -> None:
-            if self._adapter.is_active:
-                if event.value.strip():
-                    self._adapter.request_control(
-                        ControlRequestKind.CORRECT,
-                        message=event.value,
+            self._submit_text(event.value, allow_commands=True)
+
+        def action_review_facts(self) -> None:
+            # F3（S2-B）：冻结当前只读 snapshot 回看最近保留内容；打开/翻页/
+            # 关闭不提交 action、不调用 provider/tool、不写状态、不随后台刷新
+            # 跳页；Esc 返回时草稿与焦点原样保留。
+            state = self._displayed_state
+            if state is None:
+                try:
+                    state = self._adapter.load_view().snapshot.state
+                except Exception:
+                    self._show_control_request_received(
+                        "无法读取当前状态；回看暂不可用。"
                     )
+                    return
+            pages, shown = build_f3_pages(state.facts)
+            self.push_screen(build_facts_review_screen(pages, shown))
+
+        def action_multiline_edit(self) -> None:
+            # F4（S2-B）：多行编辑 modal；提交走与主输入同一 displayed-state
+            # gate 与 SubmitMessage/control 路径；Esc 存草稿返回。
+            self.push_screen(
+                build_multiline_edit_screen(self.draft_text),
+                self._on_multiline_result,
+            )
+
+        def _on_multiline_result(self, result) -> None:  # noqa: ANN001
+            if result is None:
                 return
-            if self.closing_requested or self.shutdown_blocked:
+            disposition, text = result
+            if disposition == "send":
+                # modal 内 slash 文本是普通消息内容：不解析命令。
+                self._submit_text(text, allow_commands=False)
                 return
-            state = self._adapter.load_view().snapshot.state
-            command_result = parse_process_command(
-                event.value,
-                state,
-                approval_time_factory=approval_time_factory,
+            self.draft_text = text
+            self.draft_revision += 1
+            if "\n" in text:
+                # 多行草稿留在 UI 本地，不压进单行 Input 丢换行；主界面显示
+                # "N行草稿，F4继续编辑"。
+                line_count = text.count("\n") + 1
+                self._show_control_request_received(
+                    f"已保存 {line_count} 行草稿；按 F4 继续编辑。"
+                )
+                return
+            self._restore_draft()
+
+        def _submit_text(self, value: str, *, allow_commands: bool) -> None:
+            if self._busy():
+                displayed = self._displayed_state
+                if (
+                    displayed is not None
+                    and displayed.browser_takeover_pending is not None
+                ):
+                    return
+                if value.strip():
+                    queued = self._request_control_safely(
+                        ControlRequestKind.CORRECT,
+                        message=value,
+                    )
+                    if queued:
+                        self._show_control_request_received(
+                            "已收到新要求；当前步骤结束后会在安全边界应用。"
+                        )
+                return
+            if self.closing_requested or self._reload_failed:
+                return
+            state = self._displayed_state
+            if state is None:
+                return
+            command_result = (
+                parse_process_command(
+                    value,
+                    state,
+                    approval_time_factory=approval_time_factory,
+                )
+                if allow_commands
+                else None
             )
             if command_result is not None:
                 kind, payload = command_result
+                if kind == "new_session":
+                    # /new 允许后以 NEW_SESSION_REQUESTED 退出码交还装配层
+                    # (main 会话循环)重建 conversation;不重启进程。
+                    if self._busy():
+                        return
+                    from agent.cli.actions import NEW_SESSION_REQUESTED
+
+                    self.exit(return_code=NEW_SESSION_REQUESTED)
+                    return
                 if kind == "action":
                     if (
                         isinstance(payload, ResolveApproval)
@@ -457,11 +976,22 @@ def build_app(
                 state = self._permitted_state("correct_goal")
             if state is None:
                 return
-            if not event.value.strip():
+            if not value.strip():
+                return
+            # S2-A：已入 inbox 且未消费的同一纠正文本不重复发送；提交路径的
+            # 重复保护只针对"排队等待"的纠正（提交在 busy 期间走纠正入口）。
+            if any(
+                message == value
+                for message, _revision in self._pending_control_texts.values()
+            ):
+                self._show_control_request_received(
+                    "尚不能确认上一次提交已被接收；草稿已保留，请勿重复发送。"
+                )
                 return
             action = build_submit(
-                state, message=event.value, run_id=self._run_id_factory()
+                state, message=value, run_id=self._run_id_factory()
             )
+            self._pending_submission = (value, self.draft_revision)
             self._run_action(action)
 
         # --- keyboard action methods（全部经 projection gate）---
@@ -478,6 +1008,47 @@ def build_app(
                     binding_digest=req.binding_digest,
                     approved=True,
                     approved_at=approval_time_factory(),
+                    defer_artifact_confirmation=(
+                        req.artifact_confirmation_requirement is not None
+                    ),
+                )
+            )
+
+        async def action_approve_goal_target(self) -> None:
+            state = self._permitted_state("approve")
+            if state is None:
+                return
+            req = state.active_run.pending_request
+            self._run_action(
+                build_resolve_approval(
+                    state,
+                    request_id=req.request_id,
+                    binding_digest=req.binding_digest,
+                    approved=True,
+                    approved_at=approval_time_factory(),
+                    defer_artifact_confirmation=(
+                        req.artifact_confirmation_requirement is not None
+                    ),
+                    authorize_goal_target=True,
+                )
+            )
+
+        async def action_approve_goal_directory(self) -> None:
+            state = self._permitted_state("approve")
+            if state is None:
+                return
+            req = state.active_run.pending_request
+            self._run_action(
+                build_resolve_approval(
+                    state,
+                    request_id=req.request_id,
+                    binding_digest=req.binding_digest,
+                    approved=True,
+                    approved_at=approval_time_factory(),
+                    defer_artifact_confirmation=(
+                        req.artifact_confirmation_requirement is not None
+                    ),
+                    authorize_goal_directory=True,
                 )
             )
 
@@ -540,8 +1111,19 @@ def build_app(
             self._run_action(build_resume(state))
 
         async def action_cancel(self) -> None:
-            if self._adapter.is_active:
-                self._adapter.request_control(ControlRequestKind.CANCEL)
+            displayed = self._displayed_state
+            if displayed is not None and displayed.browser_takeover_pending is not None:
+                state = self._permitted_state("browser_cancel")
+                if state is not None:
+                    self._run_action(build_cancel_browser_takeover(state))
+                return
+            if self._busy():
+                queued = self._request_control_safely(ControlRequestKind.CANCEL)
+                if queued:
+                    self._show_control_request_received(
+                        "已收到取消请求；正在等待当前模型或工具步骤到达安全边界，"
+                        "此时尚未真正停止。"
+                    )
                 return
             state = self._permitted_state("cancel_goal")
             if state is not None:
@@ -553,8 +1135,15 @@ def build_app(
             self._run_action(build_cancel(state))
 
         async def action_pause_goal(self) -> None:
-            if self._adapter.is_active:
-                self._adapter.request_control(ControlRequestKind.PAUSE)
+            displayed = self._displayed_state
+            if displayed is not None and displayed.browser_takeover_pending is not None:
+                return
+            if self._busy():
+                queued = self._request_control_safely(ControlRequestKind.PAUSE)
+                if queued:
+                    self._show_control_request_received(
+                        "已收到暂停请求；当前步骤结束后会在安全边界暂停。"
+                    )
                 return
             state = self._permitted_state("pause_goal")
             if state is not None:
@@ -567,6 +1156,11 @@ def build_app(
                     build_ack_provider(state, acknowledged_at="operator-confirmed")
                 )
 
+        async def action_browser_done(self) -> None:
+            state = self._permitted_state("browser_done")
+            if state is not None:
+                self._run_action(build_complete_browser_takeover(state))
+
         def action_toggle_source_refs(self) -> None:
             self._advanced_sources = not self._advanced_sources
             self._refresh()
@@ -577,4 +1171,6 @@ def build_app(
 def run_tui(adapter: TuiAdapter, *, run_id_factory: Callable[[], str]) -> int:
     app = build_app(adapter, run_id_factory=run_id_factory)
     app.run()
-    return 0
+    # /new 经 self.exit(return_code=NEW_SESSION_REQUESTED) 退出时,App.run()
+    # 返回该码,由 main 会话循环重建 conversation;正常退出仍为 0。
+    return int(app.return_code or 0)

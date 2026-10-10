@@ -1471,8 +1471,13 @@ class KernelToolRuntime:
             projections.append(draft.stderr_projection)
         rendered = "".join(projections)
         content = (
-            rendered[: spec.output_limit_chars]
-            if rendered
+            _render_model_visible_output(
+                rendered,
+                spec.output_limit_chars,
+                stdout_truncated=draft.stdout_truncated,
+                stderr_truncated=draft.stderr_truncated,
+            )
+            if rendered or draft.stdout_truncated or draft.stderr_truncated
             else f"local_process {draft.outcome.value}"
         )
         return ToolResult(
@@ -1648,8 +1653,13 @@ class KernelToolRuntime:
         return ToolResult(
             tool_call_id=intent.tool_call_id,
             content=(
-                rendered[: spec.output_limit_chars]
-                if rendered
+                _render_model_visible_output(
+                    rendered,
+                    spec.output_limit_chars,
+                    stdout_truncated=draft.stdout_truncated,
+                    stderr_truncated=draft.stderr_truncated,
+                )
+                if rendered or draft.stdout_truncated or draft.stderr_truncated
                 else f"sandbox_exec {draft.outcome.value}"
             ),
             is_error=not success,
@@ -1907,6 +1917,21 @@ def _canonical_json(value: object) -> str:
 
 def _digest_json(value: object) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _render_model_visible_output(
+    rendered: str,
+    limit: int,
+    *,
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+) -> str:
+    """有界输出的截断事实必须模型可见：不许把不完整输出伪装成完整输出。"""
+
+    if not (stdout_truncated or stderr_truncated or len(rendered) > limit):
+        return rendered[:limit]
+    notice = "\n[output truncated; complete facts live in the receipt]"
+    return rendered[: max(0, limit - len(notice))] + notice
 
 
 def _normalize_output(value: object) -> str:

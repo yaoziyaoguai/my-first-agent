@@ -55,8 +55,8 @@ class _NoRuntime:
         ),
         (GoalStatus.PAUSED, InteractionState.IDLE, ("resume_goal", "correct_goal", "cancel_goal")),
         (GoalStatus.BLOCKED, InteractionState.IDLE, ("resume_goal", "correct_goal", "cancel_goal")),
-        (GoalStatus.CANCELLED, InteractionState.IDLE, ()),
-        (GoalStatus.VERIFIED_DONE, InteractionState.IDLE, ()),
+        (GoalStatus.CANCELLED, InteractionState.IDLE, ("submit",)),
+        (GoalStatus.VERIFIED_DONE, InteractionState.IDLE, ("submit",)),
     ),
 )
 def test_shared_goal_view_matches_cli_tui_and_headless(
@@ -116,10 +116,14 @@ def test_shared_goal_view_matches_cli_tui_and_headless(
     shared = project_goal_view(state)
     cli_or_headless = load_headless_view(store)
     tui_loaded = TuiAdapter(_NoRuntime(), store).load_view().goal
-    tui_rendered = project(state).goal
+    tui_projection = project(state)
+    tui_rendered = tui_projection.goal
 
     assert shared == cli_or_headless == tui_loaded == tui_rendered
     assert shared.legal_actions == expected_actions
+    assert tui_projection.actions == expected_actions
+    if goal_status in {GoalStatus.CANCELLED, GoalStatus.VERIFIED_DONE}:
+        assert tui_projection.focus == "input"
     assert shared.goal_id == "goal-1"
     assert shared.goal_revision == 1
 

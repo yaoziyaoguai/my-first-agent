@@ -186,6 +186,19 @@ def revalidate_process(prepared: PreparedProcessV1):  # noqa: ANN202
             code="cwd_identity_changed",
             message="cwd directory identity drifted after approval",
         )
+    if prepared.child_path != os.pathsep.join(prepared.search_paths):
+        return KnownNotExecuted(
+            code="environment_policy_changed",
+            message="prepared environment changed; prepare and review the command again",
+        )
+    expected_environment = admission.build_environment_plan(
+        captured_path=prepared.child_path
+    )
+    if command.environment_policy != expected_environment:
+        return KnownNotExecuted(
+            code="environment_policy_changed",
+            message="prepared environment changed; prepare and review the command again",
+        )
     revalidated = ProcessCommandV1(
         executable_token=command.executable_token,
         argv=command.argv,

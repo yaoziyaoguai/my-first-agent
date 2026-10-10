@@ -8,7 +8,9 @@ per-invocation temp 环境与 enforcement facts 校验。
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
+from dataclasses import replace
 from types import SimpleNamespace
 
 from agent.process.contracts import ProcessDraftOutcome
@@ -101,7 +103,7 @@ def _seatbelt_invocation(policy, command, env, *, policy_digest=None):
 
 def _prepared_and_policy(
     tmp_path, mode=SandboxMode.WORKSPACE_WRITE,
-    network=SandboxNetworkMode.OFF, cwd=".",
+    network=SandboxNetworkMode.OFF, cwd=".", captured_path="/usr/bin:/bin",
 ):
     for name in ("work", "tmp", "state", "home"):
         (tmp_path / name).mkdir(parents=True, exist_ok=True)
@@ -110,7 +112,7 @@ def _prepared_and_policy(
     prepared = prepare_process(
         {"executable": "/usr/bin/true", "cwd": cwd},
         workspace=tmp_path / "work",
-        captured_path="/usr/bin:/bin",
+        captured_path=captured_path,
     )
     policy = build_sandbox_policy(
         mode=mode,
@@ -122,6 +124,32 @@ def _prepared_and_policy(
         private_roots=(),
     )
     return prepared, policy
+
+
+def test_execute_uses_the_path_bound_into_the_approved_command(tmp_path):
+    raw_path = os.pathsep.join(("relative", "/usr/bin", "/bin", "/usr/bin"))
+    prepared, policy = _prepared_and_policy(tmp_path, captured_path=raw_path)
+    confiner = FakeConfiner()
+    runner = FakeRunner()
+
+    def _confine(command, pol, env):
+        invocation = _seatbelt_invocation(pol, command, env)
+        confiner.calls.append((command, pol, dict(env)))
+        return invocation
+
+    confiner.confine = _confine  # type: ignore[method-assign]
+    executor = NativeSandboxExecutor(
+        confiner=confiner, runner=runner,
+    )
+
+    draft = executor.execute(prepared, policy)
+
+    assert isinstance(draft, SandboxExecutionDraftV1)
+    delivered_path = runner.calls[0]["environment"]["PATH"]
+    assert delivered_path == prepared.child_path
+    assert hashlib.sha256(delivered_path.encode()).hexdigest() == (
+        prepared.command.environment_policy.path_digest
+    )
 
 
 def test_confined_execute_runs_wrapped_invocation_once_and_cleans_temp(tmp_path):
@@ -137,7 +165,7 @@ def test_confined_execute_runs_wrapped_invocation_once_and_cleans_temp(tmp_path)
 
     confiner.confine = _confine  # type: ignore[method-assign]
     executor = NativeSandboxExecutor(
-        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+        confiner=confiner, runner=runner,
     )
     draft = executor.execute(prepared, policy)
     assert isinstance(draft, SandboxExecutionDraftV1)
@@ -171,11 +199,30 @@ def test_execute_revalidates_before_confine(tmp_path):
     confiner = FakeConfiner()
     runner = FakeRunner()
     executor = NativeSandboxExecutor(
-        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+        confiner=confiner, runner=runner,
     )
     outcome = executor.execute(prepared, policy)
     assert isinstance(outcome, KnownNotExecuted)
     assert outcome.code == "cwd_identity_changed"
+    assert confiner.calls == []
+    assert runner.calls == []
+
+
+def test_environment_mismatch_reaches_no_temp_confiner_or_runner(tmp_path):
+    prepared, policy = _prepared_and_policy(tmp_path)
+    prepared = replace(
+        prepared,
+        command=replace(prepared.command, environment_policy=None),
+    )
+    confiner = FakeConfiner()
+    runner = FakeRunner()
+    executor = NativeSandboxExecutor(confiner=confiner, runner=runner)
+
+    outcome = executor.execute(prepared, policy)
+
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "environment_policy_changed"
+    assert list(__import__("pathlib").Path(policy.temp_root).iterdir()) == []
     assert confiner.calls == []
     assert runner.calls == []
 
@@ -188,7 +235,7 @@ def test_backend_unavailable_returns_known_not_executed(tmp_path):
     confiner = FakeConfiner(outcome=unavailable)
     runner = FakeRunner()
     executor = NativeSandboxExecutor(
-        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+        confiner=confiner, runner=runner,
     )
     outcome = executor.execute(prepared, policy)
     assert isinstance(outcome, KnownNotExecuted)
@@ -208,7 +255,7 @@ def test_enforcement_facts_tampering_is_rejected(tmp_path):
 
     confiner.confine = _confine  # type: ignore[method-assign]
     executor = NativeSandboxExecutor(
-        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+        confiner=confiner, runner=runner,
     )
     outcome = executor.execute(prepared, policy)
     assert isinstance(outcome, KnownNotExecuted)
@@ -244,7 +291,7 @@ def test_bypass_invocation_runs_raw_command_with_unconfined_facts(tmp_path):
     confiner = FakeConfiner()
     confiner.confine = _confine  # type: ignore[method-assign]
     executor = NativeSandboxExecutor(
-        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+        confiner=confiner, runner=runner,
     )
     draft = executor.execute(prepared, policy)
     assert isinstance(draft, SandboxExecutionDraftV1)
@@ -286,7 +333,7 @@ def test_valid_danger_network_off_seatbelt_invocation_runs(tmp_path):
     confiner = FakeConfiner()
     confiner.confine = _confine  # type: ignore[method-assign]
     executor = NativeSandboxExecutor(
-        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+        confiner=confiner, runner=runner,
     )
     draft = executor.execute(prepared, policy)
     assert isinstance(draft, SandboxExecutionDraftV1)
@@ -301,7 +348,7 @@ def test_forged_unconfined_facts_for_confined_policy_reach_no_runner(tmp_path):
     runner = FakeRunner()
     confiner = _bypass_confiner()
     executor = NativeSandboxExecutor(
-        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+        confiner=confiner, runner=runner,
     )
     outcome = executor.execute(prepared, policy)
     assert isinstance(outcome, KnownNotExecuted)
@@ -316,7 +363,7 @@ def test_forged_unconfined_facts_for_danger_network_off_reach_no_runner(tmp_path
     )
     runner = FakeRunner()
     executor = NativeSandboxExecutor(
-        confiner=_bypass_confiner(), captured_path="/usr/bin:/bin", runner=runner,
+        confiner=_bypass_confiner(), runner=runner,
     )
     outcome = executor.execute(prepared, policy)
     assert isinstance(outcome, KnownNotExecuted)
@@ -338,7 +385,7 @@ def test_forged_seatbelt_facts_for_danger_full_are_a_contradiction(tmp_path):
     confiner = FakeConfiner()
     confiner.confine = _confine  # type: ignore[method-assign]
     executor = NativeSandboxExecutor(
-        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+        confiner=confiner, runner=runner,
     )
     outcome = executor.execute(prepared, policy)
     assert isinstance(outcome, KnownNotExecuted)
@@ -371,7 +418,7 @@ def test_profile_digest_not_matching_profile_bytes_reaches_no_runner(tmp_path):
     confiner = FakeConfiner()
     confiner.confine = _confine  # type: ignore[method-assign]
     executor = NativeSandboxExecutor(
-        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+        confiner=confiner, runner=runner,
     )
     outcome = executor.execute(prepared, policy)
     assert isinstance(outcome, KnownNotExecuted)
@@ -404,7 +451,7 @@ def test_profile_bytes_not_matching_wrapped_argv_reach_no_runner(tmp_path):
     confiner = FakeConfiner()
     confiner.confine = _confine  # type: ignore[method-assign]
     executor = NativeSandboxExecutor(
-        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+        confiner=confiner, runner=runner,
     )
     outcome = executor.execute(prepared, policy)
     assert isinstance(outcome, KnownNotExecuted)
@@ -429,9 +476,30 @@ def test_confiner_cannot_mutate_closed_environment_before_runner(tmp_path):
     confiner = FakeConfiner()
     confiner.confine = _confine  # type: ignore[method-assign]
     executor = NativeSandboxExecutor(
-        confiner=confiner, captured_path="/usr/bin:/bin", runner=runner,
+        confiner=confiner, runner=runner,
     )
     outcome = executor.execute(prepared, policy)
+    assert isinstance(outcome, KnownNotExecuted)
+    assert outcome.code == "enforcement_facts_mismatch"
+    assert runner.calls == []
+
+
+def test_confiner_cannot_hide_an_in_place_environment_mutation(tmp_path):
+    prepared, policy = _prepared_and_policy(tmp_path)
+    runner = FakeRunner()
+
+    def _confine(command, pol, env):
+        env["INJECTED"] = "ambient"
+        return _seatbelt_invocation(pol, command, env)
+
+    confiner = FakeConfiner()
+    confiner.confine = _confine  # type: ignore[method-assign]
+    executor = NativeSandboxExecutor(
+        confiner=confiner, runner=runner,
+    )
+
+    outcome = executor.execute(prepared, policy)
+
     assert isinstance(outcome, KnownNotExecuted)
     assert outcome.code == "enforcement_facts_mismatch"
     assert runner.calls == []
@@ -468,7 +536,7 @@ def test_structured_path_rejects_forged_unconfined_facts_before_runner(tmp_path)
     )
     runner = FakeRunner()
     executor = NativeSandboxExecutor(
-        confiner=_bypass_confiner(), captured_path="/usr/bin:/bin", runner=runner,
+        confiner=_bypass_confiner(), runner=runner,
     )
     outcome = executor.execute(prepared, policy, io_plan=plan)
     assert isinstance(outcome, KnownNotExecuted)
@@ -485,7 +553,7 @@ def test_timeout_and_spawn_failure_outcomes_map(tmp_path):
         ),
     )
     executor = NativeSandboxExecutor(
-        confiner=_seatbelt_confiner(), captured_path="/usr/bin:/bin",
+        confiner=_seatbelt_confiner(),
         runner=timed_out,
     )
     draft = executor.execute(prepared, policy)
@@ -493,7 +561,7 @@ def test_timeout_and_spawn_failure_outcomes_map(tmp_path):
 
     spawn_failed = FakeRunner(draft=_draft(outcome=ProcessDraftOutcome.SPAWN_FAILED, pid=None))
     executor_two = NativeSandboxExecutor(
-        confiner=_seatbelt_confiner(), captured_path="/usr/bin:/bin",
+        confiner=_seatbelt_confiner(),
         runner=spawn_failed,
     )
     draft_two = executor_two.execute(prepared, policy)

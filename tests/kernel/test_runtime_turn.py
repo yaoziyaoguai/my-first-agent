@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalPolicy,
     BeginAnswer,
+    ConversationFact,
     ConversationState,
     ExecutionAuthorityClass,
+    FactKind,
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
@@ -17,6 +21,7 @@ from agent.runtime.contracts import (
     ToolSpec,
 )
 from agent.runtime.loop import AgentRuntime, InvocationLimits
+from agent.runtime.state import accept_action
 from agent.runtime.tools import KernelToolRuntime, RegisteredTool
 from tests.kernel.fakes import CollectingSink, InMemoryCheckpointStore, ScriptedProvider
 
@@ -58,6 +63,59 @@ def test_text_only_turn_completes_through_one_provider_owner() -> None:
     assert len(provider.calls) == 1
     assert store.state.active_run is None
     assert store.state.facts[-1].content["text"] == "hello back"
+
+
+def test_provider_receives_recent_history_when_budget_evicts_one_group() -> None:
+    initial = replace(
+        ConversationState.new("conversation-1"),
+        facts=(
+            ConversationFact(
+                fact_id="user-old",
+                kind=FactKind.USER_MESSAGE,
+                content={"text": "OLD_FIELD=" + "a" * 240},
+            ),
+            ConversationFact(
+                fact_id="user-recent",
+                kind=FactKind.USER_MESSAGE,
+                content={"text": "RECENT_CONFIRMED=keep-me" + "b" * 240},
+            ),
+        ),
+    )
+    action = _submit(initial, "answer using the latest confirmed field")
+    accepted = accept_action(initial, action).state
+    roomy = KernelContextManager(
+        system_policy="Be concise.",
+        limits=ContextLimits(max_input_tokens=100_000, output_reserve=1),
+    )
+    retained = replace(
+        accepted,
+        facts=tuple(fact for fact in accepted.facts if fact.fact_id != "user-old"),
+    )
+    retained_cost = roomy.build(retained, action, ()).budget.estimated_input_tokens
+    provider = ScriptedProvider(ModelResponse((ModelTextBlock("done"),)))
+    store = InMemoryCheckpointStore(initial)
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="Be concise.",
+            limits=ContextLimits(
+                max_input_tokens=retained_cost + 20,
+                output_reserve=20,
+            ),
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-1",
+    )
+
+    result = runtime.run_turn(action, store.load())
+
+    assert result.status is RunStatus.COMPLETED
+    delivered = repr(provider.calls[0].messages)
+    assert "RECENT_CONFIRMED=keep-me" in delivered
+    assert "OLD_FIELD=" not in delivered
 
 
 def test_tool_result_rebuilds_context_before_final_response() -> None:
@@ -137,3 +195,38 @@ def test_text_with_tool_call_is_preamble_not_completion() -> None:
 
     assert result.message == "final"
     assert len(provider.calls) == 3
+
+
+def test_model_text_delta_events_stream_to_sink_advisory_only() -> None:
+    """r19 小步 3:流式文本增量直写 event_sink(advisory),不进 invocation
+    事件交付;丢失/重复不影响权威结果与 checkpoint(checkpoint 语义不变)。"""
+    from agent.runtime.contracts import (
+        ModelResponse,
+        ModelTextBlock,
+        RuntimeEventKind,
+    )
+
+    class _StreamingProvider:
+        def __init__(self) -> None:
+            self.seen_observers: list[object] = []
+
+        def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN001
+            self.seen_observers.append(delta_observer)
+            if delta_observer is not None:
+                delta_observer.on_text_delta("Hello ")
+                delta_observer.on_text_delta("world")
+            return ModelResponse((ModelTextBlock("Hello world"),))
+
+    provider = _StreamingProvider()
+    sink = CollectingSink()
+    store = InMemoryCheckpointStore(ConversationState.new("conversation-1"))
+    runtime = _runtime(provider, store, sink=sink)
+    result = runtime.run_turn(_submit(store.state), store.load())
+    assert result.status is RunStatus.COMPLETED
+    # observer 在 generate 调用期间被传入(实时前提)
+    assert len(provider.seen_observers) == 1
+    deltas = [e for e in sink.events if e.kind is RuntimeEventKind.MODEL_TEXT_DELTA]
+    assert [e.payload["text"] for e in deltas] == ["Hello ", "world"]
+    assert all(e.advisory for e in deltas)
+    # 权威结果不受增量影响:final message 即模型文本。
+    assert result.message == "Hello world"

@@ -69,9 +69,31 @@ class CheckpointUsage:
 
 
 @runtime_checkable
+class ModelDeltaObserver(Protocol):
+    """流式增量文本的窄观察合同(r19 小步 3)。
+
+    只承载可公开的回答文本增量:不承载 control JSON、工具参数、usage 或任何
+    opaque 推理。observer 是 advisory 通道——丢失、重复或乱序不得影响权威
+    ModelResponse 与 durable state;最终响应仍由 provider 一次返回并经
+    normalize 唯一接纳。
+    """
+
+    def on_text_delta(self, text: str) -> None: ...
+
+
+@runtime_checkable
 class ModelProvider(Protocol):
-    def generate(self, context: ContextPack) -> ModelResponse:
-        """执行一次有限时的非流式模型调用。"""
+    def generate(
+        self,
+        context: ContextPack,
+        *,
+        delta_observer: ModelDeltaObserver | None = None,
+    ) -> ModelResponse:
+        """执行一次有限时的模型调用。
+
+        非流式 adapter 忽略 delta_observer(不发现成事件);流式 adapter 只把
+        公开回答文本增量转发给 observer,最终 ModelResponse 仍一次返回。
+        """
 
 
 @runtime_checkable

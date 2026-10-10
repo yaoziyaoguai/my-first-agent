@@ -319,3 +319,35 @@ def _artifact_approval_pending_state() -> ConversationState:
             tool_calls=(ToolCall("call-1", "local_process", {}),),
         ),
     )
+
+
+def test_model_text_delta_streams_and_dedupes_final_message() -> None:
+    """r19 小步 3:delta 经专用无换行通道实时呈现;最终权威 message 与已流式
+    文本完全一致时不重复打印;重复 event_id 的增量只呈现一次(丢失/重复不改
+    权威,显示可由权威结果校正)。"""
+    deltas: list[str] = []
+    renderer = TerminalRenderer(
+        lambda message: None, delta_write_fn=deltas.append
+    )
+    renderer.emit(
+        _event(RuntimeEventKind.MODEL_TEXT_DELTA, event_id="delta-1", payload={"text": "Hel"})
+    )
+    renderer.emit(
+        _event(RuntimeEventKind.MODEL_TEXT_DELTA, event_id="delta-2", payload={"text": "lo"})
+    )
+    # 同 event_id 的重复增量被去重。
+    renderer.emit(
+        _event(RuntimeEventKind.MODEL_TEXT_DELTA, event_id="delta-2", payload={"text": "lo"})
+    )
+    assert deltas == ["Hel", "lo"]
+
+    completed = replace(
+        RunResult(RunStatus.COMPLETED, ConversationState.new("conversation-1")),
+        message="Hello",
+    )
+    assert renderer._result_message(completed) is None  # noqa: SLF001
+    other = replace(
+        RunResult(RunStatus.COMPLETED, ConversationState.new("conversation-1")),
+        message="Corrected final text",
+    )
+    assert renderer._result_message(other) == "Corrected final text"  # noqa: SLF001

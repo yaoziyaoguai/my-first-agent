@@ -29,6 +29,15 @@ class AdapterBusyError(RuntimeError):
     """同一 conversation 同时只能有一个 worker（single-flight）。"""
 
 
+class AdapterControlUnavailableError(RuntimeError):
+    """S1-C：无活跃 invocation/binding 可接受 cooperative control。
+
+    窄失败类型：binding 缺失/已关闭/被替换、store.load 等基础设施失败、inbox
+    exact 绑定校验失败都归入本类型；UI 据此给出固定受控反馈，不重试、不借
+    未来 Goal 重绑重发，也不向用户泄漏原始异常内容。
+    """
+
+
 class QueueingEventSink:
     """thread-safe event queue；``emit`` 不可同步重入 Runtime。"""
 
@@ -98,15 +107,39 @@ class TuiAdapter:
         kind: ControlRequestKind,
         *,
         message: str | None = None,
+        expected: tuple[str, str, int] | None = None,
     ) -> ControlInboxRequest:
-        """向活跃 invocation 提交绑定请求；durable mutation 仍只由 Runtime 完成。"""
+        """向活跃 invocation 提交绑定请求；durable mutation 仍只由 Runtime 完成。
+
+        ``expected=(conversation_id, goal_id, goal_revision)`` 来自界面当前展示的
+        意图：adapter 只用它核对最新 binding，绝不把请求改绑到另一个（未来的）
+        Goal；已关闭/被替换的 binding 与基础设施失败都抛窄的
+        ``AdapterControlUnavailableError``，不泄漏原始异常内容。
+        """
 
         if self._control_inbox is None:
-            raise RuntimeError("active goal controls are not configured")
-        state = self._store.load().state
+            raise AdapterControlUnavailableError(
+                "active goal controls are not configured"
+            )
+        try:
+            state = self._store.load().state
+        except Exception as error:
+            raise AdapterControlUnavailableError(
+                "control unavailable: could not read current state"
+            ) from error
         binding = self._control_inbox.current(state.conversation_id)
         if binding is None:
-            raise RuntimeError("no active goal invocation accepts cooperative control")
+            raise AdapterControlUnavailableError(
+                "no active goal invocation accepts cooperative control"
+            )
+        if expected is not None and (
+            binding.conversation_id != expected[0]
+            or binding.goal_id != expected[1]
+            or binding.goal_revision != expected[2]
+        ):
+            raise AdapterControlUnavailableError(
+                "the displayed goal binding is no longer the active invocation"
+            )
         request = ControlInboxRequest(
             request_id=f"tui-control:{uuid4()}",
             kind=kind,
@@ -116,5 +149,10 @@ class TuiAdapter:
             invocation_id=binding.invocation_id,
             message=message,
         )
-        self._control_inbox.submit(request)
+        try:
+            self._control_inbox.submit(request)
+        except ValueError as error:
+            raise AdapterControlUnavailableError(
+                "control request does not bind the active invocation"
+            ) from error
         return request

@@ -94,7 +94,7 @@ class RealPackagedPolicyFixture:
             package_read_paths=("scripts/allowed.py",),
         )
         self.executor = NativeSandboxExecutor(
-            confiner=SeatbeltConfiner(), captured_path=str(self.interpreter.parent)
+            confiner=SeatbeltConfiner()
         )
 
     def run(self, probe: str) -> str:

@@ -74,6 +74,13 @@ def test_main_no_longer_persists_docker_sandbox_profile():
     assert "FIRST_AGENT_017_E3_IMAGE_DIGEST" not in source
 
 
+def test_main_explicitly_supplies_trusted_host_home_to_sandbox_composition():
+    source = __import__("pathlib").Path(entrypoint.__file__).read_text(
+        encoding="utf-8",
+    )
+    assert "host_home=Path.home()" in source
+
+
 def test_recovery_kinds_are_native_only():
     assert frozenset({"execution_unknown"}) == SANDBOX_RECOVERY_KINDS
 

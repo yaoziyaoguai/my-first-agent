@@ -18,7 +18,38 @@ import os
 import sys
 from pathlib import Path
 
+from agent.subagent.contracts import MAX_RESULT_ENVELOPE_BYTES
+
 _RESULT_LIMIT_CHARS = 4_000
+
+
+def _encode_result_envelope(status: str, message: str) -> bytes:
+    """输出 seam：在共同 8192-byte 预算内输出完整 UTF-8 JSON 结果 bytes。
+
+    先保留现有 ``_RESULT_LIMIT_CHARS`` 产品字符上限，再按**完整 envelope**（JSON 转义 +
+    结构开销，``ensure_ascii=False`` + UTF-8 计字节）验证预算；超预算时二分选择满足
+    总字节上限的最大 message 字符前缀（前缀每多一个字符，编码字节单调不减，二分安全）。
+    绝不直接截断完整 JSON bytes、不切坏 UTF-8/escape、不引入替换字符；短消息原样保留，
+    status 不变、不新增协议字段。返回的 bytes 一定是已验证 ≤ 预算的合法 JSON。
+    """
+    candidate = message[:_RESULT_LIMIT_CHARS]
+
+    def envelope_bytes(prefix: str) -> bytes:
+        return json.dumps(
+            {"status": status, "message": prefix}, ensure_ascii=False
+        ).encode("utf-8")
+
+    blob = envelope_bytes(candidate)
+    if len(blob) <= MAX_RESULT_ENVELOPE_BYTES:
+        return blob
+    lo, hi = 0, len(candidate)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if len(envelope_bytes(candidate[:mid])) <= MAX_RESULT_ENVELOPE_BYTES:
+            lo = mid
+        else:
+            hi = mid - 1
+    return envelope_bytes(candidate[:lo])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,12 +90,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     # run_turn 内部捕获 provider 异常并分类为终态；它正常返回即表示 child 已 terminally 报告。
     result = runtime.run_turn(action, store.load())
-    payload = {
-        "status": result.status.value,
-        "message": (result.message or "")[:_RESULT_LIMIT_CHARS],
-    }
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
-    sys.stdout.flush()
+    # 写出已验证的完整 UTF-8 JSON bytes：直接写 buffer，不依赖子进程 locale 的 stdout 编码。
+    blob = _encode_result_envelope(result.status.value, result.message or "")
+    sys.stdout.buffer.write(blob)
+    sys.stdout.buffer.flush()
     return 0
 
 

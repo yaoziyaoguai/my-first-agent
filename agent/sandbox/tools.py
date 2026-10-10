@@ -158,7 +158,6 @@ def build_sandbox_exec_registration(
     boundary = WorkspaceBoundary(roots["workspace"])
     executor = NativeSandboxExecutor(
         confiner=confiner,
-        captured_path=str(captured_path),
         runner=runner,
     )
     resolved_policy_builder = policy_builder or (

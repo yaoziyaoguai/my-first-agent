@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from agent.cli.actions import (
@@ -12,10 +14,14 @@ from agent.cli.actions import (
 )
 from agent.runtime.contracts import (
     ActionDisposition,
+    ActiveRun,
+    ActiveRunStatus,
     ApprovalRequest,
+    ContinuationPhase,
     ConversationState,
     EgressClass,
     ExecutionAuthorityClass,
+    GoalStatus,
     RecoverUnknownObservation,
     RecoveryRequest,
     RecoveryResolution,
@@ -161,3 +167,47 @@ def test_public_observation_recovery_builder_binds_persisted_executing_intent() 
     assert action.tool_call_id == "call-1"
     assert action.intent_digest == "public-intent"
     assert accept_action(recovering, action).disposition is ActionDisposition.ACCEPTED
+
+
+def test_parse_process_command_new_session_uses_shared_gate() -> None:
+    """/new(r19 小步 2):TUI 与 CLI 共享 new_session_gate。
+
+    终态/无 Goal → ("new_session", None);active run 或活跃 Goal → 拒绝原因;
+    与 CLI 的 NEW_SESSION_REQUESTED 信令同一语义。"""
+    from agent.cli.actions import NEW_SESSION_REQUESTED, new_session_gate
+    from agent.tui.app import parse_process_command
+    from tests.kernel.fakes import (
+        conversation_with_active_goal,
+        conversation_with_terminal_goal,
+    )
+
+    terminal = conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE)
+    assert parse_process_command("/new", terminal) == ("new_session", None)
+    assert new_session_gate(terminal) is None
+    assert NEW_SESSION_REQUESTED == 79
+
+    active_goal = conversation_with_active_goal()
+    result = parse_process_command("/new", active_goal)
+    assert result is not None and result[0] == "error"
+    assert "goal" in result[1].lower()
+
+    pending = replace(
+        ConversationState.new("conversation-1"),
+        goal=active_goal.goal,
+        active_run=ActiveRun(
+            "run-1",
+            status=ActiveRunStatus.AWAITING_APPROVAL,
+            phase=ContinuationPhase.TOOL,
+            pending_request=ApprovalRequest(
+                request_id="approval-full-id",
+                run_id="run-1",
+                tool_call_id="call-1",
+                binding_digest="binding-1",
+                preview="write note.txt (5 bytes)",
+            ),
+            tool_calls=(ToolCall("call-1", "write_file", {}),),
+        ),
+    )
+    blocked = parse_process_command("/new", pending)
+    assert blocked is not None and blocked[0] == "error"
+    assert "pending" in blocked[1].lower() or "resolve" in blocked[1].lower()

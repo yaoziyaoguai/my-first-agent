@@ -11,6 +11,8 @@ from agent.runtime.contracts import (
     EgressClass,
     ExecutingIntentRecord,
     ExecutionAuthorityClass,
+    ExecutionIntent,
+    InvocationOrigin,
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
@@ -23,10 +25,17 @@ from agent.runtime.contracts import (
     SideEffectClass,
     SubmitMessage,
     ToolCall,
+    ToolDefinition,
     ToolResult,
 )
-from agent.runtime.loop import AgentRuntime, InvocationLimits
-from tests.kernel.fakes import CollectingSink, InMemoryCheckpointStore, ScriptedProvider
+from agent.runtime.loop import AgentRuntime, InvocationLimits, RetryableProviderError
+from tests.kernel.fakes import (
+    CollectingSink,
+    InMemoryCheckpointStore,
+    ScriptedProvider,
+    conversation_with_active_goal,
+    goal_noop_response,
+)
 
 
 class ExplodingToolRuntime:
@@ -108,6 +117,50 @@ class ExplodingPublicObservationRuntime:
 
     def invoke(self, intent):
         raise RuntimeError("unknown after public send")
+
+
+class PartiallyExplodingBatchRuntime:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def definitions(self):
+        return (
+            ToolDefinition(
+                "explode",
+                "return a known failure or lose the outcome",
+                {"type": "object"},
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+            ),
+        )
+
+    def prepare(self, call, context, approval=None):
+        return ExecutionIntent(
+            execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+            tool_call_id=call.tool_call_id,
+            tool_name=call.name,
+            tool_identity="fixture-tool",
+            arguments=call.arguments,
+            arguments_digest=f"arguments-{call.tool_call_id}",
+            intent_digest=f"intent-{call.tool_call_id}",
+            idempotency_key=f"key-{call.tool_call_id}",
+            policy_identity="fixture-policy",
+            conversation_id=context.conversation_id,
+            run_id=context.run_id,
+            side_effect=SideEffectClass.READ_ONLY,
+            invocation_origin=InvocationOrigin.MODEL,
+        )
+
+    def invoke(self, intent):
+        self.calls.append(intent.tool_call_id)
+        if intent.arguments.get("mode") == "unknown":
+            raise RuntimeError("unknown after invocation")
+        return ToolResult(
+            tool_call_id=intent.tool_call_id,
+            content="known failure",
+            is_error=True,
+            executed=False,
+            metadata={"code": "known_failure"},
+        )
 
 
 def test_unknown_tool_outcome_never_retries_automatically() -> None:
@@ -290,6 +343,71 @@ def test_public_observation_recovery_is_typed_exactly_once_and_never_resends() -
             if fact.content.get("metadata", {}).get("code") == "observation_unknown"
         ]
     ) == 1
+
+
+def test_unknown_recovery_prefix_is_not_counted_as_an_ordinary_failed_batch() -> None:
+    provider = ScriptedProvider(
+        goal_noop_response("recovery-batch-user-supplement"),
+        ModelResponse(
+            (
+                ModelToolCall("known-a", "explode", {"mode": "known"}),
+                ModelToolCall("unknown", "explode", {"mode": "unknown"}),
+                ModelToolCall("known-b", "explode", {"mode": "known"}),
+            )
+        ),
+        RetryableProviderError("stop after classified recovery"),
+    )
+    tool_runtime = PartiallyExplodingBatchRuntime()
+    store = InMemoryCheckpointStore(conversation_with_active_goal())
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=8_000, output_reserve=200),
+        ),
+        tool_runtime=tool_runtime,
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(max_no_progress_replans=0),
+        invocation_id_factory=lambda: "invocation-1",
+    )
+    paused = runtime.run_turn(
+        SubmitMessage(
+            conversation_id=store.state.conversation_id,
+            action_seq=store.state.next_action_seq,
+            expected_revision=store.state.revision,
+            run_id=f"run-{store.state.next_action_seq}",
+            message="run the batch",
+        ),
+        store.load(),
+    )
+
+    assert paused.status is RunStatus.AWAITING_RECOVERY
+    assert paused.request is not None
+    resolved = runtime.run_turn(
+        ResolveUnknownToolOutcome(
+            conversation_id="conversation-1",
+            action_seq=store.state.next_action_seq,
+            expected_revision=store.state.revision,
+            request_id=paused.request.request_id,
+            binding_digest=paused.request.binding_digest,
+            resolution=RecoveryResolution.MARK_FAILED,
+        ),
+        store.load(),
+    )
+
+    assert resolved.status is RunStatus.FAILED_RETRYABLE
+    assert resolved.error_code == "provider_retryable"
+    assert tool_runtime.calls == ["known-a", "unknown", "known-b"]
+    assert [
+        fact.content["tool_call_id"]
+        for fact in store.state.facts
+        if "tool_call_id" in fact.content
+    ] == ["known-a", "unknown", "known-b"]
+    assert not any(
+        fact.content.get("code") == "no_progress_replan_required"
+        for fact in store.state.facts
+    )
 
 
 def test_public_observation_recovery_rejects_stale_or_cross_identity() -> None:

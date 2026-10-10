@@ -5,11 +5,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from agent.runtime.contracts import (
+    AdmittedCriterion,
     BlockedClaim,
     CompletionClaim,
     ContextPack,
     ConversationFact,
     ConversationState,
+    EvidenceOracleKind,
+    EvidenceRecord,
     FactKind,
     GoalDelta,
     GoalDeltaProposal,
@@ -21,6 +24,7 @@ from agent.runtime.contracts import (
     ModelResponse,
     ProposedCriterion,
     RuntimeEvent,
+    canonical_json_digest,
 )
 from agent.subagent.contracts import ProviderDeadlineCapability
 
@@ -205,6 +209,56 @@ def conversation_with_active_goal(conversation_id: str = "conversation-1") -> Co
     )
 
 
+def conversation_with_terminal_goal(
+    status: GoalStatus,
+    conversation_id: str = "conversation-terminal",
+) -> ConversationState:
+    state = conversation_with_active_goal(conversation_id)
+    if status is GoalStatus.CANCELLED:
+        return replace(state, goal=replace(state.goal, status=status))
+    if status is not GoalStatus.VERIFIED_DONE:
+        raise ValueError("terminal status required")
+
+    predicate = {"path": "reports/final.md", "sha256": "a" * 64}
+    criterion = AdmittedCriterion(
+        criterion_id="criterion-1",
+        description="report exists",
+        source_fact_id="action:1:user",
+        oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+        predicate=predicate,
+        required_evidence_class="workspace_file",
+        admission_digest="admission-1",
+    )
+    evidence = EvidenceRecord(
+        evidence_id="evidence-1",
+        goal_id="goal-1",
+        goal_revision=1,
+        criterion_id="criterion-1",
+        oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+        predicate_digest=canonical_json_digest(predicate),
+        source_fact_ids=("action:1:user",),
+        source_digest="source-1",
+        oracle_identity="filesystem-digest:v1",
+        passed=True,
+        observed_at="2026-09-08T09:00:00Z",
+    )
+    return replace(
+        state,
+        goal=replace(
+            state.goal,
+            status=status,
+            admitted_criteria=(criterion,),
+        ),
+        evidence_records=(evidence,),
+        completion_claim=CompletionClaim(
+            correlation_id="claim-1",
+            goal_id="goal-1",
+            goal_revision=1,
+            criterion_evidence_refs=("evidence-1",),
+        ),
+    )
+
+
 class ScriptedProvider:
     """Test provider with structural deadline contract for SubAgent compatibility."""
 
@@ -217,7 +271,7 @@ class ScriptedProvider:
         self._responses = deque(responses)
         self.calls: list[ContextPack] = []
 
-    def generate(self, context: ContextPack) -> ModelResponse:
+    def generate(self, context, *, delta_observer=None) -> ModelResponse:
         self.calls.append(context)
         if not self._responses:
             raise AssertionError("provider script exhausted")

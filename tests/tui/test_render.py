@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import replace
 
 from agent.runtime.contracts import (
+    ActiveRunStatus,
     ApprovalRequest,
+    BrowserTakeoverRequestV1,
     ConversationState,
     EgressClass,
     ExecutionAuthorityClass,
@@ -16,12 +18,14 @@ from agent.runtime.contracts import (
 )
 from agent.runtime.state import (
     accept_action,
+    begin_browser_takeover,
     mark_executing,
     pause_for_approval,
     pause_for_recovery,
     start_tool_batch,
 )
 from agent.tui.render import SafeDisplayTooLargeError, project, run_status_label, safe_display
+from tests.kernel.fakes import conversation_with_active_goal
 
 
 def _approval_state():
@@ -70,6 +74,23 @@ def _recovery_state():
     )
 
 
+def _takeover_state():
+    ready = conversation_with_active_goal("c-takeover")
+    return begin_browser_takeover(
+        ready,
+        BrowserTakeoverRequestV1(
+            request_id="takeover-1",
+            session_ref="session-0123456789abcdef",
+            profile_ref="profile-0123456789abcdef",
+            profile_revision=3,
+            browser_identity_digest="a" * 64,
+            goal_id=ready.goal.goal_id,
+            goal_revision=ready.goal.revision,
+            requested_at="2026-09-08T08:00:00+00:00",
+        ),
+    )
+
+
 def test_safe_display_escapes_ansi_bidi_and_controls() -> None:
     raw = "clean\x1b[2Jtext‮override\x00\x9bend"
     out = safe_display(raw)
@@ -111,6 +132,38 @@ def test_projection_ready_then_terminal() -> None:
     assert view.actions == ("submit",)
 
 
+def test_browser_takeover_projection_overrides_ready_goal_and_terminal() -> None:
+    waiting = replace(
+        _takeover_state(),
+        last_safe_result=RecordedRunResult(
+            status=RunStatus.COMPLETED,
+            run_id="old-run",
+            message="old terminal result",
+        ),
+    )
+
+    view = project(waiting)
+
+    assert view.main_text == "Browser takeover — waiting for you"
+    assert view.form_kind == "browser_takeover"
+    assert view.actions == ("browser_done", "browser_cancel")
+    assert view.focus == "browser_takeover"
+    assert view.terminal_message is None
+    assert view.form_fields == (
+        ("request", "takeover-1"),
+        ("session", "session-0123456789abcdef"),
+        ("profile", "profile-0123456789abcdef"),
+        ("profile revision", "3"),
+        (
+            "next step",
+            "Use Browser done after finishing in the dedicated browser window opened "
+            "during this app session. After restarting the app, or when the original "
+            "window is unavailable, use Browser cancel. Returning control does not "
+            "approve later browser actions.",
+        ),
+    )
+
+
 def test_projection_approval_and_recovery_forms() -> None:
     approval = _approval_state()
     assert project(approval).form_kind == "approval"
@@ -119,6 +172,29 @@ def test_projection_approval_and_recovery_forms() -> None:
     recovery = _recovery_state()
     assert project(recovery).form_kind == "recovery"
     assert project(recovery).actions == ("mark_succeeded", "mark_failed")
+
+
+def test_browser_takeover_cannot_bypass_recovery_or_executing_barrier() -> None:
+    pending = _takeover_state().browser_takeover_pending
+    assert pending is not None
+
+    recovery = replace(_recovery_state(), browser_takeover_pending=pending)
+    recovery_view = project(recovery)
+    assert recovery_view.form_kind == "recovery"
+    assert recovery_view.actions == ("mark_succeeded", "mark_failed")
+
+    executing = replace(
+        _recovery_state(),
+        active_run=replace(
+            _recovery_state().active_run,
+            status=ActiveRunStatus.RUNNABLE,
+            pending_request=None,
+        ),
+        browser_takeover_pending=pending,
+    )
+    executing_view = project(executing)
+    assert executing_view.main_text == "interrupted unknown effect"
+    assert executing_view.actions == ("resume",)
 
 
 def test_public_observation_recovery_never_asks_user_to_guess_success() -> None:

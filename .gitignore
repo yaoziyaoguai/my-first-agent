@@ -43,9 +43,9 @@ graphify-out/
 CLAUDE.md
 .codex/
 .opencode/
-pytest.ini
 
 # OS / UI residue
 .DS_Store
 node_modules/
 .tui_audit_log*
+.local/

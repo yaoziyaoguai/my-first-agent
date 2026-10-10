@@ -18,6 +18,7 @@ import os
 import signal
 import stat
 import subprocess
+import sys
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -340,3 +341,289 @@ wait
     finally:
         if draft is not None:
             _cleanup_exact_pgid(draft.process_group_id)
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_016_double_pipe_eof_waits_for_direct_child_natural_exit(
+    tmp_path: Path, monkeypatch, exit_code: int
+) -> None:
+    """双 EOF 只结束 I/O；仍存活的同一 direct child 必须能在 deadline 内完成。"""
+
+    import agent.process.runner as runner_module
+
+    marker = tmp_path / f"completed-{exit_code}"
+    child = """
+import os
+import sys
+import time
+
+marker = sys.argv[1]
+exit_code = int(sys.argv[2])
+os.close(1)
+os.close(2)
+time.sleep(0.35)
+fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+try:
+    os.write(fd, b"completed")
+finally:
+    os.close(fd)
+raise SystemExit(exit_code)
+"""
+    recorded_proc: list[subprocess.Popen] = []
+    real_popen = subprocess.Popen
+
+    class _RecordingPopen(real_popen):  # type: ignore[misc, valid-type]
+        def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            super().__init__(*args, **kwargs)
+            recorded_proc.append(self)
+
+    monkeypatch.setattr(runner_module.subprocess, "Popen", _RecordingPopen)
+    try:
+        draft = run_local_process(
+            resolved_executable=sys.executable,
+            argv=("-c", child, str(marker), str(exit_code)),
+            cwd=str(tmp_path),
+            profile=_fast_profile(deadline=2),
+            environment={},
+        )
+        assert draft.outcome is ProcessDraftOutcome.EXITED
+        assert draft.exit_code == exit_code
+        assert draft.term_sent is False
+        assert draft.kill_sent is False
+        assert marker.read_bytes() == b"completed"
+    finally:
+        if recorded_proc:
+            _cleanup_exact_pgid(recorded_proc[0].pid)
+
+
+@pytest.mark.parametrize(
+    ("ignore_term", "expected_kill"),
+    [(False, False), (True, True)],
+)
+def test_016_double_pipe_eof_still_honors_original_deadline(
+    tmp_path: Path,
+    monkeypatch,
+    ignore_term: bool,
+    expected_kill: bool,
+) -> None:
+    """watch 为空不代表完成；原 deadline 仍治理 TERM→KILL。"""
+
+    import agent.process.runner as runner_module
+
+    child = """
+import os
+import signal
+import sys
+import time
+
+if sys.argv[1] == "ignore":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+os.close(1)
+os.close(2)
+time.sleep(30)
+"""
+    recorded_proc: list[subprocess.Popen] = []
+    real_popen = subprocess.Popen
+
+    class _RecordingPopen(real_popen):  # type: ignore[misc, valid-type]
+        def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            super().__init__(*args, **kwargs)
+            recorded_proc.append(self)
+
+    monkeypatch.setattr(runner_module.subprocess, "Popen", _RecordingPopen)
+    try:
+        draft = run_local_process(
+            resolved_executable=sys.executable,
+            argv=("-c", child, "ignore" if ignore_term else "accept"),
+            cwd=str(tmp_path),
+            profile=_fast_profile(deadline=1),
+            environment={},
+        )
+        assert draft.outcome is ProcessDraftOutcome.TIMED_OUT_REAPED
+        assert draft.term_sent is True
+        assert draft.kill_sent is expected_kill
+        assert draft.duration_seconds >= 0.8
+    finally:
+        if recorded_proc:
+            _cleanup_exact_pgid(recorded_proc[0].pid)
+
+
+def test_016_empty_watch_waits_with_positive_bounded_slices(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """fake clock 只由 sleep 推进，证明双 EOF 后不早退且不零延时自旋。"""
+
+    import agent.process.runner as runner_module
+
+    clock = [0.0]
+    sleeps: list[float] = []
+    terminate_calls: list[int] = []
+
+    class _FakeStream:
+        def __init__(self, fd: int) -> None:
+            self._fd = fd
+            self.closed = False
+
+        def fileno(self) -> int:
+            return self._fd
+
+        def close(self) -> None:
+            self.closed = True
+
+    class _FakeProc:
+        pid = 424_242
+
+        def __init__(self) -> None:
+            self.stdout = _FakeStream(11)
+            self.stderr = _FakeStream(12)
+            self.returncode = None
+
+        def poll(self):  # noqa: ANN201
+            return self.returncode
+
+        def wait(self, timeout=None):  # noqa: ANN001, ANN201
+            if self.returncode is None:
+                raise subprocess.TimeoutExpired("fake", timeout)
+            return self.returncode
+
+        def kill(self) -> None:
+            self.returncode = -signal.SIGKILL
+
+    proc = _FakeProc()
+
+    def _sleep(seconds: float) -> None:
+        assert 0 < seconds <= runner_module._SELECT_SLICE  # noqa: SLF001
+        sleeps.append(seconds)
+        assert len(sleeps) < 20, "empty-watch loop did not converge"
+        clock[0] += seconds
+
+    def _terminate(fake_proc, pgid, **_kwargs):  # noqa: ANN001, ANN202
+        assert fake_proc is proc
+        terminate_calls.append(pgid)
+        fake_proc.returncode = -signal.SIGTERM
+        return True, False
+
+    monkeypatch.setattr(runner_module.subprocess, "Popen", lambda *_a, **_k: proc)
+    monkeypatch.setattr(runner_module.process_group, "verified_group_identity", lambda pid: pid)
+    monkeypatch.setattr(runner_module.process_group, "terminate_group", _terminate)
+    monkeypatch.setattr(runner_module.process_group, "group_alive", lambda _pgid: False)
+    monkeypatch.setattr(runner_module.select, "select", lambda watch, *_a: (list(watch), [], []))
+    monkeypatch.setattr(runner_module.os, "read", lambda _fd, _size: b"")
+    monkeypatch.setattr(runner_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runner_module.time, "sleep", _sleep)
+
+    draft = run_local_process(
+        resolved_executable="/synthetic/process",
+        argv=(),
+        cwd=str(tmp_path),
+        profile=_fast_profile(deadline=1),
+        environment={},
+    )
+
+    assert sleeps
+    assert sum(sleeps) == pytest.approx(1.0)
+    assert terminate_calls == [proc.pid]
+    assert draft.outcome is ProcessDraftOutcome.TIMED_OUT_REAPED
+    assert proc.stdout.closed is True
+    assert proc.stderr.closed is True
+
+
+@pytest.mark.parametrize(
+    "failure_point",
+    ["select_oserror", "select_valueerror", "stdout_after_partial", "stderr_read"],
+)
+def test_016_collection_failure_is_not_a_normal_draft_and_governs_group(
+    tmp_path: Path, monkeypatch, failure_point: str
+) -> None:
+    """select/read failure 保留 cause、治理原 PGID，绝不能伪造正常空结果。"""
+
+    import agent.process.runner as runner_module
+
+    original_error: OSError | ValueError
+    if failure_point == "select_valueerror":
+        original_error = ValueError("synthetic select failure")
+    else:
+        original_error = OSError(errno.EIO, f"synthetic {failure_point} failure")
+    cleanup_calls: list[int] = []
+    read_counts = {11: 0, 12: 0}
+
+    class _FakeStream:
+        def __init__(self, fd: int) -> None:
+            self._fd = fd
+            self.closed = False
+
+        def fileno(self) -> int:
+            return self._fd
+
+        def close(self) -> None:
+            self.closed = True
+
+    class _FakeProc:
+        pid = 434_343
+
+        def __init__(self) -> None:
+            self.stdout = _FakeStream(11)
+            self.stderr = _FakeStream(12)
+            self.returncode = None
+
+        def poll(self):  # noqa: ANN201
+            return self.returncode
+
+        def wait(self, timeout=None):  # noqa: ANN001, ANN201
+            if self.returncode is None:
+                raise subprocess.TimeoutExpired("fake", timeout)
+            return self.returncode
+
+        def kill(self) -> None:
+            self.returncode = -signal.SIGKILL
+
+    proc = _FakeProc()
+
+    def _select(watch, *_args):  # noqa: ANN001, ANN202
+        if failure_point.startswith("select_"):
+            raise original_error
+        target = 11 if failure_point == "stdout_after_partial" else 12
+        if target in watch:
+            return [target], [], []
+        return list(watch), [], []
+
+    def _read(fd: int, _size: int) -> bytes:
+        read_counts[fd] += 1
+        if failure_point == "stdout_after_partial" and fd == 11:
+            if read_counts[fd] == 1:
+                return b"partial"
+            raise original_error
+        if failure_point == "stderr_read" and fd == 12:
+            raise original_error
+        return b""
+
+    def _terminate(fake_proc, pgid, **_kwargs):  # noqa: ANN001, ANN202
+        assert fake_proc is proc
+        cleanup_calls.append(pgid)
+        fake_proc.returncode = -signal.SIGTERM
+        return True, False
+
+    monkeypatch.setattr(runner_module.subprocess, "Popen", lambda *_a, **_k: proc)
+    monkeypatch.setattr(runner_module.process_group, "verified_group_identity", lambda pid: pid)
+    monkeypatch.setattr(
+        runner_module.process_group,
+        "group_alive",
+        lambda _pgid: proc.returncode is None,
+    )
+    monkeypatch.setattr(runner_module.process_group, "terminate_group", _terminate)
+    monkeypatch.setattr(runner_module.select, "select", _select)
+    monkeypatch.setattr(runner_module.os, "read", _read)
+
+    with pytest.raises(ProcessCleanupError) as excinfo:
+        run_local_process(
+            resolved_executable="/synthetic/process",
+            argv=(),
+            cwd=str(tmp_path),
+            profile=_fast_profile(deadline=2),
+            environment={},
+        )
+
+    assert excinfo.value.__cause__ is original_error
+    assert cleanup_calls == [proc.pid]
+    assert proc.stdout.closed is True
+    assert proc.stderr.closed is True

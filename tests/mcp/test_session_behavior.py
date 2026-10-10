@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import gc
+import json
 import os
 import signal
 import sys
@@ -91,6 +93,9 @@ def _behavior_session_factory(
     marker: Path | None = None,
     pidfile: Path | None = None,
     timeouts: SessionTimeouts,
+    child_facts: Path | None = None,
+    child_release: Path | None = None,
+    child_inherit_stdio: bool = False,
 ):
     """构造一个 run_stdio_session coroutine factory（不在调用线程内 submit）。"""
     latch = _latch(tmp_path)
@@ -99,6 +104,12 @@ def _behavior_session_factory(
         env["BEHAVIOR_MARKER"] = str(marker)
     if pidfile is not None:
         env["BEHAVIOR_PIDFILE"] = str(pidfile)
+    if child_facts is not None:
+        env["BEHAVIOR_CHILD_FACTS"] = str(child_facts)
+    if child_release is not None:
+        env["BEHAVIOR_CHILD_RELEASE"] = str(child_release)
+    if child_inherit_stdio:
+        env["BEHAVIOR_CHILD_INHERIT_STDIO"] = "1"
 
     def factory():
         return run_stdio_session(
@@ -381,6 +392,285 @@ def _wait_for_file(path: Path, *, timeout: float = 10.0) -> None:
             return
         time.sleep(0.02)
     raise AssertionError(f"{path} never appeared within {timeout}s (handshake failed)")
+
+
+# ---------------------------------------------------------------------------
+# 006 U1/U2：leader 单独退出、同组 child 存活 —— owned process group cleanup proof
+# ---------------------------------------------------------------------------
+
+
+def test_leader_exit_child_survives_requires_group_cleanup_proof(tmp_path: Path) -> None:
+    """006 U1：server（leader）在 tools/call 后 spawn 同组 benign child，随后以已知成功
+    退出。``process_exit_confirmed=True`` 必须同时证明 leader reaped、frozen owned group
+    消失、transport close 完成——leader 单独退出不能冒充整个组已清理。
+
+    旧实现 leader 正常退出即返回 confirmed=True 并按已知 EXECUTED clear latch，而同组
+    child 仍存活（RED）。修复后：对 frozen PGID 发 SIGKILL → child 终止、group 消失，
+    三项事实均成立才 confirmed=True 并按既有 token/revision/binding clear latch。
+    """
+    facts_path = tmp_path / "group_facts.json"
+    release_path = tmp_path / "release"
+    factory, latch = _behavior_session_factory(
+        tmp_path,
+        mode="spawn_child_leader_exit",
+        child_facts=facts_path,
+        child_release=release_path,
+        timeouts=SessionTimeouts(initialize=10, list_page=10, call=10, shutdown=5),
+    )
+    bridge = McpAsyncBridge(total_timeout_seconds=40.0)
+    result: dict[str, object] = {}
+
+    def submit_thread() -> None:
+        try:
+            result["outcome"] = bridge.submit(factory)
+        except BaseException as error:  # noqa: BLE001 - 记录任意结束方式，断言只看 outcome
+            result["error"] = error
+
+    thread = threading.Thread(target=submit_thread, name="u1-submit")
+    pgid: int | None = None
+    thread.start()
+    try:
+        # 握手：server 已 spawn child 并写出 leader/child/PGID facts。
+        _wait_for_file(facts_path, timeout=15.0)
+        facts = json.loads(facts_path.read_text(encoding="utf-8"))
+        leader_pid = facts["leader_pid"]
+        child_pid = facts["child_pid"]
+        pgid = facts["pgid"]
+        # 测试亲自确认（真实 syscall，非注入布尔值）：child 确属本次 invocation 拥有的
+        # group，且 start_new_session=True 下 PGID == leader PID。
+        assert os.getpgid(child_pid) == pgid == leader_pid
+        # 放行 leader：回已知成功并退出，child 同组存活。
+        release_path.touch()
+
+        thread.join(timeout=30.0)
+        assert not thread.is_alive(), "submit must complete bounded"
+        assert "error" not in result, f"session raised: {result.get('error')!r}"
+        outcome = result["outcome"]
+
+        assert outcome.classification is McpOutcomeClassification.EXECUTED
+        assert outcome.result_text == "ok"
+        # GREEN 核心：confirmed=True 必须意味着同组 child 已被清理、frozen group 已消失。
+        # 旧实现在此处返回 True 并 clear latch，而 child 仍存活 → RED。
+        assert outcome.process_exit_confirmed is True, (
+            "cleanup proof must be achievable by killing the frozen owned group"
+        )
+        assert _process_group_dead(pgid, timeout=10.0), (
+            f"owned group {pgid} survived: process_exit_confirmed=True was claimed "
+            "while a benign same-group child was still alive"
+        )
+        # 已知 EXECUTED + cleanup proof → 按既有 token/revision/full binding 清 latch。
+        assert latch.status() == "clear"
+    finally:
+        # 兜底：任何失败都不残留自己创建的 process group；同时放行可能仍卡在握手的 leader。
+        release_path.touch()
+        if pgid is not None:
+            _force_kill_group(pgid)
+        bridge.close()
+        thread.join(timeout=5.0)
+
+
+def test_leader_exit_child_inheriting_stdio_cleanup_still_bounded_and_confirmed(
+    tmp_path: Path,
+) -> None:
+    """006 U3：child 不关闭继承的 stdout/stderr（readers 只能等到 child 被杀后才收
+    EOF）。cleanup 仍必须有界收口：对 frozen PGID SIGKILL 后 group 消失、confirmed=True。
+    """
+    facts_path = tmp_path / "group_facts.json"
+    release_path = tmp_path / "release"
+    factory, latch = _behavior_session_factory(
+        tmp_path,
+        mode="spawn_child_leader_exit",
+        child_facts=facts_path,
+        child_release=release_path,
+        child_inherit_stdio=True,
+        timeouts=SessionTimeouts(initialize=10, list_page=10, call=10, shutdown=5),
+    )
+    bridge = McpAsyncBridge(total_timeout_seconds=40.0)
+    result: dict[str, object] = {}
+
+    def submit_thread() -> None:
+        try:
+            result["outcome"] = bridge.submit(factory)
+        except BaseException as error:  # noqa: BLE001
+            result["error"] = error
+
+    thread = threading.Thread(target=submit_thread, name="u3-inherit-submit")
+    pgid: int | None = None
+    thread.start()
+    try:
+        _wait_for_file(facts_path, timeout=15.0)
+        facts = json.loads(facts_path.read_text(encoding="utf-8"))
+        pgid = facts["pgid"]
+        assert os.getpgid(facts["child_pid"]) == pgid == facts["leader_pid"]
+        release_path.touch()
+
+        start = time.monotonic()
+        thread.join(timeout=30.0)
+        assert not thread.is_alive(), "submit must complete bounded"
+        assert "error" not in result, f"session raised: {result.get('error')!r}"
+        outcome = result["outcome"]
+
+        assert outcome.classification is McpOutcomeClassification.EXECUTED
+        assert outcome.process_exit_confirmed is True
+        assert _process_group_dead(pgid, timeout=10.0)
+        assert latch.status() == "clear"
+        elapsed = time.monotonic() - start
+        assert elapsed < 20.0, f"cleanup must stay bounded; took {elapsed:.1f}s"
+    finally:
+        release_path.touch()
+        if pgid is not None:
+            _force_kill_group(pgid)
+        bridge.close()
+        thread.join(timeout=5.0)
+
+
+def test_group_signal_permission_error_fails_closed_and_keeps_latch_armed(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """006 U3：group probe/signal 的权限错误是确定性故障注入——不得返回 True、不得
+    clear latch。已知 EXECUTED 结果因 cleanup 不可证明而被重分类为既有 UNKNOWN
+    （recovery），latch 保持 ARMED。测试故障替身不得留下真实 child：finally 用 os.kill
+    （未被 patch）清理，child 自身也有 watchdog。
+    """
+    facts_path = tmp_path / "group_facts.json"
+    release_path = tmp_path / "release"
+    factory, latch = _behavior_session_factory(
+        tmp_path,
+        mode="spawn_child_leader_exit",
+        child_facts=facts_path,
+        child_release=release_path,
+        timeouts=SessionTimeouts(initialize=10, list_page=10, call=10, shutdown=1.0),
+    )
+
+    def _faulty_killpg(pgid: int, sig: int) -> None:
+        raise PermissionError(f"fault injection: killpg({pgid}, {sig}) denied")
+
+    monkeypatch.setattr(os, "killpg", _faulty_killpg)
+
+    bridge = McpAsyncBridge(total_timeout_seconds=40.0)
+    result: dict[str, object] = {}
+
+    def submit_thread() -> None:
+        try:
+            result["outcome"] = bridge.submit(factory)
+        except BaseException as error:  # noqa: BLE001
+            result["error"] = error
+
+    thread = threading.Thread(target=submit_thread, name="u3-perm-submit")
+    child_pid: int | None = None
+    thread.start()
+    try:
+        _wait_for_file(facts_path, timeout=15.0)
+        facts = json.loads(facts_path.read_text(encoding="utf-8"))
+        child_pid = facts["child_pid"]
+        # getpgid 未被 patch：仍可亲自确认 child 确属本次 group。
+        assert os.getpgid(child_pid) == facts["pgid"] == facts["leader_pid"]
+        release_path.touch()
+
+        thread.join(timeout=30.0)
+        assert not thread.is_alive(), "submit must complete bounded"
+        assert "error" not in result, f"session raised: {result.get('error')!r}"
+        outcome = result["outcome"]
+
+        # 权限错误 → group 无法证明消失 → 不得 confirmed、不得 clear latch；
+        # 已知 EXECUTED 被既有 finalize 规则重分类为 UNKNOWN。
+        assert outcome.process_exit_confirmed is False
+        assert outcome.classification is McpOutcomeClassification.UNKNOWN
+        assert latch.status() == "armed"
+    finally:
+        release_path.touch()
+        # killpg 仍被 patch：用未 patch 的 os.kill 直接清理真实 child，绝不残留。
+        if child_pid is not None:
+            with contextlib.suppress(OSError):
+                os.kill(child_pid, signal.SIGKILL)
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(child_pid, 0)
+                except OSError:
+                    break
+                time.sleep(0.05)
+        bridge.close()
+        thread.join(timeout=5.0)
+
+
+def test_transport_close_failure_cannot_confirm_cleanup(tmp_path: Path) -> None:
+    """006 U3：transport close 未完成/失败不能产生 confirmed——即使 leader 已 reap、
+    group 已被真实 SIGKILL 清理。故障替身只替换 leader transport 的 aclose；真实 benign
+    child group 由 _shutdown_process 真实 SIGKILL + 并发 reap 清理，不残留进程。
+    """
+    import asyncio
+    import subprocess
+
+    from agent.mcp.bridge import _shutdown_process
+
+    child = subprocess.Popen(
+        [sys.executable, str(SERVER), "_child_sleeper", "30"],
+        start_new_session=True,  # 测试自己拥有的 benign group：PGID == child PID
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    pgid = child.pid
+
+    class _FaultyTransportLeader:
+        """已退出 leader 的替身：wait 立即成功（已 reap），aclose 确定性失败。"""
+
+        stdin = None
+
+        async def wait(self) -> int:
+            return 0
+
+        async def aclose(self) -> None:
+            raise RuntimeError("transport close failed")
+
+    async def scenario() -> bool:
+        # child 的 parent 是本测试进程：SIGKILL 后会成为本进程的 zombie，必须并发 reap
+        # 才能让 group 真正消失（否则 absence 等待会耗尽 deadline，无法隔离 transport
+        # 这一项失败事实）。
+        reaper = asyncio.create_task(asyncio.to_thread(child.wait))
+        try:
+            return await _shutdown_process(_FaultyTransportLeader(), pgid, 1.0)
+        finally:
+            await reaper
+
+    try:
+        confirmed = asyncio.run(scenario())
+        assert confirmed is False, "transport close failure must not yield confirmed=True"
+        assert _process_group_dead(pgid, timeout=10.0), "fault double must not leave a real child"
+    finally:
+        with contextlib.suppress(OSError):
+            child.kill()
+        child.wait(timeout=5.0)
+
+
+def test_missing_group_primitive_fails_before_spawn_zero_side_effects(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """006 frozen semantics：host 缺 POSIX group lifecycle primitive 时必须在 spawn 前
+    零副作用拒绝——NOT_EXECUTED、不创建任何进程（pidfile 缺席即铁证）、无进程时允许
+    清除本次 arm 的 stale ARMED marker。
+    """
+    pidfile = tmp_path / "server.pid"
+    monkeypatch.delattr(os, "killpg")
+    bridge = McpAsyncBridge(total_timeout_seconds=10.0)
+    try:
+        outcome, latch = _run_behavior(
+            bridge,
+            tmp_path,
+            mode="disconnect_after_call",
+            pidfile=pidfile,
+            timeouts=SessionTimeouts(initialize=2, list_page=2, call=2, shutdown=1),
+        )
+    finally:
+        bridge.close()
+
+    assert outcome.classification is McpOutcomeClassification.NOT_EXECUTED
+    assert outcome.error_code == "group_lifecycle_unsupported"
+    assert not pidfile.exists(), "refusal must happen before spawn with zero side effects"
+    assert latch.status() == "clear"
 
 
 # ---------------------------------------------------------------------------

@@ -332,10 +332,7 @@ class JourneyHarness:
         if self._confiner is None:
             from agent.sandbox.seatbelt import SeatbeltConfiner
             self._confiner = SeatbeltConfiner()
-        return NativeSandboxExecutor(
-            confiner=self._confiner,
-            captured_path=os.environ.get("PATH", "/usr/bin:/bin"),
-        )
+        return NativeSandboxExecutor(confiner=self._confiner)
 
     def confined(self, argv: list[str], *, cwd: str = ".", mode: str = "workspace-write",
                  network: str = "off", private_roots: tuple = (),
@@ -502,7 +499,6 @@ def journey_backend_unavailable_confined_zero_execution(h: JourneyHarness) -> bo
     policy = h._build_policy("workspace-write", "off", ())
     executor = NativeSandboxExecutor(
         confiner=_UnavailableConfiner(),
-        captured_path=os.environ.get("PATH", "/usr/bin:/bin"),
     )
     outcome = executor.execute(prepared, policy)
     if not isinstance(outcome, KnownNotExecuted):

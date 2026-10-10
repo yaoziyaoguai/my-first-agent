@@ -538,7 +538,7 @@ def test_one_runtime_combines_history_workspace_and_approved_web_without_mode(
         def __init__(self) -> None:
             self.calls: list[ContextPack] = []
 
-        def generate(self, context: ContextPack) -> ModelResponse:
+        def generate(self, context, *, delta_observer=None) -> ModelResponse:
             self.calls.append(context)
             index = len(self.calls)
             if index == 1:
@@ -830,7 +830,7 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
         def _blocks(context: ContextPack):  # noqa: ANN205
             return [block for message in context.messages for block in message.content]
 
-        def generate(self, context: ContextPack) -> ModelResponse:
+        def generate(self, context, *, delta_observer=None) -> ModelResponse:
             self.calls.append(context)
             index = len(self.calls)
             if index == 1:

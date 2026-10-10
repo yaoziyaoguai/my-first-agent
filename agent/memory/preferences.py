@@ -7,6 +7,7 @@ from pathlib import Path
 
 from agent.memory.contracts import (
     MemoryBusyError,
+    MemoryCapacityError,
     MemoryCasMismatchError,
     MemoryRecord,
     ProviderTrustProfile,
@@ -346,6 +347,12 @@ def _confirm(store: OwnerPreferenceStore):
             record = store.confirm(
                 PreferenceAdmission.from_runtime_binding(binding, content=content)
             )
+        except MemoryCapacityError:
+            # 写前容量拒绝：durable 未被触碰，是 known-not-executed，不是 unknown outcome。
+            return KnownNotExecuted(
+                code="preference_capacity_exceeded",
+                message="preference store is at its durable size limit; nothing was written",
+            )
         except (MemoryBusyError, MemoryCasMismatchError):
             return KnownNotExecuted(code="preference_busy", message="preference store changed")
         return f"confirmed preference {record.record_id} revision {record.revision}"
@@ -367,6 +374,12 @@ def _correct(store: OwnerPreferenceStore):
                 str(intent.arguments.get("preference_id", "")),
                 PreferenceAdmission.from_runtime_binding(binding, content=content),
             )
+        except MemoryCapacityError:
+            # 写前容量拒绝：durable 未被触碰，是 known-not-executed，不是 unknown outcome。
+            return KnownNotExecuted(
+                code="preference_capacity_exceeded",
+                message="preference store is at its durable size limit; nothing was written",
+            )
         except (MemoryBusyError, MemoryCasMismatchError, ValueError):
             return KnownNotExecuted(code="preference_changed", message="preference store changed")
         return f"corrected preference {record.record_id} revision {record.revision}"
@@ -378,6 +391,12 @@ def _forget(store: OwnerPreferenceStore):
     def invoke(intent):
         try:
             receipt = store.forget(str(intent.arguments.get("preference_id", "")))
+        except MemoryCapacityError:
+            # 写前容量拒绝：durable 未被触碰，是 known-not-executed，不是 unknown outcome。
+            return KnownNotExecuted(
+                code="preference_capacity_exceeded",
+                message="preference store is at its durable size limit; nothing was written",
+            )
         except (MemoryBusyError, MemoryCasMismatchError, ValueError):
             return KnownNotExecuted(code="preference_changed", message="preference store changed")
         return receipt.claim

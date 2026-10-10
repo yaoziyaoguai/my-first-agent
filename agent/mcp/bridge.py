@@ -39,6 +39,11 @@ _CoroFactory = Callable[[], Coroutine[Any, Any, McpBridgeOutcome]]
 # 覆盖最长 cleanup + task-group 收口，保证 loop.stop 永远发生在 cleanup 完成之后。
 _CLOSE_DRAIN_SECONDS = 8.0
 
+# _shutdown_process 的整体 deadline 中为 transport close 预留的份额：SIGKILL 后的
+# ``Process.aclose`` 正常是毫秒级，但 deadline 到期时若跳过 close 会泄漏 pipe transport；
+# 预留保证 close 总被尝试，同时整体仍在单一 deadline 内。
+_TRANSPORT_CLOSE_RESERVE_SECONDS = 0.5
+
 
 class McpAsyncBridge:
     def __init__(self, *, total_timeout_seconds: float) -> None:
@@ -196,6 +201,7 @@ async def run_stdio_session(
     token = latch.arm(expected_clear_revision=expected_clear_revision, binding=binding)
     commit = _CommitState()
     process = None
+    owned_pgid: int | None = None
     outcome: McpBridgeOutcome | None = None
     try:
         if spawn_identity is not None:
@@ -208,10 +214,11 @@ async def run_stdio_session(
                     "spawn_identity_drift",
                     "approved spawn identity (executable/ancestor/cwd) drifted; re-provision",
                 ) from None
-        process = await _spawn(command, args, cwd, env)
+        process, owned_pgid = await _spawn(command, args, cwd, env)
         await _validate_arguments(arguments, input_schema)
         outcome = await _drive_session(
             process=process,
+            owned_pgid=owned_pgid,
             remote_name=remote_name,
             arguments=arguments,
             pinned_schema=input_schema,
@@ -246,7 +253,9 @@ async def run_stdio_session(
         # 仅当 _drive_session 未运行（如 validate 在 drive 前失败）时才在此补做。
         # _shutdown_process 对已退出进程幂等，且 cancellation-safe（shielded）。
         if process is not None and not commit.process_exit_confirmed:
-            commit.process_exit_confirmed = await _shutdown_process(process, timeouts.shutdown)
+            commit.process_exit_confirmed = await _shutdown_process(
+                process, owned_pgid, timeouts.shutdown
+            )
         # auto-clear 必须保守：只在「确定无 unknown 风险」时清除 armed latch。
         # 从未 spawn（process is None）→ 无残留进程，可清除 stale ARMED marker；
         # 已 spawn 则必须 process_exit_confirmed 且 outcome 是确定的 EXECUTED/NOT_EXECUTED。
@@ -268,6 +277,7 @@ async def run_stdio_session(
 async def _drive_session(
     *,
     process,
+    owned_pgid,
     remote_name,
     arguments,
     pinned_schema,
@@ -412,15 +422,18 @@ async def _drive_session(
             )
         finally:
             # 有界、cancellation-safe 终止 process group，让 task group 能收口。_shutdown_process
-            # 关 stdin（正常 server 见 EOF 退出）+ bounded wait + 必要时 SIGKILL 整个 process group
-            # + readers drain 到 EOF，再由 anyio Process.aclose 关闭 wrapper/主 transport。
+            # 关 stdin（正常 server 见 EOF 退出）+ bounded wait + 必要时对 frozen owned PGID
+            # SIGKILL 整个 process group + 确认 leader reaped 与 group 消失，再由 anyio
+            # Process.aclose 关闭 wrapper/主 transport。
             # hanging server 不会因 stdin EOF 退出，
             # 必须 kill 才能让其 stdout/stderr pipe 关闭 → reader 收 EOF 退出；否则 task group
             # 永远等 hanging stdout、_drive_session 不返回，只能撞 bridge total_timeout 全局
             # quarantine 误伤无关 server。shield 保证 bridge.close 取消任务时 kill+reap+aclose
             # 仍完成（不留 orphan、不泄漏 transport）。stderr 持续 drain 到 EOF、buffer-0 commit
             # boundary、close stack 与无自动重试均不变。
-            commit.process_exit_confirmed = await _shutdown_process(process, timeouts.shutdown)
+            commit.process_exit_confirmed = await _shutdown_process(
+                process, owned_pgid, timeouts.shutdown
+            )
             await write_stream.aclose()
             await read_stream.aclose()
     assert outcome is not None
@@ -592,67 +605,128 @@ async def _spawn(command, args, cwd, env):
 
     import anyio
 
-    return await anyio.open_process(
+    _require_group_lifecycle_primitives()
+    process = await anyio.open_process(
         [command, *args],
         env=env,
         cwd=cwd,
         stderr=subprocess.PIPE,
         start_new_session=True,
     )
+    # start_new_session=True 使 child 成为新 session 的 leader：PGID == PID。在受控
+    # spawn 路径上立即冻结正的 owned_pgid；绝不晚于此从 leader 反查——leader 可能已退出，
+    # dead leader 的 getpgid 既不可用也非本 invocation 拥有的事实。
+    owned_pgid = process.pid
+    return process, owned_pgid
 
 
-async def _shutdown_process(process, timeout) -> bool:
-    """有界、cancellation-safe 的 process-group shutdown + 完整 transport close。
+def _require_group_lifecycle_primitives() -> None:
+    """owned-group cleanup 依赖的 POSIX primitive 检查；缺失必须在 spawn 前零副作用拒绝。
 
-    保证（即使调用方被 bridge.close / submit total_timeout 取消）：
-      1. SIGKILL 整个 process group（``start_new_session=True`` 下 hanging server 自身即
-         组长，含其同组子进程）；
-      2. 有界 reap（确认 returncode）；
-      3. stdout/stderr readers 在进程退出后 drain 到 EOF，关闭底层 read-pipe transport；
-         随后复用 anyio ``Process.aclose`` 关闭 wrapper 与主 subprocess transport，不触碰
-         私有 asyncio transport。
+    不实现 Windows fallback，也不把 host adapter 的 qualification 冒充 portable Kernel——
+    直接映射为 pre-spawn NOT_EXECUTED（无进程、无副作用），由上层按既有路径处理。
+    """
+    import signal
 
-    ``CancelScope(shield=True)`` 让取消不会打断 kill+reap+aclose：旧实现只捕获 TimeoutError，
-    CancelledError（BaseException）会跳过 SIGKILL 分支，使 hanging 子进程成为 orphan。scope
-    退出时若有待决 cancellation，anyio 在此重新抛出——cleanup 已完成，原 cancellation 不被吞掉。
+    if hasattr(os, "killpg") and hasattr(signal, "SIGKILL"):
+        return
+    raise _NotExecutedError(
+        "group_lifecycle_unsupported",
+        "host lacks POSIX group lifecycle primitives (killpg/SIGKILL); refusing to spawn",
+    )
+
+
+def _owned_group_absent(pgid: int) -> bool:
+    """组 absence 只由对 frozen PGID 的明确「不存在」结果证明。
+
+    ``killpg(pgid, 0)`` 成功 → 组内仍有进程（含 zombie）；``ProcessLookupError`` → 组已
+    不存在；``PermissionError``/其他 ``OSError`` → 状态未知，一律不是 absent（fail closed）。
+    """
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+async def _shutdown_process(process, owned_pgid, timeout) -> bool:
+    """有界、cancellation-safe 的 owned process-group shutdown + 完整 transport close。
+
+    ``process_exit_confirmed=True`` 必须同时证明三件独立事实：
+      1. leader 已回收（``process.wait()`` 确认 returncode）；
+      2. frozen ``owned_pgid`` 对应的原 process group 已明确不存在（见
+         ``_owned_group_absent``；权限/未知错误不是不存在）；
+      3. transport ``process.aclose()`` 已完整完成。
+
+    leader 单独退出（returncode 已知）不能证明 group 已清理——同组 child 可能仍存活；因此
+    无论 leader 是否已退出都 probe 原 group，仍存在则对 frozen PGID 发 SIGKILL，并在剩余
+    deadline 内等待 leader 回收、反复确认 group 不存在、完成 transport close。整条 cleanup
+    受单一整体 deadline 约束（其中 transport close 预留小份额，保证 deadline 到期也不会
+    跳过 close 造成 transport 泄漏）。任何不确定（权限错误、timeout、cancellation、close
+    失败）都返回 False，由调用方保持 fail closed、不清 latch。
+
+    ``CancelScope(shield=True)`` 让外部取消（bridge.close / submit total timeout）不打断
+    kill+reap+confirm+close；scope 退出后待决 cancellation 照常重新抛出——cleanup 已完成。
     """
     import contextlib
     import signal
 
     import anyio
 
-    with anyio.CancelScope(shield=True):
+    if not owned_pgid or owned_pgid <= 0:
+        # frozen PGID 只能来自受控 spawn；非正值绝不作为 SIGKILL 目标（killpg(0) 会命中
+        # bridge 自身进程组）。
+        return False
+
+    leader_reaped = False
+    group_absent = False
+    transport_closed = False
+    overall_deadline = anyio.current_time() + timeout
+    close_budget = min(_TRANSPORT_CLOSE_RESERVE_SECONDS, timeout / 2)
+
+    with anyio.CancelScope(shield=True, deadline=overall_deadline - close_budget):
         # 1. best-effort 关 stdin：正常 server 见 EOF 自行退出。
         with contextlib.suppress(BaseException):
             if process.stdin is not None:
                 await process.stdin.aclose()
-        # 2. 有界等 graceful exit；超时或被取消都进入强制 kill 分支。
-        exited = False
-        with anyio.move_on_after(timeout):
+        # 2. 有界 graceful leader wait：至多消耗剩余预算的一半，为 kill/reap/confirm/close
+        #    保留余量（hanging leader 不能因 graceful 占满预算而失去 SIGKILL 机会）。
+        grace = max(0.0, (overall_deadline - close_budget - anyio.current_time()) / 2)
+        with anyio.move_on_after(grace):
             try:
                 await process.wait()
-                exited = True
+                leader_reaped = True
             except BaseException:
                 pass
-        # 3. 仍未退出 → SIGKILL 整个 process group + 有界 reap。
-        if not exited:
-            try:
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            except ProcessLookupError:
-                exited = True
-            except OSError:
-                pass
-            if not exited:
-                with anyio.move_on_after(timeout):
-                    try:
-                        await process.wait()
-                        exited = True
-                    except BaseException:
-                        pass
-        # 4. readers 会因进程退出读到 EOF；这里关闭 anyio wrappers + 主 transport（幂等）。
-        with contextlib.suppress(BaseException):
+        # 3. 无论 leader 是否已退出，都检查原 owned group；leader 终态（returncode/已
+        #    reap/signal 成功）都不构成 group 已清理的证明。组仍存在 → 对 frozen PGID
+        #    发 SIGKILL；权限/未知错误只意味着「不能确认」。
+        if not _owned_group_absent(owned_pgid):
+            with contextlib.suppress(OSError):
+                os.killpg(owned_pgid, signal.SIGKILL)
+        # 4. 剩余预算内：reap leader + 反复确认 group 不存在（SIGKILL 后可能存在短暂的
+        #    zombie 窗口，待 init/launchd 回收后 group 才真正消失）。
+        try:
+            await process.wait()
+            leader_reaped = True
+        except BaseException:
+            pass
+        while not _owned_group_absent(owned_pgid):
+            await anyio.sleep(0.02)
+        group_absent = True
+
+    # 5. transport close：在预留份额内完成才可确认；失败/未完成 → transport_closed=False，
+    # 整体不 confirmed（fail closed）。
+    with anyio.CancelScope(shield=True, deadline=overall_deadline):
+        try:
             await process.aclose()
-        return exited
+            transport_closed = True
+        except BaseException:
+            pass
+
+    return leader_reaped and group_absent and transport_closed
 
 
 def _finalize_outcome(outcome: McpBridgeOutcome, commit: _CommitState) -> McpBridgeOutcome:

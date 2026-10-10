@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 
 from agent.runtime.contracts import (
@@ -9,6 +10,7 @@ from agent.runtime.contracts import (
     ApprovalRequest,
     ConversationState,
     EgressClass,
+    GoalStatus,
     RecoveryRequest,
     RunResult,
     RunStatus,
@@ -17,32 +19,117 @@ from agent.runtime.contracts import (
 )
 from agent.runtime.views import (
     SourceView,
+    delivery_summary_message,
     project_goal_view,
     project_process_leases,
     project_visible_source_views,
+    verification_scope_message,
 )
 
 
 class TerminalRenderer:
-    def __init__(self, write_fn: Callable[[str], None] = print) -> None:
+    """CLI 的唯一事件与结果渲染矩阵。
+
+    S1-C（2026-10-09）：progress heartbeat 来自 provider-progress 线程，与
+    delta/权威结果并发到达；对去重表、流式身份与一次输出使用窄锁，避免乱序
+    覆盖。锁内不调用 Runtime/provider。
+    """
+
+    def __init__(
+        self,
+        write_fn: Callable[[str], None] = print,
+        *,
+        delta_write_fn: Callable[[str], None] | None = None,
+    ) -> None:
         self._write = write_fn
+        self._delta_write = delta_write_fn
         self._seen_event_ids: set[str] = set()
+        # r19 小步 3:已流式呈现的回答文本;与最终权威 message 完全一致时
+        # 不再重复打印(显示可由权威结果校正,而不是双份输出)。
+        self._streamed_answer = ""
+        self._stream_identity: tuple[str, str | None, int, str] | None = None
+        self._terminal_hints: set[tuple[str, int, str]] = set()
+        # S1-C：progress 线程与 REPL 主线程并发的窄锁。
+        self._lock = threading.Lock()
 
     def emit(self, event: RuntimeEvent) -> None:
-        if event.event_id in self._seen_event_ids:
-            return
-        self._seen_event_ids.add(event.event_id)
-        message = self._event_message(event)
-        if message is not None:
-            self._write(message)
+        with self._lock:
+            if event.event_id in self._seen_event_ids:
+                return
+            self._seen_event_ids.add(event.event_id)
+            if event.kind is RuntimeEventKind.MODEL_TEXT_DELTA:
+                text = str(event.payload.get("text", ""))
+                if not text:
+                    return
+                stream_identity = (
+                    event.conversation_id,
+                    event.run_id,
+                    event.revision,
+                    event.causation_id,
+                )
+                if stream_identity != self._stream_identity:
+                    self._stream_identity = stream_identity
+                    self._streamed_answer = ""
+                self._streamed_answer += text
+                display_text = terminal_text(text, allow_newlines=True)
+                if self._delta_write is not None:
+                    self._delta_write(display_text)
+                else:
+                    self._write(display_text)
+                return
+            message = self._event_message(event)
+            if message is not None:
+                self._write(message)
 
     def render_result(self, result: RunResult) -> None:
+        with self._lock:
+            self._render_result_locked(result)
+
+    def _render_result_locked(self, result: RunResult) -> None:
         message = self._result_message(result)
+        # Renderer 由整个 REPL 复用，但流式原文只属于刚结束的这次 run_turn。
+        # 先完成本轮权威结果比较，再清空，避免下一轮回答与旧文本拼接。
+        self._streamed_answer = ""
+        self._stream_identity = None
         if message is not None:
             self._write(terminal_text(message, allow_newlines=True))
-        sources = project_goal_view(result.state).sources
+        goal_view = project_goal_view(result.state)
+        if goal_view.status == GoalStatus.VERIFIED_DONE.value:
+            self._write(
+                terminal_text(
+                    delivery_summary_message(goal_view),
+                    allow_newlines=True,
+                )
+            )
+        sources = goal_view.sources
         if sources:
             self._write(self._sources_message(sources))
+        if (
+            goal_view.status == GoalStatus.VERIFIED_DONE.value
+            and goal_view.verification_scope
+        ):
+            self._write(
+                terminal_text(
+                    self._verification_scope_message(goal_view.verification_scope),
+                    allow_newlines=True,
+                )
+            )
+        if (
+            goal_view.goal_id is not None
+            and goal_view.goal_revision is not None
+            and goal_view.status
+            in {GoalStatus.VERIFIED_DONE.value, GoalStatus.CANCELLED.value}
+        ):
+            terminal_key = (
+                goal_view.goal_id,
+                goal_view.goal_revision,
+                goal_view.status,
+            )
+            if terminal_key not in self._terminal_hints:
+                self._terminal_hints.add(terminal_key)
+                self._write(
+                    "Task is closed. Use /new to start another task in this workspace."
+                )
         for warning in result.delivery_warnings:
             self._write(f"Warning: {terminal_text(warning)}")
 
@@ -102,6 +189,15 @@ class TerminalRenderer:
         elif active.status is ActiveRunStatus.PAUSED_RETRYABLE:
             self._write(self._result_message_for_retryable())
 
+    def render_working(self) -> None:
+        """在同步 Runtime 调用前确认输入已接收，不猜测内部阶段或进度。"""
+
+        self._write("Working...")
+
+    @staticmethod
+    def _verification_scope_message(scopes: tuple[str, ...]) -> str:
+        return verification_scope_message(scopes)
+
     def render_sources(self, state: ConversationState, *, advanced: bool = False) -> None:
         sources = project_visible_source_views(state, advanced=advanced)
         if not sources:
@@ -144,6 +240,12 @@ class TerminalRenderer:
             return None
         if event.kind is RuntimeEventKind.WARNING:
             return f"Warning: {terminal_text(payload.get('message', 'runtime warning'))}"
+        if (
+            event.kind is RuntimeEventKind.MODEL_PROGRESS
+            and payload.get("phase") == "provider_waiting"
+        ):
+            elapsed = payload.get("elapsed_seconds", 0)
+            return f"Model is still working ({terminal_text(elapsed)}s elapsed)..."
         if event.kind in {
             RuntimeEventKind.MODEL_PROGRESS,
             RuntimeEventKind.TOOL_REQUESTED,
@@ -152,9 +254,11 @@ class TerminalRenderer:
             return None
         return None
 
-    @staticmethod
-    def _result_message(result: RunResult) -> str | None:
+    def _result_message(self, result: RunResult) -> str | None:
         if result.status is RunStatus.COMPLETED:
+            if result.message and result.message == self._streamed_answer:
+                # 流式已逐字呈现同一文本;不重复打印(权威校正留给不一致时)。
+                return None
             return result.message
         if result.status is RunStatus.AWAITING_APPROVAL:
             return None
@@ -163,6 +267,8 @@ class TerminalRenderer:
         if result.status is RunStatus.AWAITING_DISCLOSURE:
             return None
         if result.status is RunStatus.CANCELLED:
+            if result.error_code == "approval_declined" and result.message:
+                return terminal_text(result.message, allow_newlines=True)
             return "Run cancelled."
         if result.status is RunStatus.LIMIT_REACHED:
             if result.error_code == "no_progress":
@@ -220,18 +326,15 @@ class TerminalRenderer:
             "Approval required",
             f"tool: {terminal_text(tool_name)}",
             f"risk/effect: {terminal_text(risk)}/{terminal_text(side_effect)}",
-            f"preview: {terminal_text(preview)}",
+            f"preview: {terminal_text(preview, allow_newlines=True)}",
         ]
         if artifact_path is None:
             lines.append("Execute this operation? [y/N]")
         else:
-            # artifact approval 只接受 digest 确认的 special command：展示实际
-            # path 与精确格式，不自动填 digest，也不提供通用 [y/N]。
             lines.append(
-                "This artifact-producing command requires an exact digest. "
-                "Approve with /approve-artifact <64-lowercase-hex-sha256> "
-                f"{terminal_text(artifact_path)} after verifying the file's "
-                "sha256, or reply 'no' to reject it."
+                f"This command may generate {terminal_text(artifact_path)}. "
+                "Approve generation now? [y/N] The generated file is not confirmed yet; "
+                "First Agent must show its current content for a separate confirmation."
             )
         return "\n".join(lines)
 

@@ -85,6 +85,7 @@ def open_workspace_session(
     max_candidates: int = DEFAULT_ACTIVE_CANDIDATE_LIMIT,
     max_history_checkpoints: int = WORKSPACE_HISTORY_CAPACITY,
     bound_at_factory: Callable[[], str] | None = None,
+    force_new: bool = False,
 ) -> WorkspaceSession:
     if max_candidates < 1:
         raise ValueError("max_candidates must be positive")
@@ -92,6 +93,8 @@ def open_workspace_session(
         raise ValueError(
             "max_history_checkpoints must be positive and cover max_candidates"
         )
+    if not isinstance(force_new, bool):
+        raise ValueError("force_new must be a bool")
     identity = WorkspaceIdentityV1.resolve(workspace)
     root = (
         default_state_root(home) if state_root is None else Path(state_root)
@@ -116,6 +119,7 @@ def open_workspace_session(
             max_candidates=max_candidates,
             max_history_checkpoints=max_history_checkpoints,
             bound_at_factory=bound_at_factory,
+            force_new=force_new,
         )
 
 
@@ -128,6 +132,7 @@ def _open_workspace_session_locked(
     max_candidates: int,
     max_history_checkpoints: int,
     bound_at_factory: Callable[[], str] | None,
+    force_new: bool = False,
 ) -> WorkspaceSession:
     loaded = _load_candidates(
         workspace_root,
@@ -148,7 +153,10 @@ def _open_workspace_session_locked(
         for item in loaded
         if item not in legacy_unbound and _is_nonterminal(item[1].state)
     )
-    if len(active) == 1:
+    # force_new(/new 显式新任务):跳过 resume/select 投影,直接进入新
+    # conversation 创建;容量保护仍然生效。无 Goal 的闲聊会话在 active 语义
+    # 下会被 RESUMED,只有显式 force_new 才能可靠开始新任务。
+    if not force_new and len(active) == 1:
         path, snapshot = active[0]
         candidate = _candidate(path, snapshot)
         state_binding = snapshot.state.workspace_binding
@@ -179,7 +187,7 @@ def _open_workspace_session_locked(
             total_checkpoint_count=len(loaded),
             total_active_count=1,
         )
-    if len(active) > 1:
+    if not force_new and len(active) > 1:
         visible = active[:max_candidates]
         return WorkspaceSession(
             disposition=StartupDisposition.SELECT_REQUIRED,

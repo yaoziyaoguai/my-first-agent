@@ -1,0 +1,285 @@
+Session: fa-daily-closure-audit-xval-20261010-r2
+Mode: browser foreground
+Models: 1
+Detach: no
+Reattach: oracle session fa-daily-closure-audit-xval-20261010-r2
+Launching browser mode (picker=current; requested=gpt-5.6-sol) with ~13,605 tokens.
+This run can take up to 45 minutes (usually ~10 minutes).
+[browser] Browser control: launch visible Chrome; may focus/control the browser UI.
+[browser] Browser guidance: A visible automation Chrome window may take focus while Oracle controls ChatGPT.
+[browser] Browser guidance: Use --browser-hide-window, --browser-attach-running, or --remote-chrome to reduce desktop disruption.
+[browser] Thinking time: Power, item 5 of 5 (slider ARIA) (already selected)
+[browser] Thinking time: Power, item 5 of 5 (slider ARIA) (already selected)
+[browser] ChatGPT thinking - 30s elapsed; status=response streaming; source=inline
+[browser] ChatGPT thinking - 1m 0s elapsed; status=response streaming; last change 30s ago; source=inline
+[browser] ChatGPT thinking - 1m 30s elapsed; status=response streaming; last change 59s ago; source=inline
+[browser] ChatGPT thinking - 2m 0s elapsed; status=response streaming; last change 1m 30s ago; source=inline
+[browser] ChatGPT thinking - 2m 30s elapsed; status=response streaming; last change 2m 0s ago; source=inline
+[browser] ChatGPT thinking - 3m 0s elapsed; status=response streaming; last change 2m 30s ago; source=inline
+[browser] ChatGPT thinking - 3m 30s elapsed; status=response streaming; last change 3m 0s ago; source=inline
+[browser] ChatGPT thinking - 4m 0s elapsed; status=response streaming; last change 3m 30s ago; source=inline
+[browser] ChatGPT thinking - 4m 30s elapsed; status=response streaming; last change 4m 0s ago; source=inline
+[browser] ChatGPT thinking - 5m 0s elapsed; status=response streaming; last change 4m 30s ago; source=inline
+[browser] ChatGPT thinking - 5m 30s elapsed; status=response streaming; last change 5m 0s ago; source=inline
+[browser] ChatGPT thinking - 6m 0s elapsed; status=response streaming; last change 5m 30s ago; source=inline
+[browser] ChatGPT thinking - 6m 30s elapsed; status=response streaming; last change 6m 0s ago; source=inline
+[browser] ChatGPT thinking - 7m 0s elapsed; status=response streaming; last change 6m 30s ago; source=inline
+[browser] ChatGPT thinking - 7m 30s elapsed; status=response streaming; last change 7m 0s ago; source=inline
+[browser] ChatGPT thinking - 8m 0s elapsed; status=response streaming; last change 7m 30s ago; source=inline
+[browser] ChatGPT thinking - 8m 30s elapsed; status=response streaming; last change 8m 0s ago; source=inline
+[browser] ChatGPT thinking - 9m 0s elapsed; status=response streaming; last change 8m 30s ago; source=inline
+[browser] ChatGPT thinking - 9m 30s elapsed; status=response streaming; last change 9m 0s ago; source=inline
+[browser] ChatGPT archive skipped (disabled).
+[browser] Model selection evidence: requestedKey=gpt-5.6-sol; target=GPT-5.6 Sol; resolvedLabel=Power, item 5 of 5 (slider ARIA); status=already-selected; strategy=current; verified=yes; source=thinking-time-control; capturedAt=2026-10-09T22:52:25.749Z
+Answer:
+编号分析
+1. 总体裁决：已有实质完成证据，但还不足以确认“27 项全部按冻结合同闭合”
+
+你提供的独立复核已经显著降低了“测试文件不存在、执行者没有真正运行测试、Dogfood 成果完全虚构、请求次数随意填写”等风险。3706 passed / 1 skipped、承重测试 9/9 通过，以及实际产物和请求台账的交叉核对，都应计入正面证据，不能因为发现记录问题就全部推翻。
+
+但以下三个命题仍然不同：
+
+当前收集到的测试通过 ≠ 冻结合同每个必需子条件都被验证 ≠ 所有行为修改都有可追溯的先 Red、后 Green 证据。
+
+冻结合同明确要求逐行为证明，不能用测试总数代替；Red 的要求针对行为变更，并非机械要求每个未修改的回归行都有一份新 Red。（依据：ACCEPTANCE.md:8–19。）
+
+就本次提供的快照，我的结论是：
+
+审计对象	当前可支持的结论
+当前测试套件	接受你报告的独立复跑结果；唯一 SKIP 的节点、原因及合同影响仍需明确
+本地实现	有较强的真实实现证据，但“DU-01–27 全部合同闭合”尚不能确认
+历史 Red/Green 纪律	部分有明确叙述；尚不足以证明所有行为变更均遵守
+真实 A/B	按你报告的独立复核，可保留相应场景的通过结论
+真实 C	按原场景定义应为 PARTIAL，不是完整场景 PASS
+交付记录	两处具体错误已修正，但附件仍存在其他当前状态冲突
+
+因此，现有的 IMPLEMENTED_WITH_VALIDATION_GAPS 比无条件完成更准确；不过，缺口清单应包含实际未证的合同子项，而不能只列“范围外问题”。这不是认定造假，也不是判定整个产品失败。
+
+2. 尚未排除的假完成模式，以及能关闭它们的最小检查
+
+下表中的“尚未排除”不等于“已经发生”。其中有些只是待排除风险，有些则已经在执行记录中明确暴露为证据缺口。
+
+风险	本次证据尚未排除什么	最小补证或抽查
+合同子条件被省略，但整行仍 PASS	测试有有效断言，但只覆盖某行的一部分；将“代码有该分支”当成“该行为已验证”	按合同中的每个必需条件，定位到具体 node 和断言。优先查下文列出的 DU-10、DU-22、DU-05、DU-14
+历史 Red 缺失或失去因果意义	只有“Red 已验证”的文字；失败来自 fixture、权限过期或旧 call ID，而不是待修缺陷；Red 与 Green 使用了不同反例	检查原始失败输出、实际命令、修复前源码身份、测试内容以及修复后同一反例。无原始记录时，历史“先 Red”仍未证
+非空断言仍被削弱	检查最终字符串或状态，却不检查执行次数、真实文件字节、新 receipt、旧 evidence 失效；期望值由同一个被测函数算出，形成自证	对 DU-01/07、DU-24 检查独立的文件内容预期、执行 fact、receipt 引用、revision 与 typed state，而非只看 Verified delivery
+入口真实，但关键内部链被替换	确实调用 main()，却在 fixture、composition factory 或 driver 中替换审批、checkpoint、receipt，或预先写好目标产物	沿测试和 Dogfood driver 追到 composition；核对 patch 的实际目标。允许 scripted provider 和合同允许的基础设施 seam，不允许替换被验收机制
+新测试正常，旧回归或收集配置被削弱	旧断言被删、旧测试被排除、共享 fixture 提前返回、插件改变收集或报告；新文件里没有 skip 并不能排除这些	审查测试及配置差异、共享 conftest.py、实际插件和收集清单。pytest 的收集 hook 确实可以过滤测试，报告也经过 hook，因此必须检查这一层。
+pytest 文档
++1
+
+证据对应的是另一个候选	当前代码、3704 收口候选、3706 复跑候选、wheel、真实旅程使用的源码不同；HEAD 相同但 dirty/untracked 不同	核对公开文件清单及哈希、完整日志时间与候选身份；确认新增的两个收集节点确实是双尺寸 Pilot，而不是仅凭总数差 2 推定
+不同验证层互相替代	源码 Pilot 被当成安装后 TUI；mock driver 测试被当成真实 Chromium；离线恢复被当成真实模型恢复	分别核对安装物、真实本地浏览器、离线 Runtime、真实 provider 四类证据，不能跨层补票
+账本一致被外推为费用和凭据完全闭合	52 条吻合但漏计连通性请求或其他重试；估算被称为实付或严格上界；删除本地文件被称为服务端撤销	核对请求总体及预算算法；凭据只保留已证明的“指定文件删除、仓库扫描未检出”，不外推为已撤销或所有位置均销毁
+
+本包应优先核对的具体缺口如下。
+
+DU-10、DU-22 是最直接的两项。 RESULTS.md:45 明写“绑定更换反例未单测”；:56 明写 stdout 超限未单独构造。但合同分别要求提交期间绑定关闭／更换，以及 stdout、stderr 超限与有界收尾。前者可能已有其他集成证据，需定位；后者不能仅以“output_limit 代码承担”代替执行验证。没有找到其他对应证据前，应将这些子项记为 NOT_VERIFIED，而不是据此直接判定产品代码有 bug。（依据：ACCEPTANCE.md:32,44。）
+
+DU-05、DU-14 要检查“引用的测试是否真的证明该命题”。 纯 fold、普通 reopen、一般 compaction 分别通过，不自动证明“写后重建仍允许合法复测，压缩前后结论一致”。同样，DU-01 的工具复测不自动证明 DU-14 的真实 Runtime 模型重试 revision 递增。这里只需要检查现有测试的调用顺序和断言，不需要新建一套测试体系。（依据：ACCEPTANCE.md:27,36；RESULTS.md:41,49。）
+
+安装物验收不能仅靠“等价”二字关闭。 合同允许引用同候选全量 gate 内的 packaging 证据，不要求重复构建；但“构建输入只来自公开 allowlist”和“输出 wheel 的打包清单受限”是两个不同命题。记录承认没有单独 staging，又没有清楚指出安装后 TUI 关键交互的证据，需检查 packaging fixture 是否真正完成了相应隔离与安装后运行。无需因此新增像素截图门：原合同要求交互和可读性检查，并要求如实披露视觉检查边界。（依据：ACCEPTANCE.md:93–95,129–138；RESULTS.md:72–73。）
+
+最终差异审查仍明确为 PARTIAL。 这不是可以自动当作笔误略过的内容。还要核对 state.py、provider 修复是否进入最终修改清单和候选身份；记录中的最终修改范围没有完整反映执行日志提到的这些变化。此外，未跟踪 journey 脚本曾被覆盖后重建，当前旅程通过只能证明现有行为，不能单独证明原用户增量完整保留。最小检查是对照执行前保留的原文件／BASELINE，而非再跑更多相同旅程。（依据：RESULTS.md:74,122–129,172–174。）
+
+关于 Red，还应保留一个重要区别：后来在临时副本中用旧产品代码跑出 Red，可以证明当前测试能捕获旧缺陷，但不能补成“当时先 Red、后修改”的历史事实。 不应为填满表格而伪造时间顺序。
+
+3. 两处 stale rows 是真实交付记录缺陷；已修两处，不代表整份记录已闭合
+
+是，属于真实交付记录缺陷，建议按 P2／中等严重度处理，而非运行时重大故障。 这里的 P2 指会影响交接判断、验收结论或下一步操作的记录问题。
+
+原因不是“历史记录里出现失败状态”——历史失败本就应保留。问题在于旧状态仍出现在具有当前状态含义的位置，与后来已完成的事实冲突，可能导致错误地继续施工、重新配置凭据或重复付费验证。
+
+对于你描述的那两处，采用“保留历史事实＋带日期的审计校正＋明确当前状态”是正确处理。这两条具体缺陷可以关闭，不应无限追究，也不应据此否定真实实现。
+
+但是，本次附件还保留了以下冲突：
+
+位置	仍然存在的问题
+RESULTS.md:3–12	“当前状态”仍为 PACKAGE_READY / NOT_IMPLEMENTED，并称没有实施、没有真实调用，下一步仍从 Red 开始
+RESULTS.md:177	“最终交付摘要”仍称 DU-24、wheel、真实模型行为未经验证，与同节前文直接冲突
+RESULTS.md:180	“下一执行者最小继续路径”仍要求补 DU-24、重跑 Dogfood、wheel 和 full gate
+RESULTS.md:182–190	未填模板与“分级：未实施”残留在最终摘要中，没有明确标为废止模板
+RESULTS.md:42,53	DU-06、DU-19 的状态栏是说明文字，而非明确验收状态；这是记录规范问题，不是功能失败证据
+
+因此，准确表述应为：
+
+两条已知 stale-row 缺陷已修正；当前附件仍有其他状态一致性缺陷，整份唯一执行记录尚不能判定为完全一致。
+
+相反，3704 → 3706 本身不应判为缺陷：只要日期、候选差异和新增两个实际收集节点对应，历史收口数与后续独立复跑数可以同时成立。编包阶段的未实施记录、先前失败的 full gate，也可以继续保留在清楚标注的历史章节中。
+
+4. C 按原合同应为 PARTIAL；“PASS with boundary”只能用于明确缩小的观察项
+
+决定性问题不是退出码 2，而是实际执行的场景与原合同不同。
+
+真实 C 的授权定义是：
+
+安全边界暂停 → 关闭 → 重开 → 继续原任务 → 完成交付。
+
+而记录和你提供的复核证明的是：
+
+创建并验证 notes.txt → 任务已完成 → 全新进程重开 → 加载到无未完成任务的状态。
+
+两者不等价。即使首进程退出码为 0，后者仍不能证明前者。 离线 DU-24 可以证明指定的离线真实链，但不能替代真实 provider 对暂停后上下文和续做的实际验证。（依据：RESULTS.md:132,156；ACCEPTANCE.md:46,149–150。）
+
+建议拆分判定：
+
+C 的具体命题	判定
+notes.txt 的实际内容正确，任务检查完成	按所报独立证据，PASS
+全新进程能够读取同一持久状态	按所报独立复核，PASS；证据应绑定同一 workspace/state 和任务身份
+真实模型在暂停后重开并继续原任务	NOT_VERIFIED；本次没有给出该过程证据
+首进程正常、无异常退出	未通过：实际 exit=2
+DU-24 离线纠正／暂停／重开／续做	保留其独立 PASS，不受真实 C 降级连带抹除
+原定义的真实 C 整体	PARTIAL
+
+退出码 2 需要另外解释，不能简单地两极化：
+
+它不一定推翻任务结果，也不一定说明 DU-09 的错误处理失效。 DU-09 本来就要求特定关闭期错误最终以 2 退出；诚实返回非零，可能正是预期的失败处理。（依据：ACCEPTANCE.md:30–31。）
+
+但“发生在任务完成后”“只出现一次”“新进程能打开”仍不足以证明异常完全无害。最小检查是原始 traceback 所在阶段、最后成功保存的 checkpoint revision、重开后的同一任务／fact 身份，以及权限和资源收尾。单独打印 Status: no unfinished task 不足以排除打开了空状态或错误状态目录。
+
+因此：
+
+可以把“C 的已完成任务持久化与全新进程重开读取”记为 PASS（关闭存在异常）；不能据此把原合同 C 记为 PASS，也不能继续表述“三个原定义场景全部完成”。
+
+这不要求现在扩范围修复，也不授权再次调用真实 API。先准确记录；只有源码和异常路径证明它违反现有 DU-08/09 等必需行为时，才将它关联回对应本地验收，而不是仅凭“范围外”标签排除影响。
+
+风险优先复核清单
+
+以下从仓库根目录运行。命令不修改产品或测试源码；pytest 和本地旅程会产生其正常临时工件／缓存。不要执行 reset/checkout，不要恢复密钥或重新运行付费 Dogfood。PIP_NO_INDEX=1 不是网络隔离，仍须沿既有测试隔离运行。
+
+① 锁定当前记录、候选差异和历史 Red 的可追溯位置
+Bash
+P=docs/handoffs/2026-10-09-daily-use-closure
+
+git rev-parse HEAD
+git status --short
+
+git diff --name-status 838cb2b -- \
+  agent main.py first_agent_skill_runner tests scripts pyproject.toml
+
+git ls-files --others --exclude-standard -- \
+  agent main.py first_agent_skill_runner tests scripts "$P"
+
+nl -ba "$P/RESULTS.md" | sed -n '1,75p;150,190p'
+rg -n 'BASELINE|source_identity|Red|RED|FAILED|2026-10-10' "$P"
+
+**检查点：**剩余状态冲突、scoped diff 的 PARTIAL 是否有后续证据、Red 是否能追到原始输出。838cb2b 的 Git 差异包含可能继承的 dirty 改动，不能全部归因于本轮执行者；执行起点应以实际 BASELINE 为准。
+
+② 检查断言、共享 fixture 和收集配置有没有削弱验收
+Bash
+git --no-pager diff --no-ext-diff --no-textconv 838cb2b -- \
+  tests conftest.py pyproject.toml pytest.ini .pytest.ini \
+  pytest.toml .pytest.toml tox.ini setup.cfg
+
+rg -n -g 'conftest.py' \
+  'pytest_|collect_ignore|monkeypatch|patch\(|Mock' .
+
+rg -n \
+  'monkeypatch|patch\(|Mock|app\.exit|except|assert ' \
+  tests/process/test_r1_two_validation_completion.py \
+  tests/acceptance/test_daily_use_recovery_journey.py \
+  tests/acceptance/test_daily_use_browser_driver.py
+
+printf 'PYTEST_ADDOPTS=%s\nPYTEST_PLUGINS=%s\nPYTEST_DISABLE_PLUGIN_AUTOLOAD=%s\n' \
+  "${PYTEST_ADDOPTS-}" "${PYTEST_PLUGINS-}" \
+  "${PYTEST_DISABLE_PLUGIN_AUTOLOAD-}"
+
+PIP_NO_INDEX=1 PYTHONDONTWRITEBYTECODE=1 \
+  .venv/bin/python -m pytest --trace-config --collect-only -q
+printf 'collection exit=%s\n' "$?"
+
+**检查点：**补丁只替换许可 seam；自然退出断言不依赖最后强制 app.exit()；旧测试没有无说明地删除或削弱；收集清单没有不明过滤。--trace-config 用于查看实际插件，--collect-only 用于查看收集节点；不要为复核而盲目禁用全部插件，因为其中可能承载测试隔离。
+pytest 文档
++1
+
+③ 复核最有区分力的现有测试，而不是再看一次总数
+Bash
+PIP_NO_INDEX=1 PYTHONDONTWRITEBYTECODE=1 \
+  .venv/bin/python -m pytest -q -ra \
+  tests/process/test_r1_two_validation_completion.py \
+  tests/kernel/test_validation_request_freshness.py \
+  tests/kernel/test_runtime_progress.py \
+  tests/continuity/test_goal_controls.py \
+  tests/acceptance/test_daily_use_recovery_journey.py \
+  tests/acceptance/test_daily_use_browser_driver.py \
+  tests/tui/test_app.py \
+  tests/tui/test_adapter.py
+printf 'focused exit=%s\n' "$?"
+
+**检查点：**DU-01/07 的新 ID／相同参数／真实执行／新 receipt；DU-24 的新 composition、真实产物与零效果重放；DU-10 的绑定变更；DU-22 的双管道超限和有界退出。
+
+已有测试再次通过不会补出不存在的子案例。 对后两项找不到实际覆盖时，保留 NOT_VERIFIED，而不是把绿灯当成补证完成。
+
+④ 读取 C 的原始证据，并核对请求总体与密钥删除边界
+
+附件没有提供 ledger/result 的具体文件名或 schema，下面先精确定位，避免编造路径或用文件行数冒充请求数：
+
+Bash
+find .local/dogfood/A .local/dogfood/B .local/dogfood/C \
+  -type f \( \
+    -iname '*ledger*' -o -iname '*result*' -o \
+    -iname '*session*' -o -iname '*checkpoint*' \
+  \) -print
+
+rg -n --hidden --no-ignore \
+  -g '*.json' -g '*.jsonl' -g '*.txt' -g '*.log' -g '*.md' \
+  'CheckpointSecurityError|PAUSE|PAUSED|ResumeGoal|VERIFIED_DONE|no unfinished task|exit_code|returncode|goal_id|conversation_id' \
+  .local/dogfood/C
+
+test ! -e .local/.dskey && test ! -L .local/.dskey
+printf 'key-file-absence exit=%s\n' "$?"
+
+**检查点：**C 是否真的存在暂停后的续做过程；首进程异常发生在哪个调用栈；重开前后是否同一状态及任务身份。台账还需说明首轮 401 和后续 43-token 连通性检查是否计入 52 次／预算，不能直接假定包含或遗漏。
+
+<¥2 目前应保留为估算；除非能给出完整请求总体和保守计费计算，否则不称为已核实实付或严格上界。密钥检查只证明该路径不存在，不证明服务端已撤销。
+
+⑤ 检查安装物与浏览器证据，必要时才做对应本地复验
+Bash
+rg -n \
+  'staging|allowlist|system_site|site-packages|PYTHONPATH|Pilot|run_test|Textual|sha256|wheel' \
+  tests/cli/test_016_packaging.py \
+  tests/tui/test_app.py \
+  scripts/run_real_coding_scenario.py \
+  pyproject.toml \
+  "$P/RESULTS.md"
+
+**检查点：**安装后 import origin、构建输入隔离、安装后关键 TUI 交互，以及真实 F2/D06 的 source identity、逐旅程结果和 owner cleanup 结论。
+
+仅当对应旧证据无法复用，且驱动安全测试已通过时，按需要运行：
+
+Bash
+# 安装物证据缺失时；已有同候选 gate 证据可复用则不重复构建
+PIP_NO_INDEX=1 PYTHONDONTWRITEBYTECODE=1 \
+  .venv/bin/python -m pytest -q -ra tests/cli/test_016_packaging.py
+printf 'packaging exit=%s\n' "$?"
+
+# 真实本地浏览器证据缺失时；不是付费模型 Dogfood
+PIP_NO_INDEX=1 PYTHONDONTWRITEBYTECODE=1 \
+  .venv/bin/python scripts/f2_f3_local_browser_journeys.py \
+  --journey all --budget-seconds 120
+printf 'browser-journey exit=%s\n' "$?"
+
+浏览器命令必须同时看到 f2、d06 各自通过及 cleanup confirmed；仅 exit 0 不够。出现 timeout／cleanup-unconfirmed 就停止，不自动重跑或删除相关目录。
+
+⑥ 最后才检查完整 gate，并解释唯一 SKIP
+
+已有 2026-10-10 同候选的完整独立日志、退出码和 SKIP 说明时，直接复用；候选改变、日志不完整或用户需要亲自复验时，再运行一次：
+
+Bash
+git diff --check
+printf 'diff-check exit=%s\n' "$?"
+
+.venv/bin/ruff check .
+printf 'ruff exit=%s\n' "$?"
+
+PIP_NO_INDEX=1 PYTHONDONTWRITEBYTECODE=1 \
+  .venv/bin/python -m pytest -q -ra
+printf 'full-pytest exit=%s\n' "$?"
+
+这里使用 -ra 是为了显示包括 SKIP、XFAIL、XPASS 在内的非通过摘要，避免只知道“1 skipped”却不知道影响哪项验收。
+pytest 文档
+
+收口条件：当前声明无冲突、每个必需子条件有对应证据、唯一 SKIP 的影响已解释、候选身份一致；真实 C 保留 PARTIAL，除非有原定义过程的真实证据。重复刷绿不能替代这些条件。
+
+10m35s · Power, item 5 of 5 (slider ARIA)[browser] · ↑13.61k ↓2.4k ↻0 Δ16.01k
+files=2

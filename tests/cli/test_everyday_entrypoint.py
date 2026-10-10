@@ -217,7 +217,7 @@ def test_main_composition_uses_memory_scope_without_weakening_workspace_identity
     contexts = []
     original_generate = FakeProvider.generate
 
-    def capture_generate(self, context):
+    def capture_generate(self, context, *, delta_observer=None):  # noqa: ARG001
         contexts.append(context)
         if len(contexts) == 1:
             return ModelResponse((), control=BeginAnswer("begin-memory-answer"))

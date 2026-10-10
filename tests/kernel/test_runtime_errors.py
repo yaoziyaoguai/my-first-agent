@@ -11,21 +11,30 @@ from agent.runtime.contracts import (
     BlockedClaim,
     ClarificationRequest,
     CompletionClaim,
+    ContinuationPhase,
     ControlReceipt,
+    ConversationFact,
     ConversationState,
     DirectResponse,
     EvidenceOracleKind,
     ExecutionAuthorityClass,
+    ExecutionIntent,
     FactKind,
     GoalProgress,
+    GoalStatus,
+    KnownExecutedError,
+    KnownNotExecuted,
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
     OutputPolicy,
+    ResolveApproval,
     Resume,
     RunStatus,
     SideEffectClass,
     SubmitMessage,
+    ToolCall,
+    ToolResult,
     ToolRisk,
     ToolSpec,
 )
@@ -60,6 +69,8 @@ def _run(
     max_model_calls=16,
     state: ConversationState | None = None,
     tools=(),
+    tool_runtime=None,
+    event_sink=None,
     action=None,
 ):
     initial = state or ConversationState.new("conversation-1")
@@ -70,9 +81,11 @@ def _run(
             system_policy="policy",
             limits=ContextLimits(max_input_tokens=8_000, output_reserve=100),
         ),
-        tool_runtime=KernelToolRuntime(tools),
+        tool_runtime=(
+            tool_runtime if tool_runtime is not None else KernelToolRuntime(tools)
+        ),
         checkpoint_store=store,
-        event_sink=CollectingSink(),
+        event_sink=event_sink if event_sink is not None else CollectingSink(),
         limits=InvocationLimits(
             max_model_calls=max_model_calls,
             max_invalid_repairs=repairs,
@@ -89,6 +102,27 @@ def _run(
             message="hello",
         )
     return runtime.run_turn(action, store.load()), store
+
+
+def _read_fixture_spec() -> ToolSpec:
+    return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name="read_fixture",
+        version="1",
+        description="Read one immutable fixture",
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.LOW,
+        side_effect=SideEffectClass.READ_ONLY,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.NEVER,
+        safety_policy={},
+        output_limit_chars=100,
+    )
 
 
 def test_transient_provider_error_is_retryable_pause() -> None:
@@ -692,28 +726,27 @@ def test_materially_different_nonexecuted_tool_attempts_can_replan_to_completion
 
 def test_sixteenth_known_nonexecuted_tool_attempt_pauses_without_extra_send() -> None:
     calls: list[str] = []
-    spec = ToolSpec(
-        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
-        name="read_fixture",
-        version="1",
-        description="Read one immutable fixture",
-        input_schema={
-            "type": "object",
-            "properties": {"path": {"type": "string"}},
-            "required": ["path"],
-            "additionalProperties": False,
-        },
-        risk=ToolRisk.LOW,
-        side_effect=SideEffectClass.READ_ONLY,
-        output_policy=OutputPolicy.BOUNDED_TEXT,
-        approval_policy=ApprovalPolicy.NEVER,
-        safety_policy={},
-        output_limit_chars=100,
-    )
+
+    def fail_after_invocation(_intent) -> KnownNotExecuted:  # noqa: ANN001
+        calls.append("invoked")
+        return KnownNotExecuted(
+            code="fixture_unavailable",
+            message="fixture is temporarily unavailable",
+        )
+
+    spec = _read_fixture_spec()
     provider = ScriptedProvider(
         ModelResponse((), control=BeginAnswer("begin-known-not-executed")),
         *(
-            ModelResponse((ModelToolCall(f"invalid-{index}", "read_fixture", {}),))
+            ModelResponse(
+                (
+                    ModelToolCall(
+                        f"failed-{index}",
+                        "read_fixture",
+                        {"path": "fixture.txt"},
+                    ),
+                )
+            )
             for index in range(16)
         ),
         RetryableProviderError("post-threshold send must not happen"),
@@ -723,15 +756,799 @@ def test_sixteenth_known_nonexecuted_tool_attempt_pauses_without_extra_send() ->
         provider,
         no_progress_replans=16,
         max_model_calls=None,
-        tools=(RegisteredTool(spec, lambda _intent: calls.append("invoked")),),
+        tools=(RegisteredTool(spec, fail_after_invocation),),
     )
 
     assert result.status is RunStatus.LIMIT_REACHED
     assert result.error_code == "no_progress"
+    assert result.message is not None
+    assert "recorded results preserved" in result.message
+    assert "explicitly continue" in result.message
     assert len(provider.calls) == 17
-    assert calls == []
+    assert calls == ["invoked"] * 16
+    assert sum(fact.kind is FactKind.TOOL_RESULT for fact in store.state.facts) == 16
     assert store.state.active_run is not None
     assert store.state.active_run.status.value == "paused_limit"
+
+
+def test_repeated_known_executed_errors_pause_as_no_progress() -> None:
+    calls: list[str] = []
+    seed = conversation_with_active_goal()
+
+    def fail_after_execution(_intent) -> KnownExecutedError:  # noqa: ANN001
+        calls.append("executed")
+        return KnownExecutedError(
+            code="remote_error",
+            message="remote fixture failed after execution",
+        )
+
+    provider = ScriptedProvider(
+        goal_noop_response("known-executed-error-user-supplement"),
+        ModelResponse(
+            (ModelToolCall("failed-1", "read_fixture", {"path": "fixture.txt"}),)
+        ),
+        ModelResponse(
+            (ModelToolCall("failed-2", "read_fixture", {"path": "fixture.txt"}),)
+        ),
+        RetryableProviderError("post-threshold send must not happen"),
+    )
+
+    result, store = _run(
+        provider,
+        no_progress_replans=2,
+        max_model_calls=None,
+        state=seed,
+        tools=(RegisteredTool(_read_fixture_spec(), fail_after_execution),),
+    )
+
+    assert result.status is RunStatus.LIMIT_REACHED
+    assert result.error_code == "no_progress"
+    assert len(provider.calls) == 3
+    assert calls == ["executed", "executed"]
+    results = [fact for fact in store.state.facts if fact.kind is FactKind.TOOL_RESULT]
+    assert len(results) == 2
+    assert all(fact.content["executed"] is True for fact in results)
+    assert all(fact.content["is_error"] is True for fact in results)
+    assert store.state.goal is not None
+    assert store.state.goal.status not in {
+        GoalStatus.BLOCKED,
+        GoalStatus.VERIFIED_DONE,
+        GoalStatus.CANCELLED,
+    }
+
+
+def test_repeated_read_only_exceptions_pause_after_tool_runtime_normalization() -> None:
+    calls: list[str] = []
+
+    def fail_read(_intent) -> str:  # noqa: ANN001
+        calls.append("invoked")
+        raise RuntimeError("fixture read failed")
+
+    provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-read-exception")),
+        ModelResponse(
+            (ModelToolCall("failed-1", "read_fixture", {"path": "fixture.txt"}),)
+        ),
+        ModelResponse(
+            (ModelToolCall("failed-2", "read_fixture", {"path": "fixture.txt"}),)
+        ),
+        RetryableProviderError("post-threshold send must not happen"),
+    )
+
+    result, store = _run(
+        provider,
+        no_progress_replans=2,
+        max_model_calls=None,
+        tools=(RegisteredTool(_read_fixture_spec(), fail_read),),
+    )
+
+    assert result.status is RunStatus.LIMIT_REACHED
+    assert result.error_code == "no_progress"
+    assert calls == ["invoked", "invoked"]
+    results = [fact for fact in store.state.facts if fact.kind is FactKind.TOOL_RESULT]
+    assert [fact.content["metadata"]["code"] for fact in results] == [
+        "tool_error",
+        "tool_error",
+    ]
+
+
+def test_volatile_failure_receipts_do_not_reset_no_progress() -> None:
+    class VolatileFailureRuntime(KernelToolRuntime):
+        def __init__(self) -> None:
+            super().__init__(
+                (
+                    RegisteredTool(
+                        _read_fixture_spec(),
+                        lambda _intent: KnownNotExecuted(
+                            code="fixture_unavailable",
+                            message="fixture is temporarily unavailable",
+                        ),
+                    ),
+                )
+            )
+            self.ordinal = 0
+
+        def invoke(self, intent: ExecutionIntent) -> ToolResult:
+            result = super().invoke(intent)
+            self.ordinal += 1
+            return replace(
+                result,
+                metadata={
+                    **result.metadata,
+                    "receipt_digest": f"receipt-{self.ordinal}",
+                    "lease_id": f"lease-{self.ordinal}",
+                    "use_ordinal": self.ordinal,
+                    "duration_seconds": float(self.ordinal),
+                },
+            )
+
+    provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-volatile-failure")),
+        ModelResponse(
+            (ModelToolCall("failed-1", "read_fixture", {"path": "fixture.txt"}),)
+        ),
+        ModelResponse(
+            (ModelToolCall("failed-2", "read_fixture", {"path": "fixture.txt"}),)
+        ),
+        RetryableProviderError("post-threshold send must not happen"),
+    )
+
+    result, _store = _run(
+        provider,
+        no_progress_replans=2,
+        max_model_calls=None,
+        tool_runtime=VolatileFailureRuntime(),
+    )
+
+    assert result.status is RunStatus.LIMIT_REACHED
+    assert result.error_code == "no_progress"
+    assert len(provider.calls) == 3
+
+
+def test_parallel_known_failures_use_one_replan_opportunity_per_response() -> None:
+    calls: list[str] = []
+
+    def known_failure(_intent) -> KnownNotExecuted:  # noqa: ANN001
+        calls.append("invoked")
+        return KnownNotExecuted(
+            code="fixture_unavailable",
+            message="fixture is temporarily unavailable",
+        )
+
+    def batch(prefix: str) -> ModelResponse:
+        return ModelResponse(
+            tuple(
+                ModelToolCall(
+                    f"{prefix}-{index}",
+                    "read_fixture",
+                    {"path": "fixture.txt"},
+                )
+                for index in range(2)
+            )
+        )
+
+    result, store = _run(
+        ScriptedProvider(
+            ModelResponse((), control=BeginAnswer("begin-batched-failures")),
+            batch("first"),
+            batch("second"),
+            ModelResponse((ModelTextBlock("replanned final"),)),
+        ),
+        no_progress_replans=3,
+        tools=(RegisteredTool(_read_fixture_spec(), known_failure),),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.message == "replanned final"
+    assert calls == ["invoked"] * 4
+    assert sum(fact.kind is FactKind.TOOL_RESULT for fact in store.state.facts) == 4
+
+
+def test_known_failure_policy_follows_the_complete_model_tool_batch() -> None:
+    calls: list[str] = []
+
+    def known_failure(intent: ExecutionIntent) -> KnownNotExecuted:
+        path = str(intent.arguments["path"])
+        calls.append(path)
+        return KnownNotExecuted(
+            code="fixture_unavailable",
+            message=f"{path} is temporarily unavailable",
+        )
+
+    provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-batch-ordering")),
+        ModelResponse(
+            (ModelToolCall("prior", "read_fixture", {"path": "prior.txt"}),)
+        ),
+        ModelResponse(
+            (
+                ModelToolCall("batch-a", "read_fixture", {"path": "a.txt"}),
+                ModelToolCall("batch-b", "read_fixture", {"path": "b.txt"}),
+            )
+        ),
+        ModelResponse((ModelTextBlock("replanned final"),)),
+    )
+
+    result, store = _run(
+        provider,
+        no_progress_replans=4,
+        tools=(RegisteredTool(_read_fixture_spec(), known_failure),),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert calls == ["prior.txt", "a.txt", "b.txt"]
+    batch_start = next(
+        index
+        for index, fact in enumerate(store.state.facts)
+        if fact.kind is FactKind.TOOL_CALLS
+        and [call["tool_call_id"] for call in fact.content["calls"]]
+        == ["batch-a", "batch-b"]
+    )
+    batch_facts = store.state.facts[batch_start : batch_start + 4]
+    assert [fact.kind for fact in batch_facts] == [
+        FactKind.TOOL_CALLS,
+        FactKind.TOOL_RESULT,
+        FactKind.TOOL_RESULT,
+        FactKind.POLICY_RESULT,
+    ]
+
+    next_context = provider.calls[-1]
+    tool_message_index = next(
+        index
+        for index, message in enumerate(next_context.messages)
+        if any(block.get("tool_call_id") == "batch-a" for block in message.content)
+    )
+    assert [
+        block["tool_call_id"]
+        for block in next_context.messages[tool_message_index].content
+        if block["type"] == "tool_call"
+    ] == ["batch-a", "batch-b"]
+    assert [
+        block["tool_call_id"]
+        for block in next_context.messages[tool_message_index + 1].content
+        if block["type"] == "tool_result"
+    ] == ["batch-a", "batch-b"]
+    assert any(
+        block.get("code") == "no_progress_replan_required"
+        for block in next_context.messages[tool_message_index + 2].content
+    )
+
+
+def test_no_progress_threshold_waits_for_the_complete_model_tool_batch() -> None:
+    calls: list[str] = []
+    sink = CollectingSink()
+
+    def known_failure(intent: ExecutionIntent) -> KnownNotExecuted:
+        path = str(intent.arguments["path"])
+        calls.append(path)
+        return KnownNotExecuted(
+            code="fixture_unavailable",
+            message=f"{path} is temporarily unavailable",
+        )
+
+    def batch(prefix: str) -> ModelResponse:
+        return ModelResponse(
+            (
+                ModelToolCall(f"{prefix}-a", "read_fixture", {"path": "a.txt"}),
+                ModelToolCall(f"{prefix}-b", "read_fixture", {"path": "b.txt"}),
+            )
+        )
+
+    provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-batch-threshold")),
+        batch("first"),
+        batch("second"),
+        RetryableProviderError("post-threshold send must not happen"),
+    )
+
+    result, store = _run(
+        provider,
+        no_progress_replans=2,
+        max_model_calls=None,
+        tools=(RegisteredTool(_read_fixture_spec(), known_failure),),
+        event_sink=sink,
+    )
+
+    assert result.status is RunStatus.LIMIT_REACHED
+    assert result.error_code == "no_progress"
+    assert calls == ["a.txt", "b.txt", "a.txt", "b.txt"]
+    assert len(provider.calls) == 3
+    assert [
+        fact.content["tool_call_id"]
+        for fact in store.state.facts
+        if fact.kind is FactKind.TOOL_RESULT
+    ] == ["first-a", "first-b", "second-a", "second-b"]
+    assert [
+        event.causation_id
+        for event in sink.events
+        if event.kind.value == "tool_result"
+    ] == ["first-a", "first-b", "second-a", "second-b"]
+    assert store.state.active_run is not None
+    assert store.state.active_run.status.value == "paused_limit"
+    assert store.state.active_run.phase.value == "model"
+    assert store.state.active_run.tool_calls == ()
+
+
+def test_mixed_success_batch_resets_convergence_regardless_of_position() -> None:
+    for success_position, mixed_paths in (
+        (0, ("ok.txt", "fail.txt")),
+        (1, ("fail.txt", "ok.txt")),
+        (1, ("fail-a.txt", "ok.txt", "fail-b.txt")),
+    ):
+        calls: list[str] = []
+
+        def sometimes_available(
+            intent: ExecutionIntent,
+            *,
+            recorded_calls: list[str] = calls,
+        ) -> str | KnownNotExecuted:
+            path = str(intent.arguments["path"])
+            recorded_calls.append(path)
+            if path == "ok.txt":
+                return "fixture content"
+            return KnownNotExecuted(
+                code="fixture_unavailable",
+                message=f"{path} is temporarily unavailable",
+            )
+
+        mixed = ModelResponse(
+            tuple(
+                ModelToolCall(f"mixed-{success_position}-{index}", "read_fixture", {"path": path})
+                for index, path in enumerate(mixed_paths)
+            )
+        )
+
+        def failed_batch(prefix: str) -> ModelResponse:
+            return ModelResponse(
+                (
+                    ModelToolCall(f"{prefix}-a", "read_fixture", {"path": "a.txt"}),
+                    ModelToolCall(f"{prefix}-b", "read_fixture", {"path": "b.txt"}),
+                )
+            )
+
+        provider = ScriptedProvider(
+            ModelResponse((), control=BeginAnswer(f"begin-mixed-{success_position}")),
+            ModelResponse(
+                (ModelToolCall("prior", "read_fixture", {"path": "prior.txt"}),)
+            ),
+            mixed,
+            failed_batch("after-1"),
+            failed_batch("after-2"),
+            RetryableProviderError("post-threshold send must not happen"),
+        )
+
+        result, store = _run(
+            provider,
+            no_progress_replans=2,
+            max_model_calls=None,
+            tools=(RegisteredTool(_read_fixture_spec(), sometimes_available),),
+        )
+
+        assert result.status is RunStatus.LIMIT_REACHED
+        assert result.error_code == "no_progress"
+        assert calls == ["prior.txt", *mixed_paths, "a.txt", "b.txt", "a.txt", "b.txt"]
+        mixed_ids = {
+            f"mixed-{success_position}-{index}" for index in range(len(mixed_paths))
+        }
+        mixed_end = max(
+            index
+            for index, fact in enumerate(store.state.facts)
+            if fact.content.get("tool_call_id") in mixed_ids
+        )
+        assert store.state.facts[mixed_end + 1].kind is FactKind.TOOL_CALLS
+
+
+def test_success_dominates_a_later_duplicate_in_the_same_batch() -> None:
+    calls: list[str] = []
+
+    def sometimes_available(intent: ExecutionIntent) -> str | KnownNotExecuted:
+        path = str(intent.arguments["path"])
+        calls.append(path)
+        if path == "ok.txt":
+            return "fixture content"
+        return KnownNotExecuted(
+            code="fixture_unavailable",
+            message=f"{path} is temporarily unavailable",
+        )
+
+    provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-success-and-duplicate")),
+        ModelResponse(
+            (
+                ModelToolCall("new-failure", "read_fixture", {"path": "fail.txt"}),
+                ModelToolCall("success", "read_fixture", {"path": "ok.txt"}),
+                ModelToolCall("duplicate", "read_fixture", {"path": "ok.txt"}),
+            )
+        ),
+        ModelResponse((ModelTextBlock("completed after mixed batch"),)),
+    )
+
+    result, store = _run(
+        provider,
+        tools=(RegisteredTool(_read_fixture_spec(), sometimes_available),),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert calls == ["fail.txt", "ok.txt"]
+    duplicate = next(
+        fact
+        for fact in store.state.facts
+        if fact.content.get("tool_call_id") == "duplicate"
+    )
+    assert duplicate.content["executed"] is False
+    assert duplicate.content["metadata"]["code"] == "duplicate_product_request"
+    assert not any(
+        fact.content.get("code") == "no_progress_replan_required"
+        for fact in store.state.facts
+    )
+
+
+def test_batch_signature_uses_every_stable_result_but_ignores_volatile_metadata() -> None:
+    class BatchFailureRuntime(KernelToolRuntime):
+        def __init__(self) -> None:
+            self.b_count = 0
+            self.ordinal = 0
+
+            def fail(intent: ExecutionIntent) -> KnownNotExecuted:
+                path = str(intent.arguments["path"])
+                code = "a_failure"
+                if path == "b.txt":
+                    self.b_count += 1
+                    code = "b_failure_v1" if self.b_count == 1 else "b_failure_v2"
+                return KnownNotExecuted(code=code, message=f"stable {code}")
+
+            super().__init__((RegisteredTool(_read_fixture_spec(), fail),))
+
+        def invoke(self, intent: ExecutionIntent) -> ToolResult:
+            result = super().invoke(intent)
+            self.ordinal += 1
+            return replace(
+                result,
+                metadata={
+                    **result.metadata,
+                    "receipt_digest": f"receipt-{self.ordinal}",
+                    "lease_id": f"lease-{self.ordinal}",
+                    "use_ordinal": self.ordinal,
+                    "duration_seconds": float(self.ordinal),
+                },
+            )
+
+    def batch(prefix: str) -> ModelResponse:
+        return ModelResponse(
+            (
+                ModelToolCall(f"{prefix}-a", "read_fixture", {"path": "a.txt"}),
+                ModelToolCall(f"{prefix}-b", "read_fixture", {"path": "b.txt"}),
+            )
+        )
+
+    provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-batch-signature")),
+        batch("first"),
+        batch("changed"),
+        batch("repeated"),
+        RetryableProviderError("post-threshold send must not happen"),
+    )
+    result, store = _run(
+        provider,
+        no_progress_replans=2,
+        max_model_calls=None,
+        tool_runtime=BatchFailureRuntime(),
+    )
+
+    assert result.status is RunStatus.LIMIT_REACHED
+    assert result.error_code == "no_progress"
+    assert len(provider.calls) == 4
+    assert [
+        fact.content["tool_call_id"]
+        for fact in store.state.facts
+        if fact.kind is FactKind.TOOL_RESULT
+    ] == [
+        "first-a",
+        "first-b",
+        "changed-a",
+        "changed-b",
+        "repeated-a",
+        "repeated-b",
+    ]
+
+
+def test_completed_batch_unifies_prepare_and_invoked_known_failure_paths() -> None:
+    calls: list[str] = []
+
+    def fail_in_distinct_ways(intent: ExecutionIntent) -> KnownNotExecuted | KnownExecutedError:
+        path = str(intent.arguments["path"])
+        calls.append(path)
+        if path == "known.txt":
+            return KnownNotExecuted(code="known", message="known not executed")
+        if path == "raised.txt":
+            raise RuntimeError("read failed")
+        return KnownExecutedError(code="executed", message="known executed error")
+
+    provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-three-result-paths")),
+        ModelResponse(
+            (
+                ModelToolCall("prepare", "read_fixture", {}),
+                ModelToolCall("known", "read_fixture", {"path": "known.txt"}),
+                ModelToolCall("raised", "read_fixture", {"path": "raised.txt"}),
+                ModelToolCall("executed", "read_fixture", {"path": "executed.txt"}),
+            )
+        ),
+        ModelResponse((ModelTextBlock("replanned after complete batch"),)),
+    )
+    result, store = _run(
+        provider,
+        no_progress_replans=4,
+        tools=(RegisteredTool(_read_fixture_spec(), fail_in_distinct_ways),),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert calls == ["known.txt", "raised.txt", "executed.txt"]
+    assert [
+        fact.content["tool_call_id"]
+        for fact in store.state.facts
+        if fact.kind is FactKind.TOOL_RESULT
+    ] == ["prepare", "known", "raised", "executed"]
+    assert not any(
+        fact.kind is FactKind.POLICY_RESULT for fact in store.state.facts
+    )
+
+
+def test_resumed_batch_rebuilds_prefix_and_excludes_operator_results() -> None:
+    write_spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name="write_fixture",
+        version="1",
+        description="Write one fixture",
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.HIGH,
+        side_effect=SideEffectClass.WRITE,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        safety_policy={},
+        output_limit_chars=100,
+    )
+    for first_path, approved in (("ok.txt", True), ("fail.txt", False)):
+        provider = ScriptedProvider(
+            goal_noop_response(f"resume-batch-{first_path}-user-supplement"),
+            ModelResponse(
+                (
+                    ModelToolCall(
+                        "prefix-result",
+                        "read_fixture",
+                        {"path": first_path},
+                    ),
+                    ModelToolCall(
+                        "approval-result",
+                        "write_fixture",
+                        {"path": "out.txt"},
+                    ),
+                    ModelToolCall(
+                        "suffix-failure",
+                        "read_fixture",
+                        {"path": "fail.txt"},
+                    ),
+                )
+            ),
+            RetryableProviderError("stop after the resumed batch"),
+        )
+        store = InMemoryCheckpointStore(conversation_with_active_goal())
+        runtime = AgentRuntime(
+            provider=provider,
+            context_manager=KernelContextManager(
+                system_policy="policy",
+                limits=ContextLimits(max_input_tokens=8_000, output_reserve=100),
+            ),
+            tool_runtime=KernelToolRuntime(
+                (
+                    RegisteredTool(
+                        _read_fixture_spec(),
+                        lambda intent: (
+                            "fixture content"
+                            if intent.arguments["path"] == "ok.txt"
+                            else KnownNotExecuted(
+                                code="fixture_unavailable",
+                                message="fixture is temporarily unavailable",
+                            )
+                        ),
+                    ),
+                    RegisteredTool(
+                        write_spec,
+                        lambda _intent: KnownExecutedError(
+                            code="write_failed",
+                            message="write completed with a known error",
+                        ),
+                    ),
+                )
+            ),
+            checkpoint_store=store,
+            event_sink=CollectingSink(),
+            limits=InvocationLimits(max_no_progress_replans=0),
+            invocation_id_factory=lambda: "invocation-1",
+        )
+        submit = SubmitMessage(
+            conversation_id=store.state.conversation_id,
+            action_seq=store.state.next_action_seq,
+            expected_revision=store.state.revision,
+            run_id=f"run-resumed-batch-{approved}",
+            message="run the mixed batch",
+        )
+
+        paused = runtime.run_turn(submit, store.load())
+
+        assert paused.status is RunStatus.AWAITING_APPROVAL
+        assert paused.request is not None
+        durable_prefix = runtime._resumed_tool_batch_convergence(store.state)
+        assert durable_prefix.eligible is True
+        assert durable_prefix.has_success is (first_path == "ok.txt")
+        assert len(durable_prefix.failure_signatures) == (
+            0 if first_path == "ok.txt" else 1
+        )
+        approval = ResolveApproval(
+            conversation_id=store.state.conversation_id,
+            action_seq=store.state.next_action_seq,
+            expected_revision=store.state.revision,
+            request_id=paused.request.request_id,
+            binding_digest=paused.request.binding_digest,
+            approved=approved,
+        )
+        completed = runtime.run_turn(approval, store.load())
+
+        assert completed.status is RunStatus.FAILED_RETRYABLE
+        assert completed.error_code == "provider_retryable"
+        assert [
+            fact.content["tool_call_id"]
+            for fact in store.state.facts
+            if fact.kind is FactKind.TOOL_RESULT
+        ] == ["prefix-result", "approval-result", "suffix-failure"]
+        assert not any(
+            fact.content.get("code") == "no_progress_replan_required"
+            for fact in store.state.facts
+        )
+
+
+def test_resumed_batch_never_uses_a_matching_prefix_from_an_old_run() -> None:
+    calls = (
+        ToolCall("same-a", "read_fixture", {"path": "a.txt"}),
+        ToolCall("same-b", "read_fixture", {"path": "b.txt"}),
+    )
+    state = ConversationState(
+        conversation_id="conversation-1",
+        revision=2,
+        next_action_seq=1,
+        facts=(
+            ConversationFact(
+                fact_id="run:old-run:tool-batch:1",
+                kind=FactKind.TOOL_CALLS,
+                content={
+                    "calls": [
+                        {
+                            "tool_call_id": call.tool_call_id,
+                            "name": call.name,
+                            "arguments": call.arguments,
+                        }
+                        for call in calls
+                    ]
+                },
+            ),
+            ConversationFact(
+                fact_id="run:old-run:tool-result:same-a:2",
+                kind=FactKind.TOOL_RESULT,
+                content={
+                    "tool_call_id": "same-a",
+                    "text": "old success",
+                    "is_error": False,
+                    "executed": True,
+                    "metadata": {},
+                },
+            ),
+        ),
+        active_run=ActiveRun(
+            run_id="current-run",
+            phase=ContinuationPhase.TOOL,
+            batch_cursor=1,
+            tool_calls=calls,
+        ),
+    )
+    runtime = AgentRuntime(
+        provider=ScriptedProvider(),
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=8_000, output_reserve=100),
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=InMemoryCheckpointStore(state),
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+    )
+
+    resumed = runtime._resumed_tool_batch_convergence(state)
+
+    assert resumed.eligible is False
+    assert resumed.has_success is False
+    assert resumed.failure_signatures == []
+
+
+def test_success_resets_known_failure_convergence() -> None:
+    calls: list[str] = []
+
+    def sometimes_available(intent: ExecutionIntent) -> str | KnownNotExecuted:
+        path = intent.arguments["path"]
+        calls.append(str(path))
+        if path == "fail.txt":
+            return KnownNotExecuted(
+                code="fixture_unavailable",
+                message="fixture is temporarily unavailable",
+            )
+        return "fixture content"
+
+    responses = (
+        ModelResponse(
+            (ModelToolCall("fail-1", "read_fixture", {"path": "fail.txt"}),)
+        ),
+        ModelResponse(
+            (ModelToolCall("success", "read_fixture", {"path": "ok.txt"}),)
+        ),
+        ModelResponse(
+            (ModelToolCall("fail-2", "read_fixture", {"path": "fail.txt"}),)
+        ),
+        ModelResponse(
+            (ModelToolCall("fail-3", "read_fixture", {"path": "fail.txt"}),)
+        ),
+    )
+    provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-reset-after-success")),
+        *responses,
+        RetryableProviderError("post-threshold send must not happen"),
+    )
+
+    result, _store = _run(
+        provider,
+        no_progress_replans=2,
+        max_model_calls=None,
+        tools=(RegisteredTool(_read_fixture_spec(), sometimes_available),),
+    )
+
+    assert result.status is RunStatus.LIMIT_REACHED
+    assert result.error_code == "no_progress"
+    assert calls == ["fail.txt", "ok.txt", "fail.txt", "fail.txt"]
+    assert len(provider.calls) == 5
+
+
+def test_different_known_failure_request_starts_a_new_signature() -> None:
+    calls: list[str] = []
+
+    def known_failure(intent: ExecutionIntent) -> KnownNotExecuted:
+        calls.append(str(intent.arguments["path"]))
+        return KnownNotExecuted(
+            code="fixture_unavailable",
+            message="fixture is temporarily unavailable",
+        )
+
+    provider = ScriptedProvider(
+        ModelResponse((), control=BeginAnswer("begin-different-failure")),
+        ModelResponse((ModelToolCall("a", "read_fixture", {"path": "a.txt"}),)),
+        ModelResponse((ModelToolCall("b-1", "read_fixture", {"path": "b.txt"}),)),
+        ModelResponse((ModelToolCall("b-2", "read_fixture", {"path": "b.txt"}),)),
+        RetryableProviderError("post-threshold send must not happen"),
+    )
+
+    result, _store = _run(
+        provider,
+        no_progress_replans=2,
+        max_model_calls=None,
+        tools=(RegisteredTool(_read_fixture_spec(), known_failure),),
+    )
+
+    assert result.status is RunStatus.LIMIT_REACHED
+    assert result.error_code == "no_progress"
+    assert calls == ["a.txt", "b.txt", "b.txt"]
+    assert len(provider.calls) == 4
 
 
 def test_one_parallel_nonexecuted_batch_uses_one_replan_opportunity() -> None:
@@ -846,7 +1663,7 @@ def test_non_citation_goal_target_does_not_enter_citation_authority() -> None:
     assert calls == ["read"]
 
 
-def test_workspace_mutation_invalidates_prior_read_deduplication() -> None:
+def test_executed_workspace_error_invalidates_prior_read_deduplication() -> None:
     calls: list[str] = []
 
     def spec(name: str, side_effect: SideEffectClass) -> ToolSpec:
@@ -905,7 +1722,11 @@ def test_workspace_mutation_invalidates_prior_read_deduplication() -> None:
             ),
             RegisteredTool(
                 spec("edit_file", SideEffectClass.WRITE),
-                lambda _intent: calls.append("edit") or "edited",
+                lambda _intent: calls.append("edit")
+                or KnownExecutedError(
+                    code="edit_failed_after_execution",
+                    message="edit may have changed the workspace before failing",
+                ),
             ),
         ),
     )

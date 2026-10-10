@@ -12,7 +12,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent.composition import SandboxReadiness, build_sandbox_resources
+import pytest
+
+from agent.composition import (
+    HOST_HOME_PRIVATE_ROOTS,
+    SandboxReadiness,
+    build_sandbox_resources,
+)
 from agent.runtime.contracts import ExecutionAuthorityClass
 from agent.sandbox.contracts import SandboxQualificationV1
 
@@ -55,10 +61,13 @@ def _unavailable(reason: str) -> SandboxQualificationV1:
 
 
 def _build(tmp_path: Path, confiner) -> object:
+    host_home = tmp_path / "host-home"
+    host_home.mkdir(exist_ok=True)
     return build_sandbox_resources(
         workspace=tmp_path / "work",
         state_root=tmp_path / "state",
         captured_path="/usr/bin:/bin",
+        host_home=host_home,
         confiner=confiner,
     )
 
@@ -131,11 +140,14 @@ def test_per_invocation_roots_live_outside_state_carveout(tmp_path):
     import tempfile as _tempfile
 
     _workspace(tmp_path)
+    host_home = tmp_path / "host-home"
+    host_home.mkdir()
     confiner = FakeConfiner(_qualified())
     build_sandbox_resources(
         workspace=tmp_path / "work",
         state_root=tmp_path / "state",
         captured_path="/usr/bin:/bin",
+        host_home=host_home,
         confiner=confiner,
     )
     base_name = (
@@ -160,7 +172,111 @@ def test_default_confiner_construction_is_lazy_and_backend_safe():
 
     signature = inspect.signature(build)
     assert set(signature.parameters) - {"self"} == {
-        "workspace", "state_root", "captured_path", "confiner",
+        "workspace", "state_root", "captured_path", "host_home", "confiner",
     }
+    assert signature.parameters["host_home"].default is inspect.Parameter.empty
     assert signature.parameters["confiner"].default is None
     del SeatbeltConfiner
+
+
+def test_default_composition_passes_one_closed_private_root_tuple_to_both_tools(
+    tmp_path,
+    monkeypatch,
+):
+    assert HOST_HOME_PRIVATE_ROOTS == (
+        ".aws",
+        ".claude",
+        ".codex",
+        ".config",
+        ".docker",
+        ".gnupg",
+        ".kube",
+        ".opencode",
+        ".ssh",
+        ".ua",
+        ".git-credentials",
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+    )
+    workspace = _workspace(tmp_path)
+    state_root = tmp_path / "state"
+    host_home = tmp_path / "host-home"
+    state_root.mkdir()
+    host_home.mkdir()
+    captured: dict[str, tuple] = {}
+
+    from agent.sandbox import shell as sandbox_shell
+    from agent.sandbox import tools as sandbox_tools
+
+    original_sandbox = sandbox_tools.build_sandbox_exec_registration
+    original_shell = sandbox_shell.build_shell_exec_registration
+
+    def capture_sandbox(**kwargs):  # noqa: ANN003, ANN202
+        captured["sandbox_exec"] = kwargs["private_roots"]
+        return original_sandbox(**kwargs)
+
+    def capture_shell(**kwargs):  # noqa: ANN003, ANN202
+        captured["shell_exec"] = kwargs["private_roots"]
+        return original_shell(**kwargs)
+
+    monkeypatch.setattr(sandbox_tools, "build_sandbox_exec_registration", capture_sandbox)
+    monkeypatch.setattr(sandbox_shell, "build_shell_exec_registration", capture_shell)
+
+    build_sandbox_resources(
+        workspace=workspace,
+        state_root=state_root,
+        captured_path="/usr/bin:/bin",
+        host_home=host_home,
+        confiner=FakeConfiner(_qualified()),
+    )
+
+    expected = tuple(str(host_home / entry) for entry in HOST_HOME_PRIVATE_ROOTS)
+    assert captured == {"sandbox_exec": expected, "shell_exec": expected}
+    assert not (host_home / ".ssh").exists()
+    assert not (host_home / ".aws").exists()
+
+
+def test_invalid_or_overlapping_host_home_fails_composition_closed(tmp_path):
+    workspace = _workspace(tmp_path)
+    state_root = tmp_path / "state"
+    state_root.mkdir()
+    regular_file = tmp_path / "not-a-home"
+    regular_file.write_text("fixture", encoding="utf-8")
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    symlink_home = tmp_path / "symlink-home"
+    symlink_home.symlink_to(real_home, target_is_directory=True)
+
+    for invalid in (tmp_path / "missing-home", regular_file, symlink_home):
+        with pytest.raises(ValueError, match="host_home"):
+            build_sandbox_resources(
+                workspace=workspace,
+                state_root=state_root,
+                captured_path="/usr/bin:/bin",
+                host_home=invalid,
+                confiner=FakeConfiner(_qualified()),
+            )
+
+    protected_workspace = real_home / ".ssh" / "project"
+    protected_workspace.mkdir(parents=True)
+    with pytest.raises(ValueError, match="overlap"):
+        build_sandbox_resources(
+            workspace=protected_workspace,
+            state_root=state_root,
+            captured_path="/usr/bin:/bin",
+            host_home=real_home,
+            confiner=FakeConfiner(_qualified()),
+        )
+
+    enclosing_workspace = tmp_path / "enclosing-workspace"
+    nested_home = enclosing_workspace / "host-home"
+    nested_home.mkdir(parents=True)
+    with pytest.raises(ValueError, match="overlap"):
+        build_sandbox_resources(
+            workspace=enclosing_workspace,
+            state_root=state_root,
+            captured_path="/usr/bin:/bin",
+            host_home=nested_home,
+            confiner=FakeConfiner(_qualified()),
+        )

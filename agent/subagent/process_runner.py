@@ -39,6 +39,7 @@ from agent.process.group import (
 )
 from agent.runtime.contracts import RunStatus
 from agent.subagent.contracts import (
+    MAX_RESULT_ENVELOPE_BYTES,
     ChildProfile,
     ChildProviderSpec,
     ChildRunResult,
@@ -49,9 +50,11 @@ from agent.subagent.runtime_factory import child_status_reason, derive_child_ide
 
 _POLL_INTERVAL = 0.02
 _KILL_GRACE_SECONDS = 1.0
-# parent 读取 child stdout 的有界上限（defense-in-depth）：child 内 ``_RESULT_LIMIT_CHARS``
-# 已 cap 消息，正常结果远小于此；超出按 oversized → UNCONFIRMED，绝不无界 read。
-_MAX_RESULT_BYTES = 8_192
+# parent 读取 child stdout 的有界上限（defense-in-depth）：与 child 输出 seam 共用
+# contracts 中的 8192-byte envelope 预算；child 已按完整 JSON 编码截断 message 前缀，
+# 正常结果总是 ≤ 上限，超出即外部真正 oversized → UNCONFIRMED，绝不无界 read。
+# 保留 ``_MAX_RESULT_BYTES`` 名称作为 alias，既有 monkeypatch seam 继续有效。
+_MAX_RESULT_BYTES = MAX_RESULT_ENVELOPE_BYTES
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,7 +6,10 @@
 
 - 项目名是 `my-first-agent`；它不是 Coding Agent 的身份。
 - 默认在 `main` 工作。除非用户明确要求，不 commit、push、tag 或修改 remote。
-- 当前产品是 Minimal Runtime Kernel foundation，不宣称已经是完整通用 Agent。
+- 本仓库已于 2026-09-09 冻结为学习里程碑（tag `study-freeze-2026-09-09-candidate`）：含七项 v1
+  capability 与 015–019 候选能力，全部对当前 identity 为 `implemented-candidate`，不再自动开启新的
+  优化轮次或 promotion 重绑；当前状态权威见
+  `docs/architecture/CURRENT_CAPABILITY_STATUS.md`。
 
 ## Architecture invariants
 

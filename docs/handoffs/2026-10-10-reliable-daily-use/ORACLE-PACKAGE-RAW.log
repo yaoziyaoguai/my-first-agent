@@ -1,0 +1,867 @@
+Session: fa-next-steps-package-20261010
+Mode: browser foreground
+Models: 1
+Detach: no
+Reattach: oracle session fa-next-steps-package-20261010
+Launching browser mode (picker=current; requested=gpt-5.6-sol) with ~12,611 tokens.
+This run can take up to 45 minutes (usually ~10 minutes).
+[browser] Browser control: launch visible Chrome; may focus/control the browser UI.
+[browser] Browser guidance: A visible automation Chrome window may take focus while Oracle controls ChatGPT.
+[browser] Browser guidance: Use --browser-hide-window, --browser-attach-running, or --remote-chrome to reduce desktop disruption.
+[browser] Thinking time: Power, item 5 of 5 (slider ARIA) (already selected)
+[browser] Thinking time: Power, item 5 of 5 (slider ARIA) (already selected)
+[browser] ChatGPT thinking - 30s elapsed; status=response streaming; source=inline
+[browser] ChatGPT thinking - 1m 0s elapsed; status=response streaming; last change 29s ago; source=inline
+[browser] ChatGPT thinking - 1m 30s elapsed; status=response streaming; last change 59s ago; source=inline
+[browser] ChatGPT thinking - 2m 0s elapsed; status=response streaming; last change 1m 30s ago; source=inline
+[browser] ChatGPT thinking - 2m 30s elapsed; status=response streaming; last change 1m 59s ago; source=inline
+[browser] ChatGPT thinking - 3m 0s elapsed; status=response streaming; last change 2m 30s ago; source=inline
+[browser] ChatGPT thinking - 3m 30s elapsed; status=response streaming; last change 3m 0s ago; source=inline
+[browser] ChatGPT thinking - 4m 0s elapsed; status=response streaming; last change 3m 30s ago; source=inline
+[browser] ChatGPT thinking - 4m 30s elapsed; status=response streaming; last change 4m 0s ago; source=inline
+[browser] ChatGPT thinking - 5m 0s elapsed; status=response streaming; last change 4m 30s ago; source=inline
+[browser] ChatGPT thinking - 5m 30s elapsed; status=response streaming; last change 5m 0s ago; source=inline
+[browser] ChatGPT thinking - 6m 0s elapsed; status=response streaming; last change 5m 30s ago; source=inline
+[browser] ChatGPT thinking - 6m 30s elapsed; status=response streaming; last change 6m 0s ago; source=inline
+[browser] ChatGPT thinking - 7m 0s elapsed; status=response streaming; last change 6m 30s ago; source=inline
+[browser] ChatGPT thinking - 7m 30s elapsed; status=response streaming; last change 7m 0s ago; source=inline
+[browser] ChatGPT thinking - 8m 0s elapsed; status=response streaming; last change 7m 30s ago; source=inline
+[browser] ChatGPT thinking - 8m 30s elapsed; status=response streaming; last change 8m 0s ago; source=inline
+[browser] ChatGPT thinking - 9m 0s elapsed; status=response streaming; last change 8m 30s ago; source=inline
+[browser] ChatGPT thinking - 9m 30s elapsed; status=response streaming; last change 9m 0s ago; source=inline
+[browser] ChatGPT thinking - 10m 0s elapsed; status=response streaming; last change 9m 30s ago; source=inline
+[browser] ChatGPT thinking - 10m 30s elapsed; status=response streaming; last change 10m 0s ago; stale-hint=no UI progress change; source=inline
+[browser] ChatGPT thinking - 11m 0s elapsed; status=response streaming; last change 10m 30s ago; stale-hint=no UI progress change; source=inline
+[browser] ChatGPT thinking - 11m 30s elapsed; status=response streaming; last change 11m 0s ago; stale-hint=no UI progress change; source=inline
+[browser] ChatGPT thinking - 12m 0s elapsed; status=response streaming; last change 11m 30s ago; stale-hint=no UI progress change; source=inline
+[browser] ChatGPT thinking - 12m 30s elapsed; status=response streaming; last change 12m 0s ago; stale-hint=no UI progress change; source=inline
+[browser] ChatGPT thinking - 13m 0s elapsed; status=response streaming; last change 12m 30s ago; stale-hint=no UI progress change; source=inline
+[browser] ChatGPT thinking - 13m 30s elapsed; status=response streaming; last change 13m 0s ago; stale-hint=no UI progress change; source=inline
+[browser] ChatGPT thinking - 14m 0s elapsed; status=response streaming; last change 13m 30s ago; stale-hint=no UI progress change; source=inline
+[browser] ChatGPT thinking - 14m 30s elapsed; status=response streaming; last change 14m 0s ago; stale-hint=no UI progress change; source=inline
+[browser] ChatGPT thinking - 15m 0s elapsed; status=response streaming; last change 14m 30s ago; stale-hint=no UI progress change; source=inline
+[browser] ChatGPT thinking - 15m 30s elapsed; status=response streaming; last change 15m 0s ago; stale-hint=no UI progress change; source=inline
+[browser] ChatGPT thinking - 16m 0s elapsed; status=response streaming; last change 15m 30s ago; stale-hint=no UI progress change; source=inline
+[browser] ChatGPT thinking - 16m 30s elapsed; status=response streaming; last change 16m 0s ago; stale-hint=no UI progress change; source=inline
+[browser] ChatGPT archive skipped (disabled).
+[browser] Model selection evidence: requestedKey=gpt-5.6-sol; target=GPT-5.6 Sol; resolvedLabel=Power, item 5 of 5 (slider ARIA); status=already-selected; strategy=current; verified=yes; source=thinking-time-control; capturedAt=2026-10-10T06:13:32.340Z
+Answer:
+my-first-agent：日用基线固化与有界可靠性收尾执行包
+
+建议目录： docs/handoffs/2026-10-10-reliable-daily-use/
+合同状态： 本包行为范围冻结；执行前必须与仓库交叉核对。交叉核对只能补齐实际路径、函数签名、命令及证据位置，不能自行增加产品目标。
+执行方式： 单执行者，串行推进；optional_subagents: []。
+默认真实 API 预算： ¥0，0 次请求。
+Git 提交权限： 需要执行前单独确认；本咨询及“下一步做什么”的意图不替代明确的 commit 授权。
+
+1. Goal
+
+将已经通过验收的 Agent 收敛成一个来源可追溯、可以独立安装运行、已知故障有明确处理办法的个人日用版本。
+
+本轮优先级固定为：
+
+优先级	切片	要解决的问题
+P0	S1：改动归属与可提交基线	防止混入或损坏用户既有工作；确认剥离无关改动后，待提交版本仍能独立成立
+P1	S2：会话生命周期异常的有界诊断	定位已发生的 CheckpointSecurityError；未复现时保留边界，不做猜测性修复
+P1	S3：日用入口与恢复说明	用已有能力完成安装、配置、首次任务、恢复和故障提示，不再增加一套配置系统
+P2	S4：Provider 支持边界	明确当前验证范围；本轮延期新增真实 Provider 验证
+P0，收口门禁	S5：独立候选验证与授权提交	把“当前脏工作树能跑”转化为“明确版本能跑”，并交付真实的版本与限制
+
+**本轮成功不要求定位所有偶发故障，也不要求支持更多模型。**成功要求是：成果安全保存，候选可独立验证，已知风险没有被隐藏，用户能够按明确路径开始日用。
+
+1.1 继承的已验证状态
+
+以下状态直接继承用户提供的当前结论，不重新降级或重开原验收：
+
+DU-01～27 全部 PASS。
+最终全量 gate 为 3711 passed / 1 skipped / 0 failed；其中 skipped 来自所附 RESULTS.md:70，执行者需核对其具体原因。
+真实 DeepSeek Flash A/B/C 均按最终定义 PASS。
+本地专属 Chromium 旅程 PASS。
+usage 持久化、DU-10/14/22 补证均已完成，不再安排重复修复。
+CheckpointSecurityError 的完整消息日志已接入 agent.entrypoint；根因仍未定位。
+当前产品定位仍为 implemented-candidate，本包不是 promotion。
+
+以上以所附 AUDIT-2026-10-10.md:86–96 和 RESULTS.md:169–179 的最终状态为准。旧记录中的 “C 部分完成”“usage 待修”“下一步补 DU-10/14/22”等内容按历史记录理解，不作为新任务来源。
+
+2. Non-goals
+
+本轮不得增加第二套 Agent loop、生命周期管理框架、配置框架、调度器、后台 daemon、服务定位器、兼容性 fallback，或新的平台支持。
+
+不得新增 Provider adapter、自动模型切换、自动安装依赖、自动寻找凭据、自动清理 checkpoint/lock、自动重试 CheckpointSecurityError，也不得放宽 checkpoint、approval、evidence、sandbox 的安全检查。
+
+不修改旧冻结合同、旧验收定义和原始审计证据；不为消除历史文字矛盾而重写整个旧 handoff。不重做已经完成的 owner-preferences 持久化，不按测试数量、文件行数或“覆盖更多可能性”扩张工作。
+
+所有生产状态变化仍必须经过现有 AgentRuntime.run_turn、ToolRuntime 和已有治理链路。
+
+3. 执行规则、产物与预算
+3.1 最小产物
+
+优先复用现有文件和工具。新 handoff 最多维护以下核心资料：
+
+产物	用途
+EXECUTION-PACK.md	本冻结合同
+RESULTS.md	本轮唯一人工进度与证据记录
+OWNERSHIP.tsv	文件／hunk 归属、前后版本、是否允许提交
+COMMANDS.md	仓库交叉核对后确认的入口、测试 node 和完整命令
+
+日用说明优先更新已有指南；确实没有合适入口时，新增 docs/guides/daily-use.md。
+
+合成诊断日志、临时 index、候选副本、补丁和原始测试输出存放于本轮专属临时目录，不混入产品包，不默认提交。已有同名未跟踪文件必须先确认归属，不能覆盖。
+
+3.2 权限
+操作	本包默认决定
+读取公开源码、公开测试、公开 handoff	允许
+修改已完成归属确认的最小公开代码／文档／测试	执行本包时允许
+新建合成 workspace/state/profile、使用 fake provider	允许
+运行现有离线测试、已安装的专属 Chromium＋loopback 旅程	允许，必须沿用隔离与清理规则
+读取旧真实日志、真实 checkpoint、用户 profile、私有目录或凭据	不允许
+真实 Provider／MCP／外站调用	不允许
+下载、升级、自动安装缺失依赖或浏览器	不允许
+本仓库 commit	待用户明确确认
+push、tag、修改 remote、历史重写	不允许
+
+旧的 ¥10 授权及其估算剩余额度不自动转入本包。历史约 ¥2 只能继续表述为估算，不改称实付。
+
+3.3 预算与停止上限
+
+以下是执行上限，不是完成时间承诺。
+
+项目	上限
+Git 归属补证	最多两轮；缺失原始内容或归属仍不明即停止提交整理
+生命周期静态诊断	60 分钟有效分析预算
+生命周期 stress	首轮最多 100 对同进程会话；只有出现新证据、修复或明确的夹具纠正，才允许第二轮，累计最多 200 对
+每轮 stress	主工作 600 秒；另留最多 10 秒处理本轮自有进程的收尾
+确定性回归	修复前至少 3 次同因失败；修复后最多 10 次验证，分布于至少两个独立测试进程
+全量 gate	原则上 C0、最终候选各一次；有明确修复依据时额外一次，总计最多三次
+单次 full gate	1800 秒墙钟上限；超时不能计为通过
+本地 Chromium 旅程	最多两次；使用现有脚本的预算及清理机制
+真实 API	¥0／0 次
+本仓库本地提交	用户确认后最多两次：C0 已验收成果、C1 本轮必要收尾
+
+不得假设系统安装了 GNU timeout 或 pytest-timeout。使用执行器已有的有界进程能力；超时后无法确认资源收尾时，停止后续批次。
+
+3.4 Red／Green 与证据纪律
+
+每项行为改动必须先有能够区分缺陷的 Red，再做最小 Green。诊断未复现、纯文档整理、Git 归属确认，不需要伪造 Red。
+
+每条验收记录至少包含：
+
+纯文本
+ID：
+状态：
+候选身份：HEAD / tree ID / 相关公开源码 SHA-256
+环境与入口：
+命令、cwd、实际 pytest node：
+退出码、完整 summary、耗时：
+Red 为什么证明目标缺陷：
+Green 为什么排除了同一缺陷：
+自有资源清理结果：
+未证明的边界：
+
+测试总数变化必须按实际新增／调整 node 解释。失败、超时、输出截断、意外 skip、收集数量减少，均不能包装为 PASS。
+
+4. S1：改动归属与可提交基线
+4.1 核心裁决
+
+不能直接 git add 那 11 个文件，再把当前未跟踪文件全部加入。
+
+这里存在两种不同的差异：
+
+纯文本
+H：当前 HEAD
+B：上一轮开始时的工作树内容，可能已经包含用户未提交的改动
+C：上一轮完成后的当前内容
+
+本轮实施差异：B → C
+直接整文件提交的差异：H → C
+
+BASELINE.sha256 能识别某文件相对 B 是否变化，不能恢复 B 的内容，也不能证明 H → C 全部属于上一轮。即使采用按路径提交，Git 仍可能提交该路径当前工作树中的完整改动，而不是只提交特定轮次的 hunk。
+Git
+
+因此，唯一推荐路径是：
+
+先逐文件／逐 hunk 确认归属，再从 HEAD 构建只含获准差异的临时候选 index，独立验证后提交。
+
+4.2 S1-A：只读盘点和保护
+
+在开始新增生产代码修改前，执行以下盘点。以下命令使用 Bash；输出保存于权限受限的临时目录，不直接打印整个目录内容。
+
+Bash
+set -euo pipefail
+umask 077
+
+REPO="/Users/jinkun.wang/work_space/my-first-agent"
+cd "$REPO"
+
+test "$(git symbolic-ref --quiet --short HEAD)" = "main"
+test -z "${GIT_INDEX_FILE-}"
+
+export GIT_OPTIONAL_LOCKS=0
+
+H="$(git rev-parse HEAD)"
+E="$(mktemp -d "${TMPDIR:-/tmp}/first-agent-next.XXXXXX")"
+
+printf '%s\n' "$H" > "$E/head.before"
+
+git status --porcelain=v2 -z --untracked-files=all \
+  > "$E/status.before.z"
+
+git diff --name-status -z \
+  > "$E/unstaged.before.z"
+
+git diff --cached --name-only -z \
+  > "$E/staged-paths.before.z"
+
+git ls-files --stage -z \
+  > "$E/index-entries.before.z"
+
+git ls-files --others --exclude-standard -z \
+  > "$E/untracked.before.z"
+
+INDEX_PATH="$(git rev-parse --git-path index)"
+case "$INDEX_PATH" in
+  /*) ;;
+  *) INDEX_PATH="$REPO/$INDEX_PATH" ;;
+esac
+
+test -f "$INDEX_PATH"
+test ! -L "$INDEX_PATH"
+test ! -e "${INDEX_PATH}.lock"
+test -z "$(git ls-files -u)"
+
+cp -p "$INDEX_PATH" "$E/index.before"
+shasum -a 256 "$E/index.before" > "$E/index.before.sha256"
+
+随后检查是否存在 merge、rebase、cherry-pick、revert 未完成状态，以及 split/sparse index、特殊 index 标记、有效 hooks 和签名要求。
+
+**本包不自动处理这些复杂状态。**存在未完成 Git 操作、候选路径特殊 index 状态、未确认的 hook 副作用或并发写入者时，停止提交路径；不删除 lock，不关闭用户工具，不禁用 hooks 来绕过。
+
+git ls-files --stage -z 可以保存 index 的 mode、blob ID、stage 与路径，适合在提交前后核对用户已有暂存内容是否保持不变。
+Git
+
+4.3 S1-B：枚举候选，而不是猜测 11 个文件
+
+先定位并核对旧 BASELINE.sha256 的真实路径、格式和路径安全性，再执行：
+
+Bash
+shasum -a 256 -c \
+  docs/handoffs/2026-10-09-daily-use-closure/BASELINE.sha256
+
+此命令出现 hash mismatch 是预期的差异发现结果，不是产品 Red。需保存完整输出和退出码。
+
+必须区分：
+
+审计当时的 11/48。
+后续 usage、日志可观测性及补证变更。
+本包启动后新增的变更。
+
+当前数量不是 11 时，先解释时间线，不能强行凑成 11，也不能把新增差异自动批准。
+
+以报告中的以下内容作为查找种子，不是提交 allowlist：
+
+纯文本
+agent/runtime/loop.py
+agent/runtime/evidence.py
+agent/tui/app.py
+agent/tui/adapter.py
+agent/tui/dialogs.py
+agent/cli/render.py
+main.py
+scripts/f2_f3_local_browser_journeys.py
+scripts/run_real_coding_scenario.py
+相关 state.py、openai_http.py、usage 编码与记录代码
+报告明确引用的测试文件
+
+实际路径以仓库为准；缺少的路径通过公开源码检索定位，不凭文件名猜目录。
+
+OWNERSHIP.tsv 必需字段
+纯文本
+path
+tracked_at_HEAD
+present_before_round
+baseline_sha256
+baseline_content_source
+current_sha256
+ownership_class
+owned_hunks_or_whole_file
+required_dependency
+commit_decision
+evidence
+
+归属分类固定如下：
+
+分类	处理
+ROUND_ONLY	能证明整文件差异仅来自目标轮次，可整文件纳入
+MIXED_SEPARABLE	存在用户旧改动，但有可靠 B 内容，可分离本轮 hunk
+PREEXISTING_UNTRACKED	不能当作本轮新文件；提交其原有内容需要另行授权
+UNKNOWN	不提交、不覆盖；给出最小缺失证据
+UNRELATED	完全排除
+
+**新文件的证明不能只靠 mtime、Git 的 ??，或“不在那 48 个文件里”。**应结合轮次开始时的文件清单、明确的创建记录、受控 diff 或用户确认。
+
+特别处理旧报告中曾被覆盖后重建的未跟踪 journey 脚本：语义验证通过，不等于其完整原始内容的提交归属已经证明。缺少可核验的轮前内容时，不能把整文件当作本轮新建文件提交。
+
+4.4 S1-C：构造独立候选
+
+对 MIXED_SEPARABLE：
+
+取得 B 的可靠内容，核对 SHA-256。
+从 B → C 提取有证据的本轮变化。
+将这些变化应用到 H 的隔离副本。
+检查是否依赖未获准的用户旧改动。
+生成审核后的 owned.patch 和 NUL 分隔的 selected-paths.z。
+
+没有 B 内容时，不从 hash 反推原文，也不以“看起来是 AI 写的”判断归属。
+
+如果获准差异必须依赖用户的预存代码才能运行，输出最小依赖清单并停止该候选提交。不得为了让测试通过而悄悄纳入依赖。
+
+临时 index 命令
+
+以下输入必须已经产生并审核：
+
+纯文本
+$E/owned.patch
+$E/selected-paths.z
+
+所有路径必须为仓库相对的明确文件路径，禁止目录通配、越界路径、秘密目录、未确认 symlink 和 submodule。
+
+Bash
+cd "$REPO"
+
+test "$(git rev-parse HEAD)" = "$H"
+test -s "$E/owned.patch"
+test -s "$E/selected-paths.z"
+
+ALT_INDEX="$E/candidate.index"
+test ! -e "$ALT_INDEX"
+
+GIT_INDEX_FILE="$ALT_INDEX" git read-tree "$H"
+
+GIT_INDEX_FILE="$ALT_INDEX" \
+  git apply --cached --check "$E/owned.patch"
+
+GIT_INDEX_FILE="$ALT_INDEX" \
+  git apply --cached "$E/owned.patch"
+
+GIT_INDEX_FILE="$ALT_INDEX" \
+  git diff --cached --check "$H"
+
+GIT_INDEX_FILE="$ALT_INDEX" \
+  git diff --cached --name-only -z "$H" \
+  > "$E/candidate-paths.z"
+
+GIT_INDEX_FILE="$ALT_INDEX" \
+  git diff --cached --binary "$H" \
+  > "$E/candidate.review.patch"
+
+TREE="$(GIT_INDEX_FILE="$ALT_INDEX" git write-tree)"
+printf '%s\n' "$TREE" > "$E/candidate.tree"
+
+GIT_INDEX_FILE 指定替代 index；read-tree 在不使用工作树更新选项时只准备 index；git apply --cached 只修改该 index，不修改用户工作树。
+Git
++2
+
+执行者必须断言：
+
+纯文本
+candidate-paths.z 的集合 == selected-paths.z 的集合
+原真实 index 的 SHA-256 未变
+HEAD 未变
+获准公开文件的工作树内容未因候选构造而改变
+没有纳入 .local、.ua、graphify-out、真实日志、会话、凭据或无关未跟踪文件
+独立物化
+
+在确认候选树没有私有内容、危险路径及未处理的特殊文件后：
+
+Bash
+CANDIDATE="$E/candidate"
+mkdir "$CANDIDATE"
+
+GIT_INDEX_FILE="$ALT_INDEX" \
+  git checkout-index --all --prefix="$CANDIDATE/"
+
+该命令从临时 index 导出到新目录，而不是复制整个 dirty 工作树。
+Git
+
+独立候选必须使用自身源码运行测试。不得依赖原工作树里的未跟踪文件、原源码导入路径，或“恰好装过的 editable 包”掩盖缺失依赖。
+
+若测试确实依赖 .git 或特殊目录布局，先复用仓库已有隔离验证方式；不能删除测试、回源导入或自动搭建另一套发布流程来绕过。
+
+4.5 S1 验收
+ID	行为	必需证据
+ND-01	修改前保存 HEAD、状态、index 元数据及受控公开文件快照；没有覆盖用户内容	盘点命令、元数据、写入范围
+ND-02	48 文件差异、后续增量、新文件均有明确归属；未知项排除	完整 OWNERSHIP.tsv
+ND-03	混合文件只纳入获准 hunk；预存未跟踪文件不冒充新增文件	B hash、B→C 差异、H→候选审核 diff
+ND-04	临时候选构造没有修改真实 index、HEAD 或用户工作树	前后 hash、index 条目比较
+ND-05	候选不存在对未获准 dirty/untracked 内容的隐式依赖	隔离 focused/full gate、导入来源检查
+ND-06	C0 提交仅在明确授权后进行；未授权时保留已验证候选和补丁	授权原文，或 READY_NOT_COMMITTED 状态
+
+停止条件： 两轮补证后归属仍不明、候选依赖未获准代码、HEAD/index 并发变化、候选无法独立验证。
+
+S1 被 Git 授权阻塞时，可以继续只读诊断及合成实验；未完成归属和快照保护前，不继续修改混合生产文件。
+
+5. S2：CheckpointSecurityError 有界诊断
+5.1 目标和现状
+
+目标不是“再跑很多次看看”，而是确定错误发生于：
+
+纯文本
+首次会话关闭
+→ cleanup callback / provider stream 收尾
+→ 第二次 open_workspace_session
+→ checkpoint 安全校验
+
+中的哪一个真实阶段，以及它是否与资源归属、句柄复用、锁状态或关闭顺序有关。
+
+已存在五种离线复现尝试及日志增强。因此，先复用已有诊断材料和夹具；只有原方法缺少同进程连续性或可控流式时序时才补齐。
+
+“新进程正常”“二跑不复发”都是有效观察，但不等于根因已修复。
+
+5.2 S2-A：源码路径核对
+
+遵守 AGENTS 的 Graphify 规则；仅在能确认图来自公开输入时使用。随后对实际路径做源码核对：
+
+Bash
+rg -n \
+  'CheckpointSecurityError|open_workspace_session|close_stack|agent\.entrypoint' \
+  main.py agent tests scripts
+
+在 RESULTS.md 中画出一条实际调用链，不新增架构图系统：
+
+纯文本
+产品入口
+→ session 打开
+→ root/state 资源获得
+→ checkpoint load/save
+→ provider／worker 收尾
+→ cleanup callbacks
+→ 第二次 session 打开
+
+记录所有实际抛出 CheckpointSecurityError 的守卫条件，以及它们使用的是路径、目录句柄、文件句柄还是持久化元数据。
+
+以下只作为待验证假设：
+
+假设	所需证据
+旧 callback 关闭了新会话复用的 fd	callback 所属会话、fd 代际、fstat 身份和实际执行顺序
+session close 与外层 close_stack 重复承担同一资源	两条真实关闭路径及资源 owner
+旧 callback 捕获了后来被替换的可变对象	closure／对象引用与第二会话绑定变化
+stream／worker 尚未真正结束便开始下一会话	callable 实际结束、cleanup 完成和第二次 open 的顺序
+正常安全检查拒绝了一个本来就不合法的重开	第二次 open 时仍存活的 owner／lease，以及既有合同
+目录或 checkpoint 身份确实变化	合成目录的身份变化及对应 guard；区分合法原子替换与根目录身份异常
+
+ExitStack 按注册逆序执行关闭动作；需要检查实际注册顺序与异常路径，而不是简单加一次 close()。若仓库使用的是其他资源栈，以其实现为准。
+Python documentation
+
+5.3 S2-B：最小观测
+
+优先在合成 harness 中记录，不先增加生产日志字段。
+
+每对会话只记录：
+
+纯文本
+cycle / phase / monotonic sequence
+PID / thread 标识
+合成 session 标识、资源 owner 标识
+callback 注册、进入、退出、异常顺序
+受控 fd 的 acquire / use / close / 身份
+第二次 open 的开始位置
+异常类型、合成数据下的完整消息、实际 stack
+资源关闭确认结果
+
+限制：
+
+不读取历史 .local/dogfood、用户 checkpoint 或真实 profile。
+不输出真实 token、prompt、response、会话内容。
+用户可见错误仍保持既定的类型级输出，不把完整异常消息放入 TUI/CLI。
+不增加全局调试开关或常驻监控服务。
+lsof 仅在已安装时用于本轮自有合成进程；不能据一个全局 fd 数量变化直接判为泄漏。
+锁文件存在不等于锁仍被持有；不得通过删除 lock“验证修复”。
+5.4 S2-C：固定复现矩阵
+
+首轮总计 100 对会话。每一对的两个会话必须在同一个子进程里打开；第二会话创建新的 composition/provider 实例。
+
+父进程可以负责有界超时，但不能把每次 session 都移到新进程后声称验证了同进程问题。
+
+模式	对数	场景及断言
+M1：终态串行重开	25	完成合成任务→正常 close→同 PID 第二次 open；读取到正确终态，没有资源归属串线
+M2：审批边界恢复	25	到达 write approval→通过产品 /exit 安全退出→同 PID 重开→恢复并完成；未审批不写，已完成副作用不重复
+M3：受控流式收尾	25	使用实际 adapter 路径上的 fake transport／已有流式夹具，控制最后事件、worker 结束及 close 顺序；正常串行重开不误失败
+M4：部分打开失败后重开	25	在源码确认的资源获得阶段注入受控失败，执行真实收尾后再次打开；上一个有效 checkpoint 不被破坏
+
+M3/M4 的安排必须符合现有合同。强行让两个排他会话同时持有资源而被拒绝，是负向测试的预期结果，不是本历史缺陷的复现。
+
+不用随机 sleep。优先使用事件／屏障，固定 seed 为 20261010；屏障自身必须有超时。
+
+确需新增诊断入口时，只允许一个非产品脚本：
+
+纯文本
+docs/handoffs/2026-10-10-reliable-daily-use/diagnose_session_lifecycle.py
+
+这是待执行者实现的诊断脚本，不是声称仓库已有的命令。其冻结命令接口为：
+
+Bash
+.venv/bin/python \
+  docs/handoffs/2026-10-10-reliable-daily-use/diagnose_session_lifecycle.py \
+  --pairs 100 \
+  --seed 20261010 \
+  --max-seconds 600 \
+  --output-dir "$E/session-diagnosis-1"
+
+脚本必须调用核对后的真实 session composition／入口，不另建产品 loop；必须拒绝 real provider，使用独立合成目录，超时非零退出，并给出资源收尾结果。
+
+如果现有脚本已能满足这些条件，复用它，并把真实等价命令冻结到 COMMANDS.md，不再新增文件。
+
+5.5 S2-D：修复与不修复的分叉
+A. 找到可重复的真实缺陷
+
+先最小化失败场景，至少三次得到同一 guard／同一因果失败，再修复。
+
+允许的修复仅限经证据定位的错误，例如错误 callback 归属、重复关闭、缺失的部分初始化收尾，或错误的关闭完成判定。修复位置必须是已有责任边界，不能新建统一资源管理层。
+
+Green 必须验证原反例通过，且既有安全拒绝仍生效。不得靠捕获异常后继续、换一个空 state、延迟重试、取消 no-follow 或放宽身份校验通过测试。
+
+B. 未复现
+
+记录：
+
+纯文本
+Diagnosis: COMPLETED_WITHIN_BUDGET
+Root cause: NOT_REPRODUCED
+Fix: NONE
+Historical incident: STILL_OPEN
+Mitigation: 确认旧进程已结束后，用原 workspace/state 在新进程恢复
+
+不增加猜测性锁、sleep、全局 cache reset 或自动重试。不把“100 对通过”改写为“偶发异常已修复”。
+
+C. 发现安全／数据完整性问题
+
+只要出现错误工作区绑定、未审批执行、checkpoint 损坏、旧 callback 操作新 owner，或新进程也无法可靠恢复，立即停止日用封版，保存合成证据，进入 BLOCKED_SAFETY。
+
+5.6 S2 验收
+ID	行为	必需证据
+ND-07	明确实际 throw site、打开／关闭调用链和资源 owner	源码路径、行号与合成 trace
+ND-08	复现确实覆盖同 PID 两次真实 session 打开，不用新进程替代	PID、composition 身份、入口轨迹
+ND-09	受控时序、次数、超时和输出均有界	固定矩阵、完整统计、退出码
+ND-10	失败不破坏合成 checkpoint、不重复副作用、不跨 workspace	恢复后的语义断言及必要文件身份／hash
+ND-11	有根因才修；无根因保留 NOT_REPRODUCED	最小 Red／Green，或明确的未复现记录
+ND-12	所有安全拒绝和错误退出语义保留；日志不扩大暴露	相关既有负向回归，必要时新增最小断言
+ND-13	诊断结束无不明 owner 的活跃资源；异常目录按需保留	自有进程／资源收尾清单
+
+停止条件： 预算耗尽、首次真实安全问题、复现方法需要真实 API／私有数据、或第二轮没有新的证据依据。
+
+不把 stress 的 100 次循环拆成 100 条永久测试。常驻测试只保留有区分力的缺陷回归；本轮仅有文档变更且未复现时，新增生产测试为零也可以成立。
+
+6. S3：日用入口、配置与故障说明
+6.1 决定
+
+**不新建 onboarding wizard 或 doctor 系统。**先把已有 profile 持久化、安装诊断、CLI/TUI 交互及恢复能力连接成一条可照做的路径。
+
+指南必须明确覆盖：
+
+部分	必须说明的内容
+环境	当前 macOS／Seatbelt 边界；支持版本以仓库配置为准，不猜测最低版本
+安装	复用现有非 editable wheel 安装路径；核心功能与 browser/web/skill extras 分开
+Provider	DeepSeek Flash 的现有配置方式；变量名、配置键、入口以源码为准；不打印凭据
+owner-preferences	已有 profile 如何保存、下次如何复用；不让用户每次重新填写
+首个任务	一个合成小文件任务：提出修改→明确审批→自验→查看交付证据
+日常操作	采用现有 /help、/new、退出、纠正、审批及 TUI 编辑方式，不新增平行命令
+恢复	必须使用同一 workspace/state；新任务不等于恢复；审批边界退出不是强杀／崩溃恢复
+故障	缺 extras、配置无效、任务未验证、checkpoint 安全错误分别如何处理
+CheckpointSecurityError 操作说明
+
+文档必须表达以下内容，不承诺“重启一定成功”：
+
+本次会话未能安全打开或关闭。先确认旧进程已结束、没有未确认的执行资源，再使用原工作区和原状态位置重启。不要删除 checkpoint、lock 或新建空状态来绕过错误。若新进程仍然失败，停止继续操作并保留状态，进行定位。
+
+6.2 实施边界
+
+先核对真实入口和已有测试：
+
+Bash
+rg -n \
+  'owner.preferences|owner_preferences|profile|optional-dependencies|project.scripts' \
+  pyproject.toml main.py agent tests/cli
+
+附件未提供全部 parser 和配置实现，因此不得在指南中凭空写出 --workspace、--state-dir、--profile 等未核验参数。
+
+执行者需从实际 --help、parser 及已有安装说明提取完整命令，写入 COMMANDS.md。未经核验的示例不能以“可直接复制”交付。
+
+只在发现具体低成本缺口时修改代码，例如已有错误分支没有告诉用户缺的是哪个 extra。此类改动必须先有 Red；已经具备诊断能力的地方不再新增一套 preflight。
+
+所有演练使用合成 HOME／profile／state 或既有等价隔离 fixture，不能让测试回落到用户真实配置。
+
+6.3 S3 验收
+ID	行为	必需证据
+ND-14	从独立安装物能够获得版本／帮助／缺依赖诊断；不触发模型请求	现有 packaging smoke、fake 调用计数为零的对应阶段
+ND-15	owner-preferences 使用现有持久化路径，新会话读取已保存设置	合成 profile 的实际持久化／重载证据，可复用已有测试
+ND-16	指南中的命令、配置键及 extras 名全部与当前实现吻合	命令核对表及合成演练
+ND-17	暂停、退出、新任务、恢复、未验证交付的区别明确	文档检查及现有恢复／交互证据
+ND-18	安全错误说明提供有条件恢复步骤，不指导删除状态或弱化校验	文档和必要的窄用户可见分支回归
+
+停止条件： 完成指南需要新的配置系统、平台适配、真实账户验证或自动依赖安装。此时记录缺口，不扩大本轮。
+
+7. S4：Provider 矩阵——本轮延期真实扩展
+7.1 唯一推荐
+
+本轮不验证第二个真实 Provider。
+
+理由基于当前目标：主模型 A/B/C 已真实通过；尚未定位的问题集中于本地会话生命周期；扩大 Provider 会引入新的协议、流式、工具调用及 continuation 验证面，却不能优先解决 Git 归属和本地重开问题。
+
+本轮只建立一个准确的支持矩阵：
+
+对象	本轮可以声明	不得声明
+DeepSeek Flash	2026-10-10 审计候选的真实 A/B/C PASS	对任意任务必成功；任意后续 commit 都重新完成了真实验证
+仓库已有其他 adapter	按实际源码列出，并逐项注明现有离线测试证据	未经真实调用即标记真实兼容
+其他“兼容接口”的服务	本轮未验证	因协议名称相近便自动纳入支持
+新 adapter／自动 fallback	不在本包范围	借矩阵补齐之名顺手实施
+
+**证据继承规则：**旧真实 Dogfood 绑定的是当时的候选。若本轮提交的生产源码身份不同，只能记录“历史基线真实验证＋本轮离线回归”，不能把旧实测冒充新 commit 实测。能够证明相关生产闭包完全一致时，才按明确范围继承。
+
+以后只有用户明确选定实际要使用的第二个 Provider，或主 Provider 的可用性已成为真实日用障碍时，再单独立项。新授权必须同时明确模型／端点、场景、金额、传输尝试次数和重试边界；不能只说“还有剩余预算”。
+
+7.2 S4 验收
+ID	行为	必需证据
+ND-19	矩阵区分真实验证、离线验证、未验证，并绑定证据身份	支持矩阵及源码／测试引用
+ND-20	本轮零真实调用、零新增 adapter、零自动 fallback	执行命令记录、scoped diff 和零调用说明
+
+停止条件： 任何步骤开始要求 API Key、远端连通性探测或协议兼容改造。记录为后续授权项。
+
+8. S5：最终候选验证、授权提交与交付
+8.1 验证顺序
+
+先运行 touched-area tests，再运行最终完整 gate。以下路径来自附件，执行前检查实际存在；缺失时停止对应步骤，不换成无关测试补数。
+
+生命周期相关已有回归入口
+Bash
+.venv/bin/python -m pytest -q -rx \
+  tests/acceptance/test_daily_use_recovery_journey.py \
+  tests/cli/test_entrypoint.py \
+  tests/tui/test_app.py \
+  tests/tui/test_adapter.py
+
+S2 若产生最小新回归，其精确 node 必须补入 COMMANDS.md。
+
+安装物验证
+Bash
+.venv/bin/python -m pytest -q -rx \
+  tests/cli/test_016_packaging.py
+
+核对 fixture 仍使用本地 wheel、离线安装路径和隔离环境。缺少所需本地依赖时记 BLOCKED_ENV，不得自动下载补齐。
+
+本地真实浏览器旅程
+Bash
+.venv/bin/python \
+  scripts/f2_f3_local_browser_journeys.py \
+  --journey all \
+  --budget-seconds 120
+
+仍须确认这是专属 Chromium＋loopback，且清理已确认。C0 已跑通而 C1 没有改变该执行闭包时，不为“看起来完整”重复运行。
+
+强制最终 gate
+Bash
+git diff --check
+.venv/bin/ruff check .
+.venv/bin/python -m pytest -q -rx
+
+最终候选还要核对临时 index 差异：
+
+Bash
+GIT_INDEX_FILE="$ALT_INDEX" \
+  git diff --cached --check "$H"
+独立候选上的运行原则
+
+从 $CANDIDATE 运行时可以使用已有虚拟环境中的解释器和依赖，但不能导入原工作树源码。例如：
+
+Bash
+(
+  cd "$CANDIDATE"
+  PYTHONPATH="$CANDIDATE" \
+    "$REPO/.venv/bin/python" -m pytest -q -rx
+)
+
+执行前必须核对主要产品模块确实来自 $CANDIDATE。若现有 fixture 对源码目录有额外约束，使用已验证的等价隔离入口，不把上面的示例当作必然适配所有 fixture 的保证。
+
+**隔离候选失败、原 dirty 树通过，应优先判断为候选缺少依赖或身份不一致。**不能自动把排除的用户文件加回来。
+
+8.2 提交授权
+
+提交前向用户展示：
+
+纯文本
+父提交 H
+候选 tree ID
+完整 path／hunk 归属清单及摘要 hash
+拟提交内容与仍然排除的用户工作
+验证结果和已知边界
+
+需要类似以下的明确确认：
+
+我确认仅在 main 创建本包所列、最多两个本地 commit；提交范围以已审核的归属清单为准。允许提交后仅同步这些路径的 index，不包含用户既有无关工作，不 push、tag、修改 remote 或重写历史。
+
+用户没有明确确认时，状态为 READY_NOT_COMMITTED。不能由执行者自己把“隐含意图”填成授权。
+
+8.3 临时 index 提交后的真实 index 处理
+
+**提交临时 index 后，真实 index 不会自动变成该候选。**不处理它，可能让已提交内容在真实 index 中表现为待回退差异。
+
+本包采用保守前提：
+
+所有入选路径，在本包启动时不得存在预存 staged 差异。
+
+用户在其他路径上已有 staged 工作可以保留。若入选路径与预存 staged 路径相交，停止自动提交，不能擅自 unstaging 或推断其归属。
+
+提交前先核验：
+
+Bash
+.venv/bin/python - \
+  "$E/selected-paths.z" \
+  "$E/staged-paths.before.z" <<'PY'
+from pathlib import Path
+import sys
+
+def paths(name: str) -> set[bytes]:
+    return {p for p in Path(name).read_bytes().split(b"\0") if p}
+
+overlap = paths(sys.argv[1]) & paths(sys.argv[2])
+if overlap:
+    raise SystemExit(
+        "BLOCKED: selected paths overlap pre-existing staged changes"
+    )
+PY
+
+完成授权、候选 gate、hooks／签名检查以及 HEAD/index 未变化检查后：
+
+Bash
+cd "$REPO"
+
+test "$(git rev-parse HEAD)" = "$H"
+cmp "$INDEX_PATH" "$E/index.before"
+
+EXPECTED_TREE="$(GIT_INDEX_FILE="$ALT_INDEX" git write-tree)"
+
+# commit-message.txt 必须已经审核；此命令之前必须有真实用户授权。
+GIT_INDEX_FILE="$ALT_INDEX" \
+  git commit -F "$E/commit-message.txt"
+
+NEW="$(git rev-parse HEAD)"
+
+test "$(git rev-parse "${NEW}^")" = "$H"
+test "$(git rev-parse "${NEW}^{tree}")" = "$EXPECTED_TREE"
+
+# 只更新这些路径的 index；绝不能加 --worktree。
+git --literal-pathspecs restore \
+  --staged \
+  --source="$NEW" \
+  --pathspec-from-file="$E/selected-paths.z" \
+  --pathspec-file-nul
+
+git ls-files --stage -z > "$E/index-entries.after.z"
+printf '%s\n' "$NEW" > "$E/commit.after"
+
+restore --staged 只更新 index；这里必须使用明确的提交来源及 NUL 分隔的精确路径集，不能增加 --worktree 或省略路径限制。
+Git
+
+提交后必须验证：
+
+纯文本
+新 commit tree == 已测试候选 tree
+新 commit parent == 授权时的 H
+所有未入选路径的 index mode/blob/stage 与提交前一致
+入选路径的 index 与新 commit 一致
+工作树中的用户旧 hunk 仍然存在
+用户无关 untracked 文件没有被纳入提交
+
+如果 commit 已成功但 index 同步中断，记录 COMMITTED_INDEX_RECONCILIATION_PENDING。不要恢复整个旧 index、不要 reset；先核对上述身份，再处理那一组入选路径。
+
+**工作树继续 dirty 是允许且预期的。**不能以“清理到干净”为理由处理用户剩余工作。
+
+8.4 收口身份与证据
+
+测试输出写入外部证据目录，避免一边向候选写结果、一边宣称候选身份未变。
+
+最终交付至少给出：
+
+纯文本
+本地 commit SHA，或明确的未提交状态
+候选 tree ID
+公开生产源码／安装物身份
+完整 gate 结果及唯一 skip 的原因
+S2 根因状态和是否存在实际修复
+支持矩阵
+日用指南入口
+用户预存 dirty/staged/untracked 工作保留情况
+
+不要为了在一个文件里写入“它自身所在 commit 的 SHA”制造无限补提交。最终 SHA 可以放在交付回执；记录文件后续更新应如实标注为未提交文档，不影响已冻结产品版本的身份声明。
+
+8.5 S5 验收
+ID	行为	必需证据
+ND-21	touched-area tests 与完整 gate 在明确候选上完成；没有意外收集或 skip 变化	node、完整 summary、退出码、候选身份
+ND-22	安装物验证不依赖 editable 源码泄漏，不包含辅助／私有产物	packaging 证据、安装来源、wheel 内容检查
+ND-23	适用的本地 Chromium 证据绑定正确执行闭包，且资源清理确认	现有 journey 结果或同闭包继承说明
+ND-24	只提交授权候选；用户原有 staged／unstaged／untracked 工作保留	授权、commit tree 比较、index 条目和 scoped diff
+ND-25	S2 的已修／未复现／阻塞状态、Provider 边界、历史实测身份均准确	最终限制表，不使用笼统“全部问题已解决”
+ND-26	给出可以执行的日用入口及精确交付身份；不隐含新增权限	交付回执与指南
+9. 全局停止与回滚规则
+必须立即停止
+
+出现以下任一情况，不继续扩大修改或执行批次：
+
+发现用户文件被覆盖，或当前内容与已保存归属证据不一致。
+HEAD、index、候选源码在执行中被其他写入者改变。
+需要读取私有目录、真实会话、凭据或调用真实 API 才能继续。
+发生 checkpoint 损坏、跨工作区绑定、未经审批执行、重复副作用。
+超时后无法确认本轮资源的 owner 或清理结果。
+需要修改冻结合同、放宽安全校验或引入新架构才能通过。
+达到预算上限，且没有合同内的明确下一步。
+回滚与保留
+
+未提交时，仅撤回本轮有记录、内容仍匹配预期 after-hash 的自有 hunk；若用户又修改过同一区域，停止自动撤回。
+
+临时 index 和候选副本可以保留作为证据；删除前先确认它们属于本轮且没有活跃资源。失败的合成 state 默认保留，不自动递归清理用户路径。
+
+已提交时不自动 reset、amend、rebase 或 revert。需要撤销 commit 时，应给出确切目标 SHA 和影响，重新取得授权；也不能把旧二进制直接用于可能发生过格式变化的状态，除非兼容性已有证据。
+
+禁止执行：
+
+纯文本
+git add .
+git add -A
+git commit -a
+git clean
+git reset --hard
+git stash / stash -u
+不限定路径的 checkout / restore
+禁用 hooks 或使用 --no-verify 绕过未解决问题
+
+第 8.3 节限定路径、仅 --staged 的 index 同步是明确许可的窄操作，不属于工作树恢复。
+
+10. 最终日用判定
+判定	条件
+GO：当前主路径日用	macOS／Seatbelt 主路径验证成立；明确版本或候选身份；安装及指南可用；无安全／数据完整性阻塞；已知偶发异常明确披露
+GO_WITH_KNOWN_BOUNDARY	S2 有界诊断未复现，但旧进程结束后新进程恢复仍是已验证主路径；不宣称同进程重开缺陷已修复
+READY_NOT_COMMITTED	产品候选验证完成，但 commit 未获授权；不能宣称 Git 收尾已完成
+NO-GO：候选封版	无法安全分离用户工作、隔离候选不成立、版本身份不清，或关键 gate 未通过
+NO-GO：日用安全	checkpoint／审批／副作用／资源归属出现实质安全问题，或新进程恢复也不可靠
+
+第二个 Provider 未验证、非 macOS 不支持、未做像素级视觉检查，不构成本轮主路径日用的新增阻塞项。
+
+11. 执行前 GO／NO-GO Checklist
+
+执行者必须逐项核对；不得用本包文字替代仓库事实。
+
+检查	GO 条件	NO-GO 后动作
+[ ] 当前状态	已确认最新终态，未把旧 C/usage/DU 缺口重新当作待修任务	校正当前执行记录后再开始
+[ ] 架构与合同	已读取当前 AGENTS、架构权威和旧冻结合同；本包不改变其不变量	停止冲突切片
+[ ] 仓库身份	main、HEAD、dirty/index 状态已记录；没有并发写入或未完成 Git 操作	停止提交与混合文件修改
+[ ] 用户工作保护	已有 metadata、受控公开快照及归属表；不把 11 个文件视为天然白名单	仅继续归属补证或只读诊断
+[ ] 原始内容可得	混合文件可核验 B；预存未跟踪内容没有被冒充本轮新增	排除未知项，报告最小阻塞
+[ ] 临时候选	有明确补丁与精确路径集；不会依赖无关 dirty/untracked 内容	不提交不独立成立的候选
+[ ] 诊断边界	同 PID 复现路径、固定矩阵、预算、超时和 owner 清理已核对	不启动 stress
+[ ] 环境与数据	使用已有依赖和合成 workspace/state/profile，不读取真实私有数据	记 BLOCKED_ENV 或权限阻塞
+[ ] API 预算	本轮为 ¥0／0 次；不会复用旧 Key 或旧额度	停止任何远端调用
+[ ] 命令真实性	实际入口、配置键、测试 node 与包装验证方式已写入 COMMANDS.md	不执行猜测参数
+[ ] Git 授权	用户已确认提交范围、候选身份和最多两次本地 commit	可以保留验证成果，但不 commit
+[ ] 停止承诺	执行者接受未复现就保留边界，不以更多测试、更多 Provider 或猜测性修复扩大范围	不进入实施
+
+17m37s · Power, item 5 of 5 (slider ARIA)[browser] · ↑12.61k ↓5.06k ↻0 Δ17.67k
+files=3

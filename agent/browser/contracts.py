@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import StrEnum
+from urllib.parse import urlsplit
 
 from agent.browser.quarantine import QuarantinedDownloadV1
 from agent.runtime.contracts import (
@@ -21,10 +22,11 @@ from agent.runtime.contracts import (
 
 
 class BrowserMode(StrEnum):
-    """closed session modes；两种模式不可静默切换（spec §4）。"""
+    """closed session modes；不同 authority 不可静默切换（spec §4）。"""
 
     PUBLIC_READ_EPHEMERAL = "public_read_ephemeral"
     SITE_BOUND_INTERACTIVE = "site_bound_interactive"
+    TASK_LOOPBACK_EPHEMERAL = "task_loopback_ephemeral"
 
 
 class BrowserActionKind(StrEnum):
@@ -87,6 +89,73 @@ def _freeze_params(value: JSONValue | None) -> JSONValue | None:
 
 
 @dataclass(frozen=True, slots=True)
+class LoopbackOriginBindingV1:
+    """本任务受管进程与 exact loopback origin 的短期绑定。
+
+    该对象只是不可变身份，不是永久网络权限。Browser adapter 每次请求前仍须
+    向进程 owner 重新核对进程组、端口、Goal 与期限，避免端口复用把权限转给
+    另一个本机服务。
+    """
+
+    resource_ref: str
+    origin: str
+    goal_id: str
+    goal_revision: int
+    process_group_id: int
+    command_fingerprint: str
+    issued_monotonic: float
+    expires_monotonic: float
+    binding_digest: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.resource_ref or not self.goal_id:
+            raise ValueError("loopback binding identities must not be empty")
+        _require_positive_int(self.goal_revision, "goal_revision")
+        _require_positive_int(self.process_group_id, "process_group_id")
+        if len(self.command_fingerprint) != 64 or any(
+            item not in "0123456789abcdef" for item in self.command_fingerprint
+        ):
+            raise ValueError("command_fingerprint must be 64 lowercase hex chars")
+        parts = urlsplit(self.origin)
+        try:
+            port = parts.port
+        except ValueError as error:
+            raise ValueError("loopback origin requires a valid port") from error
+        if (
+            parts.scheme != "http"
+            or parts.hostname != "127.0.0.1"
+            or port is None
+            or not 1024 <= port <= 65535
+            or parts.username is not None
+            or parts.password is not None
+            or parts.path
+            or parts.query
+            or parts.fragment
+            or self.origin != f"http://127.0.0.1:{port}"
+        ):
+            raise ValueError("loopback origin must be exact http://127.0.0.1:<port>")
+        if not all(
+            isinstance(value, float) and math.isfinite(value)
+            for value in (self.issued_monotonic, self.expires_monotonic)
+        ) or self.expires_monotonic <= self.issued_monotonic:
+            raise ValueError("loopback binding requires a finite positive lifetime")
+        values = {
+            "resource_ref": self.resource_ref,
+            "origin": self.origin,
+            "goal_id": self.goal_id,
+            "goal_revision": self.goal_revision,
+            "process_group_id": self.process_group_id,
+            "command_fingerprint": self.command_fingerprint,
+            "issued_monotonic": self.issued_monotonic,
+            "expires_monotonic": self.expires_monotonic,
+        }
+        digest = canonical_json_digest(values)
+        if self.binding_digest and self.binding_digest != digest:
+            raise ValueError("loopback binding digest mismatch")
+        object.__setattr__(self, "binding_digest", digest)
+
+
+@dataclass(frozen=True, slots=True)
 class BrowserSessionSpecV1:
     """session authority 的 immutable 输入（spec §4）。
 
@@ -104,6 +173,7 @@ class BrowserSessionSpecV1:
     profile_revision: int | None = None
     browser_identity_digest: str | None = None
     expiry_monotonic: float | None = None
+    loopback_binding: LoopbackOriginBindingV1 | None = None
     identity_digest: str = ""
 
     def __post_init__(self) -> None:
@@ -135,6 +205,23 @@ class BrowserSessionSpecV1:
                 self.expiry_monotonic
             ):
                 raise ValueError("site_bound spec requires a finite expiry_monotonic")
+            if self.loopback_binding is not None:
+                raise ValueError("site_bound spec must not carry a loopback binding")
+        elif self.mode is BrowserMode.TASK_LOOPBACK_EPHEMERAL:
+            binding = self.loopback_binding
+            if binding is None:
+                raise ValueError("task_loopback spec requires a loopback binding")
+            if self.profile_ref is not None or self.profile_revision is not None:
+                raise ValueError("task_loopback spec must not carry a profile")
+            if self.browser_identity_digest is not None or self.expiry_monotonic is not None:
+                raise ValueError("task_loopback spec uses the managed-process lifetime")
+            if self.allowed_origins != (binding.origin,):
+                raise ValueError("task_loopback spec must bind exactly one managed origin")
+            if (
+                binding.goal_id != self.goal_id
+                or binding.goal_revision != self.goal_revision
+            ):
+                raise ValueError("loopback binding does not match the Goal")
         else:
             if self.profile_ref is not None:
                 raise ValueError("public_read spec must not carry a profile_ref")
@@ -144,6 +231,8 @@ class BrowserSessionSpecV1:
                 or self.expiry_monotonic is not None
             ):
                 raise ValueError("public_read spec authority fields must be null")
+            if self.loopback_binding is not None:
+                raise ValueError("public_read spec must not carry a loopback binding")
         object.__setattr__(self, "allowed_origins", tuple(self.allowed_origins))
         object.__setattr__(
             self,
@@ -159,6 +248,11 @@ class BrowserSessionSpecV1:
                     "profile_revision": self.profile_revision,
                     "browser_identity_digest": self.browser_identity_digest,
                     "expiry_monotonic": self.expiry_monotonic,
+                    "loopback_binding_digest": (
+                        self.loopback_binding.binding_digest
+                        if self.loopback_binding is not None
+                        else None
+                    ),
                 }
             ),
         )
@@ -203,6 +297,25 @@ class BrowserSessionSpecV1:
             profile_ref=None,
             allowed_origins=(),
             action_budget=action_budget,
+        )
+
+    @classmethod
+    def task_loopback(
+        cls,
+        *,
+        goal_id: str,
+        goal_revision: int,
+        binding: LoopbackOriginBindingV1,
+        action_budget: int = 64,
+    ) -> BrowserSessionSpecV1:
+        return cls(
+            mode=BrowserMode.TASK_LOOPBACK_EPHEMERAL,
+            goal_id=goal_id,
+            goal_revision=goal_revision,
+            profile_ref=None,
+            allowed_origins=(binding.origin,),
+            action_budget=action_budget,
+            loopback_binding=binding,
         )
 
 

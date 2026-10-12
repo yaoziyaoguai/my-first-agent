@@ -32,7 +32,16 @@ def prepare_edit_binding(
     return {
         **binding,
         "new_content_digest": hashlib.sha256(updated).hexdigest(),
-        "effect_preview": f"edit {path} ({len(updated)} bytes)",
+        "effect_preview": (
+            f"edit {path} ({len(updated)} resulting bytes):\n"
+            "--- replace this exact text ---\n"
+            f"{old_text}\n"
+            "--- with this text ---\n"
+            f"{new_text}\n"
+            "--- resulting content ---\n"
+            f"{updated.decode('utf-8')}\n"
+            "--- end resulting content ---"
+        ),
     }
 
 

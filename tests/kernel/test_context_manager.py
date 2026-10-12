@@ -21,6 +21,7 @@ from agent.runtime.contracts import (
     InteractionState,
     InvocationOrigin,
     ProposedCriterion,
+    ProviderContinuationV1,
     SideEffectClass,
     SourceKind,
     SourceReceiptDraft,
@@ -146,6 +147,44 @@ def test_context_source_cannot_exceed_item_cap() -> None:
 
     with pytest.raises(ContextLimitError, match="item limit"):
         manager.build(_answering(ConversationState.new("conversation-1")), _action(), ())
+
+
+def test_assistant_provider_continuation_is_carried_outside_visible_content() -> None:
+    continuation = ProviderContinuationV1.create(
+        provider_identity_digest="a" * 64,
+        opaque_payload="private reasoning",
+    )
+    state = _answering(
+        replace(
+            ConversationState.new("conversation-1"),
+            facts=(
+                _fact("user-1", FactKind.USER_MESSAGE, text="question"),
+                _fact(
+                    "assistant-1",
+                    FactKind.ASSISTANT_MESSAGE,
+                    text="answer",
+                    provider_continuation={
+                        "provider_identity_digest": "a" * 64,
+                        "opaque_payload": "private reasoning",
+                        "opaque_payload_digest": continuation.opaque_payload_digest,
+                    },
+                ),
+                _fact("user-2", FactKind.USER_MESSAGE, text="follow-up"),
+            ),
+        )
+    )
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=3_000, output_reserve=200),
+    )
+
+    pack = manager.build(state, _action(), ())
+
+    assistant = next(message for message in pack.messages if message.role == "assistant")
+    assert assistant.provider_continuation == continuation
+    assert all(
+        "provider_continuation" not in block for block in assistant.content
+    )
 
 
 def test_budget_evicts_lowest_priority_source_before_historical_facts() -> None:

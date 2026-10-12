@@ -114,6 +114,8 @@ def archive_compaction_source(
     archive: ConversationArchive,
     source: LoadedSnapshot,
     reduced_state: ConversationState,
+    *,
+    model_attempt_recorded: bool = False,
 ) -> None:
     """校验后把完整原样的 pre-compaction 状态幂等写入 archive。
 
@@ -148,10 +150,23 @@ def archive_compaction_source(
         raise CompactionCommitError(
             "compaction must not change the workspace binding"
         )
-    if reduced_state.revision != source.state.revision + 1:
+    revision_steps = 2 if model_attempt_recorded else 1
+    if reduced_state.revision != source.state.revision + revision_steps:
         raise CompactionCommitError(
-            "reduced state must advance the revision by exactly one"
+            "reduced state must advance by the accounting and compaction revisions"
         )
+    if model_attempt_recorded:
+        source_run = source.state.active_run
+        reduced_run = reduced_state.active_run
+        if (
+            source_run is None
+            or reduced_run is None
+            or reduced_run.model_calls_used != source_run.model_calls_used + 1
+            or reduced_run.input_tokens_used < source_run.input_tokens_used
+        ):
+            raise CompactionCommitError(
+                "compaction source does not include one durable model attempt"
+            )
     if not _CHECKPOINT_TOKEN_PATTERN.fullmatch(source.token):
         raise CompactionCommitError(
             "source snapshot token is not a closed sha256 digest token"

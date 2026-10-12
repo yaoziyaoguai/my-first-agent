@@ -13,6 +13,7 @@ from agent.runtime.contracts import (
     ToolPrepareContext,
     ToolResult,
 )
+from agent.runtime.tools import IntentConflictError
 from agent.tools.file_ops import build_file_tool_runtime
 from agent.tools.path_safety import WorkspaceBoundary, WorkspaceSecurityError
 
@@ -126,6 +127,141 @@ def test_default_private_roots_are_hidden_and_unreadable(tmp_path: Path) -> None
     assert "private sessions" not in denied.content
 
 
+def test_explicit_project_paths_expose_only_the_selected_ordinary_files(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    config = workspace / "config"
+    config.mkdir(parents=True)
+    (config / "app.yaml").write_text("mode: fixture\n", encoding="utf-8")
+    (config / "other.yaml").write_text("hidden fixture\n", encoding="utf-8")
+    (config / ".env").write_text("SYNTHETIC=denied\n", encoding="utf-8")
+    (workspace / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    runtime = build_file_tool_runtime(
+        workspace,
+        project_paths=("config/app.yaml", "pytest.ini"),
+    )
+
+    listed = _invoke(runtime, ToolCall("list-1", "list_files", {"path": "config"}))
+    app = _invoke(
+        runtime,
+        ToolCall("read-1", "read_file", {"path": "config/app.yaml"}),
+    )
+    pytest_config = _invoke(
+        runtime,
+        ToolCall("read-2", "read_file", {"path": "pytest.ini"}),
+    )
+    denied_other = runtime.prepare(
+        ToolCall("read-3", "read_file", {"path": "config/other.yaml"}),
+        _context(),
+    )
+    denied_env = runtime.prepare(
+        ToolCall("read-4", "read_file", {"path": "config/.env"}),
+        _context(),
+    )
+
+    assert listed.content.splitlines() == ["app.yaml"]
+    assert app.content == "mode: fixture\n"
+    assert pytest_config.content == "[pytest]\n"
+    assert isinstance(denied_other, ToolResult) and denied_other.is_error
+    assert isinstance(denied_env, ToolResult) and denied_env.is_error
+
+
+def test_project_path_exception_keeps_env_and_local_config_names_private(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    config = workspace / "config"
+    config.mkdir(parents=True)
+    (config / "app.yaml").write_text("mode: fixture\n", encoding="utf-8")
+    private_names = (".envrc", ".env-production", "config.local")
+    for name in private_names:
+        (config / name).write_text("SYNTHETIC=private\n", encoding="utf-8")
+    runtime = build_file_tool_runtime(workspace, project_paths=("config",))
+
+    visible = _invoke(
+        runtime,
+        ToolCall("read-visible", "read_file", {"path": "config/app.yaml"}),
+    )
+    listing = _invoke(
+        runtime,
+        ToolCall("list-config", "list_files", {"path": "config"}),
+    )
+    search = _invoke(
+        runtime,
+        ToolCall(
+            "search-config",
+            "search_text",
+            {"query": "SYNTHETIC", "root": "config"},
+        ),
+    )
+    denied = tuple(
+        runtime.prepare(
+            ToolCall(f"read-private-{index}", "read_file", {"path": f"config/{name}"}),
+            _context(),
+        )
+        for index, name in enumerate(private_names)
+    )
+    denied_chunks = tuple(
+        runtime.prepare(
+            ToolCall(
+                f"chunk-private-{index}",
+                "read_file_chunk",
+                {"path": f"config/{name}", "start_line": 1, "max_lines": 1},
+            ),
+            _context(),
+        )
+        for index, name in enumerate(private_names)
+    )
+    denied_writes = tuple(
+        runtime.prepare(
+            ToolCall(
+                f"write-private-{index}",
+                "write_file",
+                {"path": f"config/{name}", "content": "replacement"},
+            ),
+            _context(),
+        )
+        for index, name in enumerate(private_names)
+    )
+
+    assert visible.content == "mode: fixture\n"
+    assert listing.content.splitlines() == ["app.yaml"]
+    assert "SYNTHETIC" not in search.content
+    assert all(isinstance(result, ToolResult) and result.is_error for result in denied)
+    assert all(
+        isinstance(result, ToolResult) and result.is_error for result in denied_chunks
+    )
+    assert all(
+        isinstance(result, ToolResult) and result.is_error for result in denied_writes
+    )
+    assert all("SYNTHETIC" not in result.content for result in denied)
+    assert all(
+        (config / name).read_text(encoding="utf-8") == "SYNTHETIC=private\n"
+        for name in private_names
+    )
+
+
+def test_specific_project_file_grant_does_not_grant_an_ancestor_file(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "config").write_text("SYNTHETIC=ancestor\n", encoding="utf-8")
+    runtime = build_file_tool_runtime(
+        workspace,
+        project_paths=("config/public.yaml",),
+    )
+
+    denied = runtime.prepare(
+        ToolCall("read-ancestor", "read_file", {"path": "config"}),
+        _context(),
+    )
+
+    assert isinstance(denied, ToolResult) and denied.is_error
+    assert "SYNTHETIC" not in denied.content
+
+
 def test_file_resource_bounds_fail_closed_without_mutation(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -188,6 +324,156 @@ def test_control_characters_in_paths_fail_before_approval(tmp_path: Path) -> Non
     assert not (workspace / "note\n\x1b[2J.txt").exists()
 
 
+def test_write_to_missing_parent_explains_the_safe_next_step(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = build_file_tool_runtime(workspace)
+
+    denied = runtime.prepare(
+        ToolCall(
+            "write-missing-parent",
+            "write_file",
+            {"path": "reports/daily.md", "content": "fixture"},
+        ),
+        _context(),
+    )
+
+    assert isinstance(denied, ToolResult) and denied.is_error
+    assert denied.metadata["code"] == "workspace_parent_missing"
+    assert "parent directory does not exist" in denied.content
+    assert "create it explicitly" in denied.content
+    assert not (workspace / "reports").exists()
+
+
+def test_make_directory_requires_exact_approval_then_creates_one_level(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = build_file_tool_runtime(workspace)
+    call = ToolCall("mkdir-1", "make_directory", {"path": "reports"})
+
+    approval = runtime.prepare(call, _context())
+
+    assert isinstance(approval, ApprovalRequired)
+    assert "create directory reports" in approval.request.preview
+    assert not (workspace / "reports").exists()
+
+    intent = runtime.prepare(
+        call,
+        _context(),
+        approval=ApprovalGrant(
+            approval.request.request_id,
+            approval.request.binding_digest,
+        ),
+    )
+    assert isinstance(intent, ExecutionIntent)
+    result = runtime.invoke(intent)
+
+    assert result.is_error is False
+    assert result.executed is True
+    assert result.metadata["governed_tool_receipt_kind"] == "governed_tool_v1"
+    assert (workspace / "reports").is_dir()
+    assert (workspace / "reports").stat().st_mode & 0o777 == 0o700
+
+
+def test_make_directory_never_creates_a_missing_parent_implicitly(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = build_file_tool_runtime(workspace)
+
+    denied = runtime.prepare(
+        ToolCall("mkdir-1", "make_directory", {"path": "reports/2026"}),
+        _context(),
+    )
+
+    assert isinstance(denied, ToolResult) and denied.is_error
+    assert denied.metadata["code"] == "workspace_parent_missing"
+    assert not (workspace / "reports").exists()
+
+
+def test_make_directory_reports_an_existing_directory_without_a_fake_receipt(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "reports").mkdir(parents=True)
+    runtime = build_file_tool_runtime(workspace)
+
+    prepared = runtime.prepare(
+        ToolCall("mkdir-1", "make_directory", {"path": "reports"}),
+        _context(),
+    )
+
+    assert isinstance(prepared, ExecutionIntent)
+    result = runtime.invoke(prepared)
+    assert result.executed is False
+    assert result.metadata["code"] == "directory_already_exists"
+    assert "governed_tool_receipt_kind" not in result.metadata
+
+
+def test_make_directory_rejects_an_approval_after_parent_identity_changes(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    parent = workspace / "reports"
+    parent.mkdir(parents=True)
+    runtime = build_file_tool_runtime(workspace)
+    call = ToolCall("mkdir-1", "make_directory", {"path": "reports/2026"})
+    approval = runtime.prepare(call, _context())
+    assert isinstance(approval, ApprovalRequired)
+
+    parent.rename(workspace / "old-reports")
+    parent.mkdir()
+    stale = runtime.prepare(
+        call,
+        _context(),
+        approval=ApprovalGrant(
+            approval.request.request_id,
+            approval.request.binding_digest,
+        ),
+    )
+
+    assert isinstance(stale, ToolResult) and stale.is_error
+    assert stale.metadata["code"] == "approval_mismatch"
+    assert not (parent / "2026").exists()
+
+
+def test_nested_file_is_created_through_separate_directory_and_file_approvals(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = build_file_tool_runtime(workspace)
+
+    for call in (
+        ToolCall("mkdir-1", "make_directory", {"path": "reports"}),
+        ToolCall("mkdir-2", "make_directory", {"path": "reports/2026"}),
+        ToolCall(
+            "write-1",
+            "write_file",
+            {"path": "reports/2026/daily.md", "content": "# Daily\nApproved fixture.\n"},
+        ),
+    ):
+        approval = runtime.prepare(call, _context())
+        assert isinstance(approval, ApprovalRequired)
+        intent = runtime.prepare(
+            call,
+            _context(),
+            approval=ApprovalGrant(
+                approval.request.request_id,
+                approval.request.binding_digest,
+            ),
+        )
+        assert isinstance(intent, ExecutionIntent)
+        assert runtime.invoke(intent).is_error is False
+
+    readback = _invoke(
+        runtime,
+        ToolCall("read-1", "read_file", {"path": "reports/2026/daily.md"}),
+    )
+    assert readback.content == "# Daily\nApproved fixture.\n"
+
+
 def test_workspace_boundary_fails_closed_without_no_follow(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delattr(os, "O_NOFOLLOW")
 
@@ -209,6 +495,8 @@ def test_write_requires_exact_approval_and_revalidates_precondition(tmp_path: Pa
 
     approval = runtime.prepare(call, _context())
     assert isinstance(approval, ApprovalRequired)
+    assert "before" not in approval.request.preview
+    assert "after" in approval.request.preview
     assert target.read_text(encoding="utf-8") == "before"
 
     target.write_text("changed by fixture", encoding="utf-8")
@@ -241,6 +529,56 @@ def test_write_requires_exact_approval_and_revalidates_precondition(tmp_path: Pa
     assert target.read_text(encoding="utf-8") == "after"
 
 
+def test_confirm_file_shows_current_content_and_revalidates_before_readback(
+    tmp_path: Path,
+) -> None:
+    """产物确认由 Runtime 展示当前内容；预览后的字节漂移必须 fail closed。"""
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "report.txt"
+    target.write_text("count=12\nerrors=3\n", encoding="utf-8")
+    runtime = build_file_tool_runtime(workspace)
+    call = ToolCall("confirm-1", "confirm_file", {"path": "report.txt"})
+
+    approval = runtime.prepare(call, _context())
+
+    assert isinstance(approval, ApprovalRequired)
+    assert "count=12" in approval.request.preview
+    assert approval.request.new_content_digest is not None
+
+    intent = runtime.prepare(
+        call,
+        _context(),
+        approval=ApprovalGrant(
+            approval.request.request_id,
+            approval.request.binding_digest,
+        ),
+    )
+    assert isinstance(intent, ExecutionIntent)
+    target.write_text("count=12\nerrors=4\n", encoding="utf-8")
+
+    with pytest.raises(IntentConflictError, match="preconditions changed"):
+        runtime.invoke(intent)
+
+    fresh = runtime.prepare(call, _context())
+    assert isinstance(fresh, ApprovalRequired)
+    fresh_intent = runtime.prepare(
+        call,
+        _context(),
+        approval=ApprovalGrant(
+            fresh.request.request_id,
+            fresh.request.binding_digest,
+        ),
+    )
+    assert isinstance(fresh_intent, ExecutionIntent)
+
+    result = runtime.invoke(fresh_intent)
+
+    assert result.is_error is False
+    assert result.content == "count=12\nerrors=4\n"
+
+
 def test_edit_requires_unique_old_text_and_atomic_approved_write(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -255,6 +593,8 @@ def test_edit_requires_unique_old_text_and_atomic_approved_write(tmp_path: Path)
 
     approval = runtime.prepare(call, _context())
     assert isinstance(approval, ApprovalRequired)
+    assert "two" in approval.request.preview
+    assert "TWO" in approval.request.preview
     intent = runtime.prepare(
         call,
         _context(),

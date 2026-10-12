@@ -26,6 +26,7 @@ from agent.runtime.contracts import (
     ModelTextBlock,
     ModelToolCall,
     ProposedCriterion,
+    ProviderContinuationV1,
     SourceKind,
 )
 
@@ -278,6 +279,11 @@ def validate_context_pack(context: ContextPack) -> None:
     for message in context.messages:
         if message.role not in {"user", "assistant"}:
             raise _fail("unsupported_context_role")
+        if (
+            message.provider_continuation is not None
+            and message.role != "assistant"
+        ):
+            raise _fail("malformed_provider_continuity")
         for raw_block in message.content:
             block = _object(raw_block, reason="malformed_context_block")
             block_type = block.get("type")
@@ -336,6 +342,7 @@ def _validate_trusted_control_context(
             "workspace_identity_digest",
             "authority_snapshot",
             "explicit_non_prose_outcome",
+            "configured_capabilities",
             "decision_rule",
         }:
             raise _fail("malformed_context_block")
@@ -347,6 +354,13 @@ def _validate_trusted_control_context(
         ):
             _string(block.get(key), reason="malformed_context_block")
         if not isinstance(block.get("explicit_non_prose_outcome"), bool):
+            raise _fail("malformed_context_block")
+        configured = block.get("configured_capabilities")
+        if (
+            not isinstance(configured, list)
+            or any(not isinstance(item, str) or not item for item in configured)
+            or configured != sorted(set(configured))
+        ):
             raise _fail("malformed_context_block")
         return
     required = {
@@ -480,6 +494,8 @@ def _trusted_control_text(block: dict[str, Any]) -> str:
 
 def context_to_anthropic_messages(context: ContextPack) -> list[dict[str, Any]]:
     validate_context_pack(context)
+    if any(message.provider_continuation is not None for message in context.messages):
+        raise _fail("provider_continuity_mismatch")
     messages: list[dict[str, Any]] = []
     for message in context.messages:
         content: list[dict[str, Any]] = []
@@ -537,7 +553,12 @@ def context_tools_to_anthropic(context: ContextPack) -> list[dict[str, Any]]:
     return tools
 
 
-def context_to_openai_messages(context: ContextPack) -> list[dict[str, Any]]:
+def context_to_openai_messages(
+    context: ContextPack,
+    *,
+    provider_identity_digest: str | None = None,
+    require_reasoning_continuity: bool = False,
+) -> list[dict[str, Any]]:
     validate_context_pack(context)
     messages: list[dict[str, Any]] = []
     system_text = trusted_system_projection(context)
@@ -595,6 +616,17 @@ def context_to_openai_messages(context: ContextPack) -> list[dict[str, Any]]:
             "role": message.role,
             "content": "\n".join(text_parts) if text_parts else ("" if tool_calls else None),
         }
+        continuation = message.provider_continuation
+        if continuation is not None:
+            if (
+                not require_reasoning_continuity
+                or provider_identity_digest is None
+                or continuation.provider_identity_digest != provider_identity_digest
+            ):
+                raise _fail("provider_continuity_mismatch")
+            projected["reasoning_content"] = continuation.opaque_payload
+        elif require_reasoning_continuity and message.role == "assistant":
+            raise _fail("missing_reasoning_continuity")
         if tool_calls:
             projected["tool_calls"] = tool_calls
         messages.append(projected)
@@ -1211,6 +1243,7 @@ def normalize_openai_response(
     raw_response: object,
     *,
     trusted_completion_binding: tuple[str, int] | None = None,
+    provider_identity_digest: str | None = None,
 ) -> ModelResponse:
     payload = _object(raw_response, reason="malformed_response")
     _reject_opaque_envelope_fields(payload)
@@ -1222,6 +1255,8 @@ def normalize_openai_response(
     message = _object(choice.get("message"), reason="malformed_response")
 
     allowed_message_fields = {"role", "content", "tool_calls"}
+    if provider_identity_digest is not None:
+        allowed_message_fields.add("reasoning_content")
     if set(message).difference(allowed_message_fields):
         raise _fail("unsupported_response_block")
     if message.get("role") not in {None, "assistant"}:
@@ -1235,6 +1270,16 @@ def normalize_openai_response(
         if not isinstance(content, str):
             raise _fail("unsupported_response_block")
         accumulator.add_text(content)
+
+    provider_continuation = None
+    reasoning_content = message.get("reasoning_content")
+    if provider_identity_digest is not None:
+        if not isinstance(reasoning_content, str) or not reasoning_content:
+            raise _fail("missing_reasoning_continuity")
+        provider_continuation = ProviderContinuationV1.create(
+            provider_identity_digest=provider_identity_digest,
+            opaque_payload=reasoning_content,
+        )
 
     raw_tool_calls = message.get("tool_calls", [])
     if not isinstance(raw_tool_calls, list):
@@ -1287,6 +1332,7 @@ def normalize_openai_response(
         stop_reason=stop_reason,
         input_tokens=_token_count(usage_object.get("prompt_tokens")),
         output_tokens=_token_count(usage_object.get("completion_tokens")),
+        provider_continuation=provider_continuation,
     )
 
 

@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 import re
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 
 from agent.runtime.compaction_rules import (
     CompactionIneligibleHistoryError,
@@ -53,6 +53,7 @@ from agent.runtime.contracts import (
     InvocationOrigin,
     JSONValue,
     ModelMessage,
+    ProviderContinuationV1,
     SideEffectClass,
     SubmitMessage,
     ToolDefinition,
@@ -99,6 +100,20 @@ _EXPLICIT_NON_PROSE_OUTCOME_PATTERNS = (
         r"validate|check|execute)\b",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"^\s*(?:(?:请(?:你)?|麻烦(?:你)?|帮我|替我|给我)\s*)?"
+        r"(?:(?:调用|使用)\s*(?:已配置的\s*)?MCP\b|"
+        r"委派.{0,80}(?:子\s*Agent|SubAgent)|"
+        r"(?:记住|记下|存入(?:工作区)?\s*Memory)\b)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*(?:(?:please|kindly)\s+|(?:can|could|would)\s+you\s+)?"
+        r"(?:call|invoke|use)\s+(?:the\s+)?MCP\b|"
+        r"^\s*(?:(?:please|kindly)\s+)?delegate\b.{0,80}\b(?:subagent|child agent)\b|"
+        r"^\s*(?:(?:please|kindly)\s+)?(?:remember|save to workspace memory)\b",
+        re.IGNORECASE,
+    ),
 )
 
 _ACTION_EXPLANATION_QUESTION_PATTERNS = (
@@ -119,10 +134,16 @@ _ACTION_EXPLANATION_QUESTION_PATTERNS = (
     ),
     re.compile(
         r"^\s*(?:create|write|edit|save|fix|delete|move|copy|run|test|build|"
-        r"validate|check|execute)\b.{0,160}(?:[—–,:;\-]\s*(?:will|would|does|"
+        r"validate|check|execute|call|invoke|use|delegate|remember)\b.{0,160}"
+        r"(?:[—–,:;\-]\s*(?:will|would|does|"
         r"do|is|are|can|could|should)\b|\b(?:what|why|how|which|when|where)\b)"
         r".*\?\s*$",
         re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*(?:调用|使用|委派|记住|记下|存入).{0,160}"
+        r"(?:会|能|要|需要|是否|是不是|为何|为什么|如何|怎么|哪些|什么|"
+        r"多久|多少|哪里|哪种).*[?？]\s*$"
     ),
 )
 
@@ -144,6 +165,24 @@ def _explicit_non_prose_outcome_requested(state: ConversationState) -> bool:
         pattern.search(text) is not None
         for pattern in _EXPLICIT_NON_PROSE_OUTCOME_PATTERNS
     )
+
+
+def _configured_capability_categories(
+    tools: tuple[ToolDefinition, ...],
+) -> tuple[str, ...]:
+    """只投影非敏感能力类别；intent gate 不泄露具体 callable schema。"""
+
+    categories: set[str] = set()
+    for tool in tools:
+        if tool.name.startswith("memory_"):
+            categories.add("memory")
+        elif tool.name.startswith("skill_"):
+            categories.add("skills")
+        elif tool.name.startswith("mcp__"):
+            categories.add("mcp")
+        elif tool.name.startswith("subagent__"):
+            categories.add("subagent")
+    return tuple(sorted(categories))
 
 
 def _fact_disclosure_data_classes(
@@ -229,6 +268,30 @@ class _ContextPlan:
     clipped_ids: tuple[str, ...]
     source_digests: tuple[str, ...]
     estimated_input_tokens: int
+
+
+def _provider_continuation_from_fact(
+    fact: ConversationFact,
+) -> ProviderContinuationV1 | None:
+    raw = fact.content.get("provider_continuation")
+    if raw is None:
+        return None
+    if fact.kind not in {FactKind.ASSISTANT_MESSAGE, FactKind.TOOL_CALLS}:
+        raise ValueError("provider continuation is attached to an invalid fact kind")
+    if not isinstance(raw, dict) or set(raw) != {
+        "provider_identity_digest",
+        "opaque_payload",
+        "opaque_payload_digest",
+    }:
+        raise ValueError("provider continuation fact payload is malformed")
+    try:
+        return ProviderContinuationV1(
+            provider_identity_digest=raw["provider_identity_digest"],
+            opaque_payload=raw["opaque_payload"],
+            opaque_payload_digest=raw["opaque_payload_digest"],
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError("provider continuation fact payload is malformed") from error
 
 
 def _compaction_boundary_safe(state: ConversationState) -> bool:
@@ -566,10 +629,15 @@ class KernelContextManager:
         data_classes = self._compaction_disclosure_data_classes(
             projected_facts, state.conversation_id
         )
-        facts_projection = [
-            {"fact_id": fact.fact_id, "kind": fact.kind.value, "content": fact.content}
-            for fact in projected_facts
-        ]
+        facts_projection = []
+        for fact in projected_facts:
+            content = dict(fact.content)
+            # opaque provider 连续性只供匹配的 wire assistant message 回放；
+            # 不把私有 reasoning 当普通压缩素材发送或写入 summary。
+            content.pop("provider_continuation", None)
+            facts_projection.append(
+                {"fact_id": fact.fact_id, "kind": fact.kind.value, "content": content}
+            )
         block: dict[str, JSONValue] = {
             "type": "context_summary_input",
             "untrusted": True,
@@ -837,7 +905,7 @@ class KernelContextManager:
         goal_group = self._goal_group(state)
         if goal_group is not None:
             groups = (goal_group, *groups)
-        goal_bootstrap, bootstrap_group = self._goal_bootstrap_group(state)
+        goal_bootstrap, bootstrap_group = self._goal_bootstrap_group(state, tools)
         if bootstrap_group is not None:
             groups = (bootstrap_group, *groups)
         history_group_count = len(groups)
@@ -1056,6 +1124,7 @@ class KernelContextManager:
     def _goal_bootstrap_group(
         self,
         state: ConversationState,
+        tools: tuple[ToolDefinition, ...],
     ) -> tuple[GoalBootstrap | None, _ContextGroup | None]:
         if (
             state.goal is not None
@@ -1081,6 +1150,7 @@ class KernelContextManager:
             "workspace_identity_digest": bootstrap.workspace_identity_digest,
             "authority_snapshot": bootstrap.authority_snapshot,
             "explicit_non_prose_outcome": _explicit_non_prose_outcome_requested(state),
+            "configured_capabilities": list(_configured_capability_categories(tools)),
             # 016 §5.2 goal-first 决策规则放在模型最先看到的 trusted pinned 块:
             # 显式任务必须在任何 product tool 调用之前提案 Goal——同一 user action
             # 内成功的 source 检索会关闭 goal_proposal 窗口,而未知目标文件由
@@ -1102,7 +1172,12 @@ class KernelContextManager:
                 "a means, not the outcome. direct_response and begin_answer are allowed only "
                 "when answer text itself is the entire requested outcome. A conditional "
                 "read-only or answer-only fallback does not turn an explicit request "
-                "to act into a question; establish its Goal before attempting it."
+                "to act into a question; establish its Goal before attempting it. "
+                "configured_capabilities lists coarse capability categories configured "
+                "for this session even though callable schemas are intentionally hidden "
+                "at this intent gate. Do not report a listed category as unavailable. "
+                "For an explicit effect in a listed category, establish its Goal first; "
+                "the governed tools are advertised only after that transition."
             ),
         }
         return bootstrap, _ContextGroup(
@@ -1341,10 +1416,18 @@ class KernelContextManager:
         )
 
     def _group_cost(self, group: _ContextGroup) -> int:
-        return sum(
-            self._estimate_json({"role": message.role, "content": message.content})
-            for message in group.messages
-        )
+        total = 0
+        for message in group.messages:
+            payload: dict[str, object] = {
+                "role": message.role,
+                "content": message.content,
+            }
+            if message.provider_continuation is not None:
+                payload["provider_continuation"] = asdict(
+                    message.provider_continuation
+                )
+            total += self._estimate_json(payload)
+        return total
 
     def _clip_tool_results(
         self,
@@ -1454,7 +1537,13 @@ class KernelContextManager:
                 fact_ids.append(result.fact_id)
                 next_index += 1
 
-            messages = [ModelMessage(role="assistant", content=tuple(call_blocks))]
+            messages = [
+                ModelMessage(
+                    role="assistant",
+                    content=tuple(call_blocks),
+                    provider_continuation=_provider_continuation_from_fact(fact),
+                )
+            ]
             if result_blocks:
                 messages.append(ModelMessage(role="user", content=tuple(result_blocks)))
             groups.append(
@@ -1498,6 +1587,7 @@ class KernelContextManager:
             role = "user"
             block_type = "policy_result"
         block: dict[str, JSONValue] = {"type": block_type, **fact.content}
+        block.pop("provider_continuation", None)
         projection = (
             source_projections[fact.fact_id]
             if fact.kind is FactKind.TOOL_RESULT
@@ -1527,7 +1617,13 @@ class KernelContextManager:
         )
         return _ContextGroup(
             fact_ids=(fact.fact_id,),
-            messages=(ModelMessage(role=role, content=(block,)),),
+            messages=(
+                ModelMessage(
+                    role=role,
+                    content=(block,),
+                    provider_continuation=_provider_continuation_from_fact(fact),
+                ),
+            ),
             tool_call_ids=(tool_call_id,) if isinstance(tool_call_id, str) else (),
             has_tool_result=fact.kind is FactKind.TOOL_RESULT,
             data_classes=group_data_classes,

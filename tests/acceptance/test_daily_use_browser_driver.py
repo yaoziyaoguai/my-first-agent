@@ -105,7 +105,7 @@ def test_run_bounded_timeout_latches_and_terminates_owned_group(
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        # EV-01：生产按真实字节计数，测试子进程也必须是二进制 pipe。
         start_new_session=True,
     )
 
@@ -177,7 +177,7 @@ def test_run_bounded_protocol_failures_fail_bounded(f2f3, tmp_path, monkeypatch)
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            # EV-01：生产按真实字节计数，测试子进程也必须是二进制 pipe。
             start_new_session=True,
         )
 
@@ -242,7 +242,7 @@ def test_group_gone_does_not_prove_independent_session_descendant_cleaned(
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        # EV-01：生产按真实字节计数，测试子进程也必须是二进制 pipe。
         start_new_session=True,
     )
     from agent.process.group import verified_group_identity
@@ -321,7 +321,7 @@ def test_run_bounded_stdout_overflow_fails_bounded(f2f3, tmp_path) -> None:
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        # EV-01：生产按真实字节计数，测试子进程也必须是二进制 pipe。
         start_new_session=True,
     )
 
@@ -376,7 +376,7 @@ def test_run_bounded_stderr_overflow_fails_bounded(f2f3, tmp_path) -> None:
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        # EV-01：生产按真实字节计数，测试子进程也必须是二进制 pipe。
         start_new_session=True,
     )
 

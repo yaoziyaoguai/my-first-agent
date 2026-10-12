@@ -10,7 +10,6 @@ import pytest
 from agent.cli.actions import (
     build_cancel_goal,
     build_pause_goal,
-    build_resume,
     build_resume_goal,
 )
 from agent.continuity.restart import project_restart
@@ -62,6 +61,7 @@ def _runtime(
     store,
     *,
     workspace_identity_digest: str = "workspace-digest-1",
+    limits=EVERYDAY_INVOCATION_LIMITS,
 ) -> AgentRuntime:  # noqa: ANN001
     return AgentRuntime(
         provider=provider,
@@ -74,7 +74,7 @@ def _runtime(
         tool_runtime=KernelToolRuntime(()),
         checkpoint_store=store,
         event_sink=CollectingSink(),
-        limits=EVERYDAY_INVOCATION_LIMITS,
+        limits=limits,
         invocation_id_factory=lambda: "invocation-016",
     )
 
@@ -93,6 +93,8 @@ def test_everyday_policy_treats_explicit_verifiable_work_as_a_goal() -> None:
     assert "call local_process so the user sees its exact approval" in (
         EVERYDAY_SYSTEM_POLICY
     )
+    assert "never invent or save an output artifact" in EVERYDAY_SYSTEM_POLICY
+    assert "use that exact executable and argv directly" in EVERYDAY_SYSTEM_POLICY
     assert "never spend local_process authority on workspace discovery" in (
         EVERYDAY_SYSTEM_POLICY
     )
@@ -178,6 +180,9 @@ def test_intent_contract_uses_one_prose_only_test_for_mixed_tasks() -> None:
         "看看这个项目再修改 greet.py，会很难吗？",
         "结合资料整理一页说明到 report.md，会很难吗？",
         "Run tests—will that be slow?",
+        "调用 MCP 会向外发送数据吗？",
+        "委派给子 Agent 会产生额外费用吗？",
+        "记住这条信息需要批准吗？",
     )
     for index, message in enumerate(explanation_questions, start=1):
         verb_question_state = ConversationState.new(
@@ -216,8 +221,14 @@ def test_intent_contract_uses_one_prose_only_test_for_mixed_tasks() -> None:
         ]["kind"]["enum"]
 
 
-def test_artifact_validation_is_materialized_before_process_approval() -> None:
-    assert "materialize and read back that artifact before calling local_process" in (
+def test_artifact_validation_separates_existing_and_process_created_files() -> None:
+    assert "approve the bounded process effect first, then call confirm_file" in (
+        EVERYDAY_SYSTEM_POLICY
+    )
+    assert "materialize and read back that artifact before local_process" in (
+        EVERYDAY_SYSTEM_POLICY
+    )
+    assert "Process approval alone does not confirm future artifact bytes" in (
         EVERYDAY_SYSTEM_POLICY
     )
     assert "materialize and read it back before requesting this process" in (
@@ -234,6 +245,9 @@ def test_artifact_validation_is_materialized_before_process_approval() -> None:
         "把结果写入 report.md，然后运行校验器。",
         "看看这个项目，把 greet 的标点错误修好，然后运行现有测试确认。只改必要文件。",
         "结合这份 CSV 和公开资料，整理一页说明到 report.md，然后运行项目里的校验器确认格式。",
+        "调用 MCP echo 返回 SABLE-27。",
+        "委派给子 Agent 总结两点结论。",
+        "请记住：本项目的测试代号是 SABLE-27。",
     ),
 )
 def test_explicit_non_prose_outcome_cannot_complete_through_bare_text(
@@ -365,14 +379,17 @@ def test_unadvertised_direct_response_repairs_to_goal_proposal() -> None:
     assert all("completion_claim" not in message for message in repairs)
 
 
-def test_everyday_path_has_no_cumulative_budget_and_pauses_at_16_no_progress(
+def test_everyday_path_continues_progressing_work_past_8_model_calls(
     tmp_path: Path,
 ) -> None:
     assert EVERYDAY_INVOCATION_LIMITS.max_model_calls is None
+    assert EVERYDAY_INVOCATION_LIMITS.max_run_model_calls == 40
+    assert EVERYDAY_INVOCATION_LIMITS.max_run_wall_seconds == 2 * 60 * 60
     assert EVERYDAY_INVOCATION_LIMITS.max_tool_calls is None
     assert EVERYDAY_INVOCATION_LIMITS.max_input_tokens is None
     assert EVERYDAY_INVOCATION_LIMITS.max_output_tokens is None
-    assert EVERYDAY_INVOCATION_LIMITS.max_invalid_repairs == 8
+    assert EVERYDAY_INVOCATION_LIMITS.max_invalid_repairs == 7
+    assert EVERYDAY_INVOCATION_LIMITS.max_retryable_provider_retries == 2
     assert EVERYDAY_INVOCATION_LIMITS.max_no_progress_replans == 16
 
     progresses = tuple(
@@ -383,12 +400,12 @@ def test_everyday_path_has_no_cumulative_budget_and_pauses_at_16_no_progress(
             summary=f"只描述进度 {index}",
             next_step="重复同一个下一步",
         )
-        for index in range(16)
+        for index in range(8)
     )
     provider = ScriptedProvider(
         ModelResponse((), control=goal_draft_from_frame("goal-016", _goal_frame())),
         *(ModelResponse((), control=progress) for progress in progresses),
-        RetryableProviderError("temporary outage after explicit resume"),
+        RetryableProviderError("temporary outage after continued progress"),
     )
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -407,49 +424,16 @@ def test_everyday_path_has_no_cumulative_budget_and_pauses_at_16_no_progress(
         workspace_identity_digest=opened.workspace_identity.identity_digest,
     ).run_turn(_submit(store.load().state), store.load())
 
-    assert result.status is RunStatus.LIMIT_REACHED
-    assert result.error_code == "no_progress"
-    assert len(provider.calls) == 17
-    paused_snapshot = store.load()
-    assert paused_snapshot.state.active_run is not None
-    assert paused_snapshot.state.active_run.status is ActiveRunStatus.PAUSED_LIMIT
-    assert paused_snapshot.state.goal is not None
-    assert paused_snapshot.state.goal.status.value != "verified_done"
-
-    reopened = open_workspace_session(workspace, state_root=state_root)
-    projection = project_restart(reopened)
-    assert reopened.disposition is StartupDisposition.RESUMED
-    assert reopened.store is not None and reopened.snapshot is not None
-    assert projection.active_run_status is ActiveRunStatus.PAUSED_LIMIT
-    assert projection.required_action == "resume"
-    tool_results_before = tuple(
-        fact
-        for fact in reopened.snapshot.state.facts
-        if fact.kind is FactKind.TOOL_RESULT
-    )
-    evidence_before = reopened.snapshot.state.evidence_records
-
-    resumed = _runtime(
-        provider,
-        reopened.store,
-        workspace_identity_digest=reopened.workspace_identity.identity_digest,
-    ).run_turn(build_resume(reopened.snapshot.state), reopened.snapshot)
-    assert resumed.status is RunStatus.FAILED_RETRYABLE
-    resumed_snapshot = reopened.store.load()
-    cancelled = _runtime(
-        provider,
-        reopened.store,
-        workspace_identity_digest=reopened.workspace_identity.identity_digest,
-    ).run_turn(build_cancel_goal(resumed_snapshot.state), resumed_snapshot)
-    assert cancelled.status is RunStatus.CANCELLED
-    assert cancelled.state.goal is not None
-    assert cancelled.state.goal.status is GoalStatus.CANCELLED
-    assert cancelled.state.goal.status is not GoalStatus.VERIFIED_DONE
-    assert tuple(
-        fact for fact in cancelled.state.facts if fact.kind is FactKind.TOOL_RESULT
-    ) == tool_results_before
-    assert cancelled.state.evidence_records == evidence_before
-    assert len(provider.calls) == 18
+    assert result.status is RunStatus.FAILED_RETRYABLE
+    assert result.error_code == "provider_retryable"
+    assert len(provider.calls) == 10
+    final_state = store.load().state
+    assert final_state.active_run is not None
+    assert final_state.active_run.status is ActiveRunStatus.PAUSED_RETRYABLE
+    assert final_state.goal is not None
+    assert final_state.goal.status is not GoalStatus.VERIFIED_DONE
+    assert not any(fact.kind is FactKind.TOOL_RESULT for fact in final_state.facts)
+    assert final_state.evidence_records == ()
 
 
 def test_no_progress_watchdog_resets_for_a_different_stall_fingerprint() -> None:
@@ -479,7 +463,11 @@ def test_no_progress_watchdog_resets_for_a_different_stall_fingerprint() -> None
     )
     store = InMemoryCheckpointStore(ConversationState.new("conversation-mixed-stall"))
 
-    result = _runtime(provider, store).run_turn(_submit(store.state), store.load())
+    result = _runtime(
+        provider,
+        store,
+        limits=replace(EVERYDAY_INVOCATION_LIMITS, max_model_calls=None),
+    ).run_turn(_submit(store.state), store.load())
 
     assert result.status is RunStatus.FAILED_RETRYABLE
     assert result.error_code == "provider_retryable"
@@ -517,10 +505,14 @@ def test_provider_failure_keeps_safe_adapter_classification_for_recovery() -> No
     initial = conversation_with_active_goal()
     store = InMemoryCheckpointStore(initial)
 
-    result = _runtime(ScriptedProvider(CodedRetryableError("provider_timeout")), store).run_turn(
-        _submit(store.state, "继续当前任务"),
-        store.load(),
-    )
+    result = _runtime(
+        ScriptedProvider(CodedRetryableError("provider_timeout")),
+        store,
+        limits=replace(
+            EVERYDAY_INVOCATION_LIMITS,
+            max_retryable_provider_retries=0,
+        ),
+    ).run_turn(_submit(store.state, "继续当前任务"), store.load())
 
     assert result.status is RunStatus.FAILED_RETRYABLE
     assert result.error_code == "provider_timeout"

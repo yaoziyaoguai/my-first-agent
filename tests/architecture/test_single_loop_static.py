@@ -29,3 +29,9 @@ def test_public_schedule_script_points_only_to_portable_cli() -> None:
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert 'first-agent-schedule = "agent.automation.cli:main"' in pyproject
     assert 'first-agent-schedule = "main:run_schedule"' not in pyproject
+
+
+def test_runtime_never_hidden_reloads_checkpoint_store() -> None:
+    source = (ROOT / "agent" / "runtime" / "loop.py").read_text(encoding="utf-8")
+
+    assert "self._checkpoint_store.load(" not in source

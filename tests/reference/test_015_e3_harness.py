@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import ast
 import json
+import os
+import signal
 import stat
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -24,6 +27,133 @@ import run_015_e3 as e3  # noqa: E402
 import verify_015_materialized_tree as v015  # noqa: E402
 
 SCRIPT = ROOT / "scripts" / "run_015_e3.py"
+
+
+def test_015_offline_gate_timeout_cleans_owned_process_group(tmp_path: Path) -> None:
+    pid_file = tmp_path / "descendant.pid"
+    child = (
+        "import subprocess,sys,time; "
+        "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+        f"open({str(pid_file)!r},'w').write(str(p.pid)); "
+        "time.sleep(30)"
+    )
+
+    assert e3._run("timeout fixture", [sys.executable, "-c", child], timeout=0.5) == 124
+    assert pid_file.exists(), "fixture never spawned its descendant"
+    descendant_pid = int(pid_file.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        try:
+            os.kill(descendant_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("offline gate left its owned descendant alive")
+
+
+def test_015_offline_gate_reaps_leader_when_group_identity_is_unverified(
+    monkeypatch,
+) -> None:
+    observed_pid: list[int] = []
+
+    def reject_identity(pid: int) -> int:
+        observed_pid.append(pid)
+        raise e3.ProcessCleanupError("synthetic identity failure")
+
+    monkeypatch.setattr(e3, "verified_group_identity", reject_identity)
+
+    assert e3._run(
+        "identity fixture",
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        timeout=5,
+    ) == 125
+    assert len(observed_pid) == 1
+    with pytest.raises(ProcessLookupError):
+        os.kill(observed_pid[0], 0)
+
+
+def test_015_offline_gate_interrupt_cleans_owned_process_group(tmp_path: Path) -> None:
+    pid_file = tmp_path / "descendant.pid"
+    gate_child = (
+        "import subprocess,sys,time; "
+        "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+        f"open({str(pid_file)!r},'w').write(str(p.pid)); "
+        "time.sleep(30)"
+    )
+    worker = (
+        "import sys; "
+        f"sys.path.insert(0,{str(ROOT / 'scripts')!r}); "
+        "import run_015_e3 as e3; "
+        f"e3._run('interrupt fixture',[sys.executable,'-c',{gate_child!r}],timeout=30)"
+    )
+    proc = subprocess.Popen(  # noqa: S603 - bounded local fixture
+        [sys.executable, "-c", worker],
+        cwd=ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    descendant_pid: int | None = None
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not pid_file.exists():
+            time.sleep(0.05)
+        assert pid_file.exists(), "fixture never spawned its descendant"
+        descendant_pid = int(pid_file.read_text(encoding="utf-8"))
+        os.kill(proc.pid, signal.SIGINT)
+        assert proc.wait(timeout=5) != 0
+        gone_deadline = time.monotonic() + 3
+        while time.monotonic() < gone_deadline:
+            try:
+                os.kill(descendant_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("interrupted offline gate left its descendant alive")
+    finally:
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait(timeout=5)
+        if descendant_pid is not None:
+            try:
+                pgid = os.getpgid(descendant_pid)
+            except ProcessLookupError:
+                pass
+            else:
+                if pgid > 0 and pgid != os.getpgrp():
+                    os.killpg(pgid, signal.SIGKILL)
+
+
+def test_015_offline_gate_rejects_detached_descendant_after_leader_exit(
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "detached.pid"
+    child = (
+        "import subprocess,sys; "
+        "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'],"
+        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+        f"open({str(pid_file)!r},'w').write(str(p.pid))"
+    )
+    descendant_pid: int | None = None
+    try:
+        result = e3._run(
+            "detached fixture", [sys.executable, "-c", child], timeout=5
+        )
+        # 124 表示确认清理，125 表示系统仍保留不可确认的进程组身份；二者都必须
+        # fail closed，不能把“leader 已退出”误报成 gate PASS。
+        assert result in {124, 125}
+        descendant_pid = int(pid_file.read_text(encoding="utf-8"))
+    finally:
+        if descendant_pid is not None:
+            try:
+                pgid = os.getpgid(descendant_pid)
+            except ProcessLookupError:
+                pass
+            else:
+                if pgid > 0 and pgid != os.getpgrp():
+                    os.killpg(pgid, signal.SIGKILL)
 
 
 def test_015_e3_harness_has_26_closed_boolean_claims() -> None:

@@ -543,6 +543,30 @@ def test_build_compaction_clips_tool_results_without_mutating_archive_state() ->
     assert repr(state) == before
 
 
+def test_compaction_never_turns_opaque_provider_continuity_into_summary_input() -> None:
+    state = _compaction_state()
+    facts = list(state.facts)
+    assistant = facts[1]
+    continuation = {
+        "provider_identity_digest": "a" * 64,
+        "opaque_payload": "private reasoning must not enter summary input",
+        "opaque_payload_digest": hashlib.sha256(
+            b"private reasoning must not enter summary input"
+        ).hexdigest(),
+    }
+    facts[1] = replace(
+        assistant,
+        content={**assistant.content, "provider_continuation": continuation},
+    )
+    state = replace(state, facts=tuple(facts))
+
+    pack = _manager().build_compaction(state, _plan(), _source_token())
+
+    serialized = json.dumps(pack.messages[0].content, ensure_ascii=False)
+    assert "private reasoning" not in serialized
+    assert "provider_continuation" not in serialized
+
+
 # --------------------------------------------------------------------------- #
 # fail closed 前置校验：inert plan / 非法 ids / 非法 source token
 # --------------------------------------------------------------------------- #

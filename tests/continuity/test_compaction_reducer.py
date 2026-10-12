@@ -225,6 +225,8 @@ def _authorization() -> GoalAuthorizationBinding:
         source_kind=AuthoritySourceKind.USER_FACT,
         source_id="action:17:user",
         source_digest="4" * 64,
+        issued_at="2026-09-04T00:00:00Z",
+        expires_at="2026-09-04T01:00:00Z",
     )
 
 

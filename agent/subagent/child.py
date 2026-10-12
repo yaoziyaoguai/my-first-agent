@@ -23,7 +23,14 @@ from agent.subagent.contracts import MAX_RESULT_ENVELOPE_BYTES
 _RESULT_LIMIT_CHARS = 4_000
 
 
-def _encode_result_envelope(status: str, message: str) -> bytes:
+def _encode_result_envelope(
+    status: str,
+    message: str,
+    *,
+    model_calls: int = 0,
+    tool_calls: int = 0,
+    sources: tuple[dict, ...] = (),
+) -> bytes:
     """输出 seam：在共同 8192-byte 预算内输出完整 UTF-8 JSON 结果 bytes。
 
     先保留现有 ``_RESULT_LIMIT_CHARS`` 产品字符上限，再按**完整 envelope**（JSON 转义 +
@@ -35,9 +42,14 @@ def _encode_result_envelope(status: str, message: str) -> bytes:
     candidate = message[:_RESULT_LIMIT_CHARS]
 
     def envelope_bytes(prefix: str) -> bytes:
-        return json.dumps(
-            {"status": status, "message": prefix}, ensure_ascii=False
-        ).encode("utf-8")
+        payload = {"status": status, "message": prefix}
+        # v1 单轮、零工具结果保持原 envelope 形状与精确字节边界；只有真正的
+        # 多步 child 才附加计数，旧 parent 仍可忽略未知字段。
+        if model_calls > 1 or tool_calls > 0 or sources:
+            payload.update({"model_calls": model_calls, "tool_calls": tool_calls})
+        if sources:
+            payload["sources"] = list(sources)
+        return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
     blob = envelope_bytes(candidate)
     if len(blob) <= MAX_RESULT_ENVELOPE_BYTES:
@@ -59,7 +71,10 @@ def main(argv: list[str] | None = None) -> int:
     config_path = Path(args[0])
 
     try:
-        from agent.subagent.runner import build_child_provider, build_child_runtime
+        from agent.subagent.runner import (
+            build_child_provider,
+            build_child_runtime,
+        )
         from agent.subagent.runtime_factory import compose_child_prompt, derive_child_identity
 
         config = _load_config(config_path)
@@ -69,6 +84,20 @@ def main(argv: list[str] | None = None) -> int:
         objective = str(config["objective"])
         handoff = str(config["handoff"])
         parent_key = str(config["parent_idempotency_key"])
+        raw_workspace_root = config.get("workspace_root")
+        workspace_root = (
+            Path(raw_workspace_root).resolve(strict=True)
+            if isinstance(raw_workspace_root, str)
+            else None
+        )
+        raw_protected_paths = config.get("protected_paths", [])
+        if not isinstance(raw_protected_paths, list) or any(
+            not isinstance(item, str) for item in raw_protected_paths
+        ):
+            raise ValueError("child protected paths must be a string list")
+        protected_paths = tuple(
+            Path(item).resolve(strict=False) for item in raw_protected_paths
+        )
     except Exception:  # noqa: BLE001 - 任何配置/provider 构建失败：不写结果，exit 非 0 → UNCONFIRMED
         return _die("child config or provider build failed")
 
@@ -80,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
         profile,
         conversation_id=child_conversation_id,
         strict_control_schema=spec.strict_tools,
+        workspace_root=workspace_root,
+        protected_paths=protected_paths,
     )
     action = SubmitMessage(
         conversation_id=child_conversation_id,
@@ -91,7 +122,30 @@ def main(argv: list[str] | None = None) -> int:
     # run_turn 内部捕获 provider 异常并分类为终态；它正常返回即表示 child 已 terminally 报告。
     result = runtime.run_turn(action, store.load())
     # 写出已验证的完整 UTF-8 JSON bytes：直接写 buffer，不依赖子进程 locale 的 stdout 编码。
-    blob = _encode_result_envelope(result.status.value, result.message or "")
+    from agent.runtime.contracts import FactKind
+
+    result_state = getattr(result, "state", None)
+    from agent.subagent.evidence import verified_child_sources_from_state
+
+    sources = (
+        verified_child_sources_from_state(
+            result_state,
+            workspace_root=workspace_root,
+            protected_paths=protected_paths,
+        )
+        if result_state is not None
+        else ()
+    )
+    blob = _encode_result_envelope(
+        result.status.value,
+        result.message or "",
+        model_calls=getattr(result, "model_calls_used", 0),
+        tool_calls=sum(
+            fact.kind is FactKind.TOOL_RESULT
+            for fact in (() if result_state is None else result_state.facts)
+        ),
+        sources=tuple(source.to_json() for source in sources),
+    )
     sys.stdout.buffer.write(blob)
     sys.stdout.buffer.flush()
     return 0
@@ -170,6 +224,8 @@ def _spec_from_config(raw: dict):
         thinking_mode=raw.get("thinking_mode"),
         request_path=raw.get("request_path"),
         strict_tools=raw.get("strict_tools", False) is True,
+        attempt_ledger_path=raw.get("attempt_ledger_path"),
+        max_model_attempts=raw.get("max_model_attempts"),
     )
 
 

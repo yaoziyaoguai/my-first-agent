@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from agent.runtime.context import ContextLimits, KernelContextManager
@@ -7,10 +9,13 @@ from agent.runtime.contracts import (
     ActiveRunStatus,
     ApprovalPolicy,
     BlockedClaim,
+    CompletionClaim,
     ConversationState,
     EvidenceOracleKind,
     ExecutionAuthorityClass,
+    ExecutionIntent,
     FactKind,
+    GoalStatus,
     KnownExecutedError,
     KnownNotExecuted,
     ModelResponse,
@@ -21,9 +26,11 @@ from agent.runtime.contracts import (
     RunStatus,
     SideEffectClass,
     SubmitMessage,
+    ToolCall,
     ToolPrepareContext,
     ToolRisk,
     ToolSpec,
+    closed_evidence_id,
 )
 from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.tools import KernelToolRuntime, RegisteredTool
@@ -101,6 +108,131 @@ def _blocked_response(correlation_id: str, message: str) -> ModelResponse:
             resume_condition="provide a closed completion oracle",
         ),
     )
+
+
+def test_successful_effectful_tool_gets_a_kernel_governed_receipt() -> None:
+    runtime = KernelToolRuntime(
+        (RegisteredTool(_write_spec("remote_fixture"), lambda intent: "HELIX-13"),)
+    )
+    prepared = runtime.prepare(
+        ToolCall("call-receipt", "remote_fixture", {}),
+        ToolPrepareContext(
+            conversation_id="conversation-1",
+            run_id="run-1",
+            state_revision=1,
+            goal_id="goal-1",
+            goal_revision=1,
+            workspace_identity_digest="workspace-1",
+        ),
+    )
+    assert isinstance(prepared, ExecutionIntent)
+
+    result = runtime.invoke(prepared)
+
+    assert result.executed is True
+    assert result.is_error is False
+    assert result.metadata["tool_name"] == "remote_fixture"
+    assert result.metadata["governed_tool_receipt_kind"] == "governed_tool_v1"
+    assert len(str(result.metadata["receipt_digest"])) == 64
+
+
+def test_read_only_tool_does_not_get_an_effect_receipt() -> None:
+    spec = replace(
+        _write_spec("read_fixture"),
+        side_effect=SideEffectClass.READ_ONLY,
+        risk=ToolRisk.LOW,
+    )
+    runtime = KernelToolRuntime((RegisteredTool(spec, lambda intent: "HELIX-13"),))
+    prepared = runtime.prepare(
+        ToolCall("call-read", "read_fixture", {}),
+        ToolPrepareContext(
+            conversation_id="conversation-1",
+            run_id="run-1",
+            state_revision=1,
+        ),
+    )
+    assert isinstance(prepared, ExecutionIntent)
+
+    result = runtime.invoke(prepared)
+
+    assert result.executed is True
+    assert result.is_error is False
+    assert "receipt_digest" not in result.metadata
+
+
+def test_approved_governed_tool_receipt_can_close_its_exact_goal_criterion() -> None:
+    state = conversation_with_active_goal()
+    assert state.goal is not None
+    state = replace(
+        state,
+        goal=replace(
+            state.goal,
+            proposed_criteria=(
+                ProposedCriterion(
+                    "criterion-remote-outcome",
+                    "the requested remote result is available",
+                    oracle_kind=EvidenceOracleKind.USER_CONFIRMATION,
+                ),
+            ),
+        ),
+    )
+    criterion_id = "criterion:required-governed-tool:goal-1:1:call-receipt"
+    provider = ScriptedProvider(
+        goal_noop_response("governed-receipt-user-supplement"),
+        ModelResponse((ModelToolCall("call-receipt", "mcp__fixture__remote", {}),)),
+        ModelResponse(
+            (),
+            control=CompletionClaim(
+                correlation_id="governed-receipt-completion",
+                goal_id="goal-1",
+                goal_revision=1,
+                criterion_evidence_refs=(
+                    closed_evidence_id("goal-1", 1, criterion_id),
+                ),
+            ),
+        ),
+    )
+    store = InMemoryCheckpointStore(state)
+    spec = replace(
+        _write_spec("mcp__fixture__remote"),
+        side_effect=SideEffectClass.EXTERNAL,
+        approval_policy=ApprovalPolicy.ALWAYS,
+    )
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=2_000, output_reserve=200),
+        ),
+        tool_runtime=KernelToolRuntime((RegisteredTool(spec, lambda intent: "HELIX-13"),)),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-governed-receipt",
+    )
+    pending = runtime.run_turn(_submit(store.state), store.load())
+    assert pending.status is RunStatus.AWAITING_APPROVAL
+    assert pending.request is not None
+
+    completed = runtime.run_turn(
+        ResolveApproval(
+            conversation_id=state.conversation_id,
+            action_seq=store.state.next_action_seq,
+            expected_revision=store.state.revision,
+            request_id=pending.request.request_id,
+            binding_digest=pending.request.binding_digest,
+            approved=True,
+        ),
+        store.load(),
+    )
+
+    assert completed.status is RunStatus.COMPLETED
+    assert completed.state.goal is not None
+    assert completed.state.goal.status is GoalStatus.VERIFIED_DONE
+    admitted = completed.state.goal.admitted_criteria
+    assert len(admitted) == 1
+    assert admitted[0].criterion_id == criterion_id
+    assert set(admitted[0].predicate) == {"receipt_digest"}
 
 
 def test_known_not_executed_advances_cursor_without_recovery() -> None:

@@ -1,36 +1,55 @@
 # First Agent 日用指南
 
-> 2026-10-10 执行包 S3 产物。所有命令经当前实现核验；详细命令清单见
-> [COMMANDS.md](../handoffs/2026-10-10-reliable-daily-use/COMMANDS.md)。
+> 2026-10-10 执行包 S3 产物；2026-10-12 按候选安装物复核（Q1）：
+> extras 与元数据一致、安装物入口 `first-agent`、Textual 8.2.8。
+> 详细命令清单见 [COMMANDS.md](../handoffs/2026-10-10-reliable-daily-use/COMMANDS.md)。
 
 ## 环境
 
 - **macOS 专属**：沙箱使用 macOS Seatbelt（read-only 验证与 workspace-write）。
   其它平台未验证、不支持。
-- Python ≥ 3.12 与本仓库 `pyproject.toml` 声明的依赖；TUI 需 `textual`
-  （`pip install "first_agent-1.0.0-py3-none-any.whl[tui]"`）。
-- 浏览器能力为可选 extras，使用专属测试 Chromium，不接管你的日常浏览器。
+- Python：`pyproject.toml` 声明最低 **3.11**；本轮实际验证运行版本 **3.12.2**
+  （未做跨 Python 矩阵）。
+- extras 严格来自当前元数据：`dev`、`browser`、`skill`、`mcp`、`tui`
+  （**没有** `web` extra）。TUI 需 `tui`（`textual>=8.2,<9`；本轮在 **8.2.8**
+  上验证）。
+- 浏览器能力是 `browser` extra，使用专属测试 Chromium，不接管你的日常浏览器。
 
 ## 安装
 
+**每个 venv 必须先创建**；下面两条路径分别对应"用户安装物启动"与"源码开发启动"。
+
+### 用户安装物启动（推荐日常使用）
+
 ```bash
-# 本地构建（不访问网络解析依赖）
-python3 -m pip wheel --no-deps --no-build-isolation --wheel-dir dist .
-python3 -m pip install "dist/first_agent-1.0.0-py3-none-any.whl"        # 核心
-python3 -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[tui]"   # TUI
+python3 -m venv ~/.local/share/first-agent/venv      # 先创建 venv
+~/.local/share/first-agent/venv/bin/python -m pip install \
+  "dist/first_agent-1.0.0-py3-none-any.whl[tui]"     # 核心 + TUI
+~/.local/share/first-agent/venv/bin/first-agent --workspace ~/myproject
 ```
 
-核心与 browser/web/skill extras 分开安装；缺 extras 时启动会给出明确诊断
+安装物自带 `first-agent` 入口；**不需要**源码目录，也不要求存在 `main.py`。
+
+### 源码开发启动
+
+```bash
+python3 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/python main.py --workspace ~/myproject
+```
+
+核心与 `browser`/`skill`/`mcp` extras 分开安装；缺 extras 时启动会给出明确诊断
 （例如 TUI 缺依赖会提示安装 `tui` extra 而非缺配置）。
 
 ## Provider 配置（DeepSeek Flash，已真实验证的路径）
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...        # 只在当前 shell 注入；不要写进任何文件
-.venv/bin/python main.py setup \
+first-agent setup \
   --provider openai_compatible --model deepseek-flash \
   --base-url https://api.deepseek.com --credential-env DEEPSEEK_API_KEY
 ```
+
+（源码开发启动时把 `first-agent` 换成 `.venv/bin/python main.py`。）
 
 `setup` 把**非秘密**配置保存到 owner-only 的 owner-preferences（此后免参启动）；
 密钥永远只从环境变量注入，不会被保存、打印或写入 checkpoint。
@@ -39,7 +58,7 @@ export DEEPSEEK_API_KEY=sk-...        # 只在当前 shell 注入；不要写进
 ## 第一个任务（一分钟上手）
 
 ```bash
-.venv/bin/python main.py --workspace ~/myproject
+first-agent --workspace ~/myproject
 ```
 
 在一个含 `app.py` 的目录里输入：
@@ -74,7 +93,7 @@ Task: change greet() in app.py to return 'howdy' and verify by running python3 c
 
 | 症状 | 处置 |
 |---|---|
-| 缺 extras（TUI/浏览器/Web） | 按启动诊断提示安装对应 extra；不自动下载 |
+| 缺 extras（TUI/浏览器/skill/mcp） | 按启动诊断提示安装对应 extra；不自动下载 |
 | 配置无效/凭据未设 | `setup` 重存非秘密配置；key 只放环境变量 |
 | 任务显示完成但未验证 | 看 `Verified delivery` 的证据范围行；`RunStatus.COMPLETED` 不等于验收完成 |
 | **Checkpoint 安全错误**（本次会话未能安全打开/关闭） | 先确认旧进程已结束、无未确认的执行资源，再用**原 workspace 与原 state 位置**重启。不要删除 checkpoint/lock、不要新建空状态绕过。若新进程仍失败：停止操作并保留状态，用于定位 |

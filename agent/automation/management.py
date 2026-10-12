@@ -279,9 +279,10 @@ class AutomationManagementService:
         manifest = self._workspace_repository.scan_source(binding, self._workspace_bounds)
         if manifest.manifest_digest != body.source_snapshot_digest:
             raise PreviewConflictError("source manifest does not match the proposal")
-        wake = self._wake_adapter.readback(body.wake_adapter_policy_digest)
-        if wake.outcome in {WakeReadbackOutcome.DRIFT, WakeReadbackOutcome.UNKNOWN}:
-            raise ActivationUnavailableError("wake adapter readback is not exact")
+        if body.wake_adapter_policy_digest is not None:
+            wake = self._wake_adapter.readback(body.wake_adapter_policy_digest)
+            if wake.outcome in {WakeReadbackOutcome.DRIFT, WakeReadbackOutcome.UNKNOWN}:
+                raise ActivationUnavailableError("wake adapter readback is not exact")
         return AutomationPreviewV1(
             automation_id=body.automation_id,
             revision=body.revision,
@@ -306,6 +307,20 @@ class AutomationManagementService:
         body = record.draft_body
         if body is None:
             raise PreviewConflictError("automation has no inactive draft to approve")
+        if body.wake_adapter_policy_digest is not None:
+            wake = self._wake_adapter.readback(body.wake_adapter_policy_digest)
+            if wake.outcome is WakeReadbackOutcome.ABSENT:
+                return _management_result(
+                    "wake_not_enabled",
+                    self._controller.snapshot(),
+                    automation_id,
+                )
+            if wake.outcome is not WakeReadbackOutcome.INSTALLED:
+                return _management_result(
+                    "wake_state_unknown",
+                    self._controller.snapshot(),
+                    automation_id,
+                )
         binding = self._source_bindings[body.source_workspace_binding_digest]
         manifest = self._workspace_repository.scan_source(binding, self._workspace_bounds)
         self._workspace_repository.capture_source(
@@ -314,27 +329,6 @@ class AutomationManagementService:
             self._workspace_bounds,
             owner_automation_id=body.automation_id,
         )
-        wake = self._wake_adapter.readback(body.wake_adapter_policy_digest)
-        if wake.outcome is WakeReadbackOutcome.ABSENT:
-            installed = self._wake_adapter.install(body.wake_adapter_policy_digest)
-            if installed.outcome is WakeInstallOutcome.FAILED:
-                return _management_result(
-                    "not_activated_install_failed",
-                    self._controller.snapshot(),
-                    automation_id,
-                )
-            if installed.outcome is WakeInstallOutcome.UNKNOWN:
-                return _management_result(
-                    "not_activated_install_unknown",
-                    self._controller.snapshot(),
-                    automation_id,
-                )
-        elif wake.outcome is not WakeReadbackOutcome.INSTALLED:
-            return _management_result(
-                "not_activated_install_unknown",
-                self._controller.snapshot(),
-                automation_id,
-            )
         definition = AutomationDefinitionV1.create_from_body(
             body,
             activation_preview_digest=preview.preview_digest,
@@ -353,7 +347,7 @@ class AutomationManagementService:
             )
         except AutomationRepositoryConflictError:
             return _management_result(
-                "adapter_installed_activation_conflict",
+                "activation_conflict",
                 self._controller.snapshot(),
                 automation_id,
             )
@@ -553,7 +547,10 @@ class AutomationManagementService:
             raise ActivationUnavailableError("sandbox qualification is unavailable")
         if body.budgets.browser_actions > 0 and not self._qualifications.browser_qualified:
             raise ActivationUnavailableError("browser qualification is unavailable")
-        if not self._qualifications.wake_qualified:
+        if (
+            body.wake_adapter_policy_digest is not None
+            and not self._qualifications.wake_qualified
+        ):
             raise ActivationUnavailableError("wake qualification is unavailable")
 
 
@@ -623,8 +620,16 @@ def _preview_sections(body: AutomationDefinitionBodyV1) -> tuple[PreviewSectionV
         PreviewSectionV1(
             "wake_and_recovery",
             (
-                f"wake policy: {body.wake_adapter_policy_digest}",
-                "wake adapter must qualify and match exactly",
+                (
+                    f"wake policy: {body.wake_adapter_policy_digest}"
+                    if body.wake_adapter_policy_digest is not None
+                    else "wake policy: manual reconcile only"
+                ),
+                (
+                    "wake adapter must qualify and match exactly"
+                    if body.wake_adapter_policy_digest is not None
+                    else "no operating-system wake will be installed"
+                ),
                 "unknown outcomes pause and require owner recovery",
             ),
         ),

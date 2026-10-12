@@ -372,6 +372,19 @@ def _prepare_process_request(
     return prepared.request
 
 
+def test_future_artifact_prepare_explains_two_stage_confirmation_without_conflict(
+    tmp_path: Path,
+) -> None:
+    """生产 prepare 的 preview 只说明两阶段确认，不给出互相冲突的批准命令。"""
+
+    _, request = _prepare_artifact_request(tmp_path)
+
+    assert "approves only the process effect" in request.preview
+    assert "does not confirm future artifact content" in request.preview
+    assert "plain yes/approve" not in request.preview
+    assert "/approve-artifact" not in request.preview
+
+
 def test_016_wrong_approved_process_cannot_satisfy_explicit_validator(
     tmp_path: Path,
 ) -> None:
@@ -755,7 +768,6 @@ def test_015_artifact_requirement_rejects_plain_approval_in_reducer(
         "outcome": "exited",
         "exit_code": 0,
     }
-
     artifact_requirement = next(
         item
         for item in accepted.goal.admitted_criteria
@@ -788,6 +800,91 @@ def test_015_artifact_requirement_rejects_plain_approval_in_reducer(
         verify_goal_completion(artifact_only)
 
 
+def test_process_artifact_generation_can_defer_digest_until_current_content_is_shown(
+    tmp_path: Path,
+) -> None:
+    """批准生成不等于确认未来字节；文件 criterion 保持 pending 等待 confirm_file。"""
+
+    criterion, request = _prepare_artifact_request(tmp_path)
+    state = _awaiting_state(request, criterion)
+    action = build_resolve_approval(
+        state,
+        request_id=request.request_id,
+        binding_digest=request.binding_digest,
+        approved=True,
+        approved_at="2026-09-12T00:00:00Z",
+        defer_artifact_confirmation=True,
+    )
+
+    accepted = _apply_action(state, action)
+
+    assert accepted.process_leases
+    assert not any(
+        item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
+        for item in accepted.goal.admitted_criteria
+    )
+    assert any(
+        item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+        for item in accepted.goal.admitted_criteria
+    )
+
+    mismatched_request = replace(
+        request,
+        artifact_confirmation_requirement=contracts.ArtifactConfirmationRequirementV1(
+            criterion_id="criterion-other",
+            artifact_path="artifact.out",
+        ),
+    )
+    mismatched_state = replace(
+        state,
+        active_run=replace(state.active_run, pending_request=mismatched_request),
+    )
+    mismatched_action = replace(
+        action,
+        request_id=mismatched_request.request_id,
+        binding_digest=mismatched_request.binding_digest,
+    )
+    with pytest.raises(ValueError, match="does not match a current Goal criterion"):
+        _apply_action(mismatched_state, mismatched_action)
+
+
+def test_confirm_file_approval_admits_the_runtime_observed_digest() -> None:
+    """用户只确认可读内容；adapter 不要求用户复制 Runtime 内部摘要。"""
+
+    criterion = _artifact_proposal()
+    request = contracts.ApprovalRequest(
+        request_id="approval-confirm",
+        run_id="run-artifact",
+        tool_call_id="call-artifact",
+        binding_digest="binding-confirm",
+        preview="confirm artifact.out current content:\nresult=42",
+        tool_name="confirm_file",
+        new_content_digest="c" * 64,
+    )
+    state = replace(
+        _awaiting_state(request, criterion),
+        active_run=replace(
+            _awaiting_state(request, criterion).active_run,
+            tool_calls=(ToolCall("call-artifact", "confirm_file", {"path": "artifact.out"}),),
+        ),
+    )
+    action = build_resolve_approval(
+        state,
+        request_id=request.request_id,
+        binding_digest=request.binding_digest,
+        approved=True,
+    )
+
+    accepted = _apply_action(state, action)
+
+    admitted = next(
+        item
+        for item in accepted.goal.admitted_criteria
+        if item.criterion_id == criterion.criterion_id
+    )
+    assert admitted.predicate == {"path": "artifact.out", "sha256": "c" * 64}
+
+
 def test_015_checkpoint_rejects_retargeted_pending_process_candidate(tmp_path: Path) -> None:
     criterion, request = _prepare_artifact_request(tmp_path)
     document = json.loads(_encode_state(_awaiting_state(request, criterion)))
@@ -807,6 +904,7 @@ def test_015_v5_retargeted_pending_candidate_is_revoked_not_resigned(
     document = json.loads(_encode_state(_awaiting_state(request, criterion)))
     document["schema_version"] = 5
     document["state"].pop("background_occurrence_binding")
+    document["state"]["active_run"].pop("run_started_at")
     document["state"]["active_run"].pop("invocation_origin")
     for field in (
         "provider_call_intent",
@@ -975,7 +1073,7 @@ def test_015_typed_non_file_goal_delta_is_recognized_as_noop() -> None:
 def test_015_cli_tui_headless_share_explicit_artifact_approval(
     tmp_path: Path,
 ) -> None:
-    """CLI/TUI/headless 使用同一个 typed builder；pending requirement 时 plain yes 拒绝。"""
+    """CLI/TUI 普通批准只授权生成；高级摘要命令仍保持 exact binding。"""
 
     criterion, request = _prepare_artifact_request(tmp_path)
     state = _awaiting_state(request, criterion)
@@ -984,12 +1082,9 @@ def test_015_cli_tui_headless_share_explicit_artifact_approval(
     from agent.tui.render import project
 
     projection = project(state)
-    assert projection.actions == ("reject",)
-    assert projection.focus == "input"
-    assert (
-        "approval command",
-        "/approve-artifact <64-lowercase-hex-sha256> artifact.out",
-    ) in projection.form_fields
+    assert projection.actions == ("approve", "reject")
+    assert projection.focus == "approval"
+    assert any(label == "confirmation" for label, _value in projection.form_fields)
 
     plain, error = _parse_action(
         "yes",
@@ -997,8 +1092,15 @@ def test_015_cli_tui_headless_share_explicit_artifact_approval(
         lambda: "run-unused",
         approval_time_factory=lambda: "2026-08-16T00:03:00Z",
     )
-    assert plain is None
-    assert error is not None and "/approve-artifact" in error
+    assert error is None
+    assert plain == build_resolve_approval(
+        state,
+        request_id=request.request_id,
+        binding_digest=request.binding_digest,
+        approved=True,
+        approved_at="2026-08-16T00:03:00Z",
+        defer_artifact_confirmation=True,
+    )
 
     command = f"/approve-artifact {'b' * 64} artifact.out"
     cli_action, error = _parse_action(

@@ -25,51 +25,85 @@ _SUMMARY_PUBLIC_KEYS = (
 )
 
 
+def _displayable_entry(fact: ConversationFact) -> str | None:
+    """把一条 fact 投影为可展示文本；不可展示（tool/private）返回 None。"""
+
+    if fact.kind is FactKind.USER_MESSAGE:
+        text = fact.content.get("text")
+        if isinstance(text, str) and text:
+            return f"[user] {text}"
+        return None
+    if fact.kind is FactKind.ASSISTANT_MESSAGE:
+        text = fact.content.get("text")
+        if isinstance(text, str) and text:
+            return f"[assistant] {text}"
+        return None
+    if fact.kind is FactKind.CONTEXT_SUMMARY:
+        lines = ["[summary — 压缩摘要，非原文]"]
+        for key in _SUMMARY_PUBLIC_KEYS:
+            value = fact.content.get(key)
+            if isinstance(value, str) and value:
+                lines.append(f"{key}: {value}")
+            elif isinstance(value, (list, tuple)) and value:
+                rendered = "; ".join(str(item) for item in value)
+                if rendered:
+                    lines.append(f"{key}: {rendered}")
+        if len(lines) > 1:
+            return "\n".join(lines)
+    return None
+
+
+def _split_within_budget(text: str) -> list[str]:
+    """把单条 safe_display 文本切成每段 ≤ ``F3_PAGE_BUDGET`` 的连续片段。
+
+    预算按**字符**（与 safe_display 输出一致，非字节）；超长单条不再整条独占
+    一页，而是可在多页读完，尾部不丢失。
+    """
+
+    if len(text) <= F3_PAGE_BUDGET:
+        return [text]
+    return [
+        text[offset : offset + F3_PAGE_BUDGET]
+        for offset in range(0, len(text), F3_PAGE_BUDGET)
+    ]
+
+
 def build_f3_pages(
     facts: tuple[ConversationFact, ...],
 ) -> tuple[tuple[str, ...], int]:
-    """最近 20 条可展示事实按原顺序分页；返回 (pages, shown_count)。
+    """最近 20 条**可展示**消息按原顺序分页；返回 (pages, shown_count)。
 
+    顺序固定（UI-04 冻结合同）：先从保留 facts 中筛选允许展示的
+    user/assistant/summary 内容，再取最近 ``F3_MAX_FACTS`` 条——被 tool
+    result 等不可展示 fact 隔开的早期消息仍会入选，不可展示 fact 不占名额。
     USER_MESSAGE / ASSISTANT_MESSAGE 仅 content.text；CONTEXT_SUMMARY 仅公开
     摘要字段并明确标注"压缩摘要，非原文"。不展示 provider_continuation、
-    opaque payload、reasoning、raw tool results 与 metadata/JSON。正文先做
-    safe_display 转义，再按预算分段；超长单条在页内保留全文（可达页预算），
-    翻页可读到每条全文尾部。
+    opaque payload、reasoning、raw tool results 与 metadata/JSON。
+
+    正文先做 safe_display 转义，再按 ``F3_PAGE_BUDGET`` 分段：页正文（含
+    `[user]`/`[assistant]` 角色标签与 summary 来源标签）合计不超过预算；
+    超长单条按预算切分为连续片段，翻页可读到全文尾部。页码/页眉等导航
+    chrome 单独计算，不计入正文预算。
     """
 
-    displayable: list[str] = []
-    for fact in facts[-F3_MAX_FACTS:]:
-        if fact.kind is FactKind.USER_MESSAGE:
-            text = fact.content.get("text")
-            if isinstance(text, str) and text:
-                displayable.append(f"[user] {text}")
-        elif fact.kind is FactKind.ASSISTANT_MESSAGE:
-            text = fact.content.get("text")
-            if isinstance(text, str) and text:
-                displayable.append(f"[assistant] {text}")
-        elif fact.kind is FactKind.CONTEXT_SUMMARY:
-            lines = ["[summary — 压缩摘要，非原文]"]
-            for key in _SUMMARY_PUBLIC_KEYS:
-                value = fact.content.get(key)
-                if isinstance(value, str) and value:
-                    lines.append(f"{key}: {value}")
-                elif isinstance(value, (list, tuple)) and value:
-                    rendered = "; ".join(str(item) for item in value)
-                    if rendered:
-                        lines.append(f"{key}: {rendered}")
-            if len(lines) > 1:
-                displayable.append("\n".join(lines))
+    displayable = [
+        entry
+        for entry in (_displayable_entry(fact) for fact in facts)
+        if entry is not None
+    ][-F3_MAX_FACTS:]
+    segments: list[str] = []
+    for entry in displayable:
+        segments.extend(_split_within_budget(safe_display(entry)))
     pages: list[tuple[str, ...]] = []
     current: list[str] = []
     budget = 0
-    for entry in displayable:
-        safe = safe_display(entry)
-        if budget + len(safe) > F3_PAGE_BUDGET and current:
+    for segment in segments:
+        if budget + len(segment) > F3_PAGE_BUDGET and current:
             pages.append(tuple(current))
             current = []
             budget = 0
-        current.append(safe)
-        budget += len(safe)
+        current.append(segment)
+        budget += len(segment)
     if current:
         pages.append(tuple(current))
     return tuple(pages), len(displayable)
@@ -100,20 +134,27 @@ def build_facts_review_screen(pages: tuple[tuple[str, ...], ...], shown: int):
             from textual.containers import Vertical
 
             with Vertical():
-                note = (
-                    f"当前 checkpoint 最近 {F3_MAX_FACTS} 条保留内容；不是完整历史"
-                    f"（本页 {self._page_index + 1}/{max(1, len(self._pages))}，"
-                    f"←/→ 翻页，Esc 返回）"
-                )
-                yield Static(safe_display(note), id="f3_header")
+                yield Static("", id="f3_header")
                 yield Static("", id="f3_body")
 
         def on_mount(self) -> None:
             self._render_page()
 
+        def _render_header(self) -> None:
+            # 页号必须随翻页更新：header 在每次 _render_page 时重算，而不是
+            # 在 compose 时固定（UI-04：翻页页号不更新的缺陷）。
+            header = self.query_one("#f3_header", Static)
+            note = (
+                f"当前 checkpoint 最近 {F3_MAX_FACTS} 条保留内容；不是完整历史"
+                f"（本页 {self._page_index + 1}/{max(1, len(self._pages))}，"
+                f"←/→ 翻页，Esc 返回）"
+            )
+            header.update(safe_display(note))
+
         def _render_page(self) -> None:
             from rich.text import Text
 
+            self._render_header()
             body = self.query_one("#f3_body", Static)
             if not self._pages:
                 body.update(Text(safe_display("当前没有可展示的保留内容。")))

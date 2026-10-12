@@ -9,6 +9,7 @@ from agent.runtime.contracts import (
     ConversationState,
     EgressClass,
     ExecutionAuthorityClass,
+    GoalStatus,
     RecordedRunResult,
     RecoveryRequest,
     RunStatus,
@@ -25,7 +26,7 @@ from agent.runtime.state import (
     start_tool_batch,
 )
 from agent.tui.render import SafeDisplayTooLargeError, project, run_status_label, safe_display
-from tests.kernel.fakes import conversation_with_active_goal
+from tests.kernel.fakes import conversation_with_active_goal, conversation_with_terminal_goal
 
 
 def _approval_state():
@@ -130,6 +131,17 @@ def test_projection_ready_then_terminal() -> None:
     view = project(terminal)
     assert view.terminal_message == "all done"
     assert view.actions == ("submit",)
+
+
+def test_verified_done_projection_explains_bounded_evidence_scope() -> None:
+    view = project(conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE))
+
+    assert "Verified delivery:" in view.main_text
+    assert "Targets: workspace" in view.main_text
+    assert "Required evidence: 1/1 passed" in view.main_text
+    assert "Durable task permissions: closed." in view.main_text
+    assert "Evidence scope: exact current bytes of reports/final.md" in view.main_text
+    assert "does not independently establish numerical or semantic correctness" in view.main_text
 
 
 def test_browser_takeover_projection_overrides_ready_goal_and_terminal() -> None:

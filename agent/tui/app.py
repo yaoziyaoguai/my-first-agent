@@ -205,6 +205,10 @@ def build_app(
         def __init__(self) -> None:
             super().__init__()
             self._adapter = adapter
+            # UI-03（2026-10-11）：丢弃判定需要只读观察活跃 control binding；
+            # adapter 未配置 inbox 时返回 None（无协作控制能力），判定整体跳过。
+            self._control_inbox = getattr(adapter, "active_control_binding", None)
+            self._dropped_control_notice = False
             self._run_id_factory = run_id_factory
             self.close_deadline_seconds = close_deadline_seconds
             self.projection: TuiProjection | None = None
@@ -298,6 +302,16 @@ def build_app(
         def _restore_draft(self) -> None:
             # 展示恢复：把 UI 草稿放回 Input，不触发新的 draft revision。
             msg_input = self.query_one("#message", Input)
+            if "\n" in self.draft_text:
+                # UI-01：多行草稿不压进单行 Input（会丢换行）；主界面只保留本地
+                # 草稿与状态提示，用户经 F4 继续编辑或提交。
+                if msg_input.value:
+                    self._restoring_draft = True
+                    try:
+                        msg_input.value = ""
+                    finally:
+                        self._restoring_draft = False
+                return
             if msg_input.value != self.draft_text:
                 self._restoring_draft = True
                 try:
@@ -313,17 +327,26 @@ def build_app(
             # 输入的新版本不被迟到回调覆盖。接收情况未知时保留草稿，不自动重发。
             pending = self._pending_submission
             if pending is not None:
-                text, revision = pending
-                if any(
-                    fact.kind is FactKind.USER_MESSAGE
-                    and fact.fact_id.startswith("action:")
-                    and fact.fact_id.endswith(":user")
+                # UI-02（2026-10-11）：待确认条目绑定确切 conversation/action
+                # identity（本次 dispatch 的 action_seq），不以"任意 action: 前缀
+                # + 文本相等"判定；历史同文、不同会话同文、迟到回执都不能消费
+                # 本次文本。
+                conversation_id, action_seq, text, revision = pending
+                fact_id = f"action:{action_seq}:user"
+                if state.conversation_id == conversation_id and any(
+                    fact.fact_id == fact_id
+                    and fact.kind is FactKind.USER_MESSAGE
                     and fact.content.get("text") == text
                     for fact in state.facts
                 ):
                     self._pending_submission = None
                     if self.draft_revision == revision:
                         self.draft_text = ""
+            # UI-03（2026-10-11）：队列关闭导致未应用的纠正必须有明确结局。
+            # ControlInbox.close 丢弃未消费请求；TUI 在收尾刷新时对照 inbox
+            # 判断——请求既无 receipt、又已不在 inbox 且 binding 已关闭，即
+            # "已明确丢弃"：解除 dedup、保留文本供用户显式重发（不自动重试）。
+            self._resolve_dropped_control_requests(state)
             for request_id, entry in list(self._pending_control_texts.items()):
                 message, revision = entry
                 if any(
@@ -333,6 +356,45 @@ def build_app(
                     del self._pending_control_texts[request_id]
                     if self.draft_revision == revision and self.draft_text == message:
                         self.draft_text = ""
+
+        def _resolve_dropped_control_requests(self, state) -> None:  # noqa: ANN001
+            """把"已明确丢弃"的纠正从 pending 账转为可重发状态。
+
+            区分三种结局（UI-03 冻结语义）：
+
+            - 已应用：durable ControlReceipt 存在（上面的消费分支处理）；
+            - 已明确丢弃：请求不再在 inbox 且当前无活跃 binding（run 已收尾，
+              Runtime 的 ``close`` 丢弃了未消费请求）→ 解除 dedup 并保留文本；
+            - 接收未知：inbox 仍持有该请求或 binding 仍活跃 → 保持 pending，
+              不自动重试、也不允许重复发送。
+
+            只读 inbox 观察，不修改 durable state、不重发请求。
+            """
+
+            binding_observer = self._control_inbox
+            if binding_observer is None or not self._pending_control_texts:
+                return
+            binding = binding_observer(state.conversation_id)
+            if binding is not None:
+                # 仍有活跃 invocation：未收到 receipt 的请求可能仍在排队，
+                # 保持 pending（未知），不做任何清理。
+                return
+            dropped = [
+                request_id
+                for request_id in self._pending_control_texts
+                if not any(
+                    receipt.correlation_id == request_id
+                    for receipt in state.control_receipts
+                )
+            ]
+            if not dropped:
+                return
+            for request_id in dropped:
+                message, revision = self._pending_control_texts.pop(request_id)
+                if self.draft_revision == revision and not self.draft_text:
+                    # 文本保留为可编辑草稿：用户可显式重发一次。
+                    self.draft_text = message
+            self._dropped_control_notice = True
 
         def _open_stream_window(self, displayed_state) -> None:  # noqa: ANN001
             # S2-A：每次 UI dispatch 打开流式展示窗口；只保存 expected conversation，
@@ -506,17 +568,25 @@ def build_app(
                 # S2-A（UI-04）：snapshot 是状态权威。approval/recovery/disclosure/
                 # takeover 等 pending 表单与 paused 状态不被旧 result 覆盖；结果
                 # 文本只在无表单的终端/继续态上叠加。
+                # UI-05（2026-10-11）：叠加而非替换——VERIFIED_DONE 的权威交付
+                # 摘要（目标/产物/证据计数/权限状态）来自 snapshot 投影，普通
+                # result.message 只能附加，不能把它整体顶掉。
                 label = run_status_label(result.status)
-                main_text = f"{label}: {result.message or projection.main_text}"
+                result_line = f"{label}: {result.message or projection.main_text}"
                 if (
                     result.message
                     and projection.goal is not None
                     and projection.goal.verification_scope
                 ):
-                    main_text = (
-                        f"{main_text}\n"
+                    result_line = (
+                        f"{result_line}\n"
                         f"{verification_scope_message(projection.goal.verification_scope)}"
                     )
+                main_text = (
+                    result_line
+                    if projection.main_text == "ready"
+                    else f"{projection.main_text}\n{result_line}"
+                )
             sources = (
                 project_visible_source_views(view.snapshot.state, advanced=True)
                 if self._advanced_sources
@@ -541,6 +611,15 @@ def build_app(
                 # 用户可见的有界失败提示（不含原始异常敏感内容）；状态来自 authoritative
                 # checkpoint 重新投影（action 未推进）。
                 main_text = worker_error
+            if self._dropped_control_notice:
+                # UI-03（2026-10-11）：run 收尾关闭 control 队列时未应用的纠正
+                # 必须有明确、用户可见的结局；文本已保留为草稿，可检查后重新
+                # 提交（不自动重试）。提示只展示一次，随下次刷新自然消失。
+                main_text = (
+                    f"{main_text}\n已明确丢弃：队列关闭前未应用的纠正没有执行；"
+                    "文本已保留为草稿，可检查后重新提交。"
+                )
+                self._dropped_control_notice = False
             self.query_one("#status", Static).update(Text(safe_display(main_text)))
 
             self.form_text = self._render_form(projection)
@@ -883,6 +962,12 @@ def build_app(
                 return
             disposition, text = result
             if disposition == "send":
+                # UI-01（2026-10-11）：任何发送尝试前先保存完整文本与本地版本。
+                # 门槛拒绝（审批/暂停/busy/接管 pending）、排队未落盘、持久化前
+                # 异常都不清空；只有 durable 接收证明（见
+                # `_consume_pending_if_durably_accepted`）才消费该版本。
+                self.draft_text = text
+                self.draft_revision += 1
                 # modal 内 slash 文本是普通消息内容：不解析命令。
                 self._submit_text(text, allow_commands=False)
                 return
@@ -991,7 +1076,14 @@ def build_app(
             action = build_submit(
                 state, message=value, run_id=self._run_id_factory()
             )
-            self._pending_submission = (value, self.draft_revision)
+            # UI-02：绑定本次 action 的确切 fact identity（conversation + action_seq），
+            # 消费判定只认这条 fact，不认历史同文。
+            self._pending_submission = (
+                state.conversation_id,
+                action.action_seq,
+                value,
+                self.draft_revision,
+            )
             self._run_action(action)
 
         # --- keyboard action methods（全部经 projection gate）---

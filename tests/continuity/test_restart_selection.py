@@ -16,6 +16,7 @@ from agent.runtime.contracts import (
     ExecutingIntentRecord,
     ExecutionAuthorityClass,
     FactKind,
+    GoalProgress,
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
@@ -26,7 +27,7 @@ from agent.runtime.contracts import (
     source_result_since_latest_user,
 )
 from agent.runtime.loop import InvocationLimits
-from agent.runtime.state import create_goal
+from agent.runtime.state import create_goal, record_goal_progress
 from agent.runtime.tools import KernelToolRuntime
 from tests.continuity.test_contracts import _goal
 from tests.kernel.fakes import (
@@ -85,6 +86,66 @@ def test_reopen_projects_goal_summary_without_provider_or_tool_call(
     assert projection.goal_revision == 1
     assert projection.user_outcome == "生成一份可验收的报告"
     assert projection.required_action is None
+
+
+def test_reopen_projects_restart_ready_work_record_without_repeating_effects(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state-root"
+    opened = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000020",
+    )
+    assert opened.store is not None and opened.snapshot is not None
+    source = ConversationFact(
+        fact_id="fact:user:work-record",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "修复导出并验证"},
+    )
+    state = create_goal(
+        replace(opened.snapshot.state, facts=(source,)),
+        _goal(
+            workspace_identity_digest=opened.workspace_identity.identity_digest,
+            created_from_fact_ids=(source.fact_id,),
+        ),
+    )
+    state = record_goal_progress(
+        state,
+        GoalProgress(
+            correlation_id="work-record-v1",
+            goal_id=state.goal.goal_id,
+            goal_revision=state.goal.revision,
+            summary=(
+                "已修改 exporter.py 和 tests/test_exporter.py；最近有效检查为 "
+                "pytest tests/test_exporter.py（12 passed）；失败路线：不要再用 split(',')"
+            ),
+            next_step="检查整体 diff，再运行最终相关回归并收尾",
+        ),
+    )
+    lease = opened.store.try_acquire(state.conversation_id)
+    assert lease is not None
+    try:
+        opened.store.compare_and_swap(opened.snapshot, state)
+    finally:
+        lease.release()
+
+    def _unexpected(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("restart projection must not call Provider or Tool")
+
+    monkeypatch.setattr(FakeProvider, "generate", _unexpected)
+    monkeypatch.setattr(KernelToolRuntime, "invoke", _unexpected)
+    reopened = open_workspace_session(workspace, state_root=state_root)
+    projection = project_restart(reopened)
+
+    assert projection.progress_summary == state.goal.progress_summary
+    assert projection.next_step == state.goal.next_step
+    assert projection.goal_revision == state.goal.revision
+    assert reopened.snapshot is not None
+    assert reopened.snapshot.state.facts == (source,)
 
 
 def test_executing_checkpoint_enters_existing_unknown_effect_recovery(

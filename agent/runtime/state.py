@@ -2587,6 +2587,7 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
         if not isinstance(pending, RecoveryRequest):
             raise ValueError("recovery request required")
         succeeded = action.resolution.value == "mark_succeeded"
+        intent = active.executing_intent
         synthetic = ConversationFact(
             fact_id=f"action:{action.action_seq}:recovery",
             kind=FactKind.TOOL_RESULT,
@@ -2599,6 +2600,15 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                 ),
                 "is_error": not succeeded,
                 "synthetic": True,
+                # RC-01（2026-10-11）：UNKNOWN 结果必须保守失效其前的旧验证。
+                # 标记失败不等于从未执行；分类来自可信执行意图（不采信模型文本），
+                # intent 缺失时不盖章 side_effect，证据/折叠消费者保守视为潜在写入。
+                "unknown_outcome": True,
+                **(
+                    {"side_effect": intent.side_effect.value}
+                    if intent is not None
+                    else {}
+                ),
                 **(
                     {"invocation_origin": InvocationOrigin.OPERATOR.value}
                     if active.invocation_origin is InvocationOrigin.OPERATOR

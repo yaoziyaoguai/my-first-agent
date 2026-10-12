@@ -8,16 +8,18 @@ import re
 import stat
 from collections.abc import Callable
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from uuid import uuid4
 
+from agent.continuity.archive import LocalConversationArchive
 from agent.continuity.identity import WorkspaceIdentityV1
-from agent.runtime.checkpoint import LocalCheckpointStore
+from agent.runtime.checkpoint import CheckpointConflictError, LocalCheckpointStore
 from agent.runtime.contracts import (
     ActiveRunStatus,
+    ArchivedConversation,
     ContinuationPhase,
     ConversationState,
     ConversationWorkspaceBindingV1,
@@ -52,6 +54,9 @@ class WorkspaceSession:
     store: LocalCheckpointStore | None
     snapshot: LoadedSnapshot | None
     candidates: tuple[SessionCandidate, ...] = ()
+    candidate_inventory: tuple[SessionCandidate, ...] = ()
+    candidate_page: int = 0
+    candidate_page_size: int = DEFAULT_ACTIVE_CANDIDATE_LIMIT
     workspace_binding: ConversationWorkspaceBindingV1 | None = None
     legacy_unbound_count: int = 0
     total_checkpoint_count: int = 0
@@ -69,6 +74,258 @@ class SessionCandidate:
     goal_revision: int | None
     goal_status: GoalStatus | None
     user_outcome: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceInspection:
+    """只读发现结果；不包含未绑定或错绑 conversation 的内容。"""
+
+    state_root: Path
+    workspace_identity: WorkspaceIdentityV1
+    snapshots: tuple[LoadedSnapshot, ...]
+    legacy_unbound_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class SessionArchivePreview:
+    """用户归档确认面：只暴露定位、状态和 checkpoint 版本。"""
+
+    conversation_id: str
+    goal_status: GoalStatus
+    user_outcome: str
+    checkpoint_digest: str
+    state_revision: int
+
+
+def inspect_workspace_sessions(
+    workspace: Path,
+    *,
+    state_root: Path | None = None,
+    home: Path | None = None,
+    max_history_checkpoints: int = WORKSPACE_HISTORY_CAPACITY,
+) -> WorkspaceInspection:
+    """在零创建、零 checkpoint mutation 下读取当前 workspace 的保存状态。"""
+
+    if max_history_checkpoints < 1:
+        raise ValueError("max_history_checkpoints must be positive")
+    identity = WorkspaceIdentityV1.resolve(workspace)
+    root = (
+        default_state_root(home) if state_root is None else Path(state_root)
+    ).absolute()
+    workspace_path = Path(identity.canonical_path)
+    if root == workspace_path or root.is_relative_to(workspace_path):
+        raise ValueError("state root must remain outside the tool workspace")
+    _reject_symlink_components(root, label="state root")
+    if not root.exists():
+        return WorkspaceInspection(root, identity, ())
+    _ensure_owner_directory(root, create=False, label="state root")
+    workspaces_root = root / "workspaces"
+    if not workspaces_root.exists():
+        return WorkspaceInspection(root, identity, ())
+    _reject_symlink_components(workspaces_root, label="workspaces root")
+    _ensure_owner_directory(workspaces_root, create=False, label="workspaces root")
+    workspace_root = workspaces_root / identity.scope_digest
+    if not workspace_root.exists():
+        return WorkspaceInspection(root, identity, ())
+    loaded = load_workspace_checkpoints(
+        workspace_root,
+        max_history_checkpoints=max_history_checkpoints,
+    )
+    safe: list[LoadedSnapshot] = []
+    legacy_unbound_count = 0
+    for _, snapshot in loaded:
+        state = snapshot.state
+        binding = state.workspace_binding
+        if binding is None and state.goal is None:
+            legacy_unbound_count += 1
+            continue
+        if binding is not None:
+            matches = (
+                binding.workspace_scope_digest == identity.scope_digest
+                and binding.workspace_identity_digest == identity.identity_digest
+            )
+        else:
+            matches = state.goal.workspace_identity_digest == identity.identity_digest
+        if not matches:
+            raise ValueError("workspace identity confirmation is required")
+        safe.append(snapshot)
+    return WorkspaceInspection(root, identity, tuple(safe), legacy_unbound_count)
+
+
+def preview_workspace_archive(
+    workspace: Path,
+    *,
+    conversation_id: str,
+    state_root: Path | None = None,
+    home: Path | None = None,
+    max_history_checkpoints: int = WORKSPACE_HISTORY_CAPACITY,
+) -> SessionArchivePreview:
+    """只读预览一个可归档的已结束会话，不创建任何状态。"""
+
+    inspection = inspect_workspace_sessions(
+        workspace,
+        state_root=state_root,
+        home=home,
+        max_history_checkpoints=max_history_checkpoints,
+    )
+    snapshot = _exact_snapshot(inspection.snapshots, conversation_id)
+    _require_user_archive_eligible(snapshot.state)
+    goal = snapshot.state.goal
+    assert goal is not None
+    return SessionArchivePreview(
+        conversation_id=conversation_id,
+        goal_status=goal.status,
+        user_outcome=goal.user_outcome,
+        checkpoint_digest=snapshot.token,
+        state_revision=snapshot.state.revision,
+    )
+
+
+def archive_workspace_session(
+    workspace: Path,
+    *,
+    conversation_id: str,
+    expected_checkpoint_digest: str,
+    state_root: Path | None = None,
+    home: Path | None = None,
+    max_history_checkpoints: int = WORKSPACE_HISTORY_CAPACITY,
+) -> ArchivedConversation:
+    """先写入并重读不可变归档，再释放 exact 终态 checkpoint。"""
+
+    identity, root, workspace_root = _existing_workspace_state_paths(
+        workspace,
+        state_root=state_root,
+        home=home,
+    )
+    with _bootstrap_lock(workspace_root):
+        loaded = load_workspace_checkpoints(
+            workspace_root,
+            max_history_checkpoints=max_history_checkpoints,
+        )
+        path, snapshot = _exact_loaded(loaded, conversation_id)
+        _require_user_archive_eligible(snapshot.state)
+        if snapshot.token != expected_checkpoint_digest:
+            raise ValueError("conversation changed after preview")
+        store = LocalCheckpointStore(path)
+        lease = store.try_acquire(conversation_id)
+        if lease is None:
+            raise ValueError("conversation is currently in use")
+        try:
+            current = store.load()
+            if current.token != expected_checkpoint_digest:
+                raise ValueError("conversation changed after preview")
+            _require_user_archive_eligible(current.state)
+            archive = LocalConversationArchive(root)
+            record = archive.archive(
+                current.state,
+                source_checkpoint_digest=current.token,
+                workspace_scope_digest=identity.scope_digest,
+            )
+            restored = archive.load_archived(record)
+            if restored != current:
+                raise ValueError("archived conversation failed exact read-back")
+            store.retire_archived_snapshot(current, record)
+            return record
+        finally:
+            lease.release()
+
+
+def restore_workspace_session(
+    workspace: Path,
+    *,
+    conversation_id: str,
+    source_checkpoint_digest: str,
+    state_root: Path | None = None,
+    home: Path | None = None,
+    max_history_checkpoints: int = WORKSPACE_HISTORY_CAPACITY,
+) -> WorkspaceSession:
+    """从 exact immutable archive 恢复原 conversation，归档本身仍保留。"""
+
+    identity, root, workspace_root = _existing_workspace_state_paths(
+        workspace,
+        state_root=state_root,
+        home=home,
+    )
+    with _bootstrap_lock(workspace_root):
+        # R3c：restore 是写路径——清扫孤儿锁与容量判定同锁内完成。
+        loaded = _load_candidates(
+            workspace_root,
+            max_history_checkpoints=max_history_checkpoints,
+            sweep_retired_locks=True,
+        )
+        if len(loaded) >= max_history_checkpoints:
+            raise ValueError("workspace history capacity is full")
+        if any(snapshot.state.conversation_id == conversation_id for _, snapshot in loaded):
+            raise ValueError("conversation already exists in active history")
+        archive = LocalConversationArchive(root)
+        archived = archive.load_archived_by_identity(
+            conversation_id=conversation_id,
+            workspace_scope_digest=identity.scope_digest,
+            source_checkpoint_digest=source_checkpoint_digest,
+        )
+        _require_user_archive_eligible(archived.state)
+        binding = archived.state.workspace_binding
+        if (
+            binding is None
+            or binding.workspace_identity_digest != identity.identity_digest
+        ):
+            raise ValueError("archived conversation workspace identity mismatch")
+        checkpoint_path = workspace_root / f"{conversation_id}.json"
+        try:
+            store = LocalCheckpointStore.initialize(checkpoint_path, archived.state)
+        except CheckpointConflictError as error:
+            raise ValueError("conversation restore target already exists") from error
+        snapshot = store.load()
+        return WorkspaceSession(
+            disposition=StartupDisposition.RESUMED,
+            state_root=root,
+            workspace_identity=identity,
+            checkpoint_path=checkpoint_path,
+            store=store,
+            snapshot=snapshot,
+            candidates=(_candidate(checkpoint_path, snapshot),),
+            workspace_binding=binding,
+            total_checkpoint_count=len(loaded) + 1,
+            total_active_count=0,
+        )
+
+
+def preview_workspace_restore(
+    workspace: Path,
+    *,
+    conversation_id: str,
+    source_checkpoint_digest: str,
+    state_root: Path | None = None,
+    home: Path | None = None,
+) -> SessionArchivePreview:
+    """只读验证 exact archive 及 workspace binding，供恢复前确认。"""
+
+    identity, root, workspace_root = _existing_workspace_state_paths(
+        workspace,
+        state_root=state_root,
+        home=home,
+    )
+    loaded = load_workspace_checkpoints(workspace_root)
+    if any(snapshot.state.conversation_id == conversation_id for _, snapshot in loaded):
+        raise ValueError("conversation already exists in active history")
+    snapshot = LocalConversationArchive(root).load_archived_by_identity(
+        conversation_id=conversation_id,
+        workspace_scope_digest=identity.scope_digest,
+        source_checkpoint_digest=source_checkpoint_digest,
+    )
+    _require_user_archive_eligible(snapshot.state)
+    binding = snapshot.state.workspace_binding
+    if binding is None or binding.workspace_identity_digest != identity.identity_digest:
+        raise ValueError("archived conversation workspace identity mismatch")
+    goal = snapshot.state.goal
+    assert goal is not None
+    return SessionArchivePreview(
+        conversation_id=conversation_id,
+        goal_status=goal.status,
+        user_outcome=goal.user_outcome,
+        checkpoint_digest=snapshot.token,
+        state_revision=snapshot.state.revision,
+    )
 
 
 def default_state_root(home: Path | None = None) -> Path:
@@ -137,6 +394,7 @@ def _open_workspace_session_locked(
     loaded = _load_candidates(
         workspace_root,
         max_history_checkpoints=max_history_checkpoints,
+        sweep_retired_locks=True,
     )
     desired_binding = ConversationWorkspaceBindingV1.create(
         workspace_scope_digest=identity.scope_digest,
@@ -188,7 +446,8 @@ def _open_workspace_session_locked(
             total_active_count=1,
         )
     if not force_new and len(active) > 1:
-        visible = active[:max_candidates]
+        inventory = tuple(_candidate(path, snapshot) for path, snapshot in active)
+        visible = inventory[:max_candidates]
         return WorkspaceSession(
             disposition=StartupDisposition.SELECT_REQUIRED,
             state_root=root,
@@ -196,7 +455,9 @@ def _open_workspace_session_locked(
             checkpoint_path=None,
             store=None,
             snapshot=None,
-            candidates=tuple(_candidate(path, snapshot) for path, snapshot in visible),
+            candidates=visible,
+            candidate_inventory=inventory,
+            candidate_page_size=max_candidates,
             workspace_binding=desired_binding,
             legacy_unbound_count=len(legacy_unbound),
             total_checkpoint_count=len(loaded),
@@ -257,22 +518,90 @@ def select_workspace_session(
     if len(matches) != 1:
         raise ValueError("SelectGoal must identify one exact startup candidate")
     candidate = matches[0]
+    if (
+        candidate.goal_id is None
+        or candidate.state_revision != action.expected_revision
+        or candidate.next_action_seq != action.action_seq
+    ):
+        raise ValueError("SelectGoal does not bind the exact candidate revision")
+    return _select_workspace_candidate(selection, candidate)
+
+
+def project_workspace_session_page(
+    selection: WorkspaceSession,
+    page: int,
+) -> WorkspaceSession:
+    """从启动时冻结的有界 inventory 投影一页；不重新扫描或修改 checkpoint。"""
+
+    if selection.disposition is not StartupDisposition.SELECT_REQUIRED:
+        raise ValueError("conversation paging requires an ambiguous startup")
+    if not isinstance(page, int) or isinstance(page, bool) or page < 0:
+        raise ValueError("conversation page is not available")
+    inventory = selection.candidate_inventory or selection.candidates
+    page_size = selection.candidate_page_size
+    start = page * page_size
+    if start >= len(inventory):
+        raise ValueError("conversation page is not available")
+    visible = inventory[start : start + page_size]
+    return replace(
+        selection,
+        candidates=visible,
+        candidate_page=page,
+        history_incomplete=len(inventory) > len(visible),
+    )
+
+
+def select_workspace_candidate(
+    selection: WorkspaceSession,
+    candidate: SessionCandidate,
+) -> WorkspaceSession:
+    """选择 startup 已展示的精确 conversation，不铸造 Runtime action。"""
+
+    if selection.disposition is not StartupDisposition.SELECT_REQUIRED:
+        raise ValueError("exact conversation selection requires an ambiguous startup")
+    matches = tuple(item for item in selection.candidates if item == candidate)
+    if len(matches) != 1:
+        raise ValueError("candidate must identify one exact displayed conversation")
+    return _select_workspace_candidate(selection, matches[0])
+
+
+def _select_workspace_candidate(
+    selection: WorkspaceSession,
+    candidate: SessionCandidate,
+) -> WorkspaceSession:
     store = LocalCheckpointStore(candidate.checkpoint_path)
     snapshot = store.load()
     goal = snapshot.state.goal
     if (
-        goal is None
-        or snapshot.state.revision != action.expected_revision
-        or snapshot.state.next_action_seq != action.action_seq
-        or goal.goal_id != action.goal_id
+        snapshot.state.conversation_id != candidate.conversation_id
+        or snapshot.state.revision != candidate.state_revision
+        or snapshot.state.next_action_seq != candidate.next_action_seq
+        or not _is_nonterminal(snapshot.state)
+        or (goal.goal_id if goal is not None else None) != candidate.goal_id
+        or (goal.revision if goal is not None else None) != candidate.goal_revision
+        or (goal.status if goal is not None else None) != candidate.goal_status
+        or (goal.user_outcome if goal is not None else None) != candidate.user_outcome
     ):
-        raise ValueError("SelectGoal does not bind the exact candidate revision")
+        raise ValueError("conversation selection does not bind the displayed candidate")
     binding = snapshot.state.workspace_binding
-    if binding is not None and (
-        binding.workspace_scope_digest != selection.workspace_identity.scope_digest
-        or binding.workspace_identity_digest
-        != selection.workspace_identity.identity_digest
-    ) or goal.workspace_identity_digest != selection.workspace_identity.identity_digest:
+    if (
+        (binding is None and goal is None)
+        or (
+            binding is not None
+            and (
+                binding.workspace_scope_digest
+                != selection.workspace_identity.scope_digest
+                or binding.workspace_identity_digest
+                != selection.workspace_identity.identity_digest
+            )
+        )
+        or (
+            binding is None
+            and goal is not None
+            and goal.workspace_identity_digest
+            != selection.workspace_identity.identity_digest
+        )
+    ):
         disposition = StartupDisposition.NEEDS_AUTHORITY
     elif _has_unknown_effect(snapshot.state):
         disposition = StartupDisposition.RECOVERY_REQUIRED
@@ -298,35 +627,107 @@ def _canonical_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# F4（2026-10-03）：锁残留与 checkpoint 容量分离。live checkpoint 锁各一个；
+# 已退休会话的孤儿锁由有界清扫移除，异常残留超过显式上界即 fail closed。
+_MAX_LOCK_RESIDUE = 32
+
+
+def _sweep_retired_locks(root: Path, orphan_names: frozenset[str]) -> None:
+    """有界清扫已退休会话的孤儿锁（retire_archived_snapshot 保留的 .json.lock）。
+
+    只在取得 flock 后重验 pathname↔fd 的 inode/设备一致才 unlink；忙碌锁
+    （其他进程正持有/等待恢复）或已被替换的 pathname 跳过，不清除。等待旧
+    inode 的进程配合 ``LocalCheckpointStore.try_acquire`` 的 post-flock inode
+    重验只能 fail closed 重试，无法凭旧 fd 取得该 pathname 的互斥修改权。
+    """
+
+    if not orphan_names:
+        return
+    directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for name in sorted(orphan_names)[:_MAX_LOCK_RESIDUE]:
+            try:
+                fd = os.open(name, os.O_RDWR | os.O_NOFOLLOW, dir_fd=directory_fd)
+            except OSError:
+                continue
+            try:
+                info = os.fstat(fd)
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or info.st_uid != os.getuid()
+                    or info.st_nlink != 1
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                ):
+                    continue
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    continue
+                try:
+                    path_info = os.stat(
+                        name, dir_fd=directory_fd, follow_symlinks=False
+                    )
+                except FileNotFoundError:
+                    continue
+                fd_info = os.fstat(fd)
+                if (path_info.st_dev, path_info.st_ino) != (
+                    fd_info.st_dev,
+                    fd_info.st_ino,
+                ):
+                    continue
+                os.unlink(name, dir_fd=directory_fd)
+                os.fsync(directory_fd)
+            finally:
+                os.close(fd)
+    finally:
+        os.close(directory_fd)
+
+
 def _load_candidates(
     workspace_root: Path,
     *,
     max_history_checkpoints: int,
+    sweep_retired_locks: bool = False,
 ) -> tuple[tuple[Path, LoadedSnapshot], ...]:
     checkpoint_paths: list[Path] = []
     lock_names: set[str] = set()
     with os.scandir(workspace_root) as entries:
-        for index, entry in enumerate(entries, start=1):
-            if index > max_history_checkpoints * 2 + 1:
-                raise ValueError("workspace state enumeration exceeds its bound")
-            if entry.name == ".bootstrap.lock":
-                lock_names.add(entry.name)
+        for entry in entries:
+            name = entry.name
+            if name == ".bootstrap.lock":
                 continue
-            if entry.name.startswith(".") and entry.name.endswith(".json.lock"):
-                lock_names.add(entry.name)
+            if name.startswith(".") and name.endswith(".json.lock"):
+                info = entry.stat(follow_symlinks=False)
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or info.st_uid != os.getuid()
+                    or info.st_nlink != 1
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                ):
+                    raise ValueError("workspace state directory contains an unsafe lock")
+                lock_names.add(name)
                 continue
-            if not _CONVERSATION_FILE.fullmatch(entry.name) or not entry.is_file(
+            if not _CONVERSATION_FILE.fullmatch(name) or not entry.is_file(
                 follow_symlinks=False
             ):
                 raise ValueError("workspace state directory contains an unknown entry")
             checkpoint_paths.append(workspace_root / entry.name)
             if len(checkpoint_paths) > max_history_checkpoints:
                 raise ValueError("workspace history capacity exceeds its safety bound")
+    if len(lock_names) > max_history_checkpoints + _MAX_LOCK_RESIDUE:
+        raise ValueError("workspace state lock accumulation exceeds its safety bound")
     checkpoint_names = {path.name for path in checkpoint_paths}
     expected_locks = {f".{name}.lock" for name in checkpoint_names}
-    unknown_locks = lock_names - expected_locks - {".bootstrap.lock"}
-    if unknown_locks:
-        raise ValueError("workspace state directory contains an orphan lock")
+    orphan_locks = lock_names - expected_locks - {".bootstrap.lock"}
+    if any(
+        not _CONVERSATION_FILE.fullmatch(name[1 : -len(".lock")])
+        for name in orphan_locks
+    ):
+        raise ValueError("workspace state directory contains an invalid lock")
+    if sweep_retired_locks:
+        # R3c（2026-10-03 follow-up）：清扫是 mutation，只属于写路径（startup/
+        # archive/restore）；只读加载（load_workspace_checkpoints/inspect）不清扫。
+        _sweep_retired_locks(workspace_root, frozenset(orphan_locks))
 
     loaded: list[tuple[Path, LoadedSnapshot]] = []
     for path in sorted(checkpoint_paths):
@@ -378,6 +779,74 @@ def _candidate(path: Path, snapshot: LoadedSnapshot) -> SessionCandidate:
         goal_status=goal.status if goal is not None else None,
         user_outcome=goal.user_outcome if goal is not None else None,
     )
+
+
+def _exact_snapshot(
+    snapshots: tuple[LoadedSnapshot, ...],
+    conversation_id: str,
+) -> LoadedSnapshot:
+    matches = tuple(
+        item for item in snapshots if item.state.conversation_id == conversation_id
+    )
+    if len(matches) != 1:
+        raise ValueError("conversation is not available in this workspace")
+    return matches[0]
+
+
+def _exact_loaded(
+    loaded: tuple[tuple[Path, LoadedSnapshot], ...],
+    conversation_id: str,
+) -> tuple[Path, LoadedSnapshot]:
+    matches = tuple(
+        item for item in loaded if item[1].state.conversation_id == conversation_id
+    )
+    if len(matches) != 1:
+        raise ValueError("conversation is not available in this workspace")
+    return matches[0]
+
+
+def _require_user_archive_eligible(state: ConversationState) -> None:
+    goal = state.goal
+    if goal is None or goal.status not in _TERMINAL_GOAL_STATUSES:
+        raise ValueError("only a terminal conversation can be archived")
+    if (
+        state.active_run is not None
+        or state.browser_takeover_pending is not None
+        or state.background_occurrence_binding is not None
+        or state.goal_authorizations
+        or state.process_leases
+        or state.sandbox_leases
+        or state.browser_leases
+    ):
+        raise ValueError("conversation still owns active or unknown work")
+
+
+def _existing_workspace_state_paths(
+    workspace: Path,
+    *,
+    state_root: Path | None,
+    home: Path | None,
+) -> tuple[WorkspaceIdentityV1, Path, Path]:
+    identity = WorkspaceIdentityV1.resolve(workspace)
+    root = (
+        default_state_root(home) if state_root is None else Path(state_root)
+    ).absolute()
+    workspace_path = Path(identity.canonical_path)
+    if root == workspace_path or root.is_relative_to(workspace_path):
+        raise ValueError("state root must remain outside the tool workspace")
+    _reject_symlink_components(root, label="state root")
+    _ensure_owner_directory(root, create=False, label="state root")
+    workspaces_root = root / "workspaces"
+    _reject_symlink_components(workspaces_root, label="workspaces root")
+    _ensure_owner_directory(workspaces_root, create=False, label="workspaces root")
+    workspace_root = workspaces_root / identity.scope_digest
+    _reject_symlink_components(workspace_root, label="workspace state directory")
+    _ensure_owner_directory(
+        workspace_root,
+        create=False,
+        label="workspace state directory",
+    )
+    return identity, root, workspace_root
 
 
 def _ensure_owner_directory(path: Path, *, create: bool, label: str) -> None:

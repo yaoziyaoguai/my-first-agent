@@ -1149,16 +1149,57 @@ def _reject_project_path_private_overlap(
             )
 
 
+def _bounded_state_failure_detail(error: BaseException) -> str:
+    """LOG-01：默认诊断只保留稳定错误码/类型与可执行的下一步。
+
+    原始异常消息可能含用户路径、私有目录或凭据细节，默认日志不记录它。诊断
+    价值来自"哪一类校验失败"（类型名 + checkpoint 的稳定失败原因），不是原始
+    字符串。详细模式是显式 opt-in（``FIRST_AGENT_DEBUG_STATE_FAILURES=1``），
+    且仍走 stderr 由用户自己决定是否保留。
+    """
+
+    from agent.runtime.checkpoint import CheckpointSecurityError
+
+    if isinstance(error, CheckpointSecurityError):
+        code = "checkpoint_security"
+        next_step = (
+            "check the state root is a real directory owned by this user with "
+            "mode 0700 and contains no symlinked entries"
+        )
+    else:
+        code = f"checkpoint_{type(error).__name__}"
+        next_step = (
+            "inspect the state root and retry; use --state-root to choose a "
+            "different location"
+        )
+    return f"code={code} type={type(error).__name__} next={next_step}"
+
+
 def _log_runtime_state_failure(error: BaseException) -> None:
-    """runtime state 失败的完整细节只进日志；用户行保持类型名（不渲染消息）。"""
+    """runtime state 失败的诊断只记录有界信息；用户行保持类型名。
+
+    LOG-01（2026-10-11）：默认路径不记录 ``str(error)``——异常消息可能含敏感
+    路径/凭据标记。原始消息只在显式 opt-in 的 debug 模式下记录，并预先标注。
+    """
 
     import logging
+    import os
 
-    logging.getLogger("agent.entrypoint").error(
-        "runtime state failed during repl: %s: %s",
-        type(error).__name__,
-        error,
-    )
+    logger = logging.getLogger("agent.entrypoint")
+    detail = _bounded_state_failure_detail(error)
+    if os.environ.get("FIRST_AGENT_DEBUG_STATE_FAILURES") == "1":
+        logger.error(
+            "runtime state failed during repl: %s (debug detail follows; "
+            "may contain local paths)",
+            detail,
+        )
+        logger.debug(
+            "runtime state failure raw message: %s: %s",
+            type(error).__name__,
+            error,
+        )
+        return
+    logger.error("runtime state failed during repl: %s", detail)
 
 
 def _close_session_resources(

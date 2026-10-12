@@ -11,6 +11,7 @@ from agent.runtime.contracts import (
     ExecutionAuthorityClass,
     ExecutionIntent,
     GoalAuthorizationBinding,
+    GoalAuthorizationScope,
     OutputPolicy,
     SideEffectClass,
     ToolCall,
@@ -58,6 +59,8 @@ def _binding(*, revision: int = 1, target: str = "reports/final.md") -> GoalAuth
         source_kind=AuthoritySourceKind.USER_FACT,
         source_id="user-1",
         source_digest="user-digest-1",
+        issued_at="2026-09-04T00:00:00Z",
+        expires_at="2026-09-04T01:00:00Z",
     )
 
 
@@ -80,7 +83,10 @@ def _runtime(spec: ToolSpec | None = None):
         calls.append(intent)
         return "ok"
 
-    runtime = KernelToolRuntime((RegisteredTool(spec or _spec(), invoke),))
+    runtime = KernelToolRuntime(
+        (RegisteredTool(spec or _spec(), invoke),),
+        clock=lambda: "2026-09-04T00:30:00Z",
+    )
     return runtime, calls
 
 
@@ -106,6 +112,96 @@ def test_exact_user_authoritative_binding_can_avoid_duplicate_prompt() -> None:
     result = runtime.invoke(prepared)
     assert result.executed is True
     assert len(calls) == 1
+
+
+def test_explicit_directory_binding_allows_descendants_but_not_siblings_or_aliases() -> None:
+    runtime, calls = _runtime()
+    binding = GoalAuthorizationBinding.create(
+        binding_id="authority-directory",
+        goal_id="goal-1",
+        goal_revision=1,
+        workspace_identity_digest="workspace-1",
+        operation="write_file",
+        normalized_target="reports",
+        scope=GoalAuthorizationScope.DIRECTORY,
+        source_kind=AuthoritySourceKind.USER_FACT,
+        source_id="user-1",
+        source_digest="user-digest-1",
+        issued_at="2026-09-04T00:00:00Z",
+        expires_at="2026-09-04T01:00:00Z",
+    )
+
+    permitted = runtime.prepare(
+        ToolCall("call-child", "write_file", {"path": "reports/daily/final.md"}),
+        _context(binding),
+    )
+    sibling = runtime.prepare(
+        ToolCall("call-sibling", "write_file", {"path": "reports-old/final.md"}),
+        _context(binding),
+    )
+    alias = runtime.prepare(
+        ToolCall("call-alias", "write_file", {"path": "reports/../outside.md"}),
+        _context(binding),
+    )
+
+    assert isinstance(permitted, ExecutionIntent)
+    assert isinstance(sibling, ApprovalRequired)
+    assert isinstance(alias, ApprovalRequired)
+    assert calls == []
+
+
+@pytest.mark.parametrize("target", [".git", ".env", "src/private.key"])
+def test_task_file_authorization_cannot_include_sensitive_targets(target: str) -> None:
+    with pytest.raises(ValueError, match="authorization target"):
+        GoalAuthorizationBinding.create(
+            binding_id="authority-sensitive",
+            goal_id="goal-1",
+            goal_revision=1,
+            workspace_identity_digest="workspace-1",
+            operation="write_file",
+            normalized_target=target,
+            scope=GoalAuthorizationScope.DIRECTORY,
+            source_kind=AuthoritySourceKind.USER_FACT,
+            source_id="user-1",
+            source_digest="user-digest-1",
+            issued_at="2026-09-04T00:00:00Z",
+            expires_at="2026-09-04T01:00:00Z",
+        )
+
+
+def test_expired_or_exhausted_goal_authorization_returns_to_exact_approval() -> None:
+    expired_runtime = KernelToolRuntime(
+        (RegisteredTool(_spec(), lambda _intent: "ok"),),
+        clock=lambda: "2026-09-04T01:00:00Z",
+    )
+    exhausted_runtime = KernelToolRuntime(
+        (RegisteredTool(_spec(), lambda _intent: "ok"),),
+        clock=lambda: "2026-09-04T00:30:00Z",
+    )
+    exhausted = GoalAuthorizationBinding.create(
+        binding_id="authority-exhausted",
+        goal_id="goal-1",
+        goal_revision=1,
+        workspace_identity_digest="workspace-1",
+        operation="write_file",
+        normalized_target="reports/final.md",
+        source_kind=AuthoritySourceKind.USER_FACT,
+        source_id="user-1",
+        source_digest="user-digest-1",
+        issued_at="2026-09-04T00:00:00Z",
+        expires_at="2026-09-04T01:00:00Z",
+        uses_consumed=16,
+    )
+    call = ToolCall("call-1", "write_file", {"path": "reports/final.md"})
+
+    assert isinstance(
+        expired_runtime.prepare(call, _context(_binding())),
+        ApprovalRequired,
+    )
+    assert isinstance(
+        exhausted_runtime.prepare(call, _context(exhausted)),
+        ApprovalRequired,
+    )
 
 
 def test_path_alias_scope_expansion_and_stale_grant_have_zero_effect() -> None:

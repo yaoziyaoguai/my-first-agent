@@ -216,7 +216,7 @@ def test_native_receipt_plus_host_digest_can_verify_artifact() -> None:
     receipt = _receipt()
     criteria = (_filesystem_criterion(), _receipt_criterion(receipt))
     records = REGISTRY.derive(
-        _state(criteria, (*_readback_facts(), _receipt_fact(receipt))),
+        _state(criteria, (_receipt_fact(receipt), *_readback_facts())),
         _claim(criteria),
         observed_at=OBSERVED_AT,
     )
@@ -224,6 +224,41 @@ def test_native_receipt_plus_host_digest_can_verify_artifact() -> None:
         "filesystem-digest:v1",
         "native-sandbox-receipt:v1",
     }
+
+
+def _later_workspace_edit() -> ConversationFact:
+    return ConversationFact(
+        fact_id="fact:edit-after-validation",
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": "edit-after-validation",
+            "text": f"edited {ARTIFACT_PATH}",
+            "is_error": False,
+            "executed": True,
+            "metadata": {"tool_name": "edit_file"},
+        },
+    )
+
+
+def test_later_workspace_edit_invalidates_filesystem_readback() -> None:
+    criterion = _filesystem_criterion()
+    with pytest.raises(EvidenceVerificationError, match="read-back"):
+        REGISTRY.derive(
+            _state((criterion,), (*_readback_facts(), _later_workspace_edit())),
+            _claim((criterion,)),
+            observed_at=OBSERVED_AT,
+        )
+
+
+def test_later_workspace_edit_invalidates_native_sandbox_receipt() -> None:
+    receipt = _receipt()
+    criterion = _receipt_criterion(receipt)
+    with pytest.raises(EvidenceVerificationError, match="sandbox receipt"):
+        REGISTRY.derive(
+            _state((criterion,), (_receipt_fact(receipt), _later_workspace_edit())),
+            _claim((criterion,)),
+            observed_at=OBSERVED_AT,
+        )
 
 
 def test_receipt_and_readback_are_each_individually_insufficient() -> None:

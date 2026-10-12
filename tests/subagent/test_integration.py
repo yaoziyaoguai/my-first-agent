@@ -6,15 +6,19 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
-    BlockedClaim,
+    CompletionClaim,
+    EvidenceOracleKind,
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
     ResolveApproval,
     RunStatus,
     SubmitMessage,
+    closed_evidence_id,
 )
 from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.tools import KernelToolRuntime
@@ -60,20 +64,38 @@ def test_parent_delegates_and_uses_child_finding() -> None:
             )
         ),
         ModelResponse(
-            (),
-            control=BlockedClaim(
-                correlation_id="subagent-finding-blocked",
+            (ModelTextBlock("Risk: SECRET-OMEGA confirmed"),),
+            control=CompletionClaim(
+                correlation_id="subagent-finding-complete",
                 goal_id="goal-1",
                 goal_revision=1,
-                blocker="Risk: SECRET-OMEGA confirmed",
-                safe_attempts=("delegated the bounded review",),
-                resume_condition="provide a closed completion oracle",
+                criterion_evidence_refs=(
+                    closed_evidence_id(
+                        "goal-1",
+                        1,
+                        "criterion:required-governed-tool:goal-1:1:delegate-1",
+                    ),
+                ),
             ),
         ),
     )
     # subagent__delegate 是 EXTERNAL effectful 工具：合法路径是 Goal 准入之后执行，
     # 所以 parent checkpoint 从已有 durable Goal 的状态起步。
-    store = InMemoryCheckpointStore(conversation_with_active_goal("parent-1"))
+    state = conversation_with_active_goal("parent-1")
+    assert state.goal is not None
+    state = replace(
+        state,
+        goal=replace(
+            state.goal,
+            proposed_criteria=(
+                replace(
+                    state.goal.proposed_criteria[0],
+                    oracle_kind=EvidenceOracleKind.USER_CONFIRMATION,
+                ),
+            ),
+        ),
+    )
+    store = InMemoryCheckpointStore(state)
     runtime = AgentRuntime(
         provider=parent_provider,
         context_manager=KernelContextManager(

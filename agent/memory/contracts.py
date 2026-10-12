@@ -24,6 +24,10 @@ class MemoryCapacityError(MemoryStoreError):
     拒绝时旧 durable bytes 与调用方内存状态不变。错误信息不携带 store 路径或 inventory。"""
 
 
+class MemoryProviderProfileMismatchError(MemoryStoreError):
+    """durable store 与本次 provider trust profile 不匹配。"""
+
+
 @dataclass(frozen=True, slots=True)
 class MemoryRecord:
     record_id: str

@@ -17,6 +17,7 @@ real mode 注入 production HTTP adapter（``build_model_provider``）。不存�
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,6 +35,14 @@ REPO = Path(__file__).resolve().parents[1]
 # for `import agent.*` in config-present real E3 path.
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
+
+from agent.process.group import (  # noqa: E402
+    ProcessCleanupError,
+    group_alive,
+    terminate_group,
+    verified_group_identity,
+)
+
 VENV_BIN = REPO / ".venv" / "bin"
 PYTHON = str(VENV_BIN / "python")
 RUFF = str(VENV_BIN / "ruff")
@@ -335,12 +345,73 @@ _E3_SYSTEM_POLICY = (
 
 
 def _run(label: str, argv: list[str], *, timeout: int = 1800) -> int:
-    proc = subprocess.run(  # noqa: S603 - argv 受控
-        argv, cwd=REPO, text=True, capture_output=True, timeout=timeout
+    proc = subprocess.Popen(  # noqa: S603 - argv 受控
+        argv,
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
     )
-    combined = (proc.stdout + proc.stderr).strip()
+    try:
+        pgid = verified_group_identity(proc.pid)
+    except ProcessCleanupError:
+        # identity 未验证时不能对猜测的 PGID 发信号；至少终止并回收本次已知
+        # leader，然后以 cleanup-unconfirmed 失败，绝不继续 gate 或报告 PASS。
+        with suppress(OSError):
+            proc.kill()
+        with suppress(subprocess.TimeoutExpired):
+            proc.communicate(timeout=1.0)
+        print(f"[offline] {label}: process group identity unverified", file=sys.stderr)
+        return 125
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+        returncode = proc.returncode
+    except subprocess.TimeoutExpired:
+        try:
+            terminate_group(
+                proc,
+                pgid,
+                term_grace_seconds=0.5,
+                kill_grace_seconds=0.5,
+                verify_budget_seconds=2.0,
+            )
+            stdout, stderr = proc.communicate(timeout=1.0)
+        except (ProcessCleanupError, subprocess.TimeoutExpired):
+            print(f"[offline] {label}: cleanup unconfirmed", file=sys.stderr)
+            return 125
+        print(f"[offline] {label}: timed out after {timeout}s", file=sys.stderr)
+        return 124
+    except KeyboardInterrupt:
+        terminate_group(
+            proc,
+            pgid,
+            term_grace_seconds=0.5,
+            kill_grace_seconds=0.5,
+            verify_budget_seconds=2.0,
+        )
+        raise
+    try:
+        descendants_alive = group_alive(pgid)
+    except ProcessCleanupError:
+        descendants_alive = True
+    if descendants_alive:
+        try:
+            terminate_group(
+                proc,
+                pgid,
+                term_grace_seconds=0.5,
+                kill_grace_seconds=0.5,
+                verify_budget_seconds=2.0,
+            )
+        except ProcessCleanupError:
+            print(f"[offline] {label}: cleanup unconfirmed", file=sys.stderr)
+            return 125
+        print(f"[offline] {label}: descendant process outlived the gate", file=sys.stderr)
+        return 124
+    combined = (stdout + stderr).strip()
     tail = combined.splitlines()[-1] if combined else ""
-    if proc.returncode != 0:
+    if returncode != 0:
         # 失败时优先显示失败测试 node ID（pytest -ra 的 FAILED 行 / verifier 的
         # 015_CONTENT_FAILED_TESTS 行）而非裸 summary——supervisor 截断展示只保留
         # 本行，此前 "1 failed" 无测试名、无法定位（source pytest 与 content 门两次命中）。
@@ -352,8 +423,8 @@ def _run(label: str, argv: list[str], *, timeout: int = 1800) -> int:
         ]
         if named:
             tail = " | ".join(named[:5])
-    print(f"[offline] {label}: exit {proc.returncode} {('-> ' + tail) if tail else ''}")
-    return proc.returncode
+    print(f"[offline] {label}: exit {returncode} {('-> ' + tail) if tail else ''}")
+    return returncode
 
 
 def offline_gates_green() -> bool:
@@ -378,6 +449,10 @@ def offline_gates_green() -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Run the frozen 015 real-model E3 after all offline gates pass."
+    )
+    parser.parse_args(argv)
     if not offline_gates_green():
         return 1
     try:
@@ -1314,6 +1389,15 @@ def _drive_journey(journey_name, composition, provider, fixtures, observed):
                 action_seq=state.next_action_seq,
                 expected_revision=state.revision,
             )
+        elif (
+            result.status is RunStatus.CANCELLED
+            and result.error_code == "approval_declined"
+            and journey_name == "j2"
+        ):
+            # 拒绝现在就是本 journey 的预期终点：当前 run 已结束、Goal 保留，
+            # driver 不得代替用户自动发新指令或诱导再次批准。
+            observed["j2_decline_returned_control"] = True
+            break
         elif result.status is RunStatus.AWAITING_RECOVERY:
             observed["j4_recovery_reached"] = True
             observed["j4_recovery_send_count"] = _provider_send_count(provider)

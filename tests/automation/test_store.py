@@ -16,7 +16,9 @@ from agent.automation.store import (
     AutomationRepositoryUnknownCommitError,
     DeterministicAutomationRepository,
     DeterministicCommitFault,
+    decode_definition_body_json,
     decode_snapshot,
+    encode_definition_body_json,
     encode_snapshot,
 )
 from agent.runtime.contracts import canonical_json_digest
@@ -48,6 +50,15 @@ def test_snapshot_codec_round_trips_the_complete_definition() -> None:
     decoded = decode_snapshot(encode_snapshot(snapshot))
 
     assert decoded == snapshot
+
+
+def test_manual_reconcile_definition_round_trips_without_a_wake_policy() -> None:
+    body = _definition(wake_adapter_policy_digest=None).body
+
+    decoded = decode_definition_body_json(encode_definition_body_json(body))
+
+    assert decoded == body
+    assert decoded.wake_adapter_policy_digest is None
 
 
 def test_snapshot_decode_rejects_an_extra_nested_member() -> None:

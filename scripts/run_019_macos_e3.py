@@ -184,6 +184,7 @@ _REASONS = frozenset(
         "unsupported_platform",
         "launchd_domain_unavailable",
         "launchd_bootstrap_unavailable",
+        "launchd_wake_not_probed",
         "launchd_wake_unobserved",
         "launchd_cleanup_unknown",
         "seatbelt_unavailable",
@@ -223,7 +224,7 @@ class MacOSU2BPreflightV1:
         _require_digest(self.probe_identity_digest)
 
 
-def run_preflight() -> MacOSU2BPreflightV1:
+def run_preflight(*, probe_launchd: bool = False) -> MacOSU2BPreflightV1:
     platform_available = platform.system() == "Darwin"
     domain_available = platform_available and _launchd_domain_available()
     seatbelt_available = platform_available and _seatbelt_available()
@@ -235,6 +236,7 @@ def run_preflight() -> MacOSU2BPreflightV1:
         {
             "platform": platform.system(),
             "python": f"{sys.version_info.major}.{sys.version_info.minor}",
+            "probe_launchd": probe_launchd,
             "schema": SCHEMA,
         }
     )
@@ -246,6 +248,8 @@ def run_preflight() -> MacOSU2BPreflightV1:
         reason = "seatbelt_unavailable"
     elif not browser_available:
         reason = "browser_runtime_unavailable"
+    elif not probe_launchd:
+        reason = "launchd_wake_not_probed"
     else:
         wake_observed, cleanup_confirmed, launchd_reason = _launchd_wake_probe()
         reason = launchd_reason if launchd_reason is not None else "qualified"
@@ -1372,7 +1376,16 @@ def _write_json_atomically(path: Path, payload: dict[str, object]) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="run-019-macos-e3")
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--preflight", action="store_true")
+    mode.add_argument(
+        "--preflight",
+        action="store_true",
+        help="read-only prerequisite inspection; does not register a LaunchAgent",
+    )
+    mode.add_argument(
+        "--probe-launchd",
+        action="store_true",
+        help="register, observe and remove one temporary LaunchAgent",
+    )
     mode.add_argument("--run", action="store_true")
     parser.add_argument("--materialized-root", type=Path)
     parser.add_argument("--seal", type=Path)
@@ -1383,10 +1396,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-full-count", type=int)
     parser.add_argument("--materialized-full-count", type=int)
     args = parser.parse_args(argv)
-    result = run_preflight()
-    if args.preflight or result.status != "qualified":
+    result = run_preflight(probe_launchd=args.probe_launchd or args.run)
+    if args.preflight or args.probe_launchd or result.status != "qualified":
         print(_json(asdict(result)))
-        return 0 if result.status == "qualified" else 2
+        return (
+            0
+            if result.status == "qualified"
+            or result.reason == "launchd_wake_not_probed"
+            else 2
+        )
     required = {
         "materialized_root": args.materialized_root,
         "seal": args.seal,

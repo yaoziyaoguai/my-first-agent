@@ -21,7 +21,12 @@ def prepare_write_binding(
     return {
         **binding,
         "new_content_digest": hashlib.sha256(encoded).hexdigest(),
-        "effect_preview": f"write {path} ({len(encoded)} bytes)",
+        "effect_preview": (
+            f"write {path} ({len(encoded)} bytes):\n"
+            "--- begin proposed content ---\n"
+            f"{content}\n"
+            "--- end proposed content ---"
+        ),
     }
 
 

@@ -10,6 +10,7 @@ import io
 import json
 import os
 import shutil
+import site
 import subprocess
 import sys
 import tarfile
@@ -499,6 +500,47 @@ _CANDIDATE_DIGEST_KEYS = (
     "bootstrap_sha256",
     "collected_node_set_sha256",
 )
+_REQUIRED_PRODUCT_MODULES = (
+    "main",
+    "agent",
+    "agent.tools",
+    "first_agent_skill_runner",
+)
+_APPROVED_CANDIDATE_SKIPS = {
+    (
+        "tests/automation_hosts/test_background_browser.py::"
+        "test_real_public_browser_observation_uses_background_authority_and_budget"
+    ): "Playwright Chromium binary is not installed on this test host",
+    (
+        "tests/automation_hosts/test_background_browser.py::"
+        "test_real_public_browser_does_not_self_authorize_disclose_commit_or_download"
+    ): "Playwright Chromium binary is not installed on this test host",
+    (
+        "tests/automation_hosts/test_launchd_real.py::"
+        "test_real_launchd_wakes_one_fixed_reconcile_command_and_cleans_up"
+    ): "real launchd probe requires explicit host gate",
+    (
+        "tests/reference/test_018_materialized_verifier.py::"
+        "test_018_controls_are_detached_but_runner_and_fixture_are_sealed"
+    ): "source overlay membership requires repository metadata",
+    (
+        "tests/reference/test_018_materialized_verifier.py::"
+        "test_materialized_tree_omits_detached_mutable_018_evidence"
+    ): "source materialization requires repository metadata",
+    (
+        "tests/reference/test_019_materialized_verifier.py::"
+        "test_019_controls_are_detached_but_runner_is_sealed"
+    ): "source overlay membership requires repository metadata",
+    (
+        "tests/reference/test_019_materialized_verifier.py::"
+        "test_materialized_tree_omits_detached_mutable_019_evidence"
+    ): "source materialization requires repository metadata",
+}
+_PROMOTION_ARTIFACT_PATHS = tuple(sorted({
+    *DETACHED_MUTABLE_PATHS,
+    SEAL_PATH.relative_to(REPO).as_posix(),
+    "docs/acceptance/019_MACOS_PROFILE_SEAL.json",
+}))
 
 
 def pytest_evidence_errors(report: object, approved_skips: dict[str, str]) -> list[str]:
@@ -573,6 +615,8 @@ def run_wheel_bound_pytest(
     installed_site: Path,
     test_tree: Path,
     required_modules: tuple[str, ...] | list[str],
+    timeout_seconds: float = 1800,
+    environment: dict[str, str] | None = None,
 ) -> dict:
     """wheel-bound pytest 的父进程驱动：guard 子进程内运行 materialized 测试树。
 
@@ -586,29 +630,94 @@ def run_wheel_bound_pytest(
     with tempfile.TemporaryDirectory(prefix="fa-019-wheel-bound-") as temp_dir:
         temp = Path(temp_dir)
         origin_log = temp / "origin-log.jsonl"
-        completed = subprocess.run(
-            [
-                python,
-                str(runner_path),
-                "--installed-site", str(installed_site),
-                "--test-tree", str(test_tree),
-                "--report-path", str(temp / "evidence-report.json"),
-                "--origin-log", str(origin_log),
-                "--basetemp", str(temp / "pytest-basetemp"),
-                *(
-                    argument
-                    for module in required_modules
-                    for argument in ("--required-module", module)
-                ),
-            ],
-            cwd=test_tree,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        report_path = temp / "evidence-report.json"
+        child_environment = dict(os.environ if environment is None else environment)
+        for name in (
+            "FIRST_AGENT_019_INSTALLED_SITE",
+            "FIRST_AGENT_019_SOURCE_ROOT",
+            "FIRST_AGENT_019_ORIGIN_LOG",
+        ):
+            child_environment.pop(name, None)
+        child_environment.update({
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONNOUSERSITE": "1",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            "PYTHONPATH": os.pathsep.join((
+                str(runner_path.parent),
+                str(installed_site),
+            )),
+        })
+        try:
+            completed = subprocess.run(
+                [
+                    python,
+                    str(runner_path),
+                    "--installed-site", str(installed_site),
+                    "--test-tree", str(test_tree),
+                    "--report-path", str(report_path),
+                    "--origin-log", str(origin_log),
+                    "--basetemp", str(temp / "pytest-basetemp"),
+                    *(
+                        argument
+                        for module in required_modules
+                        for argument in ("--required-module", module)
+                    ),
+                ],
+                cwd=test_tree,
+                env=child_environment,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout_seconds,
+            )
+            returncode = completed.returncode
+            stdout = completed.stdout
+            stderr = completed.stderr
+            timed_out = False
+        except subprocess.TimeoutExpired as error:
+            returncode = 124
+            stdout = error.stdout or ""
+            stderr = error.stderr or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            timed_out = True
         origin_errors: list[str] = []
+        if timed_out:
+            origin_errors.append(
+                f"wheel-bound pytest timed out after {timeout_seconds} seconds"
+            )
         loaded_product_origins: dict[str, str] = {}
         runner_pid: int | None = None
+        evidence: object = {
+            "schema": _PYTEST_EVIDENCE_SCHEMA,
+            "collected_node_ids": [],
+            "outcomes": [],
+            "deselected_node_ids": [],
+            "session_completed": False,
+        }
+        try:
+            report = _load_json(report_path)
+        except (OSError, ValueError) as error:
+            origin_errors.append(f"pytest evidence report unavailable: {error}")
+        else:
+            evidence = report.get("evidence")
+            if isinstance(report.get("runner_pid"), int):
+                runner_pid = report["runner_pid"]
+            reported_origins = report.get("loaded_product_origins")
+            if isinstance(reported_origins, dict):
+                loaded_product_origins.update(reported_origins)
+            reported_errors = report.get("origin_errors")
+            if isinstance(reported_errors, list):
+                for error in reported_errors:
+                    if isinstance(error, dict):
+                        origin_errors.append(
+                            f"{error.get('module')}: {error.get('error')} "
+                            f"(origin={error.get('origin')})"
+                        )
+                    else:
+                        origin_errors.append(f"origin report error: {error!r}")
         if origin_log.exists():
             for line in origin_log.read_text(encoding="utf-8").splitlines():
                 if not line.strip():
@@ -628,12 +737,13 @@ def run_wheel_bound_pytest(
                 else:
                     origin_errors.append(f"{module}: {event.get('error')} (origin={origin})")
         return {
-            "returncode": completed.returncode,
+            "returncode": returncode,
             "runner_pid": runner_pid,
             "origin_errors": origin_errors,
             "loaded_product_origins": loaded_product_origins,
-            "stdout": completed.stdout,
-            "stderr": completed.stderr,
+            "evidence": evidence,
+            "stdout": stdout,
+            "stderr": stderr,
         }
 
 
@@ -886,14 +996,119 @@ def _verified_playwright_browsers_root(python: str) -> Path:
     raise ValueError("verified Playwright browser root is not canonical")
 
 
-def run_content_gate(repo_root: Path = REPO, *, python: str | None = None) -> int:
-    py = python or sys.executable
-    entries, errors = validate_delivery(repo_root)
-    if errors:
-        return _report(errors)
-    seal = _load_json(repo_root / SEAL_PATH.relative_to(REPO))
+def _runtime_versions(
+    clean_python: str,
+    environment: dict[str, str],
+) -> tuple[dict[str, str], list[str]]:
+    """从实际跑测试的 clean interpreter 读取可复核版本。"""
+    probe = subprocess.run(
+        [
+            clean_python,
+            "-c",
+            (
+                "import json, platform; "
+                "from importlib.metadata import version; "
+                "print(json.dumps({'python': platform.python_version(), "
+                "'pytest': version('pytest')}))"
+            ),
+        ],
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    try:
+        payload = json.loads(probe.stdout)
+    except json.JSONDecodeError:
+        payload = None
+    if (
+        probe.returncode != 0
+        or not isinstance(payload, dict)
+        or not isinstance(payload.get("python"), str)
+        or not payload["python"]
+        or not isinstance(payload.get("pytest"), str)
+        or not payload["pytest"]
+    ):
+        detail = (probe.stdout + probe.stderr)[-1000:]
+        return {}, [f"materialized runtime versions unavailable: {detail}"]
+    return {"python": payload["python"], "pytest": payload["pytest"]}, []
+
+
+def _attach_host_dependency_sites(site_dir: Path) -> None:
+    """只把当前解释器的 site roots 暴露给 clean venv，不执行其中嵌套的 .pth。"""
+    dependency_sites = [
+        Path(item).resolve()
+        for item in site.getsitepackages()
+        if Path(item).is_dir() and Path(item).resolve() != site_dir.resolve()
+    ]
+    (site_dir / "_019_verified_test_dependencies.pth").write_text(
+        "".join(f"{item}\n" for item in dependency_sites),
+        encoding="utf-8",
+    )
+
+
+def _outcome_summary(evidence: object) -> dict[str, int]:
+    outcomes = evidence.get("outcomes") if isinstance(evidence, dict) else []
+    values = [
+        item.get("outcome")
+        for item in outcomes
+        if isinstance(item, dict)
+    ] if isinstance(outcomes, list) else []
+    deselected = (
+        evidence.get("deselected_node_ids") if isinstance(evidence, dict) else []
+    )
+    return {
+        "passed": values.count("passed"),
+        "failed": values.count("failed"),
+        "skipped": values.count("skipped"),
+        "deselected": len(deselected) if isinstance(deselected, list) else 0,
+    }
+
+
+def _skip_records(evidence: object) -> list[dict[str, str]]:
+    outcomes = evidence.get("outcomes") if isinstance(evidence, dict) else []
+    if not isinstance(outcomes, list):
+        return []
+    return [
+        {"node_id": item["node_id"], "reason": item["reason"]}
+        for item in outcomes
+        if isinstance(item, dict)
+        and item.get("outcome") == "skipped"
+        and isinstance(item.get("node_id"), str)
+        and isinstance(item.get("reason"), str)
+    ]
+
+
+def _collected_node_set_digest(evidence: object) -> str:
+    collected = (
+        evidence.get("collected_node_ids") if isinstance(evidence, dict) else []
+    )
+    nodes = sorted(collected) if isinstance(collected, list) else []
+    encoded = json.dumps(nodes, ensure_ascii=False, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _promotion_artifact_state(repo_root: Path) -> dict[str, str | None]:
+    state: dict[str, str | None] = {}
+    for relative in _PROMOTION_ARTIFACT_PATHS:
+        path = repo_root / relative
+        state[relative] = _sha256(path) if path.is_file() else None
+    return state
+
+
+def _run_materialized_content_gate(
+    *,
+    repo_root: Path,
+    python: str,
+    identity: dict,
+    entries: list[dict],
+    candidate_only: bool,
+) -> int:
+    """strict 与 candidate 共用的唯一物化、安装及 wheel-bound 测试执行体。"""
+    bundle_kind = "candidate" if candidate_only else "strict"
     bundle = Path(tempfile.gettempdir()).resolve() / (
-        f"my-first-agent-019-{seal['overlay_root_sha256'][:12]}"
+        f"my-first-agent-019-{bundle_kind}-{identity['overlay_root_sha256'][:12]}"
     )
     if bundle.exists():
         shutil.rmtree(bundle)
@@ -909,7 +1124,7 @@ def run_content_gate(repo_root: Path = REPO, *, python: str | None = None) -> in
         return _report(errors)
     materialized_root = e3._sha256_tree(tree)
     created = subprocess.run(
-        [py, "-m", "venv", str(prefix)],
+        [python, "-m", "venv", str(prefix)],
         check=False,
         capture_output=True,
         text=True,
@@ -921,7 +1136,7 @@ def run_content_gate(repo_root: Path = REPO, *, python: str | None = None) -> in
     wheel, build_error = inherited.inherited.build_materialized_wheel(
         tree,
         wheel_dir,
-        python=py,
+        python=python,
     )
     if wheel is None:
         return _report([f"materialized wheel: {build_error}"])
@@ -946,12 +1161,18 @@ def run_content_gate(repo_root: Path = REPO, *, python: str | None = None) -> in
     # origin check 会 import ``main``；先挂载已验证依赖，仍由后续检查保证
     # ``main`` / ``agent`` 自身只能来自新安装的 materialized wheel。
     site_dir = _site_packages_dir(prefix, clean_python)
-    host_site = _site_packages_dir(Path(sys.prefix), py)
-    inherited.inherited.attach_verified_test_dependencies(site_dir, host_site)
+    _attach_host_dependency_sites(site_dir)
+    chromium: dict[str, str] = {"status": "provided"}
+    playwright_browsers_root: Path | None = None
     try:
         playwright_browsers_root = _verified_playwright_browsers_root(clean_python)
     except (OSError, ValueError, subprocess.SubprocessError):
-        return _report(["materialized browser dependency is unavailable"])
+        if not candidate_only:
+            return _report(["materialized browser dependency is unavailable"])
+        chromium = {
+            "status": "unavailable",
+            "reason": "materialized browser dependency is unavailable",
+        }
     ok, message = assert_origin(prefix, repo_root, python=clean_python)
     if not ok:
         return _report([message])
@@ -966,12 +1187,18 @@ def run_content_gate(repo_root: Path = REPO, *, python: str | None = None) -> in
     )
     if not ok:
         return _report([message])
+    test_input_tree = bundle / "test-input"
+    shutil.copytree(tree, test_input_tree)
+    test_input_root = e3._sha256_tree(test_input_tree)
     test_tree = bundle / "test-tree"
-    shutil.copytree(tree, test_tree)
+    shutil.copytree(test_input_tree, test_tree)
     test_env = _clean_environment(home, site_dir, test_tree)
-    test_env["PYTHONPATH"] = os.pathsep.join((str(site_dir), str(test_tree)))
-    test_env["PLAYWRIGHT_BROWSERS_PATH"] = str(playwright_browsers_root)
-    ruff = str(Path(py).parent / "ruff")
+    if playwright_browsers_root is not None:
+        test_env["PLAYWRIGHT_BROWSERS_PATH"] = str(playwright_browsers_root)
+    versions, errors = _runtime_versions(clean_python, test_env)
+    if errors:
+        return _report(errors)
+    ruff = str(Path(python).parent / "ruff")
     ruff_result = subprocess.run(
         [ruff, "check", "--no-cache", str(test_tree)],
         cwd=test_tree,
@@ -983,36 +1210,112 @@ def run_content_gate(repo_root: Path = REPO, *, python: str | None = None) -> in
     )
     if ruff_result.returncode != 0:
         return _report(["materialized ruff: " + (ruff_result.stdout + ruff_result.stderr)[-2000:]])
-    tests = subprocess.run(
-        [
-            clean_python,
-            "-m",
-            "pytest",
-            "-q",
-            "-rx",
-            "--color=no",
-            str(test_tree / "tests"),
-        ],
-        cwd=test_tree,
-        env=test_env,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=1800,
+    artifact_state = _promotion_artifact_state(repo_root)
+    tests = run_wheel_bound_pytest(
+        python=clean_python,
+        installed_site=site_dir,
+        test_tree=test_tree,
+        required_modules=_REQUIRED_PRODUCT_MODULES,
+        environment=test_env,
     )
-    if tests.returncode != 0:
-        return _report(["materialized pytest: " + (tests.stdout + tests.stderr)[-5000:]])
-    count = _passed_count(tests.stdout)
-    if count < 1:
-        return _report(["materialized pytest count is unavailable"])
+    evidence = tests["evidence"]
+    evidence_errors = pytest_evidence_errors(
+        evidence,
+        approved_skips=_APPROVED_CANDIDATE_SKIPS,
+    )
+    origin_errors = list(tests["origin_errors"])
+    origin_errors.extend(
+        product_origin_errors(
+            tests["loaded_product_origins"],
+            installed_site=site_dir,
+            copied_source_root=test_tree,
+            required_modules=_REQUIRED_PRODUCT_MODULES,
+        )
+    )
+    execution_errors: list[str] = []
+    if tests["returncode"] != 0:
+        output = (tests["stdout"] + tests["stderr"])[-5000:]
+        execution_errors.append(f"materialized pytest: {output}")
+    execution_errors.extend(evidence_errors)
+    execution_errors.extend(origin_errors)
     if e3._sha256_tree(tree) != materialized_root:
-        return _report(["receipt-bound materialized source mutated during content gate"])
+        execution_errors.append(
+            "receipt-bound materialized source mutated during content gate"
+        )
+    if e3._sha256_tree(test_input_tree) != test_input_root:
+        execution_errors.append("materialized pytest input tree mutated during content gate")
+
+    summary = _outcome_summary(evidence)
+    count = summary["passed"]
+    if count < 1:
+        execution_errors.append("materialized pytest count is unavailable")
+
+    current_artifact_state = _promotion_artifact_state(repo_root)
+    artifacts_written = [
+        relative
+        for relative in _PROMOTION_ARTIFACT_PATHS
+        if artifact_state[relative] != current_artifact_state[relative]
+    ]
+    if candidate_only:
+        report_path = bundle / "candidate-report.json"
+        report = {
+            "schema": _CANDIDATE_REPORT_SCHEMA,
+            "verification_scope": "candidate_only",
+            "candidate_identity": {
+                key: identity[key]
+                for key in _CANDIDATE_IDENTITY_KEYS
+            },
+            "materialized_root_sha256": materialized_root,
+            "test_input_root_sha256": test_input_root,
+            "wheel_sha256": _sha256(wheel),
+            "verifier_sha256": _sha256(repo_root / VERIFIER_PATH.relative_to(REPO)),
+            "bootstrap_sha256": _sha256(
+                repo_root / "scripts" / "_019_installed_pytest.py"
+            ),
+            "collected_node_set_sha256": _collected_node_set_digest(evidence),
+            "python_version": versions["python"],
+            "test_dependency_versions": {"pytest": versions["pytest"]},
+            "pytest_evidence": evidence,
+            "outcome_summary": summary,
+            "skips": _skip_records(evidence),
+            "evidence_complete": not evidence_errors,
+            "origin_ok": not origin_errors,
+            "promotion_performed": bool(artifacts_written),
+            "artifacts_written": artifacts_written,
+            "chromium": chromium,
+        }
+        _write_json_atomically(report_path, report)
+        execution_errors.extend(
+            candidate_report_errors(
+                report,
+                repo_root=repo_root,
+                report_path=report_path,
+                approved_skips=_APPROVED_CANDIDATE_SKIPS,
+            )
+        )
+        if execution_errors:
+            print(f"019 candidate report: {report_path}", file=sys.stderr)
+            return _report(execution_errors)
+        print(
+            "019 candidate content gate passed: "
+            f"{count} passed, {summary['skipped']} pre-approved skips"
+        )
+        print(f"019 candidate report: {report_path}")
+        print(f"019 materialized bundle: {bundle}")
+        return 0
+
+    if artifacts_written:
+        execution_errors.append(
+            "delivery artifacts changed while strict content tests were running"
+        )
+    if execution_errors:
+        return _report(execution_errors)
     _write_json_atomically(
         repo_root / WHEEL_ARTIFACT_PATH.relative_to(REPO),
         {
             "wheel_sha256": _sha256(wheel),
             "materialized_root_sha256": materialized_root,
-            "overlay_root_sha256": seal["overlay_root_sha256"],
+            "overlay_root_sha256": identity["overlay_root_sha256"],
             "materialized_full_count": count,
         },
     )
@@ -1021,12 +1324,47 @@ def run_content_gate(repo_root: Path = REPO, *, python: str | None = None) -> in
     return 0
 
 
+def run_content_gate(repo_root: Path = REPO, *, python: str | None = None) -> int:
+    """运行 seal-bound strict gate；成功后更新既有 wheel 历史工件。"""
+    entries, errors = validate_delivery(repo_root)
+    if errors:
+        return _report(errors)
+    identity = _load_json(repo_root / SEAL_PATH.relative_to(REPO))
+    return _run_materialized_content_gate(
+        repo_root=repo_root,
+        python=python or sys.executable,
+        identity=identity,
+        entries=entries,
+        candidate_only=False,
+    )
+
+
+def run_candidate_content_gate(
+    repo_root: Path = REPO,
+    *,
+    python: str | None = None,
+) -> int:
+    """验证当前 candidate，但不改 seal、receipt、wheel 或 promotion 状态。"""
+    try:
+        identity, entries = _delivery_identity(repo_root)
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        return _report([f"019 candidate identity unavailable: {error}"])
+    return _run_materialized_content_gate(
+        repo_root=repo_root,
+        python=python or sys.executable,
+        identity=identity,
+        entries=entries,
+        candidate_only=True,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--seal", action="store_true")
     group.add_argument("--check-membership", action="store_true")
     group.add_argument("--content", action="store_true")
+    group.add_argument("--candidate-content", action="store_true")
     group.add_argument("--control-seal", action="store_true")
     group.add_argument("--attestation", action="store_true")
     args = parser.parse_args(argv)
@@ -1036,6 +1374,8 @@ def main(argv: list[str] | None = None) -> int:
         return check_membership()
     if args.content:
         return run_content_gate()
+    if args.candidate_content:
+        return run_candidate_content_gate()
     if args.control_seal:
         return check_control_seal()
     if args.attestation:

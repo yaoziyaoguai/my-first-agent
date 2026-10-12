@@ -38,6 +38,10 @@ from agent.memory.preferences import (
 from agent.memory.source import MemoryContextSource
 from agent.memory.store import MemoryStore
 from agent.memory.tools import build_memory_tool_registrations
+from agent.process.managed_web import (
+    ManagedWebProcessOwner,
+    build_managed_web_process_tools,
+)
 from agent.process.tools import build_local_process_registration
 from agent.research.tools import build_research_tool_registrations
 from agent.runtime.context import ContextLimits, KernelContextManager
@@ -171,6 +175,45 @@ class SandboxResources:
     reason_code: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ManagedWebResources:
+    """本次应用生命周期拥有的开发服务工具与 loopback authority。"""
+
+    registrations: tuple[RegisteredTool, ...]
+    owner: ManagedWebProcessOwner
+    closeables: tuple[Callable[[], None], ...]
+
+
+def build_managed_web_resources(
+    workspace: Path,
+    *,
+    captured_path: str,
+    state_root: Path | None = None,
+    protected_paths: tuple[Path, ...] = (),
+    private_roots: tuple[str, ...] = DEFAULT_PRIVATE_ROOTS,
+) -> ManagedWebResources:
+    boundary = WorkspaceBoundary(
+        workspace,
+        protected_paths=protected_paths,
+        private_roots=private_roots,
+    )
+    bundle = build_managed_web_process_tools(
+        workspace=workspace,
+        captured_path=captured_path,
+        workspace_boundary=boundary,
+        cleanup_receipt_root=(
+            Path(state_root) / "managed-web" / "cleanup-receipts"
+            if state_root is not None
+            else None
+        ),
+    )
+    return ManagedWebResources(
+        registrations=bundle.registrations,
+        owner=bundle.owner,
+        closeables=(bundle.close,),
+    )
+
+
 def build_sandbox_resources(
     workspace,
     state_root,
@@ -208,7 +251,7 @@ def build_sandbox_resources(
     report = resolved_confiner.qualify()
     state_root_path = Path(state_root)
     base = (
-        Path(_tempfile.gettempdir())
+        Path(_tempfile.gettempdir()).resolve(strict=True)
         / (
             "first-agent-sbx-"
             + hashlib.sha256(str(state_root_path).encode()).hexdigest()[:12]
@@ -432,6 +475,7 @@ def build_composition(
     checkpoint_store: CheckpointStore,
     tool_registrations: tuple[RegisteredTool, ...],
     event_sink: EventSink,
+    progress_event_sink: EventSink | None = None,
     system_policy: str,
     context_limits: ContextLimits,
     invocation_limits: InvocationLimits,
@@ -499,6 +543,7 @@ def build_composition(
         tool_runtime=tool_runtime,
         checkpoint_store=checkpoint_store,
         event_sink=event_sink,
+        progress_event_sink=progress_event_sink,
         limits=invocation_limits,
         provider_descriptor=provider_descriptor,
         control_inbox=control_inbox,
@@ -571,6 +616,7 @@ def build_tool_registrations(
     skill_roots: Sequence[Path] = (),
     protected_paths: tuple[Path, ...] = (),
     private_roots: tuple[str, ...] = DEFAULT_PRIVATE_ROOTS,
+    project_paths: tuple[str, ...] = (),
     max_tool_result_chars: int,
     skill_limits: SkillLimits | None = None,
     skill_execution: SkillExecutionConfig | None = None,
@@ -592,6 +638,7 @@ def build_tool_registrations(
             workspace,
             protected_paths=protected_paths,
             private_roots=private_roots,
+            project_paths=project_paths,
         )
     )
     registrations.extend(build_research_tool_registrations())
@@ -777,6 +824,7 @@ def build_browser_resources(
     enabled: bool,
     resolver: object | None = None,
     playwright_factory: object | None = None,
+    loopback_authority: ManagedWebProcessOwner | None = None,
 ) -> BrowserResources:
     """browser 静态组合：read-only qualification 后构造唯一 adapter 拥有的资源。
 
@@ -843,6 +891,11 @@ def build_browser_resources(
         browser_identity_digest=browser_identity_digest,
         profile_root=profile_root,
         quarantine=quarantine,
+        loopback_verifier=(
+            loopback_authority.verify_loopback_binding
+            if loopback_authority is not None
+            else None
+        ),
     )
     profile_store = BrowserProfileStore(root=profile_root)
     # registrations 与 takeover completion callback 静态绑定同一个 browser
@@ -856,8 +909,12 @@ def build_browser_resources(
         monotonic_clock=_time.monotonic,
         workspace=Path(workspace),
         quarantine=quarantine,
+        loopback_authority=loopback_authority,
     )
-    closeables: tuple[Callable[[], None], ...] = (environment.shutdown,)
+    # F2（2026-10-02）：closeable 走 owner shutdown——逐 session 取底层 CLEANED
+    # 并把 CLOSED 落入 session ledger（重启后补记关闭的唯一凭据），再做 worker
+    # 收尾；任何 UNKNOWN fail closed，物理清理与 durable tool fact 不再脱节。
+    closeables: tuple[Callable[[], None], ...] = (tools.owner_shutdown,)
     return BrowserResources(
         registrations=tools.registrations,
         closeables=closeables,

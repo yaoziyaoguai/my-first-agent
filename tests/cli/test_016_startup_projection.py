@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import shlex
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -97,6 +100,162 @@ def test_new_workspace_startup_is_readable_and_protocol_free(tmp_path: Path) -> 
     assert "Status: no unfinished task" in rendered
     for forbidden in _DENYLIST:
         assert forbidden not in rendered
+
+
+def test_startup_projects_enabled_memory_without_exposing_store_path(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    memory_path = tmp_path / "private-memory" / "store.json"
+    output: list[str] = []
+
+    exit_code = entrypoint.main(
+        [
+            "--workspace",
+            str(workspace),
+            "--state-root",
+            str(tmp_path / "state"),
+            "--provider",
+            "fake",
+            "--memory-create",
+            str(memory_path),
+        ],
+        input_fn=lambda _prompt: "/exit",
+        write_fn=output.append,
+    )
+
+    assert exit_code == 0
+    rendered = "\n".join(output)
+    assert "Memory: ready" in rendered
+    assert str(memory_path) not in rendered
+
+
+def test_startup_projects_enabled_skills_without_exposing_root(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    skill_root = tmp_path / "private-skills"
+    skill_dir = skill_root / "qa-guidance"
+    skill_dir.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text(
+        "---\nname: qa-guidance\ndescription: QA guidance.\n---\nCheck results.\n",
+        encoding="utf-8",
+    )
+    output: list[str] = []
+
+    exit_code = entrypoint.main(
+        [
+            "--workspace",
+            str(workspace),
+            "--state-root",
+            str(tmp_path / "state"),
+            "--provider",
+            "fake",
+            "--skill-root",
+            str(skill_root),
+        ],
+        input_fn=lambda _prompt: "/exit",
+        write_fn=output.append,
+    )
+
+    assert exit_code == 0
+    rendered = "\n".join(output)
+    assert "Skills: ready" in rendered
+    assert str(skill_root) not in rendered
+
+
+def test_startup_projects_enabled_mcp_without_exposing_catalog_path(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    server = Path(__file__).resolve().parents[1] / "fixtures" / "mcp" / "stdio_server.py"
+    wrapper = tmp_path / "run-mcp.sh"
+    wrapper.write_text(
+        f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(server))}\n",
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o700)
+    catalog_path = tmp_path / "mcp-catalog.json"
+    catalog_path.write_text(
+        json.dumps(
+            {
+                "servers": [
+                    {
+                        "server_id": "qa",
+                        "transport": "stdio",
+                        "command": str(wrapper),
+                        "args": [],
+                        "safety_generation": "gen-1",
+                        "protocol_revision": "2025-11-25",
+                        "tools": [
+                            {
+                                "remote_name": "echo",
+                                "description": "Echo text.",
+                                "input_schema": {
+                                    "type": "object",
+                                    "properties": {"text": {"type": "string"}},
+                                    "required": ["text"],
+                                },
+                                "output_limit_chars": 1000,
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    safety_dir = tmp_path / "mcp-safety"
+    safety_dir.mkdir(mode=0o700)
+    output: list[str] = []
+
+    exit_code = entrypoint.main(
+        [
+            "--workspace",
+            str(workspace),
+            "--state-root",
+            str(tmp_path / "state"),
+            "--provider",
+            "fake",
+            "--mcp-catalog",
+            str(catalog_path),
+            "--mcp-safety-state",
+            str(safety_dir / "latch.json"),
+        ],
+        input_fn=lambda _prompt: "/exit",
+        write_fn=output.append,
+    )
+
+    assert exit_code == 0
+    rendered = "\n".join(output)
+    assert "MCP: ready" in rendered
+    assert str(catalog_path) not in rendered
+
+
+def test_startup_projects_enabled_bounded_subagent(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    output: list[str] = []
+
+    exit_code = entrypoint.main(
+        [
+            "--workspace",
+            str(workspace),
+            "--state-root",
+            str(tmp_path / "state"),
+            "--provider",
+            "fake",
+            "--subagent",
+        ],
+        input_fn=lambda _prompt: "/exit",
+        write_fn=output.append,
+    )
+
+    assert exit_code == 0
+    assert "SubAgent: ready (bounded delegation)" in "\n".join(output)
 
 
 def test_process_notice_leads_with_plain_language_without_weakening_boundary() -> None:

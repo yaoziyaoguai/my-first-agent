@@ -82,6 +82,35 @@ def _run(state: ConversationState, *inputs: str):
     return runtime, output, exit_code
 
 
+def test_repl_shows_working_feedback_before_running_an_action() -> None:
+    """非流式路径在同步 Runtime 调用前也必须让用户知道输入已被接收。"""
+
+    output: list[str] = []
+    state = ConversationState.new("conversation-1")
+    inputs = iter(("do the work", "/exit"))
+
+    class FeedbackObservingRuntime:
+        def run_turn(self, action, snapshot):  # noqa: ANN001
+            assert output == ["Working..."]
+            return RunResult(
+                RunStatus.COMPLETED,
+                snapshot.state,
+                run_id=action.run_id,
+                message="done",
+            )
+
+    exit_code = run_repl(
+        FeedbackObservingRuntime(),
+        StaticStore(state),
+        input_fn=lambda _prompt: next(inputs),
+        write_fn=output.append,
+        run_id_factory=lambda: "run-new",
+    )
+
+    assert exit_code == 0
+    assert output == ["Working...", "done"]
+
+
 def _disclosure_state() -> ConversationState:
     request = ProviderDisclosureRequest.create(
         disclosure_id="disclosure-1",
@@ -222,8 +251,11 @@ def test_natural_language_at_approval_is_a_goal_correction() -> None:
     action = runtime.actions[0]
     assert isinstance(action, SubmitMessage)
     assert action.message == "请改为写入 final.md，不要创建 draft.md。"
-    # 自然语言更正不产生 error 输出；终端里唯一的可操作内容是输入前的 pending 提示。
-    assert output and all("Approval required" in message for message in output)
+    # 自然语言更正不产生 error 输出；Working 只确认输入已提交，仍由 pending
+    # projection 提供唯一可操作的审批提示。
+    assert output and all(
+        message == "Working..." or "Approval required" in message for message in output
+    )
 
 
 @pytest.mark.parametrize(

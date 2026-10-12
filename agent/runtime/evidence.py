@@ -24,6 +24,7 @@ from agent.runtime.contracts import (
     FactKind,
     ProcessReceiptV1,
     SandboxReceiptV1,
+    SideEffectClass,
     SourceKind,
     SourceReceiptV1,
     canonical_json_digest,
@@ -129,6 +130,9 @@ _GENERIC_GAP_INSTRUCTION = (
 # 使既有 workspace 验证失效的治理写入工具（evidence 失效判断与 loop 抑制折叠
 # 共用同一清单，不能两边各自漂移）。
 WORKSPACE_WRITE_TOOLS = frozenset({"write_file", "edit_file", "make_directory"})
+# RC-02（2026-10-11）：可信可写 same-UID 进程的启动工具；其 governed_tool_v1
+# 结果没有 process_receipt 外形，但能力本身构成潜在 workspace 变更。
+WRITABLE_PROCESS_TOOLS = frozenset({"managed_web_start"})
 
 
 @dataclass(frozen=True)
@@ -1442,14 +1446,31 @@ class ClosedEvidenceRegistry:
 
     @staticmethod
     def _may_invalidate_workspace_validation(fact: ConversationFact) -> bool:
+        if fact.kind is FactKind.CONTEXT_SUMMARY:
+            # RC-01/020（2026-10-11）：compaction 边界是保守失效边界。summary
+            # 代表被裁剪掉的任意历史跨度，Runtime 无法再证明该跨度内没有写入
+            # 或 same-UID 进程执行，因此早于 summary 的验证一律不再满足义务
+            # （审计：compaction 后旧验证均不能满足义务）；晚于 summary 的新
+            # receipt 不受影响，显式重验可再获信任。
+            return True
+        if fact.kind is not FactKind.TOOL_RESULT:
+            return False
+        if fact.content.get("unknown_outcome") is True:
+            # RC-01（2026-10-11）：UNKNOWN 恢复事实（reducer 可信标记，非模型
+            # 文本）。结果未知 → 保守失效；只有可信 side_effect=read_only 才不
+            # 失效，分类缺失保守视为潜在写入。mark_failed 不豁免。
+            return fact.content.get("side_effect") != SideEffectClass.READ_ONLY.value
         if (
-            fact.kind is not FactKind.TOOL_RESULT
-            or fact.content.get("executed") is not True
+            fact.content.get("executed") is not True
         ):
             return False
         metadata = fact.content.get("metadata")
         if not isinstance(metadata, dict):
             return False
+        if metadata.get("tool_name") in WRITABLE_PROCESS_TOOLS:
+            # RC-02（2026-10-11）：可写 same-UID 进程的启动结果是可信能力证据
+            # （进程从此可写 workspace）；无 process_receipt 外形不能视为只读。
+            return True
         if metadata.get("tool_name") in WORKSPACE_WRITE_TOOLS:
             return True
         if "process_receipt" in metadata:

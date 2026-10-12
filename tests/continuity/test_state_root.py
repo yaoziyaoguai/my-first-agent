@@ -15,6 +15,8 @@ from agent.continuity.sessions import (
     WORKSPACE_HISTORY_CAPACITY,
     StartupDisposition,
     open_workspace_session,
+    project_workspace_session_page,
+    select_workspace_candidate,
     select_workspace_session,
 )
 from agent.runtime.checkpoint import LocalCheckpointStore
@@ -239,6 +241,85 @@ def test_multiple_candidates_require_exact_select_goal_action(tmp_path: Path) ->
     assert selected.snapshot.state.goal.goal_id == "goal:2"
 
 
+def test_multiple_goal_less_conversations_allow_exact_read_only_selection(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state-root"
+    first = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000091",
+    )
+    second = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000092",
+        force_new=True,
+    )
+    assert first.snapshot is not None and second.snapshot is not None
+    ambiguous = open_workspace_session(workspace, state_root=state_root)
+    assert ambiguous.disposition is StartupDisposition.SELECT_REQUIRED
+    candidate = next(
+        item
+        for item in ambiguous.candidates
+        if item.conversation_id == second.snapshot.state.conversation_id
+    )
+    before = {
+        item.checkpoint_path: item.checkpoint_path.read_bytes()
+        for item in ambiguous.candidates
+    }
+
+    selected = select_workspace_candidate(ambiguous, candidate)
+
+    assert selected.disposition is StartupDisposition.RESUMED
+    assert selected.snapshot is not None
+    assert selected.snapshot.state.conversation_id == candidate.conversation_id
+    assert selected.snapshot.state.goal is None
+    assert {
+        path: path.read_bytes() for path in before
+    } == before, "selection must not mutate durable conversations"
+
+
+def test_goal_less_conversation_selection_rejects_displayed_revision_drift(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state-root"
+    open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000096",
+    )
+    open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000097",
+        force_new=True,
+    )
+    ambiguous = open_workspace_session(workspace, state_root=state_root)
+    candidate = ambiguous.candidates[0]
+    store = LocalCheckpointStore(candidate.checkpoint_path)
+    snapshot = store.load()
+    lease = store.try_acquire(snapshot.state.conversation_id)
+    assert lease is not None
+    try:
+        store.compare_and_swap(
+            snapshot,
+            replace(snapshot.state, revision=snapshot.state.revision + 1),
+        )
+    finally:
+        lease.release()
+    drifted_bytes = candidate.checkpoint_path.read_bytes()
+
+    with pytest.raises(ValueError, match="displayed candidate"):
+        select_workspace_candidate(ambiguous, candidate)
+
+    assert candidate.checkpoint_path.read_bytes() == drifted_bytes
+
+
 def test_bounded_workspace_state_enumeration_rejects_unknown_entries_and_overflow(
     tmp_path: Path,
 ) -> None:
@@ -349,6 +430,47 @@ def test_active_display_is_bounded_without_discarding_history(tmp_path: Path) ->
     assert opened.total_checkpoint_count == 4
     assert opened.total_active_count == 4
     assert opened.history_incomplete
+
+
+@pytest.mark.parametrize("conversation_count", [17, 33])
+def test_workspace_session_pages_preserve_a_stable_bounded_inventory(
+    tmp_path: Path,
+    conversation_count: int,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state-root"
+    for suffix in range(1, conversation_count + 1):
+        open_workspace_session(
+            workspace,
+            state_root=state_root,
+            force_new=True,
+            conversation_id_factory=(
+                lambda value=suffix: f"00000000-0000-4000-8000-{value:012d}"
+            ),
+        )
+
+    first_page = open_workspace_session(workspace, state_root=state_root)
+    second_page = project_workspace_session_page(first_page, 1)
+    last_page = project_workspace_session_page(
+        first_page,
+        (conversation_count - 1) // first_page.candidate_page_size,
+    )
+
+    assert len(first_page.candidates) == 16
+    assert first_page.candidate_page == 0
+    assert second_page.candidate_page == 1
+    assert second_page.candidates[0].conversation_id.endswith("000000000017")
+    assert len(last_page.candidates) == (conversation_count - 1) % 16 + 1
+    assert last_page.candidates[-1].conversation_id.endswith(
+        f"{conversation_count:012d}"
+    )
+    selected = select_workspace_candidate(last_page, last_page.candidates[-1])
+    assert selected.snapshot is not None
+    assert selected.snapshot.state.conversation_id.endswith(f"{conversation_count:012d}")
+
+    with pytest.raises(ValueError, match="page is not available"):
+        project_workspace_session_page(last_page, last_page.candidate_page + 1)
 
 
 def test_full_history_preserves_existing_session_but_blocks_new_conversation(

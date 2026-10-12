@@ -213,10 +213,12 @@ def _historical_active_document(source_version):
         active_run=ActiveRun(run_id="run-historical"),
     )
     document = json.loads(_encode_state(expected).decode("utf-8"))
-    assert document["schema_version"] == 9
+    assert document["schema_version"] == 10
     document["schema_version"] = source_version
     active = document["state"]["active_run"]
-    active.pop("invocation_origin")
+    active.pop("run_started_at")
+    if source_version < 9:
+        active.pop("invocation_origin")
     if source_version < 8:
         document["state"].pop("background_occurrence_binding")
         for key in _BACKGROUND_ACTIVE_KEYS:
@@ -233,14 +235,15 @@ def _historical_active_document(source_version):
     return document, expected
 
 
-@pytest.mark.parametrize("source_version", [2, 3, 4, 5, 6, 7, 8])
-def test_v2_through_v8_active_run_migrate_to_model_without_losing_state(
+@pytest.mark.parametrize("source_version", [2, 3, 4, 5, 6, 7, 8, 9])
+def test_v2_through_v9_active_run_migrate_without_losing_state(
     tmp_path,
     source_version,
 ):
     path = tmp_path / "checkpoint.json"
     document, expected = _historical_active_document(source_version)
-    assert "invocation_origin" not in document["state"]["active_run"]
+    if source_version < 9:
+        assert "invocation_origin" not in document["state"]["active_run"]
     path.write_text(
         json.dumps(document, sort_keys=True, separators=(",", ":")),
         encoding="utf-8",

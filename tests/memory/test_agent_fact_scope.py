@@ -5,16 +5,20 @@ import pytest
 from agent.memory.contracts import ProviderTrustProfile
 from agent.memory.store import MemoryStore, MemoryStoreError
 from agent.memory.tools import build_memory_tool_registrations
+from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ApprovalGrant,
     ApprovalRequired,
+    ConversationState,
     ExecutionIntent,
     FactAdmissionBinding,
     FactAdmissionClass,
     FactKind,
+    SubmitMessage,
     ToolCall,
     ToolPrepareContext,
 )
+from agent.runtime.state import accept_action
 from agent.runtime.tools import KernelToolRuntime
 
 
@@ -88,7 +92,45 @@ def test_unbacked_model_assertion_cannot_become_fact(tmp_path) -> None:
     assert prepared.is_error is True
     assert prepared.executed is False
     assert prepared.metadata["code"] == "fact_admission_required"
+    assert "exactly match a prior user message" in prepared.content
+    assert "separate message" in prepared.content
     assert store.snapshot() == ()
+
+
+def test_memory_is_visible_as_configured_at_intent_gate_without_exposing_tools(
+    tmp_path,
+) -> None:  # noqa: ANN001
+    runtime, _store = _runtime(tmp_path)
+    manager = KernelContextManager(
+        system_policy="Be concise.",
+        limits=ContextLimits(max_input_tokens=4_000, output_reserve=200),
+        workspace_identity_digest="workspace-a",
+        authority_snapshot="authority-1",
+    )
+    state = ConversationState.new("conversation-memory-bootstrap")
+    action = SubmitMessage(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+        run_id="run-memory-bootstrap",
+        message="请记住：本项目的测试代号是 SABLE-27",
+    )
+    state = accept_action(state, action).state
+
+    pack = manager.build(state, action, runtime.definitions())
+
+    bootstrap = next(
+        block
+        for message in pack.messages
+        for block in message.content
+        if block.get("type") == "trusted_goal_bootstrap"
+    )
+    assert bootstrap["configured_capabilities"] == ["memory"]
+    assert pack.tools == ()
+    assert bootstrap["explicit_non_prose_outcome"] is True
+    assert pack.control_schema is not None
+    kinds = pack.control_schema["input_schema"]["properties"]["kind"]["enum"]
+    assert "direct_response" not in kinds
 
 
 def test_forged_missing_stale_or_cross_workspace_fact_binding_is_rejected() -> None:

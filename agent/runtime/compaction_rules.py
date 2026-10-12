@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from agent.runtime.contracts import ConversationFact, ConversationState, FactKind
+from agent.runtime.resource_lifecycle import active_task_resources
 
 
 class CompactionIneligibleHistoryError(ValueError):
@@ -139,6 +140,9 @@ def protected_compaction_fact_ids(
     evidence_source_ids: set[str] = set()
     for record in state.evidence_records:
         evidence_source_ids.update(record.source_fact_ids)
+    # 未清理资源的 open/start receipt 是 durable ownership 事实；在对应 close/stop
+    # 到达前不得被摘要替换，否则 completion 会失去收尾义务。
+    goal_source_ids = goal_source_ids | active_task_resources(state.facts).owner_fact_ids
     return goal_source_ids, frozenset(evidence_source_ids)
 
 
@@ -192,7 +196,9 @@ def validate_compaction_removal(
         if not turn_ids <= selected_ids:
             raise ValueError("removable facts must cover whole closed turns")
         if turn_ids & goal_source_ids:
-            raise ValueError("removable facts must not include goal source turns")
+            raise ValueError(
+                "removable facts must not include goal or active-resource owner turns"
+            )
         if turn_ids & evidence_source_ids:
             raise ValueError("removable facts must not include evidence source turns")
         selected_turns += 1

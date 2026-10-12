@@ -151,7 +151,12 @@ def test_text_done_and_model_completion_claim_cannot_self_verify() -> None:
 
 
 def test_deterministic_receipts_bound_to_all_mandatory_criteria_verify_goal() -> None:
-    runtime, store, action = _runtime(_state(), ModelResponse((), control=_claim()))
+    from tests.continuity.test_browser_authority import make_lease
+
+    runtime, store, action = _runtime(
+        replace(_state(), browser_leases=(make_lease(),)),
+        ModelResponse((), control=_claim()),
+    )
 
     result = runtime.run_turn(action, store.load())
 
@@ -162,6 +167,7 @@ def test_deterministic_receipts_bound_to_all_mandatory_criteria_verify_goal() ->
         "fact:calls:1",
         "fact:read-result:1",
     )
+    assert store.state.browser_leases == ()
 
 
 def test_fresh_successful_read_back_closes_fully_derivable_goal_without_model_churn(
@@ -447,6 +453,58 @@ def test_unadmitted_filesystem_goal_keeps_write_tool_as_pending_obligation() -> 
         state,
         available_tools=("read_file", "write_file", "edit_file"),
     ) == ("write_file",)
+
+
+@pytest.mark.parametrize(
+    ("process_failed", "expected_tool"),
+    ((False, "confirm_file"), (True, "write_file")),
+)
+def test_process_generated_artifact_requires_confirmation_only_after_success(
+    process_failed: bool,
+    expected_tool: str,
+) -> None:
+    state = _state()
+    assert state.goal is not None
+    run_id = "run-generated-artifact"
+    process_call = ConversationFact(
+        fact_id=f"run:{run_id}:tool-batch:1",
+        kind=FactKind.TOOL_CALLS,
+        content={
+            "calls": [
+                {
+                    "tool_call_id": "generate-artifact",
+                    "name": "local_process",
+                    "arguments": {
+                        "executable": "./generate-report",
+                        "argv": [],
+                        "cwd": ".",
+                        "profile": "short",
+                    },
+                }
+            ]
+        },
+    )
+    process_result = ConversationFact(
+        fact_id=f"run:{run_id}:tool-result:1",
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": "generate-artifact",
+            "text": "generation result",
+            "is_error": process_failed,
+            "executed": True,
+        },
+    )
+    state = replace(
+        state,
+        goal=replace(state.goal, admitted_criteria=()),
+        active_run=ActiveRun(run_id),
+        facts=(*state.facts, process_call, process_result),
+    )
+
+    assert ClosedEvidenceRegistry().pending_obligation_tools(
+        state,
+        available_tools=("read_file", "confirm_file", "write_file", "edit_file"),
+    ) == (expected_tool,)
 
 
 def test_admitted_filesystem_goal_with_only_failed_read_still_requires_write() -> None:

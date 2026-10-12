@@ -179,7 +179,7 @@ Write the owner-only plist with no-follow/atomic replacement. Use only exit clas
 
 - [x] **Step 4: Integrate portable `wake enable/disable` through a host port**
 
-The portable management service asks an injected wake-adapter capability for preview/install/remove; CLI still submits typed actions. First activation follows the spec's install-before-activate partial-failure states. No macOS type leaks into portable contracts.
+The portable management service asks an injected wake-adapter capability for exact readback and explicit owner-requested enable/disable; CLI still submits typed actions. Manual definitions never require the adapter. Cold-wake approval requires prior explicit `wake enable` and never installs a login item as an approval side effect. No macOS type leaks into portable contracts.
 
 - [x] **Step 5: Verify Task 4 and record the checkpoint**
 

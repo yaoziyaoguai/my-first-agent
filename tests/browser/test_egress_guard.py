@@ -11,7 +11,7 @@ import inspect
 
 import pytest
 
-from agent.browser.contracts import BrowserMode
+from agent.browser.contracts import BrowserMode, LoopbackOriginBindingV1
 from agent.browser.playwright_adapter import (
     BrowserEgressGuard,
     PlaywrightBrowserEnvironment,
@@ -40,6 +40,102 @@ def make_guard(mapping=None):
         resolver,
         transport,
     )
+
+
+def _loopback_binding() -> LoopbackOriginBindingV1:
+    return LoopbackOriginBindingV1(
+        resource_ref="managed-web-1",
+        origin="http://127.0.0.1:43123",
+        goal_id="goal-1",
+        goal_revision=1,
+        process_group_id=4321,
+        command_fingerprint="c" * 64,
+        issued_monotonic=100.0,
+        expires_monotonic=220.0,
+    )
+
+
+def test_task_loopback_revalidates_managed_process_for_every_request() -> None:
+    binding = _loopback_binding()
+    decisions = [True, False]
+    resolver = FakeResolver({})
+    transport = FakeTransport()
+    guard = BrowserEgressGuard(
+        resolver=resolver,
+        transport=transport,
+        loopback_verifier=lambda candidate: (
+            candidate == binding and decisions.pop(0)
+        ),
+    )
+
+    admitted = guard.admit_request(
+        RequestKind.DOCUMENT,
+        f"{binding.origin}/",
+        mode=BrowserMode.TASK_LOOPBACK_EPHEMERAL,
+        allowed_origins=(binding.origin,),
+        loopback_binding=binding,
+    )
+    guard.record_send(RequestKind.DOCUMENT, admitted)
+    with pytest.raises(URLPolicyError, match="loopback_lease_inactive"):
+        guard.admit_request(
+            RequestKind.SUBRESOURCE,
+            f"{binding.origin}/app.js",
+            mode=BrowserMode.TASK_LOOPBACK_EPHEMERAL,
+            allowed_origins=(binding.origin,),
+            loopback_binding=binding,
+        )
+    assert guard.sends == 1
+
+
+def test_task_loopback_without_a_process_verifier_fails_closed() -> None:
+    binding = _loopback_binding()
+    guard, _resolver, _transport = make_guard()
+    with pytest.raises(URLPolicyError, match="loopback_lease_unverifiable"):
+        guard.admit_request(
+            RequestKind.DOCUMENT,
+            f"{binding.origin}/",
+            mode=BrowserMode.TASK_LOOPBACK_EPHEMERAL,
+            allowed_origins=(binding.origin,),
+            loopback_binding=binding,
+        )
+
+
+def test_task_loopback_session_routes_only_the_managed_origin() -> None:
+    from agent.browser.contracts import BrowserSessionSpecV1
+    from tests.browser.fakes import Journal, make_fake_factory
+
+    binding = _loopback_binding()
+    journal = Journal()
+    handle, factory = make_fake_factory(journal)
+    environment = PlaywrightBrowserEnvironment(
+        playwright_factory=factory,
+        resolver=FakeResolver({}),
+        loopback_verifier=lambda candidate: candidate == binding,
+    )
+    session = environment.open(
+        BrowserSessionSpecV1.task_loopback(
+            goal_id="goal-1",
+            goal_revision=1,
+            binding=binding,
+        )
+    )
+    context = handle.last_context
+
+    # task-loopback 已经把唯一可访问 origin 固定进 session；open 应直接进入
+    # 该页面，避免把 about:blank 交给模型再做一次无意义且易过期的导航。
+    assert [
+        event[2]["url"] for event in journal.calls("page", "goto")
+    ] == [binding.origin]
+
+    context.emit_request(f"{binding.origin}/app.js", resource_type="script")
+    context.emit_request("http://127.0.0.1:43124/blocked", resource_type="script")
+
+    assert len(journal.calls("route", "fetch")) == 1
+    assert len(journal.calls("route", "fulfill")) == 1
+    assert len(journal.calls("route", "continue")) == 1
+    assert len(journal.calls("route", "abort")) == 1
+    assert environment.egress_sends() == 2
+    assert environment.close(session).outcome.value == "cleaned"
 
 
 def test_every_request_kind_uses_the_same_guard_admission():
@@ -112,7 +208,7 @@ def test_dns_rebinding_address_drift_fails_closed():
         allowed_origins=(),
     )
     # 同 origin 解析到不同（即便都 public）地址集：rebinding fail closed。
-    resolver.mapping[PUBLIC_HOST] = ("198.51.100.7",)
+    resolver.mapping[PUBLIC_HOST] = ("93.184.216.35",)
     with pytest.raises(URLPolicyError) as exc_info:
         guard.admit_request(
             RequestKind.SUBRESOURCE,
@@ -130,6 +226,26 @@ def test_dns_rebinding_address_drift_fails_closed():
         allowed_origins=(),
     )
     # 纯 admission 不再自动计 send。
+
+
+def test_is_admissible_does_not_pin_a_dns_identity() -> None:
+    guard, resolver, _transport = make_guard()
+    guard.is_admissible(
+        RequestKind.DOCUMENT,
+        f"https://{PUBLIC_HOST}/",
+        mode=BrowserMode.PUBLIC_READ_EPHEMERAL,
+        allowed_origins=(),
+    )
+    resolver.mapping[PUBLIC_HOST] = ("93.184.216.35",)
+
+    admitted = guard.admit_request(
+        RequestKind.DOCUMENT,
+        f"https://{PUBLIC_HOST}/",
+        mode=BrowserMode.PUBLIC_READ_EPHEMERAL,
+        allowed_origins=(),
+    )
+
+    assert admitted.canonical_origin == f"https://{PUBLIC_HOST}"
 
 
 def test_site_bound_events_use_current_origin_allowlist():

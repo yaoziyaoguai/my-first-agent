@@ -35,9 +35,8 @@ def test_materialized_tree_omits_detached_mutable_019_evidence(tmp_path: Path) -
     tree = tmp_path / "tree"
 
     assert verifier.materialize_tree(entries, verifier.REPO, tree) == []
-    # 019 overlay 只记录相对 009 candidate 的 delta；materializer 仍必须恢复
-    # 未在 delta 中重列、但已由 009 manifest 验收的父阶段文件。
-    assert not any(entry["path"] == "agent/tools/edit.py" for entry in entries)
+    # materializer 必须恢复父阶段文件，并用当前 overlay 覆盖后续真实修改；
+    # detached 的 019 mutable evidence 仍不得被带入交付树。
     assert (tree / "agent/tools/edit.py").read_bytes() == (
         verifier.REPO / "agent/tools/edit.py"
     ).read_bytes()
@@ -152,6 +151,7 @@ def _product_origin_fixture(tmp_path: Path) -> tuple[Path, Path]:
             path.write_text(f'ORIGIN_MARKER = "{marker}"\n', encoding="utf-8")
 
     origin_test = '''import importlib
+from pathlib import Path
 
 PRODUCT_MODULES = (
     "main",
@@ -162,6 +162,7 @@ PRODUCT_MODULES = (
 
 
 def test_product_origin_is_installed() -> None:
+    assert Path.cwd() == Path(__file__).parents[1]
     for name in PRODUCT_MODULES:
         assert importlib.import_module(name).ORIGIN_MARKER == "installed"
 '''
@@ -293,6 +294,11 @@ def test_materialized_pytest_uses_installed_product_modules(tmp_path: Path) -> N
 
     # 子进程内 pytest 必须真实运行并通过 fixture 内置的来源测试。
     assert result["returncode"] == 0
+    evidence = result["evidence"]
+    assert verifier.pytest_evidence_errors(evidence, approved_skips={}) == []
+    assert evidence["collected_node_ids"] == [
+        "tests/test_product_origin.py::test_product_origin_is_installed"
+    ]
     # 断言 runner 是独立进程，而不是在当前进程内伪造执行。
     assert result["runner_pid"] != os.getpid()
     # 子进程观测到的产品模块来源必须全部绑定 canonical 安装位置。
@@ -328,6 +334,29 @@ def test_materialized_pytest_rejects_late_source_import(tmp_path: Path) -> None:
     # 执行期才延迟加载的 copied product module 必须让子进程 pytest 失败并留痕。
     assert result["returncode"] != 0
     assert any("agent.late_loaded" in e for e in result["origin_errors"])
+
+
+def test_materialized_pytest_timeout_cannot_be_reported_as_complete(
+    tmp_path: Path,
+) -> None:
+    installed_site, test_tree = _product_origin_fixture(tmp_path)
+    (test_tree / "tests" / "test_timeout.py").write_text(
+        "import time\n\ndef test_timeout() -> None:\n    time.sleep(30)\n",
+        encoding="utf-8",
+    )
+
+    result = verifier.run_wheel_bound_pytest(
+        python=sys.executable,
+        installed_site=installed_site,
+        test_tree=test_tree,
+        required_modules=REQUIRED_PRODUCT_MODULES,
+        timeout_seconds=0.2,
+    )
+
+    assert result["returncode"] == 124
+    assert result["evidence"]["session_completed"] is False
+    assert verifier.pytest_evidence_errors(result["evidence"], approved_skips={}) != []
+    assert any("timed out" in error for error in result["origin_errors"])
 
 
 @pytest.mark.parametrize(
@@ -487,3 +516,24 @@ def test_candidate_content_reports_absent_chromium_without_launch(tmp_path: Path
     # 不得把缺失改写成启动、下载或资格通过。
     for bad_status in ("launched", "downloaded", "qualified"):
         assert errors(dict(base, chromium={"status": bad_status})) != [], bad_status
+
+
+def test_candidate_content_cli_uses_non_promoting_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def run_candidate() -> int:
+        nonlocal called
+        called = True
+        return 23
+
+    monkeypatch.setattr(
+        verifier,
+        "run_candidate_content_gate",
+        run_candidate,
+        raising=False,
+    )
+
+    assert verifier.main(["--candidate-content"]) == 23
+    assert called is True

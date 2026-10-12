@@ -42,7 +42,16 @@ def decode_reconcile_request(raw: str) -> ReconcileAutomationsV1:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="first-agent-schedule")
+    parser = argparse.ArgumentParser(
+        prog="first-agent-schedule",
+        description=(
+            "This installed command does not include a runnable host composition."
+        ),
+        epilog=(
+            "Commands fail closed with needs_019_config until a trusted host injects "
+            "the control core. It does not install login items or background jobs."
+        ),
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     create = commands.add_parser("create")
     _definition_args(create, include_id=False)

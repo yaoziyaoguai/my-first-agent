@@ -1,0 +1,301 @@
+"""重跑 2026-10-11 runtime 审计的纯内存诊断；不是真实 API/进程验收。
+
+运行：
+  PYTHONDONTWRITEBYTECODE=1 .venv/bin/python docs/handoffs/2026-10-11-product-reliability-closure/diagnostics/runtime_probe.py.txt
+
+只加载指定仓库的公开源码/测试 fixture。不读凭据、用户会话或日志，不启动
+工具进程，不写 checkpoint 文件。下面的 receipt、Goal、工具结果、usage
+均是明确标注的合成输入；消费者是当前生产 reducer/oracle/fold/finish。
+exit 0 仅表示诊断运行完毕，不表示产品正确或验收通过。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from dataclasses import replace
+from pathlib import Path
+
+
+def emit(record: dict) -> None:
+    print(json.dumps(record, ensure_ascii=False, sort_keys=True))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--repo", default=str(Path.cwd())
+    )
+    args = parser.parse_args()
+    repo = Path(args.repo).resolve(strict=True)
+    if not (repo / "agent/runtime/loop.py").is_file():
+        parser.error("--repo must point to the my-first-agent source checkout")
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(repo))
+
+    from tests.kernel.fakes import InMemoryCheckpointStore
+    from tests.kernel.test_validation_request_freshness import (
+        _calls_fact,
+        _receipt,
+        _runtime,
+        _sandbox_fact,
+        _state,
+    )
+    from agent.runtime.contracts import (
+        ActiveRunStatus,
+        AdmittedCriterion,
+        CompletionClaim,
+        ContinuationPhase,
+        ControlInboxRequest,
+        ControlRequestKind,
+        ConversationFact,
+        EvidenceOracleKind,
+        ExecutingIntentRecord,
+        ExecutionAuthorityClass,
+        FactKind,
+        RecoveryRequest,
+        RecoveryResolution,
+        ResolveUnknownToolOutcome,
+        SubmitMessage,
+        ToolCall,
+    )
+    from agent.runtime.control import ControlBinding, ControlInbox
+    from agent.runtime.evidence import (
+        ClosedEvidenceRegistry,
+        EvidenceVerificationError,
+    )
+    from agent.runtime.state import accept_action
+
+    emit(
+        {
+            "type": "diagnostic_scope",
+            "repo": str(repo),
+            "synthetic_factories": {
+                "_receipt/_sandbox_fact": "test-only native receipt/fact; no host sandbox execution",
+                "_calls_fact/_state": "test-only retained calls, Goal and ConversationState",
+                "_runtime": "minimal Runtime fixture; provider/tool callable never invoked",
+                "InMemoryCheckpointStore": "test store; no filesystem checkpoint writes",
+                "managed_web_result": "synthetic current ToolRuntime governed_tool_v1 output shape; no server started",
+                "usage": "injected counters (3,1200,230); no paid calls",
+            },
+            "production_consumers": [
+                "state.accept_action",
+                "ClosedEvidenceRegistry.derive",
+                "AgentRuntime._successful_product_request_inventory",
+                "ControlInbox",
+                "AgentRuntime._poll_control/_finish",
+            ],
+            "limit": "pure-memory boundary probes, not end-to-end VERIFIED_DONE or real crash/API proof",
+        }
+    )
+
+    receipt = _receipt()
+    validation = _sandbox_fact(receipt)
+    calls = _calls_fact(
+        ("validate-a", "sandbox_exec", {"executable": "./check-a"}),
+        ("mutate", "write_file", {"path": "artifact.txt", "content": "changed"}),
+        ("start", "managed_web_start", {"executable": "./server"}),
+    )
+    criterion = AdmittedCriterion(
+        criterion_id="criterion:x",
+        description="check-a passes",
+        source_fact_id="fact-user",
+        oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+        predicate={
+            "receipt_kind": "native_sandbox_v1",
+            "command_fingerprint": receipt.original_command_fingerprint,
+            "policy_digest": receipt.policy_digest,
+            "mode": receipt.mode,
+            "network": receipt.network,
+            "backend": receipt.backend,
+            "enforcement": receipt.enforcement,
+            "outcome": "exited",
+        },
+        required_evidence_class="native_sandbox_receipt",
+        admission_digest="e" * 64,
+        mandatory=True,
+    )
+    base = _state(calls, validation)
+    base = replace(base, goal=replace(base.goal, admitted_criteria=(criterion,)))
+    registry = ClosedEvidenceRegistry()
+    claim = CompletionClaim(
+        correlation_id="claim",
+        goal_id=base.goal.goal_id,
+        goal_revision=base.goal.revision,
+        criterion_evidence_refs=(
+            registry.evidence_id(
+                base.goal.goal_id, base.goal.revision, criterion.criterion_id
+            ),
+        ),
+    )
+
+    def stale_evidence_result(state) -> dict:
+        try:
+            records = registry.derive(
+                state, claim, observed_at="2026-10-11T00:00:00Z"
+            )
+        except EvidenceVerificationError as error:
+            return {"old_validation_accepted": False, "reason": str(error)}
+        return {
+            "old_validation_accepted": any(
+                validation.fact_id in record.source_fact_ids for record in records
+            ),
+            "source_fact_ids": [list(record.source_fact_ids) for record in records],
+        }
+
+    managed = ConversationFact(
+        fact_id="run:run-fresh:tool-result:start:2",
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": "start",
+            "text": '{"resource_ref":"test-resource"}',
+            "is_error": False,
+            "executed": True,
+            "metadata": {
+                "truncated": False,
+                "tool_identity": "fixture",
+                "tool_name": "managed_web_start",
+                "governed_tool_receipt_kind": "governed_tool_v1",
+                "receipt_digest": "a" * 64,
+            },
+        },
+    )
+    managed_state = replace(base, facts=(*base.facts, managed))
+    managed_evidence = stale_evidence_result(managed_state)
+    managed_count = len(
+        _runtime()._successful_product_request_inventory(managed_state)[2]
+    )
+    emit(
+        {
+            "case": "RC-02-managed-process-mutation",
+            "mutation_barrier": registry._may_invalidate_workspace_validation(managed),
+            "native_validation_suppression_count": managed_count,
+            **managed_evidence,
+            "reproduced": managed_evidence["old_validation_accepted"]
+            and managed_count == 1,
+        }
+    )
+
+    recovering = replace(
+        base,
+        active_run=replace(
+            base.active_run,
+            status=ActiveRunStatus.AWAITING_RECOVERY,
+            phase=ContinuationPhase.EXECUTING,
+            tool_calls=(
+                ToolCall("mutate", "write_file", {"path": "artifact.txt", "content": "changed"}),
+            ),
+            batch_cursor=0,
+            pending_request=RecoveryRequest(
+                request_id="recovery",
+                run_id="run-fresh",
+                tool_call_id="mutate",
+                binding_digest="intent",
+                summary="unknown",
+            ),
+            executing_intent=ExecutingIntentRecord(
+                execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+                tool_call_id="mutate",
+                intent_digest="intent",
+                idempotency_key="key",
+            ),
+        ),
+    )
+    for resolution in (RecoveryResolution.MARK_SUCCEEDED, RecoveryResolution.MARK_FAILED):
+        action = ResolveUnknownToolOutcome(
+            conversation_id=base.conversation_id,
+            action_seq=base.next_action_seq,
+            expected_revision=base.revision,
+            request_id="recovery",
+            binding_digest="intent",
+            resolution=resolution,
+        )
+        transition = accept_action(recovering, action)
+        recovered = transition.state
+        evidence = stale_evidence_result(recovered)
+        count = len(_runtime()._successful_product_request_inventory(recovered)[2])
+        emit(
+            {
+                "case": "RC-01-unknown-mutation-recovery",
+                "resolution": resolution.value,
+                "transition": transition.disposition.value,
+                "active_phase": recovered.active_run.phase.value,
+                "recovery_fact": recovered.facts[-1].content,
+                "native_validation_suppression_count": count,
+                **evidence,
+                "reproduced": evidence["old_validation_accepted"] and count == 1,
+            }
+        )
+
+    for kind in (ControlRequestKind.PAUSE, ControlRequestKind.CORRECT, ControlRequestKind.CANCEL):
+        control_base = replace(_state(), active_run=None)
+        action = SubmitMessage(
+            conversation_id=control_base.conversation_id,
+            action_seq=control_base.next_action_seq,
+            expected_revision=control_base.revision,
+            run_id="run-usage",
+            message="continue",
+        )
+        state = accept_action(control_base, action).state
+        state = replace(
+            state,
+            active_run=replace(
+                state.active_run,
+                owner_invocation_id="owner",
+                model_calls_used=3,
+                input_tokens_used=1200,
+                output_tokens_used=230,
+            ),
+        )
+        store = InMemoryCheckpointStore(state)
+        inbox = ControlInbox()
+        binding = ControlBinding(
+            conversation_id=state.conversation_id,
+            goal_id=state.goal.goal_id,
+            goal_revision=state.goal.revision,
+            invocation_id="owner",
+        )
+        inbox.open(binding)
+        inbox.submit(
+            ControlInboxRequest(
+                request_id="request-" + kind.value,
+                kind=kind,
+                conversation_id=binding.conversation_id,
+                goal_id=binding.goal_id,
+                goal_revision=binding.goal_revision,
+                invocation_id=binding.invocation_id,
+                message="new requirement" if kind is ControlRequestKind.CORRECT else None,
+            )
+        )
+        runtime = _runtime()
+        runtime._checkpoint_store = store
+        runtime._control_inbox = inbox
+        # 直接诊断安全轮询边界，补齐 run_turn 通常负责的事件 buffer；不调 provider。
+        event_token = runtime._event_buffer.set([])
+        try:
+            result = runtime._poll_control(action, store.load(), [])
+        finally:
+            runtime._event_buffer.reset(event_token)
+        terminal = store.state.last_safe_result
+        after = [
+            terminal.model_calls_used,
+            terminal.input_tokens_used,
+            terminal.output_tokens_used,
+        ]
+        emit(
+            {
+                "case": "RC-03-control-usage-loss",
+                "control": kind.value,
+                "before": [3, 1200, 230],
+                "returned_model_calls_used": result.model_calls_used,
+                "durable_usage": after,
+                "reproduced": result.model_calls_used == 0 and after == [None, None, None],
+            }
+        )
+
+    emit({"type": "diagnostic_complete", "meaning": "execution completed; not a product PASS"})
+
+
+if __name__ == "__main__":
+    main()

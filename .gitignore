@@ -35,6 +35,9 @@ config/.local_backup
 /workspace/
 /memory/
 /skills/
+# 已确认的根目录 TUI 私人运行产物；只忽略这两个路径，不忽略产品源码或整个 tui/。
+/tui/agent_log.jsonl
+/tui/memory/checkpoint.json
 
 # Coding Agent / local developer aids (not product capabilities)
 .ua/

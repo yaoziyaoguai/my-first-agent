@@ -143,6 +143,82 @@ def test_invalid_numbered_choice_has_zero_effect_and_does_not_guess(
     assert output[-1] == "That choice is not available; no task was selected."
 
 
+def test_startup_can_page_to_and_select_the_seventeenth_conversation(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state-root"
+    for suffix in range(1, 18):
+        open_workspace_session(
+            workspace,
+            state_root=state_root,
+            force_new=True,
+            conversation_id_factory=(
+                lambda value=suffix: f"00000000-0000-4000-8000-{value:012d}"
+            ),
+        )
+    before = _checkpoint_digests(state_root)
+    answers = iter(("n", "1", "/exit"))
+    output: list[str] = []
+
+    exit_code = entrypoint.main(
+        [
+            "--workspace",
+            str(workspace),
+            "--state-root",
+            str(state_root),
+            "--provider",
+            "fake",
+        ],
+        input_fn=lambda _: next(answers),
+        write_fn=output.append,
+    )
+
+    assert exit_code == 0
+    assert any("Page 1 of 2" in line for line in output)
+    assert any("Page 2 of 2" in line for line in output)
+    assert _checkpoint_digests(state_root) == before
+
+
+def test_startup_navigation_keeps_current_page_when_previous_or_next_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state-root"
+    for suffix in range(1, 34):
+        open_workspace_session(
+            workspace,
+            state_root=state_root,
+            force_new=True,
+            conversation_id_factory=(
+                lambda value=suffix: f"00000000-0000-4000-8000-{value:012d}"
+            ),
+        )
+    before = _checkpoint_digests(state_root)
+    answers = iter(("p", "n", "n", "n", "1", "/exit"))
+    output: list[str] = []
+
+    exit_code = entrypoint.main(
+        [
+            "--workspace",
+            str(workspace),
+            "--state-root",
+            str(state_root),
+            "--provider",
+            "fake",
+        ],
+        input_fn=lambda _: next(answers),
+        write_fn=output.append,
+    )
+
+    assert exit_code == 0
+    assert sum("That conversation page is not available." in line for line in output) == 2
+    assert any("Page 3 of 3" in line for line in output)
+    assert _checkpoint_digests(state_root) == before
+
+
 def test_selection_and_resume_summaries_escape_terminal_controls(tmp_path: Path) -> None:
     workspace, state_root = _two_goal_workspace(tmp_path)
     checkpoint = next(

@@ -1,4 +1,4 @@
-"""Descriptor-relative workspace boundary for the four Kernel file tools."""
+"""Descriptor-relative workspace boundary for the Kernel file tools."""
 
 from __future__ import annotations
 
@@ -15,6 +15,10 @@ from pathlib import Path, PurePosixPath
 
 class WorkspaceSecurityError(RuntimeError):
     pass
+
+
+class MissingParentDirectoryError(WorkspaceSecurityError):
+    """目标的某一级父目录不存在；与 symlink/权限拒绝保持不同分类。"""
 
 
 _SENSITIVE_EXACT = frozenset(
@@ -48,6 +52,49 @@ _SENSITIVE_COMPONENTS = frozenset(
     }
 )
 _SENSITIVE_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
+PROJECT_PATH_EXCEPTION_ROOTS = frozenset(
+    {"config", "workspace", "memory", "skills", "pytest.ini", "claude.md"}
+)
+
+
+def _is_intrinsically_sensitive_component(folded: str) -> bool:
+    """这些名称始终拒绝，不能由普通项目路径例外放行。"""
+
+    return (
+        folded in _SENSITIVE_COMPONENTS
+        or folded in _SENSITIVE_EXACT
+        or folded.startswith(".env")
+        or folded.endswith(_SENSITIVE_SUFFIXES)
+        or folded == "config.local"
+        or folded.startswith("config.local.")
+    )
+
+
+def validate_project_paths(project_paths: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
+    """校验 operator 提供的普通保留路径例外，并返回大小写无关的组件。"""
+
+    return tuple(_normalize_project_path(path) for path in project_paths)
+
+
+def _normalize_project_path(raw_path: str) -> tuple[str, ...]:
+    if (
+        not isinstance(raw_path, str)
+        or not raw_path
+        or any(not character.isprintable() for character in raw_path)
+        or any(character in raw_path for character in "*?[]")
+    ):
+        raise WorkspaceSecurityError("project path exception is malformed")
+    path = PurePosixPath(raw_path)
+    parts = tuple(part for part in path.parts if part)
+    if (
+        path.is_absolute()
+        or parts in {(), (".",)}
+        or any(part in {".", ".."} for part in parts)
+        or parts[0].casefold() not in PROJECT_PATH_EXCEPTION_ROOTS
+        or any(_is_intrinsically_sensitive_component(part.casefold()) for part in parts)
+    ):
+        raise WorkspaceSecurityError("project path exception is not admitted")
+    return tuple(part.casefold() for part in parts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +210,7 @@ class WorkspaceBoundary:
         *,
         protected_paths: tuple[Path, ...] = (),
         private_roots: tuple[str, ...] = (),
+        project_paths: tuple[str, ...] = (),
     ) -> None:
         if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
             raise WorkspaceSecurityError("required POSIX no-follow flags are unavailable")
@@ -174,6 +222,7 @@ class WorkspaceBoundary:
         self._protected_identities: set[tuple[int, int]] = set()
         self._private_roots = frozenset(private_roots)
         self._private_roots_folded = frozenset(name.casefold() for name in private_roots)
+        self._project_paths = validate_project_paths(project_paths)
         for path in protected_paths:
             protected = Path(path).absolute()
             if protected == self.root or protected.is_relative_to(self.root):
@@ -186,7 +235,13 @@ class WorkspaceBoundary:
                 raise WorkspaceSecurityError("protected state path must not be a symlink")
             self._protected_identities.add((protected_info.st_dev, protected_info.st_ino))
 
-    def validate_relative(self, raw_path: str, *, allow_root: bool = False) -> tuple[str, ...]:
+    def validate_relative(
+        self,
+        raw_path: str,
+        *,
+        allow_root: bool = False,
+        allow_project_ancestor: bool = False,
+    ) -> tuple[str, ...]:
         if not isinstance(raw_path, str) or any(
             not character.isprintable() for character in raw_path
         ):
@@ -201,7 +256,7 @@ class WorkspaceBoundary:
             raise WorkspaceSecurityError("path must name a workspace entry")
         if any(part in {".", ".."} for part in parts):
             raise WorkspaceSecurityError("path traversal is not allowed")
-        if self._is_sensitive(parts):
+        if self._is_sensitive(parts, allow_project_ancestor=allow_project_ancestor):
             raise WorkspaceSecurityError("sensitive path class is denied")
         return parts
 
@@ -212,14 +267,22 @@ class WorkspaceBoundary:
             os.close(fd)
 
     def inspect_directory(self, raw_path: str) -> None:
-        parts = self.validate_relative(raw_path, allow_root=True)
+        parts = self.validate_relative(
+            raw_path,
+            allow_root=True,
+            allow_project_ancestor=True,
+        )
         fd = self._open_directory_parts(parts)
         os.close(fd)
 
     def resolve_directory(self, raw_path: str) -> tuple[Path, str]:
         """返回经统一 boundary 验证的目录路径与 descriptor identity。"""
 
-        parts = self.validate_relative(raw_path, allow_root=True)
+        parts = self.validate_relative(
+            raw_path,
+            allow_root=True,
+            allow_project_ancestor=True,
+        )
         fd = self._open_directory_parts(parts)
         try:
             info = os.fstat(fd)
@@ -275,7 +338,11 @@ class WorkspaceBoundary:
             raise ValueError("max_entries must be positive")
         if max_scan_entries < 1 or max_output_chars < 1:
             raise ValueError("listing limits must be positive")
-        parts = self.validate_relative(raw_path, allow_root=True)
+        parts = self.validate_relative(
+            raw_path,
+            allow_root=True,
+            allow_project_ancestor=True,
+        )
         directory_fd = self._open_directory_parts(parts)
         try:
             visible: list[str] = []
@@ -331,7 +398,11 @@ class WorkspaceBoundary:
         normalized_query = _validate_search_query(query)
         if not 1 <= max_results <= limits.max_matches:
             raise ValueError("max_results exceeds the workspace search cap")
-        root_parts = self.validate_relative(root, allow_root=True)
+        root_parts = self.validate_relative(
+            root,
+            allow_root=True,
+            allow_project_ancestor=True,
+        )
         budget = _TraversalBudget(limits, time.monotonic() + limits.deadline_seconds)
         matches: list[PathMatch] = []
 
@@ -387,7 +458,11 @@ class WorkspaceBoundary:
         normalized_query = _validate_search_query(query)
         if not 1 <= max_results <= limits.max_matches:
             raise ValueError("max_results exceeds the workspace search cap")
-        root_parts = self.validate_relative(root, allow_root=True)
+        root_parts = self.validate_relative(
+            root,
+            allow_root=True,
+            allow_project_ancestor=True,
+        )
         budget = _TraversalBudget(limits, time.monotonic() + limits.deadline_seconds)
         matches: list[TextMatch] = []
 
@@ -531,8 +606,8 @@ class WorkspaceBoundary:
     ) -> tuple[str, os.stat_result, str] | None:
         name = entry.name
         child_parts = (*parts, name)
-        # 名称级拒绝必须先于 stat/open，避免遍历 private subtree。
-        if self._is_sensitive(child_parts):
+        # 只有获准子路径的祖先目录可以作为遍历通道；同名普通文件仍不可见。
+        if self._is_sensitive(child_parts, allow_project_ancestor=True):
             return None
         try:
             info = entry.stat(follow_symlinks=False)
@@ -541,6 +616,8 @@ class WorkspaceBoundary:
         if stat.S_ISLNK(info.st_mode):
             return None
         if stat.S_ISREG(info.st_mode):
+            if self._is_sensitive(child_parts):
+                return None
             if info.st_nlink != 1:
                 return None
             kind = "file"
@@ -636,6 +713,61 @@ class WorkspaceBoundary:
             data,
         )
 
+    def inspect_directory_creation(self, raw_path: str) -> dict[str, object]:
+        parts = self.validate_relative(raw_path)
+        target_digest = _sha256("/".join(parts).encode())
+        with self._open_parent(parts) as (parent_fd, name):
+            parent = os.fstat(parent_fd)
+            parent_identity = f"{parent.st_dev}:{parent.st_ino}"
+            try:
+                target_fd = os.open(
+                    name,
+                    os.O_RDONLY | os.O_DIRECTORY | _o_nofollow(),
+                    dir_fd=parent_fd,
+                )
+            except FileNotFoundError:
+                target_fd = None
+            except OSError as error:
+                raise WorkspaceSecurityError("directory target was denied") from error
+            if target_fd is None:
+                target_identity = "missing"
+                already_exists = False
+            else:
+                try:
+                    target = os.fstat(target_fd)
+                finally:
+                    os.close(target_fd)
+                if (target.st_dev, target.st_ino) in self._protected_identities:
+                    raise WorkspaceSecurityError("protected directory identity is denied")
+                target_identity = f"{target.st_dev}:{target.st_ino}"
+                already_exists = True
+        return {
+            "target_digest": target_digest,
+            "precondition_digest": _digest_values(
+                {
+                    "parent_identity": parent_identity,
+                    "target_identity": target_identity,
+                }
+            ),
+            "already_exists": already_exists,
+        }
+
+    def create_directory(self, raw_path: str) -> None:
+        parts = self.validate_relative(raw_path)
+        with self._open_parent(parts) as (parent_fd, name):
+            os.mkdir(name, 0o700, dir_fd=parent_fd)
+            directory_fd = os.open(
+                name,
+                os.O_RDONLY | os.O_DIRECTORY | _o_nofollow(),
+                dir_fd=parent_fd,
+            )
+            try:
+                os.fchmod(directory_fd, 0o700)
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+            os.fsync(parent_fd)
+
     def atomic_replace(self, raw_path: str, data: bytes) -> None:
         parts = self.validate_relative(raw_path)
         with self._open_parent(parts) as (parent_fd, name):
@@ -692,6 +824,11 @@ class WorkspaceBoundary:
                     os.O_RDONLY | os.O_DIRECTORY | _o_nofollow(),
                     dir_fd=fd,
                 )
+            except FileNotFoundError as error:
+                os.close(fd)
+                raise MissingParentDirectoryError(
+                    "parent directory does not exist"
+                ) from error
             except OSError as error:
                 os.close(fd)
                 raise WorkspaceSecurityError("directory traversal was denied") from error
@@ -747,20 +884,41 @@ class WorkspaceBoundary:
                 raise WorkspaceSecurityError("file exceeds the configured read bound")
         return b"".join(chunks)
 
-    def _is_sensitive(self, parts: tuple[str, ...]) -> bool:
+    def _is_sensitive(
+        self,
+        parts: tuple[str, ...],
+        *,
+        allow_project_ancestor: bool = False,
+    ) -> bool:
         for index, part in enumerate(parts):
             folded = part.casefold()
-            if folded in _SENSITIVE_COMPONENTS or folded in _SENSITIVE_EXACT:
-                return True
-            if folded.startswith(".env.") or folded.endswith(_SENSITIVE_SUFFIXES):
-                return True
-            if folded.startswith("config.local."):
+            if _is_intrinsically_sensitive_component(folded):
                 return True
             if folded.startswith("agent_log.archived-") or folded.startswith(".tui_audit_log"):
                 return True
-            if index == 0 and folded in self._private_roots_folded:
+            if (
+                index == 0
+                and folded in self._private_roots_folded
+                and not self._is_project_path_visible(
+                    parts,
+                    allow_ancestor=allow_project_ancestor,
+                )
+            ):
                 return True
         return False
+
+    def _is_project_path_visible(
+        self,
+        parts: tuple[str, ...],
+        *,
+        allow_ancestor: bool,
+    ) -> bool:
+        folded = tuple(part.casefold() for part in parts)
+        return any(
+            folded[: len(admitted)] == admitted
+            or (allow_ancestor and admitted[: len(folded)] == folded)
+            for admitted in self._project_paths
+        )
 
 
 def _sha256(data: bytes) -> str:

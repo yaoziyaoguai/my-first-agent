@@ -1,5 +1,6 @@
 """018 Task 6：五个 governed browser registrations 的 closed surface。"""
 
+import json
 from dataclasses import fields
 from datetime import datetime
 
@@ -10,9 +11,11 @@ from agent.browser.contracts import (
     BrowserActionReceiptV1,
     BrowserCleanupOutcome,
     BrowserCleanupReceiptV1,
+    BrowserElementRefV1,
     BrowserHandleV1,
     BrowserMode,
     BrowserObservationV1,
+    LoopbackOriginBindingV1,
 )
 from agent.browser.ports import BrowserEnvironment, BrowserOpenNotStartedError
 from agent.browser.profile_store import BrowserProfileStore, ProfileLockHeldError
@@ -63,6 +66,7 @@ class RecordingEnvironment:
         self.takeovers = []
         self._headed: set[str] = set()
         self.profile_revision = None
+        self.shutdowns = []
 
     def open(self, spec):
         # open-entry counter：方法入口即记录（self.opened.append）。
@@ -101,6 +105,70 @@ class RecordingEnvironment:
     def takeover_session_active(self, session_ref):
         return session_ref in self._headed
 
+    def shutdown(self):
+        self.shutdowns.append(True)
+
+
+class RecordingLoopbackAuthority:
+    def __init__(self) -> None:
+        self.binding = LoopbackOriginBindingV1(
+            resource_ref="managed-web-1",
+            origin="http://127.0.0.1:43123",
+            goal_id="goal-1",
+            goal_revision=1,
+            process_group_id=4321,
+            command_fingerprint="c" * 64,
+            issued_monotonic=1000.0,
+            expires_monotonic=1900.0,
+        )
+        self.prepare_calls = []
+        self.calls = []
+
+    def prepare_loopback_binding(self, resource_ref):  # noqa: ANN001
+        self.prepare_calls.append(resource_ref)
+        if resource_ref != self.binding.resource_ref:
+            raise ValueError("binding mismatch")
+        return self.binding
+
+    def loopback_binding(self, resource_ref, *, goal_id, goal_revision):  # noqa: ANN001
+        self.calls.append((resource_ref, goal_id, goal_revision))
+        if (
+            resource_ref != self.binding.resource_ref
+            or goal_id != self.binding.goal_id
+            or goal_revision != self.binding.goal_revision
+        ):
+            raise ValueError("binding mismatch")
+        return self.binding
+
+    def verify_loopback_binding(self, binding):  # noqa: ANN001
+        return binding == self.binding
+
+
+class RecordingLoopbackEnvironment(RecordingEnvironment):
+    def observe(self, handle):
+        self.observed.append(handle)
+        return BrowserObservationV1(
+            session_ref=handle.session_ref,
+            page_id=handle.session_ref,
+            frame_id="main",
+            navigation_revision=1,
+            browser_revision="b" * 64,
+            profile_revision=None,
+            canonical_url="http://127.0.0.1:43123/",
+            canonical_origin="http://127.0.0.1:43123",
+            frame_tree_digest="f" * 64,
+            aria_projection='textbox "New item"\nbutton "Add"',
+            element_refs=(
+                BrowserElementRefV1(ref="e1", role="textbox", name="New item"),
+                BrowserElementRefV1(ref="e2", role="button", name="Add"),
+            ),
+            node_count=2,
+            byte_size=32,
+            truncated=False,
+            observed_at=datetime.fromisoformat(
+                "2026-08-28T10:00:00+00:00"
+            ).timestamp(),
+        )
 
 class UnknownActionEnvironment(RecordingEnvironment):
     def execute(self, handle, action, *, binding=None):
@@ -179,6 +247,22 @@ def test_registration_surface_is_exact_and_browser_governed(tmp_path):
         for item in registrations
     )
     assert all(item.spec.input_schema["additionalProperties"] is False for item in registrations)
+
+
+def test_browser_action_schema_explains_how_to_reuse_observation_bindings(tmp_path):
+    act = next(item.spec for item in _registrations(tmp_path) if item.spec.name == "browser_act")
+    properties = act.input_schema["properties"]
+
+    assert "copy verbatim" in properties["observation_digest"]["description"]
+    assert "element_refs[].ref" in properties["target_ref"]["description"]
+    assert "element_refs[].name" in properties["params"]["description"]
+    assert "Do not add purpose" in properties["params"]["description"]
+    assert properties["params"]["properties"]["fields"] == {
+        "type": "object",
+        "minProperties": 1,
+        "additionalProperties": {"type": "string"},
+    }
+    assert "fill_form" in act.description
 
 
 def test_surface_exposes_no_raw_browser_or_host_escape(tmp_path):
@@ -279,6 +363,33 @@ def test_public_read_open_observe_act_close_uses_one_governed_runtime(tmp_path):
     observed = runtime.invoke(prepared_observe)
     assert observed.metadata["browser_result_kind"] == "browser_observe"
     observation_digest = observed.metadata["observation_digest"]
+    visible_observation = json.loads(observed.content)
+    assert visible_observation["observation_digest"] == observation_digest
+    assert visible_observation["page_id"] == observed.metadata["page_id"]
+    assert visible_observation["frame_id"] == observed.metadata["frame_id"]
+
+    malformed = runtime.prepare(
+        ToolCall(
+            "act-malformed",
+            "browser_act",
+            {
+                "session_ref": session_ref,
+                "kind": "fill_form",
+                "observation_digest": observation_digest,
+                "page_id": session_ref,
+                "frame_id": "main",
+                "target_ref": "e1",
+                "params": {"value": "new item"},
+            },
+        ),
+        _context(),
+    )
+    assert isinstance(malformed, ToolResult)
+    assert malformed.metadata["code"] == "binding_failure"
+    assert malformed.content == (
+        "Browser action parameters are invalid: "
+        "fill_form params must be exactly {'fields': {<observed name>: <text>}}"
+    )
 
     act_call = ToolCall(
         "act-1",
@@ -307,6 +418,114 @@ def test_public_read_open_observe_act_close_uses_one_governed_runtime(tmp_path):
     assert len(environment.observed) == 1
     assert len(environment.executed) == 1
     assert len(environment.closed) == 1
+
+
+def test_task_loopback_open_binds_the_active_managed_process(tmp_path) -> None:
+    environment = RecordingEnvironment()
+    authority = RecordingLoopbackAuthority()
+    runtime = KernelToolRuntime(
+        build_browser_tools(
+            environment=environment,
+            profile_store=_profile_store(tmp_path),
+            session_store=BrowserSessionStore(root=tmp_path / "sessions"),
+            browser_identity_digest="b" * 64,
+            clock=lambda: "2026-08-28T10:00:00+00:00",
+            monotonic_clock=lambda: 1000.0,
+            loopback_authority=authority,
+        ).registrations
+    )
+    call = ToolCall(
+        "open-loopback",
+        "browser_open",
+        {
+            "mode": "task_loopback_ephemeral",
+            "managed_process_ref": "managed-web-1",
+        },
+    )
+    request = runtime.prepare(call, _context())
+    assert isinstance(request, ApprovalRequired)
+    intent = runtime.prepare(
+        call,
+        _context(),
+        approval=ApprovalGrant(
+            request_id=request.request.request_id,
+            binding_digest=request.request.binding_digest,
+            approval_basis_revision=7,
+        ),
+    )
+    opened = runtime.invoke(intent)
+
+    assert opened.is_error is False
+    assert environment.opened[0].mode is BrowserMode.TASK_LOOPBACK_EPHEMERAL
+    assert environment.opened[0].loopback_binding == authority.binding
+    assert authority.prepare_calls == ["managed-web-1"] * 3
+    assert authority.calls == [("managed-web-1", "goal-1", 1)]
+
+
+def test_task_loopback_action_builds_an_approval_candidate(tmp_path) -> None:
+    environment = RecordingLoopbackEnvironment()
+    authority = RecordingLoopbackAuthority()
+    runtime = KernelToolRuntime(
+        build_browser_tools(
+            environment=environment,
+            profile_store=_profile_store(tmp_path),
+            session_store=BrowserSessionStore(root=tmp_path / "sessions"),
+            browser_identity_digest="b" * 64,
+            clock=lambda: "2026-08-28T10:00:00+00:00",
+            monotonic_clock=lambda: 1000.0,
+            loopback_authority=authority,
+        ).registrations,
+        clock=lambda: "2026-08-28T10:00:00+00:00",
+    )
+    open_call = ToolCall(
+        "open-loopback",
+        "browser_open",
+        {
+            "mode": "task_loopback_ephemeral",
+            "managed_process_ref": "managed-web-1",
+        },
+    )
+    open_approval = runtime.prepare(open_call, _context())
+    opened = runtime.invoke(
+        runtime.prepare(
+            open_call,
+            _context(),
+            approval=ApprovalGrant(
+                request_id=open_approval.request.request_id,
+                binding_digest=open_approval.request.binding_digest,
+                approval_basis_revision=7,
+            ),
+        )
+    )
+    assert opened.is_error is False, opened
+    observed = runtime.invoke(
+        runtime.prepare(
+            ToolCall(
+                "observe-loopback",
+                "browser_observe",
+                {"session_ref": opened.metadata["session_ref"]},
+            ),
+            _context(),
+        )
+    )
+    approval = runtime.prepare(
+        ToolCall(
+            "act-loopback",
+            "browser_act",
+            {
+                "session_ref": opened.metadata["session_ref"],
+                "kind": "click",
+                "observation_digest": observed.metadata["observation_digest"],
+                "page_id": observed.metadata["page_id"],
+                "frame_id": observed.metadata["frame_id"],
+                "target_ref": "e2",
+            },
+        ),
+        _context(),
+    )
+
+    assert isinstance(approval, ApprovalRequired)
+    assert approval.request.browser_action_candidate is not None
 
 
 def test_unknown_action_can_cleanup_resource_without_erasing_recovery(tmp_path) -> None:

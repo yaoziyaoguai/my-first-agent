@@ -126,6 +126,14 @@ def test_shared_goal_view_matches_cli_tui_and_headless(
         assert tui_projection.focus == "input"
     assert shared.goal_id == "goal-1"
     assert shared.goal_revision == 1
+    if goal_status is GoalStatus.VERIFIED_DONE:
+        assert shared.verification_scope == (
+            "exact current bytes of reports/final.md",
+        )
+        assert shared.targets == state.goal.targets
+        assert shared.durable_authorities_closed is True
+    else:
+        assert shared.verification_scope == ()
 
 
 def test_answering_and_clarifying_without_goal_remain_visible() -> None:

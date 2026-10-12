@@ -970,6 +970,11 @@ def test_portable_schema_gives_exact_goal_progress_payload_when_available() -> N
     assert f'"goal_revision":{_EXPECTED_GOAL_FRAME.revision}' in description
     assert '"summary":"<material progress already achieved>"' in description
     assert '"next_step":"<next concrete action>"' in description
+    assert "restart-ready" in description
+    assert "relevant changed/read files" in description
+    assert "latest valid check" in description
+    assert "failed approach" in description
+    assert "unfinished work only" in description
 
 
 def test_source_result_in_same_user_action_hides_goal_proposal_until_fresh_action(

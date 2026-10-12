@@ -17,10 +17,17 @@ from agent.runtime.contracts import (
     ContinuationPhase,
     ConversationState,
     EgressClass,
+    GoalStatus,
     RunResult,
     RunStatus,
 )
-from agent.runtime.views import GoalView, SourceView, project_goal_view
+from agent.runtime.views import (
+    GoalView,
+    SourceView,
+    delivery_summary_message,
+    project_goal_view,
+    verification_scope_message,
+)
 
 if TYPE_CHECKING:
     from agent.runtime.contracts import RecoveryRequest
@@ -115,8 +122,13 @@ def project(state: ConversationState, result: RunResult | None = None) -> TuiPro
         elif result is not None and result.message is not None:
             terminal = result.message
         actions = goal_view.legal_actions if goal_view.goal_id is not None else ("submit",)
+        main_text = terminal or "ready"
+        if goal_view.status == GoalStatus.VERIFIED_DONE.value:
+            main_text = f"{main_text}\n{delivery_summary_message(goal_view)}"
+        if goal_view.verification_scope:
+            main_text = f"{main_text}\n{verification_scope_message(goal_view.verification_scope)}"
         return TuiProjection(
-            main_text=terminal or "ready",
+            main_text=main_text,
             form_kind=None,
             actions=actions,
             focus="input" if "submit" in actions or "correct_goal" in actions else "goal",
@@ -125,17 +137,11 @@ def project(state: ConversationState, result: RunResult | None = None) -> TuiPro
             sources=goal_view.sources,
         )
     if active.status is ActiveRunStatus.AWAITING_APPROVAL:
-        requirement = (
-            active.pending_request.artifact_confirmation_requirement
-            if isinstance(active.pending_request, ApprovalRequest)
-            else None
-        )
         return TuiProjection(
             main_text="awaiting approval",
             form_kind="approval",
-            # artifact approval 必须在输入框中显式给出 path + digest；键盘 a 不能绕过。
-            actions=("reject",) if requirement is not None else ("approve", "reject"),
-            focus="input" if requirement is not None else "approval",
+            actions=("approve", "reject"),
+            focus="approval",
             terminal_message=None,
             form_fields=_approval_fields(active.pending_request),
             goal=goal_view,
@@ -229,9 +235,9 @@ def _approval_fields(req: ApprovalRequest | None) -> tuple[tuple[str, str], ...]
         fields.append(("artifact path", requirement.artifact_path))
         fields.append(
             (
-                "approval command",
-                "/approve-artifact <64-lowercase-hex-sha256> "
-                f"{requirement.artifact_path}",
+                "confirmation",
+                "This approval only permits generation. Current file content must be "
+                "shown and confirmed separately before completion.",
             )
         )
     return tuple(fields)

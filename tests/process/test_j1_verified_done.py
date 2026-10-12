@@ -37,7 +37,7 @@ def _sha256_hex(data: bytes | str) -> str:
 def test_015_process_receipt_criterion_can_be_admitted_and_verified() -> None:
     """R17/KTD10：TOOL_RECEIPT oracle 验证 process receipt criterion（closed predicate）。"""
 
-    from agent.runtime.evidence import ClosedEvidenceRegistry
+    from agent.runtime.evidence import ClosedEvidenceRegistry, EvidenceVerificationError
 
     registry = ClosedEvidenceRegistry()
     command_fingerprint = "f" * 64
@@ -127,8 +127,319 @@ def test_015_process_receipt_criterion_can_be_admitted_and_verified() -> None:
     )
     assert record.passed is True
 
+    later_edit = ConversationFact(
+        fact_id="run:r:tool-result:edit-after-validation:2",
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": "edit-after-validation",
+            "text": "edited src/export.py",
+            "is_error": False,
+            "executed": True,
+            "metadata": {"tool_name": "edit_file"},
+        },
+    )
+    with pytest.raises(EvidenceVerificationError, match="no exact process receipt"):
+        registry._tool_receipt(
+            (fact, later_edit),
+            goal_id="goal-j1",
+            goal_revision=1,
+            criterion=criterion,
+            evidence_id="evidence-process",
+            observed_at="2026-08-09T00:00:01Z",
+        )
 
-def test_015_filesystem_digest_criterion_verifies_exact_readback() -> None:
+    failed_receipt = ProcessReceiptV1.create(
+        lease_id="process-lease:j1-failed",
+        lease_digest="5" * 64,
+        use_ordinal=1,
+        goal_id="goal-j1",
+        goal_revision=1,
+        workspace_identity_digest="b" * 64,
+        tool_identity="c" * 64,
+        intent_digest="6" * 64,
+        executable_digest="e" * 64,
+        argv_digest="7" * 64,
+        cwd_digest="1" * 64,
+        resource_profile="standard",
+        environment_policy_digest="2" * 64,
+        execution_authority=ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS,
+        outcome=ProcessOutcome.EXITED,
+        exit_code=1,
+        signal=None,
+        started_at="3.0",
+        ended_at="4.0",
+        duration_seconds=1.0,
+        stdout_digest="8" * 64,
+        stderr_digest="9" * 64,
+        stdout_bytes=0,
+        stderr_bytes=1,
+        stdout_truncated=False,
+        stderr_truncated=False,
+        group_cleanup_claim="unconfirmed",
+        command_fingerprint="0" * 64,
+    )
+    later_failed_process = ConversationFact(
+        fact_id="run:r:tool-result:failed-after-validation:3",
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": "failed-after-validation",
+            "text": "local_process exited 1",
+            "is_error": True,
+            "executed": True,
+            "metadata": {
+                "process_receipt_kind": "process_v1",
+                "process_receipt": failed_receipt.to_json(),
+                "receipt_digest": failed_receipt.receipt_digest,
+                "execution_authority": "local_same_uid_process",
+                "outcome": "exited",
+                "exit_code": 1,
+                "command_fingerprint": "0" * 64,
+                "stdout_truncated": False,
+                "stderr_truncated": False,
+                "duration_seconds": 1.0,
+                "resource_profile": "standard",
+                "stdout_digest": "8" * 64,
+                "stderr_digest": "9" * 64,
+                "lease_id": "process-lease:j1-failed",
+                "use_ordinal": 1,
+                "tool_identity": "c" * 64,
+            },
+        },
+    )
+    with pytest.raises(EvidenceVerificationError, match="no exact process receipt"):
+        registry._tool_receipt(
+            (fact, later_failed_process),
+            goal_id="goal-j1",
+            goal_revision=1,
+            criterion=criterion,
+            evidence_id="evidence-process",
+            observed_at="2026-08-09T00:00:02Z",
+        )
+
+
+def test_015_process_rejected_before_execution_does_not_invalidate_validation() -> None:
+    """执行前的 fail-closed 拒绝没有 workspace effect，不伪造验证过期。"""
+
+    from agent.runtime.evidence import ClosedEvidenceRegistry
+
+    registry = ClosedEvidenceRegistry()
+    command_fingerprint = "f" * 64
+    receipt = ProcessReceiptV1.create(
+        lease_id="process-lease:j1",
+        lease_digest="a" * 64,
+        use_ordinal=1,
+        goal_id="goal-j1",
+        goal_revision=1,
+        workspace_identity_digest="b" * 64,
+        tool_identity="c" * 64,
+        intent_digest="d" * 64,
+        executable_digest="e" * 64,
+        argv_digest="0" * 64,
+        cwd_digest="1" * 64,
+        resource_profile="standard",
+        environment_policy_digest="2" * 64,
+        execution_authority=ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS,
+        outcome=ProcessOutcome.EXITED,
+        exit_code=0,
+        signal=None,
+        started_at="1.0",
+        ended_at="2.0",
+        duration_seconds=1.0,
+        stdout_digest="3" * 64,
+        stderr_digest="4" * 64,
+        stdout_bytes=1,
+        stderr_bytes=0,
+        stdout_truncated=False,
+        stderr_truncated=False,
+        group_cleanup_claim="unconfirmed",
+        command_fingerprint=command_fingerprint,
+    )
+    fact = ConversationFact(
+        fact_id="run:r:tool-result:call-j1:1",
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": "call-j1",
+            "text": "local_process exited",
+            "is_error": False,
+            "executed": True,
+            "metadata": {
+                "process_receipt_kind": "process_v1",
+                "process_receipt": receipt.to_json(),
+                "receipt_digest": receipt.receipt_digest,
+                "execution_authority": "local_same_uid_process",
+                "outcome": "exited",
+                "exit_code": 0,
+                "command_fingerprint": command_fingerprint,
+                "stdout_truncated": False,
+                "stderr_truncated": False,
+                "duration_seconds": 1.0,
+                "resource_profile": "standard",
+                "stdout_digest": "3" * 64,
+                "stderr_digest": "4" * 64,
+                "lease_id": "process-lease:j1",
+                "use_ordinal": 1,
+                "tool_identity": "c" * 64,
+            },
+        },
+    )
+    rejected = ConversationFact(
+        fact_id="run:r:tool-result:rejected:2",
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": "rejected",
+            "text": "policy rejected",
+            "is_error": True,
+            "executed": False,
+            "metadata": {"code": "approval_required"},
+        },
+    )
+    criterion = AdmittedCriterion(
+        criterion_id="criterion-process-receipt",
+        description="process command contract satisfied",
+        source_fact_id="fact-user",
+        oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+        predicate={
+            "receipt_kind": "process_v1",
+            "receipt_digest": receipt.receipt_digest,
+            "command_fingerprint": command_fingerprint,
+            "outcome": "exited",
+            "exit_code": 0,
+        },
+        required_evidence_class="process_receipt",
+        admission_digest="m" * 64,
+        mandatory=True,
+    )
+
+    record = registry._tool_receipt(
+        (fact, rejected),
+        goal_id="goal-j1",
+        goal_revision=1,
+        criterion=criterion,
+        evidence_id="evidence-process",
+        observed_at="2026-08-09T00:00:01Z",
+    )
+    assert record.passed is True
+
+
+def test_015_unsandboxed_validation_processes_no_longer_coexist_read_only_sandbox_does() -> None:
+    """F1（2026-10-02）：成功退出不等于无写入。
+
+    旧合同（tests/lint 未沙箱 receipt 互相共存）是审计缺陷：exit 0 的 same-UID
+    process 不能证明没有改写验证输入，其后的已执行 result 必须保守失效先前的
+    验证证据。可证明的"无 mutation 共存"路径是 read-only native sandbox
+    （host 实际隔离强制）；见 test_f1_input_mutation_invalidation.py。
+    """
+
+    from agent.runtime.evidence import ClosedEvidenceRegistry, EvidenceVerificationError
+
+    registry = ClosedEvidenceRegistry()
+
+    def receipt_fact(label: str, fingerprint: str) -> ConversationFact:
+        receipt = ProcessReceiptV1.create(
+            lease_id=f"process-lease:{label}",
+            lease_digest=label * 64,
+            use_ordinal=1,
+            goal_id="goal-j1",
+            goal_revision=1,
+            workspace_identity_digest="b" * 64,
+            tool_identity="c" * 64,
+            intent_digest=fingerprint,
+            executable_digest="e" * 64,
+            argv_digest=fingerprint,
+            cwd_digest="1" * 64,
+            resource_profile="standard",
+            environment_policy_digest="2" * 64,
+            execution_authority=ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS,
+            outcome=ProcessOutcome.EXITED,
+            exit_code=0,
+            signal=None,
+            started_at="1.0",
+            ended_at="2.0",
+            duration_seconds=1.0,
+            stdout_digest="3" * 64,
+            stderr_digest="4" * 64,
+            stdout_bytes=1,
+            stderr_bytes=0,
+            stdout_truncated=False,
+            stderr_truncated=False,
+            group_cleanup_claim="unconfirmed",
+            command_fingerprint=fingerprint,
+        )
+        return ConversationFact(
+            fact_id=f"run:r:tool-result:{label}:1",
+            kind=FactKind.TOOL_RESULT,
+            content={
+                "tool_call_id": label,
+                "text": "local_process exited",
+                "is_error": False,
+                "executed": True,
+                "metadata": {
+                    "process_receipt_kind": "process_v1",
+                    "process_receipt": receipt.to_json(),
+                    "receipt_digest": receipt.receipt_digest,
+                    "execution_authority": "local_same_uid_process",
+                    "outcome": "exited",
+                    "exit_code": 0,
+                    "command_fingerprint": fingerprint,
+                    "stdout_truncated": False,
+                    "stderr_truncated": False,
+                    "duration_seconds": 1.0,
+                    "resource_profile": "standard",
+                    "stdout_digest": "3" * 64,
+                    "stderr_digest": "4" * 64,
+                    "lease_id": f"process-lease:{label}",
+                    "use_ordinal": 1,
+                    "tool_identity": "c" * 64,
+                },
+            },
+        )
+
+    def criterion(label: str, fingerprint: str) -> AdmittedCriterion:
+        return AdmittedCriterion(
+            criterion_id=f"criterion-{label}",
+            description=f"{label} validation passed",
+            source_fact_id="fact-user",
+            oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+            predicate={
+                "receipt_kind": "process_v1",
+                "command_fingerprint": fingerprint,
+                "outcome": "exited",
+                "exit_code": 0,
+            },
+            required_evidence_class="process_receipt",
+            admission_digest=label * 64,
+            mandatory=True,
+        )
+
+    tests_fact = receipt_fact("a", "a" * 64)
+    lint_fact = receipt_fact("b", "b" * 64)
+    # 后续已执行 result 使先前的验证证据失效：不得凭两个未沙箱 receipt 完成两个
+    # criterion（旧合同在此放行，是审计确认的 VERIFIED_DONE 误判来源）。
+    with pytest.raises(EvidenceVerificationError, match="no exact process receipt"):
+        registry._tool_receipt(
+            (tests_fact, lint_fact),
+            goal_id="goal-j1",
+            goal_revision=1,
+            criterion=criterion("a", "a" * 64),
+            evidence_id="evidence-a",
+            observed_at="2026-08-09T00:00:01Z",
+        )
+    # 最后一个已执行 receipt 仍然支持其自身 criterion：有限步内重新验证的路径存在。
+    record = registry._tool_receipt(
+        (tests_fact, lint_fact),
+        goal_id="goal-j1",
+        goal_revision=1,
+        criterion=criterion("b", "b" * 64),
+        evidence_id="evidence-b",
+        observed_at="2026-08-09T00:00:01Z",
+    )
+    assert record.passed is True
+
+
+@pytest.mark.parametrize("tool_name", ("read_file", "confirm_file"))
+def test_015_filesystem_digest_criterion_verifies_exact_readback(
+    tool_name: str,
+) -> None:
     """R18/AE10：FILESYSTEM_DIGEST oracle 验证 artifact exact read-back。"""
 
     from agent.runtime.evidence import ClosedEvidenceRegistry
@@ -144,7 +455,7 @@ def test_015_filesystem_digest_criterion_verifies_exact_readback() -> None:
             "calls": [
                 {
                     "tool_call_id": "read-artifact",
-                    "name": "read_file",
+                    "name": tool_name,
                     "arguments": {"path": "artifact.out"},
                 }
             ]

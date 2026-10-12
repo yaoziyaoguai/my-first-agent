@@ -20,9 +20,73 @@ from agent.browser.contracts import (
     BrowserConsequence,
     BrowserMode,
     BrowserSessionSpecV1,
+    LoopbackOriginBindingV1,
 )
 from agent.browser.ports import BrowserEnvironment
 from agent.runtime.contracts import KnownNotExecuted
+
+
+def _loopback_binding(**changes):
+    values = {
+        "resource_ref": "managed-web-1",
+        "origin": "http://127.0.0.1:43123",
+        "goal_id": "goal-1",
+        "goal_revision": 1,
+        "process_group_id": 4321,
+        "command_fingerprint": "c" * 64,
+        "issued_monotonic": 100.0,
+        "expires_monotonic": 220.0,
+    }
+    values.update(changes)
+    return LoopbackOriginBindingV1(**values)
+
+
+def test_task_loopback_session_binds_exact_managed_origin() -> None:
+    binding = _loopback_binding()
+    spec = BrowserSessionSpecV1.task_loopback(
+        goal_id="goal-1",
+        goal_revision=1,
+        binding=binding,
+    )
+
+    assert spec.mode is BrowserMode.TASK_LOOPBACK_EPHEMERAL
+    assert spec.allowed_origins == ("http://127.0.0.1:43123",)
+    assert spec.loopback_binding == binding
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://localhost:43123",
+        "http://127.0.0.1",
+        "http://127.0.0.1:43123/path",
+        "https://127.0.0.1:43123",
+        "http://0.0.0.0:43123",
+    ],
+)
+def test_loopback_binding_rejects_non_exact_origins(origin: str) -> None:
+    with pytest.raises(ValueError, match="exact http"):
+        _loopback_binding(origin=origin)
+
+
+def test_task_loopback_session_rejects_goal_or_origin_drift() -> None:
+    binding = _loopback_binding()
+    with pytest.raises(ValueError, match="Goal"):
+        BrowserSessionSpecV1.task_loopback(
+            goal_id="other-goal",
+            goal_revision=1,
+            binding=binding,
+        )
+    with pytest.raises(ValueError, match="exactly one managed origin"):
+        BrowserSessionSpecV1(
+            mode=BrowserMode.TASK_LOOPBACK_EPHEMERAL,
+            goal_id="goal-1",
+            goal_revision=1,
+            profile_ref=None,
+            allowed_origins=("http://127.0.0.1:43124",),
+            action_budget=64,
+            loopback_binding=binding,
+        )
 
 
 def test_browser_modes_are_closed_enums():

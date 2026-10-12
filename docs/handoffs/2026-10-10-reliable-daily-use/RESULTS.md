@@ -49,3 +49,12 @@
 - **仍然排除**：其余 ~125 个未跟踪/修改路径（你无关的既有工作）原样保留，不入提交。
 
 确认请回复类似："我确认仅在 main 创建上述 35 路径、最多两个本地 commit；不 push、不 tag。"未确认则维持 READY_NOT_COMMITTED（所有验证成果与补丁保留在工作树与证据目录）。
+
+## 交付回执（2026-10-10 提交与合并）
+
+- 用户授权：提交 + 推送 + 合并到主分支（2026-10-10 对话确认）。
+- 分支 `reliable-daily-use-2026-10-10`：C0 `be3f28d`（34 路径，12,031 插入）+ C1 `c355b44`（6 路径，1,442 插入）；pre-commit ruff 全过。
+- PR [#3](https://github.com/yaoziyaoguai/my-first-agent/pull/3)：MERGEABLE/CLEAN，merge commit `dee8c25`；origin/main 已更新（0852e64 → dee8c25）。
+- 提交集最终为 40 路径（OWNERSHIP 35 + .gitignore 本轮 `.local/` 忽略行 + 本包 4 个后建文档/脚本）；169 个无关 dirty/untracked 路径原样保留于工作树。
+- 抽样核对：合并后 main 的 loop.py/main.py 与全量 gate 3711/0 验证时内容一致；合并后 focused 抽测通过。
+- 本节为未提交文档回执（包 §8.4：不为自引用 SHA 制造无限补提交）。

@@ -2,15 +2,14 @@
 
 ## 当前摘要
 
-- 状态：**REOPENED / 最终验收未通过（2026-10-12 独立复核）**。执行者曾报告 COMPLETE，但独立复核发现 RC-02 漏掉“服务启动后验证、继续写入、再关闭”的时序；新候选构建脚本会无确认递归删除已有输出目录；当前全量复跑存在 1 个失败。详细证据、限定结论与最小下一步见 [独立复核](INDEPENDENT_AUDIT_2026-10-12.md)。下方历史 VERIFIED/PASS 只保留原执行者当时的主张，不覆盖本摘要。
-- 已完成：接手核对与探针基线；S0 依赖闭包盘点；13 项修复；干净候选（653 文件）构建与独立 venv 安装验证（收口重跑 3679 passed / 0 failed）；Q1 指南一致性；Q2 持久化 + worker-owner 屏障证据；Q3 真实正例（产品自报 `Verified delivery:`）/负例/PAUSE→新进程恢复；真实浏览器 f2+d06 旅程。
-- 未完成/未证明：本次独立复核后的精确缺口见 [补漏工作项](../2026-10-12-reliability-closeout/WORK-PACKAGES.md)。下方 §7 等保留原执行者当时记录，不能代替新审计结论。
-- 当前目标与边界：**新补漏执行包已准备好，产品修复尚未开始**。用户当前只要求 Codex + Oracle 审计合成可交给其他 coding agent 的资料包；入口为 [2026-10-12 START-HERE](../2026-10-12-reliability-closeout/START-HERE.md)，只处理 W2→W1→W3→W4→V1→V2。旧 [README](README.md) 保留历史合同，不自动重开全部13项。
+- 状态：**补漏轮 W1–W4/V1/V2 已执行完毕（2026-10-12→13）；独立复核发现的三项缺陷已修复并验证**：RC-02 时序（W1 按验证取得时的 writer 事实判资格）、候选构建防误删（W2 重写为只创建全新 output）、全量复跑失败（W4 定位为 zombie/orphan 收敛窗口耗尽 harness 私有 2.0s 预算，已对齐共享 6.0s）。此外真实旅程暴露的 `/pause`→新进程 `/resume` bricked 缺陷已修复（V1 修复轮，accept_action 单点闭合孤儿 tool 批次）。历史 REOPENED 结论与下方历史 VERIFIED/PASS 只保留当时主张，不覆盖本摘要。
+- 已完成：接手核对与探针基线；S0 依赖闭包盘点；13 项修复；干净候选（653 文件）构建与独立 venv 安装验证（收口重跑 3679 passed / 0 failed）；Q1 指南一致性；Q2 持久化 + worker-owner 屏障证据；Q3 真实正例（产品自报 `Verified delivery:`）/负例/PAUSE→新进程恢复；真实浏览器 f2+d06 旅程。**补漏轮**：W2/W1/W3/W4 修复 + V1 本地证据（两段式零重放证明）+ V2 候选/安装/完整门。
+- 真实层：W3 **VERIFIED_REAL_MODEL**（2026-10-12 canary）；V1 **VERIFIED_REAL_MODEL（2026-10-13 复跑）**——正向新旅程（pause 落缺陷形状 → resume exit 0 闭环）+ 向后恢复（上一轮 bricked 现场 exit 0，2 条 superseded 就地愈合、NO_CANDIDATE 降级实测）；22 次真实请求（预算声明 ≤72）。
 - 审计基线：`dee8c25e550cfa957307c1eaadc4ac20a7b9a8d7`；接手时 125 个已有 tracked 修改（既有用户工作，未回滚、未覆盖）。
-- Git 保存：**上一任务已完成**。`main` 上候选提交 `ef9907f`，293 个文件的公开产品/测试/文档依赖闭包已入库，五个必要新模块均已跟踪；相关历史 `reliable-daily-use-2026-10-10` 分支已是 main 的祖先，没有另造 merge。收据提交为 `cbfa1e7`；准备新包前工作树干净。当前新增的补漏资料包和本摘要是之后的文档变更，未再次 commit/push/tag/publish，私人运行数据仍留本地。
-- 下一动作：由用户将新包入口交给执行者并授权实施本地范围；先修有误删风险的候选构建工具，再按固定顺序处理。资料包READY不等于产品验收通过；本轮没有新的真实 provider/凭据读取或 Git 写入授权。
+- Git 保存：**2026-10-13 用户授权"弄干净、分批提交推送、合并主分支"**。补漏轮与 V1 修复轮全部改动按工作包分批 commit 至 feature branch `reliability-closeout-2026-10-13`（8 个批次：文档包、W2、W1、W3、W4、V1 证据、V1 修复、RESULTS），push→PR→merge 流程执行中。私人运行数据仍留本地（`.local/` gitignored）。
+- 下一动作：完成 push→PR→merge gate；残余观察项（非缺陷）：D04 grader 中 `cli.py` 旧别名未加属模型任务完成度缺口；`resume_without_restatement`/`no_effect_replay` 两项 grader 按 F3c 设计恒 false。
 
-### 2026-10-12 补漏执行包交接（当前）
+### 2026-10-12 补漏执行包交接（历史，已执行完毕）
 
 - Oracle新会话最高档5/5已完成，完整答复已捕获，专属Chrome与临时profile清理已核对。收据、输入身份和逐项采纳/修正见 [ORACLE-DECISIONS](../2026-10-12-reliability-closeout/ORACLE-DECISIONS.md)。不是仅把Oracle建议原样交给执行者。
 - 合成后合同：W1按验证取得时的writer风险判断资格，避免幂等stop误杀新证据；W2限制新输出与不覆盖manifest；W3显式disabled优先；W4先区分清组与管道收束失败并有限诊断；V1补真实效果计数与新进程过程；V2只补最终产物的增量installed再做完整门。
@@ -18,15 +17,15 @@
 - 资料包校验：四份主文档本地链接/引用路径均有效（两个拟新增测试路径明确标注）；20/20审计输入源文件SHA无漂移；五份Oracle输入/答案文件哈希收据已保存；本次主文档无尾随空白、无缺失末尾换行、无残留待审状态，新增包的key-like/private-key模式检查零命中；`git diff --check`通过。上述检查只证明交接材料自洽，不是新的产品测试结果。
 - 执行者直接在本节续写：基线身份、精确回归node、Red/负对照、改动原因、focused、installed、完整门、真实层权限/证据及最终Git状态。表格模板见新包VALIDATION，不另建current文件。
 
-| 项 | 当前状态 | 下一动作 |
+| 项 | 执行前状态 | 最终状态 |
 | --- | --- | --- |
-| W2 / A2 | TODO | 临时合成树的防误删Red，修新输出/manifest完整预检与不覆盖发布 |
-| W1 / A1 | TODO | 旧验证失格与同参重验Red；核验未ready失败分支 |
-| W3 / A4 | TODO | disabled纯JSON/tool续接Red，保持enabled/None保护 |
-| W4 / A3 | UNRESOLVED，尚未开始新诊断 | 分阶段诊断，最多8次/10分钟/单次60秒，不重跑到绿 |
-| V1 / E2 本地 | NOT_VERIFIED | 新进程、物理计数、可继续推进与UNKNOWN窗口、证据负对照 |
-| V2 / E1 | NOT_VERIFIED（旧安装正证据保留） | 修复后新候选/wheel/child来源与增量行为，再最终完整门 |
-| 本轮真实模型 | NOT_RUN / 当前授权未确认 | 先做本地范围；如需线上样本，再核对当前来源、预算、数据范围 |
+| W2 / A2 | TODO | **已完成**（Red 18 failed → Green 21 passed；只创建全新 output） |
+| W1 / A1 | TODO | **已完成**（Red 5 failed → Green 18 passed；取得时 writer 事实判资格） |
+| W3 / A4 | TODO | **已完成**（Red 2 failed → Green 249 passed；disabled 优先） |
+| W4 / A3 | UNRESOLVED，尚未开始新诊断 | **已完成**（根因 = verify 预算绕过；harness 对齐共享 6.0s） |
+| V1 / E2 本地 | NOT_VERIFIED | **已完成**（两段式零重放证明 + 负对照 + UNKNOWN 窗口） |
+| V2 / E1 | NOT_VERIFIED（旧安装正证据保留） | **已完成**（候选/安装/完整门，诚实分层报告） |
+| 本轮真实模型 | NOT_RUN / 当前授权未确认 | **W3 canary + V1 真实旅程（含向后恢复）VERIFIED_REAL_MODEL** |
 
 ### 2026-10-12 独立复核覆盖说明
 
@@ -339,8 +338,8 @@
 - **完整门精确结果**：exit 0 / exit 0 / exit 1（1 failed pre-existing flake 按 §4 规则保留 UNRESOLVED；1 skipped 设计内环境门；3794 passed）。
 - **身份一致性**：候选 798 files ↔ manifest ↔ 正式 wheel ↔ 安装物 origin 全链一致（哈希在案）；W2/W4 交付物按规则不在 wheel 内。
 - **本地资源与真实 API**：W1 真实服务旅程、W4 真实进程清理为必需的本地资源证据（fixture 资源，清理确认在案）；本轮无真实 API 调用（BLOCKED_AUTHORIZATION）——2026-10-12 授权后已补真实层，结果见下文"真实层执行"小节。
-- **Git**：`main` @ cbfa1e7，领先 origin/main 2 commits（历史遗留，未授权不动）；本轮全部改动**未 commit/push/tag**（默认禁止）；dirty 清单 = 10 modified + 3 untracked。
-- **剩余必要问题及唯一下一动作**：~~posix_supervisor ready_timeout 家族根因处置~~（2026-10-12 已完成两层根因处置 + 完整门重跑全绿）；~~真实层补 W3 canary + V1 真实恢复旅程~~（W3 已 VERIFIED_REAL_MODEL）；**当前唯一下一动作 = V1 真实旅程暴露的既有 compaction/恢复缺陷修复轮（需单独授权）**。
+- **Git**：~~`main` @ cbfa1e7，本轮全部改动未 commit/push/tag~~ → **2026-10-13 用户授权后已分批 commit 至 `reliability-closeout-2026-10-13`（8 批次）并进入 push→PR→merge 流程**；`main` 领先 origin/main 的 2 个历史 commit（ef9907f/cbfa1e7）随本 PR 一并进入远端。
+- **剩余必要问题及唯一下一动作**：~~posix_supervisor ready_timeout 家族根因处置~~（2026-10-12 完成）；~~真实层补 W3 canary + V1 真实恢复旅程~~（W3 已 VERIFIED_REAL_MODEL）；~~V1 真实旅程暴露的既有 compaction/恢复缺陷修复轮~~（2026-10-13 已完成，双向真实旅程 PASS）。**当前无阻塞项**；残余为非缺陷观察项（见「当前摘要」末条）。
 
 ### 授权后收尾（2026-10-12）：根因处置 + 真实层尝试 + 完整门重跑与 §5 重物化
 

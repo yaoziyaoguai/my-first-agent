@@ -38,18 +38,36 @@ def test_015_offline_gate_timeout_cleans_owned_process_group(tmp_path: Path) -> 
         "time.sleep(30)"
     )
 
-    assert e3._run("timeout fixture", [sys.executable, "-c", child], timeout=0.5) == 124
-    assert pid_file.exists(), "fixture never spawned its descendant"
-    descendant_pid = int(pid_file.read_text(encoding="utf-8"))
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline:
-        try:
-            os.kill(descendant_pid, 0)
-        except ProcessLookupError:
-            break
-        time.sleep(0.05)
-    else:
-        raise AssertionError("offline gate left its owned descendant alive")
+    descendant_pid: int | None = None
+    try:
+        assert e3._run("timeout fixture", [sys.executable, "-c", child], timeout=0.5) == 124
+        assert pid_file.exists(), "fixture never spawned its descendant"
+        descendant_pid = int(pid_file.read_text(encoding="utf-8"))
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            try:
+                os.kill(descendant_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("offline gate left its owned descendant alive")
+    finally:
+        # W4（2026-10-12）：owner 记录身份的有界清理保障——第一条断言失败的
+        # 路径不泄漏 fixture descendant；TERM→KILL→确认消失，不按名猜组。
+        if descendant_pid is not None:
+            for sig, grace in ((signal.SIGTERM, 0.2), (signal.SIGKILL, 0.2)):
+                try:
+                    os.kill(descendant_pid, sig)
+                except ProcessLookupError:
+                    break
+                kill_deadline = time.monotonic() + grace
+                while time.monotonic() < kill_deadline:
+                    try:
+                        os.kill(descendant_pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.05)
 
 
 def test_015_offline_gate_reaps_leader_when_group_identity_is_unverified(

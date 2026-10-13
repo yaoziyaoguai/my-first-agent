@@ -65,7 +65,11 @@ def test_missing_start_ack_is_unknown_and_never_marks_running() -> None:
 def test_result_timeout_after_execution_permit_is_effect_outcome_unknown() -> None:
     events: list[str] = []
 
-    outcome = _supervisor("hang-after-start").run(
+    outcome = _supervisor(
+        "hang-after-start",
+        ready_timeout_seconds=5.0,
+        start_ack_timeout_seconds=5.0,
+    ).run(
         SupervisedOccurrenceSpecV1.from_prepared(_prepared()),
         _callbacks(events),
     )

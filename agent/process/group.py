@@ -107,8 +107,15 @@ def terminate_group(
         remaining = verification_deadline - time.monotonic()
         with suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=min(0.1, max(0.0, remaining)))
-        if not group_alive(pgid):
-            return term_sent, kill_sent
+        try:
+            if not group_alive(pgid):
+                return term_sent, kill_sent
+        except ProcessCleanupError:
+            # macOS killpg 对消失中的 pgid 偶发 EPERM（errno 1，瞬态自愈为
+            # ESRCH）：单次探测错误不构成"已确认消失"，也不应穿透预算——
+            # 按本函数设计意图在预算内继续探测；耗尽仍无法确认时照旧
+            # fail closed。
+            pass
         remaining = verification_deadline - time.monotonic()
         if remaining <= 0:
             break

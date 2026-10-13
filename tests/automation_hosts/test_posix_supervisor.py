@@ -46,7 +46,11 @@ def _supervisor(
     mode: str,
     *,
     observations: list[SupervisorProcessObservation] | None = None,
+    ready_timeout_seconds: float = 0.35,
+    start_ack_timeout_seconds: float = 0.35,
 ) -> PosixOccurrenceSupervisor:
+    # 正向路径需要覆盖子进程“解释器启动 + agent 全量 import（实测 0.416s）”，
+    # 负载下波动更大；超时路径测试依赖小预算快速触发，故由调用方按需放宽。
     return PosixOccurrenceSupervisor(
         command=(
             sys.executable,
@@ -54,12 +58,15 @@ def _supervisor(
             "tests.automation_hosts.fixtures.occurrence_child",
             mode,
         ),
-        ready_timeout_seconds=0.35,
-        start_ack_timeout_seconds=0.35,
+        ready_timeout_seconds=ready_timeout_seconds,
+        start_ack_timeout_seconds=start_ack_timeout_seconds,
         result_timeout_seconds=0.5,
         term_grace_seconds=0.1,
         kill_grace_seconds=0.1,
-        cleanup_verify_seconds=1.0,
+        # SIGKILL 后组内 orphan 的 launchd reap 存在收敛窗口（W4 同族根因），
+        # 共享原语 terminate_group 确认即提前返回，verify 预算只是上限；
+        # 1.0s 在批跑负载下偶发不足（cleanup_confirmed 偶发 False）。
+        cleanup_verify_seconds=6.0,
         observation_sink=None if observations is None else observations.append,
     )
 
@@ -68,7 +75,12 @@ def test_real_child_ready_start_result_and_descendant_cleanup() -> None:
     events: list[str] = []
     observations: list[SupervisorProcessObservation] = []
 
-    outcome = _supervisor("success-with-descendant", observations=observations).run(
+    outcome = _supervisor(
+        "success-with-descendant",
+        observations=observations,
+        ready_timeout_seconds=5.0,
+        start_ack_timeout_seconds=5.0,
+    ).run(
         SupervisedOccurrenceSpecV1.from_prepared(_prepared()),
         _callbacks(events),
     )

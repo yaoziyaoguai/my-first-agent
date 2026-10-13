@@ -37,6 +37,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from agent.process.group import (  # noqa: E402
+    POST_KILL_VERIFY_BUDGET_SECONDS,
     ProcessCleanupError,
     group_alive,
     terminate_group,
@@ -374,11 +375,23 @@ def _run(label: str, argv: list[str], *, timeout: int = 1800) -> int:
                 pgid,
                 term_grace_seconds=0.5,
                 kill_grace_seconds=0.5,
-                verify_budget_seconds=2.0,
+                verify_budget_seconds=POST_KILL_VERIFY_BUDGET_SECONDS,
             )
             stdout, stderr = proc.communicate(timeout=1.0)
-        except (ProcessCleanupError, subprocess.TimeoutExpired):
-            print(f"[offline] {label}: cleanup unconfirmed", file=sys.stderr)
+        except (ProcessCleanupError, subprocess.TimeoutExpired) as error:
+            # W4（2026-10-12）：group_cleanup_unconfirmed（terminate_group 未
+            # 能确认组消失）与 post_cleanup_output_drain_timeout（组已确认消
+            # 失但管道排空超时）分类打印；只输出有界字段，不回显任意子进程内容。
+            category = (
+                "group_cleanup_unconfirmed"
+                if isinstance(error, ProcessCleanupError)
+                else "post_cleanup_output_drain_timeout"
+            )
+            print(
+                f"[offline] {label}: {category} "
+                f"(leader_reaped={proc.poll() is not None}, {error})",
+                file=sys.stderr,
+            )
             return 125
         print(f"[offline] {label}: timed out after {timeout}s", file=sys.stderr)
         return 124
@@ -388,7 +401,7 @@ def _run(label: str, argv: list[str], *, timeout: int = 1800) -> int:
             pgid,
             term_grace_seconds=0.5,
             kill_grace_seconds=0.5,
-            verify_budget_seconds=2.0,
+            verify_budget_seconds=POST_KILL_VERIFY_BUDGET_SECONDS,
         )
         raise
     try:
@@ -402,7 +415,7 @@ def _run(label: str, argv: list[str], *, timeout: int = 1800) -> int:
                 pgid,
                 term_grace_seconds=0.5,
                 kill_grace_seconds=0.5,
-                verify_budget_seconds=2.0,
+                verify_budget_seconds=POST_KILL_VERIFY_BUDGET_SECONDS,
             )
         except ProcessCleanupError:
             print(f"[offline] {label}: cleanup unconfirmed", file=sys.stderr)

@@ -3999,10 +3999,17 @@ class AgentRuntime:
                 # summary 代表被裁剪掉的任意历史跨度，Runtime 无法再证明其中
                 # 没有写入；早于它的成功请求不再抑制同参重试，否则压缩后
                 # 「不能完成也不能显式重验」。晚于 summary 的新结果正常累积。
+                #
+                # P2-1（2026-10-13）：writer 在场状态不随 summary 清空——它是
+                # durable resource ownership 事实（存活 writer 的 start
+                # receipt 受压缩保护、保留在 facts 中），前向折叠在 summary
+                # 处的值恰是 retained 前缀的折叠结果，与 evidence 侧
+                # managed_writer_active_at 同一语义；清空会让 summary 之后取得
+                # 的验证被错误计入 native_validation，而 evidence 侧拒绝它，
+                # 同参重验又被该错误抑制挡住，两侧分叉。
                 ordinary.clear()
                 mutable_observation.clear()
                 native_validation.clear()
-                active_writers.clear()
                 continue
             # W1（2026-10-12）：writer 在场追踪跨 run 生效（资源门看全序列），
             # 因此置于 run 前缀过滤之前；只解释 managed receipt 形状。

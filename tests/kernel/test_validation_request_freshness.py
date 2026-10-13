@@ -1282,6 +1282,169 @@ def test_w1_new_writer_after_close_re_arms_disqualification() -> None:
     assert validate_digest not in (ordinary | native)  # w1-t7
 
 
+def test_w1_writer_active_state_survives_compaction_summary_boundary() -> None:
+    """P2-1（2026-10-13）：压缩边界不得清空 writer 在场状态。
+
+    存活 writer 的 start receipt 是受保护 owner fact：压缩保留它、且它位于
+    summary 之前。若 summary 处 clear 在场集合，之后取得的验证会被错误计入
+    native_validation（同参重验又被该错误抑制挡住），而 evidence 侧前缀扫描
+    会正确拒绝——两侧语义分叉。合同：summary 只是被裁剪跨度的边界，不改变
+    durable resource ownership 事实。
+    """
+
+    from agent.runtime.context import _compaction_candidate_fact_ids
+    from agent.runtime.contracts import (
+        ConversationSummaryV1,
+        canonical_json_digest,
+    )
+    from agent.runtime.state import apply_compaction_summary
+
+    # turn 1：Goal 源 turn（fact-user 受保护，保留）。
+    asst_goal = ConversationFact(
+        fact_id="fact-goal-asst",
+        kind=FactKind.ASSISTANT_MESSAGE,
+        content={"text": "acknowledged"},
+    )
+    # turn 2：writer start（存活，start receipt 为受保护 owner fact）。
+    start_user = ConversationFact(
+        fact_id="fact-start-user",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "start the server"},
+    )
+    start_calls = _w1_calls_fact(
+        "run:run-fresh:tool-batch:start",
+        ("start", "managed_web_start", {"executable": "./server"}),
+    )
+    start = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:start:2",
+        tool_call_id="start",
+        tool_name="managed_web_start",
+        payload={"resource_ref": "writer-x", "status": "ready"},
+    )
+    start_asst = ConversationFact(
+        fact_id="fact-start-asst",
+        kind=FactKind.ASSISTANT_MESSAGE,
+        content={"text": "started"},
+    )
+    # turn 3：可压缩旧 turn（整 turn 被替换为 summary，位置在 start 之后）。
+    old_user = ConversationFact(
+        fact_id="fact-old-user",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "old request"},
+    )
+    old_calls = _w1_calls_fact(
+        "run:run-fresh:tool-batch:old",
+        ("old-write", "write_file", {"path": "artifact.txt", "content": "x"}),
+    )
+    old_result = _write_fact("old-write")
+    old_asst = ConversationFact(
+        fact_id="fact-old-asst",
+        kind=FactKind.ASSISTANT_MESSAGE,
+        content={"text": "done"},
+    )
+    # turn 4：验证 turn（writer 存活期取得 A；retain 保留最新 turn）。
+    val_user = ConversationFact(
+        fact_id="fact-val-user",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "validate"},
+    )
+    val_calls = _w1_calls_fact(
+        "run:run-fresh:tool-batch:val",
+        ("validate-a", "sandbox_exec", {"executable": "./check-a"}),
+    )
+    a_fact = _sandbox_fact(_receipt(), tool_call_id="validate-a")
+    val_asst = ConversationFact(
+        fact_id="fact-val-asst",
+        kind=FactKind.ASSISTANT_MESSAGE,
+        content={"text": "validated"},
+    )
+    runtime = _runtime()
+    registry = ClosedEvidenceRegistry()
+    base = _w1_state(
+        asst_goal,
+        start_user,
+        start_calls,
+        start,
+        start_asst,
+        old_user,
+        old_calls,
+        old_result,
+        old_asst,
+        val_user,
+        val_calls,
+        a_fact,
+        val_asst,
+    )
+
+    # 走真实候选选择 + 真实 reducer：turn 3 被选中，summary 落在 start 之后。
+    candidates = _compaction_candidate_fact_ids(base, retain_recent_turns=1)
+    assert old_result.fact_id in candidates
+    assert start.fact_id not in candidates  # 存活 writer 的 owner fact 受保护
+    removable = tuple(
+        fact for fact in base.facts if fact.fact_id in set(candidates)
+    )
+    summary = ConversationSummaryV1(
+        objective="compact earlier turns",
+        constraints=(),
+        decisions=(),
+        completed=(),
+        open_items=(),
+        key_references=(),
+        source_checkpoint_digest="a" * 64,
+        source_fact_ids_digest=canonical_json_digest(
+            [fact.fact_id for fact in removable]
+        ),
+    )
+    compacted = apply_compaction_summary(base, summary, candidates)
+
+    ids = [fact.fact_id for fact in compacted.facts]
+    summary_index = next(
+        index
+        for index, fact in enumerate(compacted.facts)
+        if fact.kind is FactKind.CONTEXT_SUMMARY
+    )
+    assert ids.index(start.fact_id) < summary_index < ids.index(a_fact.fact_id)
+
+    # evidence 侧（前缀扫描）正确拒绝：A 取得时 writer 未确认关闭。
+    with pytest.raises(EvidenceVerificationError):
+        registry.derive(
+            compacted,
+            _closure_claim(registry, compacted),
+            observed_at="2026-10-13T00:00:00Z",
+        )
+
+    # 折叠侧必须同一语义：A 不得进入抑制集合（否则同参重验被挡住）。
+    validate_digest = runtime._product_request_digest(
+        "sandbox_exec", {"executable": "./check-a"}
+    )
+    ordinary, _obs, native = runtime._successful_product_request_inventory(compacted)
+    assert validate_digest not in (ordinary | native)  # w1-p2-1
+
+    # 关闭 writer 后的显式同参重验重新合格（恢复路径不被永久阻断）。
+    stop = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:stop:9",
+        tool_call_id="stop",
+        tool_name="managed_web_stop",
+        payload={"resource_ref": "writer-x", "cleanup": "confirmed"},
+    )
+    revalidated = replace(
+        compacted,
+        facts=(
+            *compacted.facts,
+            stop,
+            _w1_calls_fact(
+                "run:run-fresh:tool-batch:val-b",
+                ("validate-b", "sandbox_exec", {"executable": "./check-a"}),
+            ),
+            _sandbox_fact(_w1_receipt("fresh-2"), tool_call_id="validate-b"),
+        ),
+    )
+    _ordinary2, _obs2, native_after = runtime._successful_product_request_inventory(
+        revalidated
+    )
+    assert validate_digest in native_after
+
+
 def test_w1_real_service_writer_alive_at_validation_then_stop_disqualifies(
     tmp_path,
 ) -> None:

@@ -416,3 +416,15 @@
 **旅程 B（向后恢复，最强证据）**：直接复制上一轮被 brick 的真实现场（state-root5 → state-root9，workspace5）。上一轮同一状态 resume 即 `runtime_failure`；本轮**exit 0 成功推进**（4 次 provider 调用后到新 safe boundary）。checkpoint 验证：2 条 superseded 结果已就位（`call_00_HiOBYQ…`/`call_01_oO1k1…`，executed=False），turn grammar 落 `CompactionIneligibleHistoryError`（设计内窄类型）→ `plan_compaction` 实测降级 **NO_CANDIDATE**，run 正常继续。即**磁盘上已损坏的真实 checkpoint 被修复救活**。
 
 **真实层结论**：V1 缺陷（跨进程 /pause→resume 系统性不可用）**真实旅程验证 PASS**（正向新旅程 + 向后恢复双向）。业务合同未满分属模型任务完成度，另立观察项（非本缺陷回归）。产物保留在 `.local/reliability-closeout/v1-real-journey/`（state-root8/9、workspace8、新 ledger）。仍未 commit/push。
+
+### P2-1 修复（2026-10-13，merge gate review 后）：压缩边界不清空 writer 在场状态
+
+**来源**：merge gate review（独立 project-auditor，2026-10-13）在 W1 实现中发现 P2 级真实行为缺陷（无 P0/P1 阻断项）。
+
+**缺陷**：`_successful_product_request_inventory` 在遇到 `CONTEXT_SUMMARY` 时 `active_writers.clear()`，而存活 writer 的 start receipt 是受保护 owner fact——压缩保留它、且它位于 summary 之前。前向折叠在 summary 处的值恰是 retained 前缀的折叠结果；清空后该状态**永久丢失**（start receipt 已消费过，不会再重放）。后果：summary 之后取得的验证被错误计入 `native_validation`，而同参重验又被该错误抑制挡住（`duplicate_product_request`），此时 evidence 侧（`managed_writer_active_at` 前缀扫描、不受 summary 影响）正确拒绝它——两侧语义分叉，W1 明文承诺的"关闭后显式重验可再获信任"恢复路径在长会话中被堵死。不会产生虚假完成（evidence 层始终保守）。
+
+**修复（`agent/runtime/loop.py`，最小改动）**：移除 summary 分支的 `active_writers.clear()`——writer 在场是 durable resource ownership 事实，不随压缩边界重置；与 evidence 侧同一语义（retained 前缀折叠）。`ordinary`/`mutable_observation`/`native_validation` 的 clear 语义不变（RC-01/020 保守边界不受影响）。
+
+**Red→Green**：新增 `test_w1_writer_active_state_survives_compaction_summary_boundary`（走真实 `_compaction_candidate_fact_ids` 候选选择 + 真实 `apply_compaction_summary` reducer；断言 summary 落在 start 与 A 之间、evidence 侧拒绝、折叠侧 A 不入抑制集、关闭 writer 后同参重验重新合格）。修复前精确失败于 `assert validate_digest not in (ordinary | native)`；修复后 19 passed（W1 文件），focused kernel+continuity **878 passed**。
+
+**审计同时报告 P2-2/P2-3**（跨层组合覆盖缺口，代码推理判定安全，非行为缺陷）：P2-2 W1 复验路径 × wire continuity 无断言覆盖；P2-3 healed fact 未经真实 `context_to_openai_messages` 投影链路的闭合断言。按用户决定记录为合并后跟进项，不在本轮修复。

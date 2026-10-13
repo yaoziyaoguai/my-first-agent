@@ -1,0 +1,253 @@
+{
+  "baseline": "cbfa1e78c80a521fea2ebcf6169cfb4536ad1f5d",
+  "files": [
+    {
+      "path": "agent/runtime/evidence.py",
+      "sha256": "99f9495ad1e783da33e36ef0ba332d7a537880f8db9b40d947f33451c56933a9",
+      "ranges": [
+        [
+          115,
+          146
+        ],
+        [
+          1297,
+          1510
+        ]
+      ]
+    },
+    {
+      "path": "agent/runtime/loop.py",
+      "sha256": "fa2d2c7dcce9d3b551555dc9a0575894a533dc2589cf1ce5f578eed2e1142bb8",
+      "ranges": [
+        [
+          3959,
+          4180
+        ]
+      ]
+    },
+    {
+      "path": "agent/runtime/resource_lifecycle.py",
+      "sha256": "78a11f248fca2f53029866f90111a883d3dbd24872630e8f094ebb8db8af92ff",
+      "ranges": [
+        [
+          1,
+          80
+        ]
+      ]
+    },
+    {
+      "path": "agent/process/managed_web.py",
+      "sha256": "beb692d1bc37b334fbfe863e9f447775bf8b0ed54977b35c3cb6fec52737a19c",
+      "ranges": [
+        [
+          108,
+          328
+        ],
+        [
+          399,
+          412
+        ],
+        [
+          473,
+          615
+        ],
+        [
+          786,
+          906
+        ]
+      ]
+    },
+    {
+      "path": "tests/kernel/test_validation_request_freshness.py",
+      "sha256": "c6c1f4e776ebbd307d64b6dae84e28a057a27cb815f8b19a5923059193aa5bd0",
+      "ranges": [
+        [
+          1,
+          225
+        ],
+        [
+          685,
+          989
+        ]
+      ]
+    },
+    {
+      "path": "tests/process/test_managed_web.py",
+      "sha256": "7ca63c0e33cfa5ab743a47fab5918cd11ea03d7f07a697b0197b6dba2eb679cc",
+      "ranges": [
+        [
+          1,
+          175
+        ],
+        [
+          373,
+          565
+        ]
+      ]
+    },
+    {
+      "path": "scripts/build_candidate_manifest.py",
+      "sha256": "98719d7d02c1ee372085dfe2351b217f0a65c62cf300aefb3e61aa21c5d9ef9e",
+      "ranges": [
+        [
+          1,
+          246
+        ]
+      ]
+    },
+    {
+      "path": "agent/process/group.py",
+      "sha256": "f19bf3ae8c92e420b25ec2d23355f4a3e84c28008e3928d3ba9e7d71abe92456",
+      "ranges": [
+        [
+          1,
+          135
+        ]
+      ]
+    },
+    {
+      "path": "scripts/run_015_e3.py",
+      "sha256": "acc9f314986041c3552e36d21262e4afbc2059d5bba90bf449814d8d024e463b",
+      "ranges": [
+        [
+          1,
+          50
+        ],
+        [
+          347,
+          455
+        ]
+      ]
+    },
+    {
+      "path": "tests/reference/test_015_e3_harness.py",
+      "sha256": "c02f7576db80404bfdcd0b0647254439ec12603805070a4df1abcd1e19a6c102",
+      "ranges": [
+        [
+          1,
+          161
+        ]
+      ]
+    },
+    {
+      "path": "tests/automation_hosts/test_posix_supervisor_cleanup.py",
+      "sha256": "ab37a61393edc6820d2ea64fb0de0e8a742958759fcea9d9595cf1c4c8a9fdca",
+      "ranges": [
+        [
+          1,
+          197
+        ]
+      ]
+    },
+    {
+      "path": "agent/provider/openai_http.py",
+      "sha256": "4423057a5d4061c940f204a1fc36dd439bbc0eeb704f4fb908b1622be7228310",
+      "ranges": [
+        [
+          1,
+          422
+        ]
+      ]
+    },
+    {
+      "path": "agent/provider/config.py",
+      "sha256": "0b7f8dd2050ae13ded2acbeee9137c70002db66eff266a247c722d99f12354dd",
+      "ranges": [
+        [
+          1,
+          205
+        ]
+      ]
+    },
+    {
+      "path": "agent/provider/normalize.py",
+      "sha256": "82dfbd9ebdb2be506091cda674830188fbd2eb1e66fbdfabd2bf1d70d6d09f78",
+      "ranges": [
+        [
+          556,
+          674
+        ],
+        [
+          1242,
+          1338
+        ]
+      ]
+    },
+    {
+      "path": "tests/provider/test_deepseek_flash.py",
+      "sha256": "51c52b0bcdea00a0cd8ce680153f7192a22589b54576474e45584e5b3b8137c0",
+      "ranges": [
+        [
+          37,
+          95
+        ],
+        [
+          249,
+          259
+        ],
+        [
+          359,
+          405
+        ],
+        [
+          657,
+          702
+        ]
+      ]
+    },
+    {
+      "path": "tests/cli/test_016_packaging.py",
+      "sha256": "d62483428fd2597da88485c06a136b87d6c1472d4abb99045a30f8d5caa787d3",
+      "ranges": [
+        [
+          1,
+          321
+        ]
+      ]
+    },
+    {
+      "path": "scripts/_019_installed_pytest.py",
+      "sha256": "7e55cc87b9cf231989ecd86c274848373643d06e2001b8ba7270ea6e8c163c44",
+      "ranges": [
+        [
+          1,
+          130
+        ],
+        [
+          294,
+          412
+        ]
+      ]
+    },
+    {
+      "path": "docs/handoffs/2026-10-11-product-reliability-closure/WORK_ITEMS.md",
+      "sha256": "4e8a7b468800c9565c4d5b8d1cbec193b150dcf88e6bcfcb714a24ec25affd99",
+      "ranges": [
+        [
+          46,
+          64
+        ]
+      ]
+    },
+    {
+      "path": "docs/handoffs/2026-10-11-product-reliability-closure/VALIDATION.md",
+      "sha256": "3dcc564ee3104e9504338921388af35a22c96df0db167d0334cbed1e097ed5e9",
+      "ranges": [
+        [
+          145,
+          187
+        ]
+      ]
+    },
+    {
+      "path": "docs/handoffs/2026-10-11-product-reliability-closure/diagnostics/postclosure_probe.py.txt",
+      "sha256": "5368db9307695346287d93cc12f5b3461fa6126a1946f6cdbec4ce58a6dbd0a2",
+      "ranges": [
+        [
+          1,
+          96
+        ]
+      ]
+    }
+  ]
+}

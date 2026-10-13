@@ -939,6 +939,7 @@ def test_real_managed_web_start_result_from_tool_runtime_invalidates_validation(
             )
         )
         assert json.loads(stopped.content)["cleanup"] == "confirmed"
+        stop_fact = AgentRuntime._tool_result_fact(base, stopped)
         with pytest.raises(EvidenceVerificationError):
             registry.derive(
                 after_start,
@@ -947,10 +948,13 @@ def test_real_managed_web_start_result_from_tool_runtime_invalidates_validation(
             )
 
         # 关闭后显式同参重验可重新获信任并用于完成（不永久禁止验证）。
+        # W1（2026-10-12）：stop receipt 必须在被判定序列内——缺 stop fact 时
+        # writer 在场，A2 取得即失格；测试随之按新合同把 stop 纳入序列。
+        after_stop = replace(after_start, facts=(*after_start.facts, stop_fact))
         revalidated = replace(
-            after_start,
+            after_stop,
             facts=(
-                *after_start.facts,
+                *after_stop.facts,
                 ConversationFact(
                     fact_id="run:run-fresh:tool-batch:2",
                     kind=FactKind.TOOL_CALLS,
@@ -984,5 +988,485 @@ def test_real_managed_web_start_result_from_tool_runtime_invalidates_validation(
         )
         _o, _m, native_after = runtime._successful_product_request_inventory(revalidated)
         assert validate_digest in native_after
+    finally:
+        bundle.close()
+
+
+# --- W1（2026-10-12）：验证取得时的 writer 资格 ------------------------------
+
+
+import json  # noqa: E402
+
+
+def _w1_calls_fact(fact_id, *calls):
+    return ConversationFact(
+        fact_id=fact_id,
+        kind=FactKind.TOOL_CALLS,
+        content={
+            "calls": [
+                {"tool_call_id": a, "name": b, "arguments": c}
+                for a, b, c in calls
+            ],
+        },
+    )
+
+
+def _w1_managed_fact(
+    *, fact_id, tool_call_id, tool_name, payload, executed=True, is_error=False
+):
+    return ConversationFact(
+        fact_id=fact_id,
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": tool_call_id,
+            "text": json.dumps(payload),
+            "is_error": is_error,
+            "executed": executed,
+            "metadata": {
+                "truncated": False,
+                "tool_identity": "fixture",
+                "tool_name": tool_name,
+                "governed_tool_receipt_kind": "governed_tool_v1",
+                "receipt_digest": "a" * 64,
+            },
+        },
+    )
+
+
+def _w1_state(*facts):
+    state = _state(*facts)
+    return replace(
+        state, goal=replace(state.goal, admitted_criteria=(_closure_criterion(),))
+    )
+
+
+def _w1_receipt(tag):
+    return _receipt(
+        receipt_id="sandbox-receipt:" + tag,
+        lease_id="sandbox-lease:" + tag,
+    )
+
+
+def test_w1_validation_obtained_while_writer_active_is_disqualified_after_stop() -> None:
+    """W1 头条：start→A→stop，A 取得时 writer 存活，stop 后不得再被信任。
+
+    当前实现只扫 A 之后的既有失效事件（stop 不在其中），旧 A 满足 criterion
+    且把同参重验抑制掉。合同：资格取决于取得当时的资源事实。
+    """
+
+    calls = _w1_calls_fact(
+        "run:run-fresh:tool-batch:1",
+        ("start", "managed_web_start", {"executable": "./server"}),
+        ("validate-a", "sandbox_exec", {"executable": "./check-a"}),
+    )
+    start = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:start:2",
+        tool_call_id="start",
+        tool_name="managed_web_start",
+        payload={"resource_ref": "writer-x", "active": True, "status": "ready"},
+    )
+    a_fact = _sandbox_fact(_receipt(), tool_call_id="validate-a")
+    stop = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:stop:4",
+        tool_call_id="stop",
+        tool_name="managed_web_stop",
+        payload={"resource_ref": "writer-x", "cleanup": "confirmed"},
+    )
+    runtime = _runtime()
+    registry = ClosedEvidenceRegistry()
+    state = _w1_state(calls, start, a_fact, stop)
+
+    with pytest.raises(EvidenceVerificationError):
+        registry.derive(state, _closure_claim(registry, state), observed_at="2026-10-12T00:00:00Z")
+
+    validate_digest = runtime._product_request_digest(
+        "sandbox_exec", {"executable": "./check-a"}
+    )
+    ordinary, _obs, native = runtime._successful_product_request_inventory(state)
+    assert validate_digest not in (ordinary | native), "失格验证不得参与抑制"
+
+
+def test_w1_partial_close_of_two_writers_keeps_disqualification() -> None:
+    """两个 writer 只确认关闭其一：A 仍失格（另一 writer 未确认关闭）。"""
+
+    calls = _w1_calls_fact(
+        "run:run-fresh:tool-batch:w2",
+        ("start-x", "managed_web_start", {"executable": "./server-x"}),
+        ("start-y", "managed_web_start", {"executable": "./server-y"}),
+        ("validate-a", "sandbox_exec", {"executable": "./check-a"}),
+        ("stop-x", "managed_web_stop", {"resource_ref": "writer-x"}),
+    )
+    start_x = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:start-x:2",
+        tool_call_id="start-x",
+        tool_name="managed_web_start",
+        payload={"resource_ref": "writer-x", "status": "ready"},
+    )
+    start_y = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:start-y:3",
+        tool_call_id="start-y",
+        tool_name="managed_web_start",
+        payload={"resource_ref": "writer-y", "status": "ready"},
+    )
+    a_fact = _sandbox_fact(_receipt(), tool_call_id="validate-a")
+    stop_x = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:stop-x:5",
+        tool_call_id="stop-x",
+        tool_name="managed_web_stop",
+        payload={"resource_ref": "writer-x", "cleanup": "confirmed"},
+    )
+    runtime = _runtime()
+    registry = ClosedEvidenceRegistry()
+    state = _w1_state(calls, start_x, start_y, a_fact, stop_x)
+
+    with pytest.raises(EvidenceVerificationError):
+        registry.derive(state, _closure_claim(registry, state), observed_at="2026-10-12T00:00:00Z")
+
+    validate_digest = runtime._product_request_digest(
+        "sandbox_exec", {"executable": "./check-a"}
+    )
+    ordinary, _obs, native = runtime._successful_product_request_inventory(state)
+    assert validate_digest not in (ordinary | native)  # w1-t3
+
+
+def test_w1_stop_without_confirmed_cleanup_never_closes_the_writer() -> None:
+    """cleanup 非 confirmed 的 stop 不构成关闭事件：A 取得时 writer 仍算存活。"""
+
+    calls = _w1_calls_fact(
+        "run:run-fresh:tool-batch:w3",
+        ("start", "managed_web_start", {"executable": "./server"}),
+        ("validate-a", "sandbox_exec", {"executable": "./check-a"}),
+        ("stop", "managed_web_stop", {"resource_ref": "writer-x"}),
+    )
+    start = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:start:2",
+        tool_call_id="start",
+        tool_name="managed_web_start",
+        payload={"resource_ref": "writer-x", "status": "ready"},
+    )  # w1-t4-head
+    a_fact = _sandbox_fact(_receipt(), tool_call_id="validate-a")
+    stop_unknown = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:stop:4",
+        tool_call_id="stop",
+        tool_name="managed_web_stop",
+        payload={"resource_ref": "writer-x", "cleanup": "unknown"},
+    )
+    runtime = _runtime()
+    registry = ClosedEvidenceRegistry()
+    state = _w1_state(calls, start, a_fact, stop_unknown)
+
+    with pytest.raises(EvidenceVerificationError):
+        registry.derive(state, _closure_claim(registry, state), observed_at="2026-10-12T00:00:00Z")
+
+    validate_digest = runtime._product_request_digest(
+        "sandbox_exec", {"executable": "./check-a"}
+    )
+    ordinary, _obs, native = runtime._successful_product_request_inventory(state)
+    assert validate_digest not in (ordinary | native)  # w1-t4
+
+
+def test_w1_repeated_stop_does_not_invalidate_post_close_validation() -> None:
+    """幂等重复 stop 不产生新关闭事件：关闭后取得的 A 仍然合格。"""
+
+    calls = _w1_calls_fact(
+        "run:run-fresh:tool-batch:w5",
+        ("start", "managed_web_start", {"executable": "./server"}),
+        ("stop", "managed_web_stop", {"resource_ref": "writer-x"}),
+        ("stop-again", "managed_web_stop", {"resource_ref": "writer-x"}),
+        ("validate-a", "sandbox_exec", {"executable": "./check-a"}),
+    )
+    start = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:start:2",
+        tool_call_id="start",
+        tool_name="managed_web_start",
+        payload={"resource_ref": "writer-x", "status": "ready"},
+    )  # w1-t5-head
+    stop = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:stop:3",
+        tool_call_id="stop",
+        tool_name="managed_web_stop",
+        payload={"resource_ref": "writer-x", "cleanup": "confirmed"},
+    )
+    stop_again = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:stop-again:4",
+        tool_call_id="stop-again",
+        tool_name="managed_web_stop",
+        payload={"resource_ref": "writer-x", "cleanup": "confirmed"},
+    )
+    a_fact = _sandbox_fact(_receipt(), tool_call_id="validate-a")
+    runtime = _runtime()
+    registry = ClosedEvidenceRegistry()
+    state = _w1_state(calls, start, stop, stop_again, a_fact)
+
+    registry.derive(state, _closure_claim(registry, state), observed_at="2026-10-12T00:00:00Z")
+
+    validate_digest = runtime._product_request_digest(
+        "sandbox_exec", {"executable": "./check-a"}
+    )
+    ordinary, _obs, native = runtime._successful_product_request_inventory(state)
+    assert validate_digest in native
+    assert validate_digest not in ordinary  # w1-t5
+
+
+def test_w1_declined_start_never_created_a_writer() -> None:
+    """declined start（executed=False）从未成为 writer：其后的 A 合格。"""
+
+    calls = _w1_calls_fact(
+        "run:run-fresh:tool-batch:w6",
+        ("start", "managed_web_start", {"executable": "./server"}),
+        ("validate-a", "sandbox_exec", {"executable": "./check-a"}),
+    )
+    declined = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:start:2",
+        tool_call_id="start",
+        tool_name="managed_web_start",
+        payload={"resource_ref": "writer-x"},
+        executed=False,
+        is_error=True,
+    )  # w1-t6-head
+    a_fact = _sandbox_fact(_receipt(), tool_call_id="validate-a")
+    runtime = _runtime()
+    registry = ClosedEvidenceRegistry()
+    state = _w1_state(calls, declined, a_fact)
+
+    registry.derive(state, _closure_claim(registry, state), observed_at="2026-10-12T00:00:00Z")
+
+    validate_digest = runtime._product_request_digest(
+        "sandbox_exec", {"executable": "./check-a"}
+    )
+    ordinary, _obs, native = runtime._successful_product_request_inventory(state)
+    assert validate_digest in native
+    assert validate_digest not in ordinary  # w1-t6
+
+
+def test_w1_new_writer_after_close_re_arms_disqualification() -> None:
+    """关闭后再启动新 writer：其后取得的 A 重新失格。"""
+
+    calls = _w1_calls_fact(
+        "run:run-fresh:tool-batch:w7",
+        ("start", "managed_web_start", {"executable": "./server"}),
+        ("stop", "managed_web_stop", {"resource_ref": "writer-x"}),
+        ("start-y", "managed_web_start", {"executable": "./server-y"}),
+        ("validate-a", "sandbox_exec", {"executable": "./check-a"}),
+    )
+    start = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:start:2",
+        tool_call_id="start",
+        tool_name="managed_web_start",
+        payload={"resource_ref": "writer-x", "status": "ready"},
+    )  # w1-t7-head
+    stop = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:stop:3",
+        tool_call_id="stop",
+        tool_name="managed_web_stop",
+        payload={"resource_ref": "writer-x", "cleanup": "confirmed"},
+    )
+    start_y = _w1_managed_fact(
+        fact_id="run:run-fresh:tool-result:start-y:4",
+        tool_call_id="start-y",
+        tool_name="managed_web_start",
+        payload={"resource_ref": "writer-y", "status": "ready"},
+    )
+    a_fact = _sandbox_fact(_receipt(), tool_call_id="validate-a")
+    runtime = _runtime()
+    registry = ClosedEvidenceRegistry()
+    state = _w1_state(calls, start, stop, start_y, a_fact)
+
+    with pytest.raises(EvidenceVerificationError):
+        registry.derive(state, _closure_claim(registry, state), observed_at="2026-10-12T00:00:00Z")
+
+    validate_digest = runtime._product_request_digest(
+        "sandbox_exec", {"executable": "./check-a"}
+    )
+    ordinary, _obs, native = runtime._successful_product_request_inventory(state)
+    assert validate_digest not in (ordinary | native)  # w1-t7
+
+
+def test_w1_real_service_writer_alive_at_validation_then_stop_disqualifies(
+    tmp_path,
+) -> None:
+    """W1 真实服务旅程：start→A→服务真实写入→stop confirmed→旧 A 被拒。
+
+    用当前真实 KernelToolRuntime prepare(审批)→prepare(lease)→invoke 得到
+    生产格式的 managed start/stop 结果，经 _tool_result_fact 变成 durable
+    fact；A 在 writer 存活期取得，则 stop 后不得用于完成判定。
+    """
+
+    import json as _json
+    import os
+    import socket
+    import sys
+
+    from agent.process.managed_web import build_managed_web_process_tools
+    from agent.runtime.contracts import (
+        ApprovalRequired,
+        ExecutionIntent,
+        ProcessAuthorityLeaseV1,
+        ToolPrepareContext,
+    )
+    from agent.runtime.tools import KernelToolRuntime
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    sentinel = workspace / "sentinel.txt"
+    sentinel.write_text("before\n", encoding="utf-8")
+    server = workspace / "server.py"
+    server.write_text(
+        f"#!{sys.executable}\n"
+        "from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n"
+        "import pathlib, sys\n"
+        "class H(BaseHTTPRequestHandler):\n"
+        "    def do_GET(self):\n"
+        "        pathlib.Path('sentinel.txt').write_text('after\\n', encoding='utf-8')\n"
+        "        self.send_response(200)\n"
+        "        self.end_headers()\n"
+        "        self.wfile.write(b'wrote')\n"
+        "    def log_message(self, *args):\n"
+        "        pass\n"
+        "server = ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), H)\n"
+        "print('READY', flush=True)\n"
+        "server.serve_forever()\n",
+        encoding="utf-8",
+    )
+    server.chmod(0o700)  # w1-t8-head
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = int(probe.getsockname()[1])
+
+    bundle = build_managed_web_process_tools(
+        workspace=workspace,
+        captured_path=os.environ.get("PATH", ""),
+    )
+    tool_runtime = KernelToolRuntime(bundle.registrations)
+    context = ToolPrepareContext(
+        conversation_id="conversation-fresh",
+        run_id="run-fresh",
+        state_revision=7,
+        approval_basis_revision=7,
+        goal_id="goal-fresh",
+        goal_revision=1,
+        workspace_identity_digest=WORKSPACE_DIGEST,
+    )
+    call = ToolCall(
+        "start",
+        "managed_web_start",
+        {
+            "executable": "./server.py",
+            "argv": [str(port)],
+            "cwd": ".",
+            "profile": "long",
+            "loopback_port": port,
+        },
+    )
+
+    approval = tool_runtime.prepare(call, context)
+    assert isinstance(approval, ApprovalRequired)
+    candidate = approval.request.process_authority_candidate
+    lease = ProcessAuthorityLeaseV1.create(
+        lease_id=f"process-lease:{candidate.candidate_id}",
+        candidate_digest=candidate.candidate_digest,
+        goal_id=candidate.goal_id,
+        goal_revision=candidate.goal_revision,
+        workspace_identity_digest=candidate.workspace_identity_digest,
+        command_fingerprint=candidate.command_fingerprint,
+        readable_command=candidate.readable_command,
+        executable_digest=candidate.executable_digest,
+        argv_digest=candidate.argv_digest,
+        cwd_digest=candidate.cwd_digest,
+        resource_profile=candidate.resource_profile,
+        environment_policy_digest=candidate.environment_policy_digest,
+        execution_authority=candidate.execution_authority,
+        approved_request_identity="approval-managed-web",
+        issued_at=candidate.issued_at,
+        expires_at="2099-12-31T23:59:59Z",
+        max_uses=8,
+        uses_consumed=0,
+    )  # w1-t8-mid
+    intent = tool_runtime.prepare(call, replace(context, process_leases=(lease,)))
+    assert isinstance(intent, ExecutionIntent)
+
+    try:
+        started = tool_runtime.invoke(intent)
+        assert started.is_error is False
+        payload = _json.loads(started.content)
+        resource_ref = payload["resource_ref"]  # w1-t8-run
+
+        base = _state(
+            _w1_calls_fact(
+                "run:run-fresh:tool-batch:t8",
+                ("start", "managed_web_start", {"executable": "./server.py"}),
+                ("validate-a", "sandbox_exec", {"executable": "./check-a"}),
+                ("stop", "managed_web_stop", {"resource_ref": "_"}),
+            ),
+        )  # w1-t8-base
+        base = replace(
+            base,
+            goal=replace(base.goal, admitted_criteria=(_closure_criterion(),)),
+        )
+        managed_fact = AgentRuntime._tool_result_fact(base, started)
+        assert managed_fact.content["metadata"]["tool_name"] == "managed_web_start"  # w1-t8-fact
+
+        runtime = _runtime()
+        validate_digest = runtime._product_request_digest(
+            "sandbox_exec", {"executable": "./check-a"}
+        )
+        registry = ClosedEvidenceRegistry()
+        after_start = replace(base, facts=(*base.facts, managed_fact))
+        a_fact = _sandbox_fact(_receipt(), tool_call_id="validate-a")
+        with pytest.raises(EvidenceVerificationError):
+            registry.derive(
+                replace(after_start, facts=(*after_start.facts, a_fact)),
+                _closure_claim(registry, base),
+                observed_at="2026-10-12T00:00:00Z",
+            )  # w1-t8-disq
+        _o, _m, native = runtime._successful_product_request_inventory(
+            replace(after_start, facts=(*after_start.facts, a_fact))
+        )
+        assert validate_digest not in native  # w1-t8-inv
+
+        # 服务存活期间真实写入 sentinel。
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+            client.sendall(b"GET /write HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            client.recv(1024)
+        assert sentinel.read_text(encoding="utf-8") == "after\n"
+
+        # 关闭服务（cleanup=confirmed）进入被判定序列；旧 A 仍失格。
+        stopped = tool_runtime.invoke(
+            tool_runtime.prepare(
+                ToolCall("stop", "managed_web_stop", {"resource_ref": resource_ref}),
+                context,
+            )
+        )
+        assert _json.loads(stopped.content)["cleanup"] == "confirmed"  # w1-t8-stop
+        stop_fact = AgentRuntime._tool_result_fact(base, stopped)
+        judged = replace(
+            after_start, facts=(*after_start.facts, a_fact, stop_fact)
+        )
+        with pytest.raises(EvidenceVerificationError):
+            registry.derive(
+                judged,
+                _closure_claim(registry, base),
+                observed_at="2026-10-12T00:00:00Z",
+            )
+        _o2, _m2, native2 = runtime._successful_product_request_inventory(judged)
+        assert validate_digest not in (_o2 | native2)  # w1-t8-judged
+
+        # 关闭后显式同参重验可重新获信任并用于完成（不永久禁止验证）。
+        revalidated = replace(
+            judged,
+            facts=(
+                *judged.facts,
+                _w1_calls_fact(
+                    "run:run-fresh:tool-batch:t8b",
+                    ("validate-b", "sandbox_exec", {"executable": "./check-a"}),
+                ),
+                _sandbox_fact(
+                    _w1_receipt("fresh-2"), tool_call_id="validate-b"
+                ),
+            ),
+        )
+        _o3, _m3, native3 = runtime._successful_product_request_inventory(revalidated)
+        assert validate_digest in native3
     finally:
         bundle.close()

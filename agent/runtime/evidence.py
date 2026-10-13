@@ -30,6 +30,7 @@ from agent.runtime.contracts import (
     canonical_json_digest,
     closed_evidence_id,
 )
+from agent.runtime.resource_lifecycle import managed_writer_active_at
 from agent.runtime.state import (
     authoritative_process_entrypoints,
     normalize_process_entrypoint,
@@ -1429,6 +1430,10 @@ class ClosedEvidenceRegistry:
                 # 验证之后又发生 workspace mutation 或另一次本地执行时，无法
                 # 证明旧测试仍对应最终候选。保守要求重新跑最终验证。
                 continue
+            if managed_writer_active_at(facts, fact_index):
+                # W1（2026-10-12）：同一资格语义也约束 process receipt：
+                # 取得时 writer 未确认关闭 → 取得即失格。
+                continue
             source.append(fact)
         if not source:
             raise EvidenceVerificationError(
@@ -1575,6 +1580,10 @@ class ClosedEvidenceRegistry:
                 self._may_invalidate_workspace_validation(later)
                 for later in facts[fact_index + 1 :]
             ):
+                continue
+            if managed_writer_active_at(facts, fact_index):
+                # W1（2026-10-12）：验证取得时存在未确认关闭的 managed writer，
+                # 取得即失格；后续关闭不能倒推恢复信任，关闭后显式重验可再获信任。
                 continue
             source.append(fact)
         if not source:

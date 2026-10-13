@@ -117,6 +117,7 @@ from agent.runtime.ports import (
     RetryableProviderError,
     ToolRuntime,
 )
+from agent.runtime.resource_lifecycle import managed_process_receipts
 from agent.runtime.state import (
     accept_action,
     accept_begin_answer,
@@ -3988,6 +3989,10 @@ class AgentRuntime:
         ordinary: set[str] = set()
         mutable_observation: set[str] = set()
         native_validation: set[str] = set()
+        # W1（2026-10-12）：managed writer 在场集合，与 active_task_resources
+        # 共用同一 receipt 形状解释（managed_process_receipts）；验证取得时
+        # 在场即失格。跨 run 的 managed receipt 也参与追踪（与资源门一致）。
+        active_writers: set[str] = set()
         for fact in state.facts:
             if fact.kind is FactKind.CONTEXT_SUMMARY:
                 # RC-01/020（2026-10-11）：与证据判定共用同一保守边界——
@@ -3997,7 +4002,15 @@ class AgentRuntime:
                 ordinary.clear()
                 mutable_observation.clear()
                 native_validation.clear()
+                active_writers.clear()
                 continue
+            # W1（2026-10-12）：writer 在场追踪跨 run 生效（资源门看全序列），
+            # 因此置于 run 前缀过滤之前；只解释 managed receipt 形状。
+            for event, resource_ref in managed_process_receipts((fact,)):
+                if event == "started":
+                    active_writers.add(resource_ref)
+                else:
+                    active_writers.discard(resource_ref)
             if not fact.fact_id.startswith(run_prefix) and not (
                 fact.fact_id.startswith("action:")
                 and fact.kind is FactKind.TOOL_RESULT
@@ -4080,7 +4093,12 @@ class AgentRuntime:
                 request_digest is not None
                 and fact.content.get("is_error") is False
             ):
-                if trusted_sandbox:
+                if trusted_sandbox and active_writers:
+                    # W1（2026-10-12）：验证取得时存在未确认关闭的 managed
+                    # writer → 取得即失格：既不进 native_validation，也不
+                    # 回落 ordinary（同参重验不被抑制，普通工具抑制不变）。
+                    pass
+                elif trusted_sandbox:
                     native_validation.add(request_digest)
                 else:
                     ordinary.add(request_digest)

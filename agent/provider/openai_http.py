@@ -113,7 +113,13 @@ class OpenAICompatibleProvider:
             and str(self._config.base_url).strip().rstrip("/")
             in {u.rstrip("/") for u in DEEPSEEK_API_BASE_URLS}
         )
-        reasoning_expected = deepseek_thinking or deepseek_family_reasoning
+        # W3（2026-10-12）：family 推断不得覆盖显式 disabled——显式 disabled
+        # 会话按合同不发 reasoning（thinking={"type":"disabled"}），若按“预期
+        # 有 reasoning”处理，normalize 会以 missing_reasoning_continuity 拒绝
+        # 纯文本 JSON 响应。family 推断只在 thinking_mode is None 时生效。
+        reasoning_expected = deepseek_thinking or (
+            deepseek_family_reasoning and self._config.thinking_mode is None
+        )
         provider_identity_digest = self._config.descriptor().identity_digest
         body: dict[str, Any] = {
             "model": self._config.model,

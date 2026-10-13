@@ -119,7 +119,10 @@ def _remember_spec(scope: str) -> ToolSpec:
         execution_authority=ExecutionAuthorityClass.IN_PROCESS,
         name="memory_remember",
         version="1",
-        description="Persist one approved workspace memory record.",
+        description=(
+            "Persist one approved workspace memory record. Content must exactly match "
+            "a prior user message; ask for the exact text as a separate message when needed."
+        ),
         input_schema=_read_schema({"content": {"type": "string"}}, ["content"]),
         risk=ToolRisk.HIGH,
         side_effect=SideEffectClass.WRITE,

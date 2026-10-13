@@ -50,6 +50,7 @@ from agent.browser.contracts import (
     BrowserMode,
     BrowserObservationV1,
     BrowserSessionSpecV1,
+    LoopbackOriginBindingV1,
 )
 from agent.browser.observation import (
     ObservationIdentityV1,
@@ -320,9 +321,16 @@ class BrowserEgressGuard:
     注入只经 constructor seam，不存在 allow_private/disable_guard 开关。
     """
 
-    def __init__(self, *, resolver: Any, transport: Any) -> None:
+    def __init__(
+        self,
+        *,
+        resolver: Any,
+        transport: Any,
+        loopback_verifier: Callable[[LoopbackOriginBindingV1], bool] | None = None,
+    ) -> None:
         self._policy = BrowserURLPolicy(resolver=resolver)
         self._transport = transport
+        self._loopback_verifier = loopback_verifier
         self._attempts = 0
         self._sends = 0
         self._attempts_by_kind = {kind: 0 for kind in RequestKind}
@@ -354,17 +362,33 @@ class BrowserEgressGuard:
         *,
         mode: BrowserMode,
         allowed_origins: tuple[str, ...],
+        loopback_binding: LoopbackOriginBindingV1 | None,
+        record_identity: bool,
     ) -> AdmittedURLV1:
         # wss 与 https 同一安全语义（安全 WebSocket）；ws:// 不归一，仍被
         # https-only policy 拒绝。
         admit_url = url
-        if kind is RequestKind.WEBSOCKET and url.startswith("wss://"):
-            admit_url = "https://" + url[len("wss://"):]
-        admitted = self._policy.admit(admit_url, mode=mode, allowed_origins=allowed_origins)
+        if kind is RequestKind.WEBSOCKET:
+            if mode is BrowserMode.TASK_LOOPBACK_EPHEMERAL and url.startswith("ws://"):
+                admit_url = "http://" + url[len("ws://"):]
+            elif url.startswith("wss://"):
+                admit_url = "https://" + url[len("wss://"):]
+        if mode is BrowserMode.TASK_LOOPBACK_EPHEMERAL:
+            if self._loopback_verifier is None:
+                raise URLPolicyError("loopback_lease_unverifiable")
+            if loopback_binding is None or not self._loopback_verifier(loopback_binding):
+                raise URLPolicyError("loopback_lease_inactive")
+        admitted = self._policy.admit(
+            admit_url,
+            mode=mode,
+            allowed_origins=allowed_origins,
+            loopback_binding=loopback_binding,
+        )
         previous = self._origin_addresses.get(admitted.canonical_origin)
         if previous is not None and previous != admitted.address_digest:
             raise URLPolicyError("dns_rebinding_address_drift")
-        self._origin_addresses[admitted.canonical_origin] = admitted.address_digest
+        if record_identity:
+            self._origin_addresses[admitted.canonical_origin] = admitted.address_digest
         return admitted
 
     def admit_request(
@@ -374,11 +398,19 @@ class BrowserEgressGuard:
         *,
         mode: BrowserMode,
         allowed_origins: tuple[str, ...],
+        loopback_binding: LoopbackOriginBindingV1 | None = None,
     ) -> AdmittedURLV1:
         self._attempts += 1
         self._attempts_by_kind[kind] += 1
         try:
-            return self._admit(kind, url, mode=mode, allowed_origins=allowed_origins)
+            return self._admit(
+                kind,
+                url,
+                mode=mode,
+                allowed_origins=allowed_origins,
+                loopback_binding=loopback_binding,
+                record_identity=True,
+            )
         except Exception:
             self._rejections_by_kind[kind] += 1
             raise
@@ -390,10 +422,17 @@ class BrowserEgressGuard:
         *,
         mode: BrowserMode,
         allowed_origins: tuple[str, ...],
+        loopback_binding: LoopbackOriginBindingV1 | None = None,
     ) -> AdmittedURLV1:
         # 纯查询：不增 attempt、不写 rebinding 记录、不计 send。
-        return self._policy.admit(_normalize_websocket(kind, url), mode=mode,
-                                  allowed_origins=allowed_origins)
+        return self._admit(
+            kind,
+            url,
+            mode=mode,
+            allowed_origins=allowed_origins,
+            loopback_binding=loopback_binding,
+            record_identity=False,
+        )
 
     def record_send(self, kind: RequestKind, admitted: AdmittedURLV1) -> None:
         self._sends += 1
@@ -428,6 +467,7 @@ class PlaywrightBrowserEnvironment:
         profile_root: Any | None = None,
         clock: Callable[[], float] | None = None,
         quarantine: BrowserQuarantine | None = None,
+        loopback_verifier: Callable[[LoopbackOriginBindingV1], bool] | None = None,
     ) -> None:
         self._playwright_factory = playwright_factory
         self._browser_identity_digest = browser_identity_digest
@@ -441,6 +481,7 @@ class PlaywrightBrowserEnvironment:
         self._guard = BrowserEgressGuard(
             resolver=resolver if resolver is not None else SocketAddressResolver(),
             transport=_BrowserTransport(),
+            loopback_verifier=loopback_verifier,
         )
         self._thread: threading.Thread | None = None
         self._requests: queue.Queue = queue.Queue(maxsize=_QUEUE_CAPACITY)
@@ -580,16 +621,25 @@ class PlaywrightBrowserEnvironment:
         """composition closeable：逆序收尾时关闭全部仍 active 的 session。
 
         每个 session 走既有 close 链（page→context→browser→Playwright 并
-        join worker）；已 unusable 的 session 仍走 cleanup-only close。任何 session 的
-        cleanup 为 CLEANUP_UNKNOWN，或收尾后 worker 仍存活时，本方法抛出
-        ``BrowserCleanupUnknownError`` fail closed（session 已标记 unusable，
-        无 fallback）——绝不从成功路径的 journal 单独宣称清理闭合。
+        join worker）；R3a（2026-10-03 follow-up）：已 unusable 的 session
+        （前一次 close 已 UNKNOWN/失败，worker 已退出或即将退出）不再重复
+        发 close——对无消费者队列的第二次 roundtrip 只是白等响应超时。任何
+        未决 session 的 cleanup 为 CLEANUP_UNKNOWN，或收尾后 worker 仍存活时，
+        本方法抛出 ``BrowserCleanupUnknownError`` fail closed（无 fallback）
+        ——绝不从成功路径的 journal 单独宣称清理闭合。
         """
 
         failed: list[str] = []
         if self._anonymous_open_unknown:
             failed.append("<open-outcome-unknown>")
+        worker_alive = self.worker_alive()
         for session_ref, state in list(self._sessions.items()):
+            if state.get("unusable") is True and not worker_alive:
+                # R3a：close UNKNOWN 已定案且 worker 已退出（无消费者队列）——
+                # 不再向 dead worker 重发 close 白等响应超时。poisoned 且 worker
+                # 仍存活的 session 仍走 cleanup-only close（poison 收尾合同）。
+                failed.append(session_ref)
+                continue
             try:
                 receipt = self.close(state["handle"])
             except Exception:  # noqa: BLE001  close 内部已 fail closed；防御
@@ -839,6 +889,7 @@ class PlaywrightBrowserEnvironment:
             "last_observation": None,
             "mode": mode,
             "allowed_origins": allowed_origins,
+            "loopback_binding": spec.loopback_binding,
             "canonical_url": None,
             "canonical_origin": None,
             "explicit_navigation_url": None,
@@ -873,6 +924,19 @@ class PlaywrightBrowserEnvironment:
                 "download",
                 lambda download: self._unapproved_download(download, session),
             )
+        if mode is BrowserMode.TASK_LOOPBACK_EPHEMERAL:
+            # 该模式只有一个由 managed-process authority 固定的 origin。open
+            # 直接进入它，既不扩大导航权限，也不把 about:blank 留给模型额外处理。
+            try:
+                outcome = self._navigate_page(page, session, allowed_origins[0])
+                if outcome is not BrowserActionOutcome.EFFECT_APPLIED:
+                    raise URLPolicyError("browser_initial_navigation_blocked")
+                session["canonical_url"] = page.url
+                session["canonical_origin"] = _origin_of(page.url)
+            except Exception:
+                _best_effort_close(page)
+                _best_effort_close(context)
+                raise
         worker_sessions[session_ref] = session
         return BrowserHandleV1(
             session_ref=session_ref,
@@ -1003,6 +1067,7 @@ class PlaywrightBrowserEnvironment:
                     request.url,
                     mode=session["mode"],
                     allowed_origins=session["allowed_origins"],
+                    loopback_binding=session["loopback_binding"],
                 )
             if request.is_navigation_request():
                 response = route.fetch(max_redirects=0)
@@ -1020,6 +1085,7 @@ class PlaywrightBrowserEnvironment:
                         target_url,
                         mode=session["mode"],
                         allowed_origins=session["allowed_origins"],
+                        loopback_binding=session["loopback_binding"],
                     )
                     if explicit_document:
                         session["pending_redirect_url"] = target.canonical_url
@@ -1046,6 +1112,7 @@ class PlaywrightBrowserEnvironment:
                 websocket.url,
                 mode=session["mode"],
                 allowed_origins=session["allowed_origins"],
+                loopback_binding=session["loopback_binding"],
             )
             websocket.connect_to_server()
         except Exception:  # noqa: BLE001  不 connect 即只存在本地 mock，无外部 send
@@ -1078,6 +1145,7 @@ class PlaywrightBrowserEnvironment:
                 url,
                 mode=session["mode"],
                 allowed_origins=session["allowed_origins"],
+                loopback_binding=session["loopback_binding"],
             )
         except Exception:  # noqa: BLE001  非 allowlist popup 只清理，不计数
             _best_effort_close(page)
@@ -1397,6 +1465,7 @@ class PlaywrightBrowserEnvironment:
                 action.params["url"],
                 mode=session["mode"],
                 allowed_origins=session["allowed_origins"],
+                loopback_binding=session["loopback_binding"],
             )
         # 全部 preflight Green：在首个 effect 前消费 single-use binding——
         # 即使后续 effect 已发生而 receipt 失败，binding 也不可 replay。

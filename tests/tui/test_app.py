@@ -2379,7 +2379,13 @@ def test_late_consumption_does_not_clobber_newer_draft() -> None:
             app.draft_text = msg.value
             app.draft_revision += 1
             # 迟到回调：模拟旧的 pending（first, first_revision）在完成后到达。
-            app._pending_submission = ("first", first_revision)
+            # UI-02（2026-10-11）：pending 绑定确切 conversation/action identity。
+            app._pending_submission = (
+                store.state.conversation_id,
+                1,
+                "first",
+                first_revision,
+            )
             app._consume_pending_if_durably_accepted(store.state)
             assert msg.value == "second draft", "late callback must not clear newer draft"
             assert app.draft_text == "second draft"
@@ -2766,6 +2772,314 @@ def test_pilot_daily_flow_renders_readably_at_both_terminal_sizes(
                 await pilot.pause(delay=0.02)
                 if app.is_running is False:
                     break
+            assert app.return_code == 0
+
+    asyncio.run(scenario())
+
+
+class _BarrierProvider:
+    """Q2 屏障 provider：worker 进入 provider 后置位 entered，阻塞直到 release。
+
+    与 ``_BlockingProvider`` 的区别是双向握手：测试可以先确认 worker **确实**
+    停在 callable 内部（而不是还没调度），再断言 owner 侧没有提前动作。
+    """
+
+    deadline_contract = None
+
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.calls = 0
+
+    def generate(self, context, *, delta_observer=None):
+        self.calls += 1
+        self.entered.set()
+        self.release.wait(timeout=10)
+        return ModelResponse((ModelTextBlock("done after barrier release"),))
+
+
+def _barrier_runtime() -> tuple:
+    store = InMemoryCheckpointStore(ConversationState.new("c1"))
+    provider = _BarrierProvider()
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=8_000, output_reserve=200),
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-1",
+    )
+    return runtime, store, provider
+
+
+def _install_worker_ordering_probe(app, adapter) -> dict:
+    """Q2：给 owner 侧关键动作打点——退出、reload、完成通知时机。
+
+    reload 计数用 adapter.load_view 观察（_refresh 每次都会调用它）；退出用
+    App.exit 观察。完成通知时机在 ``execute_once`` 边界上度量：进入 callable
+    计数 +1，退出（含抛错）再 +1；完成回调触发时必须满足"已有 callable 进入且
+    全部退出"。这条不变量同时覆盖两种缺陷：worker 还在 callable 内就宣布完成
+    （entries>exits），以及根本没执行就宣布完成（entries==0）。
+    """
+
+    probe = {
+        "exits": [],
+        "loads_while_held": 0,
+        "held": False,
+        "callable_entries": 0,
+        "callable_exits": 0,
+        "completion_violations": [],
+    }
+    original_exit = app.exit
+    original_load_view = adapter.load_view
+    original_finished = app._on_action_worker_finished
+    original_execute_once = adapter.execute_once
+
+    def recording_exit(*args, **kwargs):
+        probe["exits"].append(kwargs.get("return_code", args[0] if args else 0))
+        return original_exit(*args, **kwargs)
+
+    def recording_load_view():
+        if probe["held"]:
+            probe["loads_while_held"] += 1
+        return original_load_view()
+
+    def recording_execute_once(action):
+        probe["callable_entries"] += 1
+        try:
+            return original_execute_once(action)
+        finally:
+            probe["callable_exits"] += 1
+
+    def recording_finished(result, worker_error):
+        # 收口的前提是"恰好有一次 callable 已完成"：entries==0 表示 worker 根本
+        # 没跑就宣布完成；entries>exits 表示 callable 还在里面。
+        if probe["callable_entries"] == 0 or (
+            probe["callable_entries"] != probe["callable_exits"]
+        ):
+            probe["completion_violations"].append(
+                (probe["callable_entries"], probe["callable_exits"])
+            )
+        return original_finished(result, worker_error)
+
+    app.exit = recording_exit  # type: ignore[method-assign]
+    adapter.load_view = recording_load_view  # type: ignore[method-assign]
+    adapter.execute_once = recording_execute_once  # type: ignore[method-assign]
+    app._on_action_worker_finished = recording_finished  # type: ignore[method-assign]
+    return probe
+
+
+def test_q2_worker_barrier_owner_cleanup_waits_for_normal_completion() -> None:
+    """Q2 屏障（普通完成）：worker 停在 callable 内部时，owner 不得提前
+    reload/退出；release 后先由 Runtime 落盘，owner 才收口。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    runtime, store, provider = _barrier_runtime()
+    adapter = TuiAdapter(runtime, store)
+
+    async def scenario() -> None:
+        app = build_app(
+            adapter, run_id_factory=_run_id_factory(), close_deadline_seconds=30.0
+        )
+        async with app.run_test() as pilot:
+            probe = _install_worker_ordering_probe(app, adapter)
+            baseline_loads = 0
+
+            msg = pilot.app.query_one("#message")
+            msg.value = "work"
+            await pilot.press("enter")
+
+            # 屏障 1：worker 确实已进入 callable（provider 内部），不是"尚未调度"。
+            for _ in range(200):
+                await pilot.pause(delay=0.01)
+                if provider.entered.is_set():
+                    break
+            assert provider.entered.is_set(), "worker must reach the provider call"
+            assert provider.calls == 1
+
+            # 按住期间：owner 侧没有退出，也没有把"未完成"当权威状态 reload 收口。
+            probe["held"] = True
+            baseline_loads = probe["loads_while_held"]
+            await pilot.pause(delay=0.2)
+            assert app.closing_requested is False
+            assert probe["exits"] == [], "owner must not exit while worker is inside callable"
+            assert probe["loads_while_held"] == baseline_loads, (
+                "owner must not reload authoritative state while worker holds the barrier"
+            )
+            # 关键事实：action 尚未落盘（provider 未返回）。
+            assert store.state.last_safe_result is None
+
+            # 屏障 2：release → Runtime 先落盘，owner 再收口。
+            provider.release.set()
+            for _ in range(200):
+                await pilot.pause(delay=0.01)
+                if not adapter.is_active and store.state.last_safe_result is not None:
+                    break
+            probe["held"] = False
+            assert probe["completion_violations"] == [], (
+                "completion must only be announced after the worker callable returned"
+            )
+            assert store.state.last_safe_result is not None
+            assert (
+                store.state.last_safe_result.message == "done after barrier release"
+            ), "owner closure must follow the durable runtime result"
+            assert adapter.is_active is False
+            assert app.closing_requested is False
+            assert probe["exits"] == [], "idle completion must not exit the app"
+
+    asyncio.run(scenario())
+
+
+def test_q2_worker_barrier_owner_cleanup_waits_for_worker_error() -> None:
+    """Q2 屏障（异常）：worker 在 callable 内抛错也必须等它返回；owner 不提前
+    退出，错误只在完成通知里被记录，随后仍按权威 reload 收口。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    store = InMemoryCheckpointStore(ConversationState.new("c1"))
+    provider = _BarrierProvider()
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=8_000, output_reserve=200),
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-1",
+    )
+    adapter = TuiAdapter(runtime, store)
+    original_run_turn = runtime.run_turn
+
+    def failing_run_turn(action, snapshot):
+        # 真正的"callable 内抛错"：Runtime 已消费 action 并越过 provider 屏障后
+        # 才失败，模拟不可恢复的基础设施故障（Runtime 未转成 RunResult 的那类）。
+        original_run_turn(action, snapshot)
+        raise RuntimeError("infrastructure failure after run_turn returned")
+
+    runtime.run_turn = failing_run_turn  # type: ignore[method-assign]
+
+    async def scenario() -> None:
+        app = build_app(
+            adapter, run_id_factory=_run_id_factory(), close_deadline_seconds=30.0
+        )
+        async with app.run_test() as pilot:
+            for _ in range(80):
+                await pilot.pause(delay=0.01)
+                if app.projection is not None:
+                    break
+            probe = _install_worker_ordering_probe(app, adapter)
+
+            msg = pilot.app.query_one("#message")
+            msg.value = "work"
+            await pilot.press("enter")
+            for _ in range(200):
+                await pilot.pause(delay=0.01)
+                if provider.entered.is_set():
+                    break
+            assert provider.entered.is_set()
+
+            # 按住期间 owner 未退出、未 reload、未记录错误。
+            probe["held"] = True
+            held_loads = probe["loads_while_held"]
+            await pilot.pause(delay=0.2)
+            assert probe["exits"] == []
+            assert probe["loads_while_held"] == held_loads
+            assert app._last_worker_had_error is False, (
+                "worker error must not be recorded before the callable returns"
+            )
+
+            provider.release.set()
+            for _ in range(300):
+                await pilot.pause(delay=0.01)
+                if not app._busy() and not adapter.is_active:
+                    break
+            probe["held"] = False
+            # callable 返回后才记录有界错误，并仍以权威 reload 收口（不退出）。
+            assert probe["completion_violations"] == [], (
+                "completion must only be announced after the worker callable returned"
+            )
+            assert app._last_worker_had_error is True
+            assert app._last_worker_error is not None
+            assert "infrastructure failure" not in app._last_worker_error, (
+                "bounded notice must not leak the raw exception message"
+            )
+            assert probe["exits"] == [], "worker error alone must not exit the app"
+
+    asyncio.run(scenario())
+
+
+def test_q2_worker_barrier_ctrl_q_defers_exit_until_worker_returns() -> None:
+    """Q2 屏障（Ctrl-Q pending）：关闭请求在 worker 未返回前不得 exit/不得
+    force-cancel；release 后一次权威 reload 再以 0 退出。"""
+
+    pytest.importorskip("textual")
+    from agent.tui.app import build_app
+
+    runtime, store, provider = _barrier_runtime()
+    adapter = TuiAdapter(runtime, store)
+
+    async def scenario() -> None:
+        app = build_app(
+            adapter, run_id_factory=_run_id_factory(), close_deadline_seconds=30.0
+        )
+        async with app.run_test() as pilot:
+            # 探针必须在派发之前装好：完成通知的"恰好一次已完成 callable"不变量
+            # 需要看到本次 dispatch 的进入/退出，而不是从 0 起算。
+            probe = _install_worker_ordering_probe(app, adapter)
+            msg = pilot.app.query_one("#message")
+            msg.value = "work"
+            await pilot.press("enter")
+            for _ in range(200):
+                await pilot.pause(delay=0.01)
+                if provider.entered.is_set():
+                    break
+            assert provider.entered.is_set()
+
+            probe["held"] = True
+
+            # 基线在关闭请求之前取：这样"Ctrl-Q 自己触发一次提前 reload"也会被
+            # 计为 held 期间的 reload，而不是被当成新基线放过。
+            held_loads = probe["loads_while_held"]
+            await pilot.press("ctrl+q")
+            await pilot.pause(delay=0.1)
+            assert app.closing_requested is True
+            assert app.shutdown_blocked is False
+
+            # 按住期间：不退出、不 reload、不取消 worker。
+            await pilot.pause(delay=0.2)
+            assert probe["exits"] == [], (
+                "Ctrl-Q must not force-exit while the worker is inside its callable"
+            )
+            assert probe["loads_while_held"] == held_loads, (
+                "closing must not project a pre-completion reload as authoritative"
+            )
+            assert adapter.is_active is True, "worker must not be force-cancelled"
+            assert store.state.last_safe_result is None
+
+            # release → worker 返回 → owner 一次权威 reload → 退出码 0。
+            provider.release.set()
+            for _ in range(300):
+                await pilot.pause(delay=0.01)
+                if app.is_running is False:
+                    break
+            probe["held"] = False
+            assert probe["completion_violations"] == [], (
+                "completion must only be announced after the worker callable returned"
+            )
+            assert store.state.last_safe_result is not None
+            assert (
+                store.state.last_safe_result.message == "done after barrier release"
+            )
             assert app.return_code == 0
 
     asyncio.run(scenario())

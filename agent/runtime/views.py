@@ -6,10 +6,12 @@ from dataclasses import dataclass
 
 from agent.runtime.contracts import (
     ActiveRunStatus,
+    AdmittedCriterion,
     ContinuationPhase,
     ConversationFact,
     ConversationState,
     EgressClass,
+    EvidenceOracleKind,
     FactKind,
     GoalStatus,
     SourceKind,
@@ -37,6 +39,7 @@ class GoalView:
     status: str
     interaction_state: str
     user_outcome: str | None
+    targets: tuple[str, ...]
     progress_summary: str | None
     next_step: str | None
     blocker: str | None
@@ -44,6 +47,8 @@ class GoalView:
     resume_condition: str | None
     criteria_total: int
     criteria_verified: int
+    verification_scope: tuple[str, ...]
+    durable_authorities_closed: bool
     legal_actions: tuple[str, ...]
     sources: tuple[SourceView, ...]
 
@@ -55,6 +60,32 @@ class BackgroundRecoveryView:
     occurrence_id: str
     checkpoint_identity_digest: str
     goal: GoalView
+
+
+def verification_scope_message(scopes: tuple[str, ...]) -> str:
+    """把可信 evidence scope 转成所有交互面一致的有界声明。"""
+
+    return (
+        "Evidence scope: "
+        + "; ".join(scopes)
+        + ". This proves only the listed checks; it does not independently establish "
+        "numerical or semantic correctness beyond them."
+    )
+
+
+def delivery_summary_message(view: GoalView) -> str:
+    """从终态生成不依赖模型自述的最小交付摘要。"""
+
+    if view.status != GoalStatus.VERIFIED_DONE.value or view.user_outcome is None:
+        raise ValueError("delivery summary requires a verified Goal")
+    targets = ", ".join(view.targets) if view.targets else "no declared file target"
+    authority_status = "closed" if view.durable_authorities_closed else "still open"
+    return (
+        f"Verified delivery: {view.user_outcome}\n"
+        f"Targets: {targets}\n"
+        f"Required evidence: {view.criteria_verified}/{view.criteria_total} passed\n"
+        f"Durable task permissions: {authority_status}."
+    )
 
 
 def project_background_recovery(
@@ -153,6 +184,7 @@ def project_goal_view(state: ConversationState) -> GoalView:
             status=state.interaction_state.value,
             interaction_state=state.interaction_state.value,
             user_outcome=None,
+            targets=(),
             progress_summary=None,
             next_step=None,
             blocker=None,
@@ -160,6 +192,8 @@ def project_goal_view(state: ConversationState) -> GoalView:
             resume_condition=None,
             criteria_total=0,
             criteria_verified=0,
+            verification_scope=(),
+            durable_authorities_closed=True,
             legal_actions=("submit",) if state.active_run is None else _run_actions(state),
             sources=project_source_views(
                 state,
@@ -183,6 +217,7 @@ def project_goal_view(state: ConversationState) -> GoalView:
         status=goal.status.value,
         interaction_state=state.interaction_state.value,
         user_outcome=goal.user_outcome,
+        targets=goal.targets,
         progress_summary=goal.progress_summary,
         next_step=goal.next_step,
         blocker=blocker,
@@ -196,9 +231,62 @@ def project_goal_view(state: ConversationState) -> GoalView:
                 if criterion.criterion_id in passed_criteria
             }
         ),
+        verification_scope=(
+            _verification_scope(goal.admitted_criteria, passed_criteria)
+            if goal.status is GoalStatus.VERIFIED_DONE
+            else ()
+        ),
+        durable_authorities_closed=not bool(
+            state.goal_authorizations
+            or state.process_leases
+            or state.sandbox_leases
+            or state.browser_leases
+            or state.browser_takeover_pending
+        ),
         legal_actions=_goal_actions(state),
         sources=visible_sources[-32:],
     )
+
+
+def _verification_scope(
+    criteria: tuple[AdmittedCriterion, ...],
+    passed_criteria: set[str],
+) -> tuple[str, ...]:
+    """只投影 closed oracle 实际证明的范围，不复述模型提供的 criterion prose。"""
+
+    scopes: list[str] = []
+    for criterion in criteria:
+        if criterion.criterion_id not in passed_criteria:
+            continue
+        predicate = criterion.predicate
+        if criterion.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST:
+            path = predicate.get("path")
+            scope = (
+                f"exact current bytes of {path}"
+                if isinstance(path, str) and path
+                else "exact bound workspace file bytes"
+            )
+        elif criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT:
+            receipt_kind = predicate.get("receipt_kind")
+            if receipt_kind == "process_v1":
+                scope = "approved local process exited with code 0"
+            elif receipt_kind == "native_sandbox_v1":
+                scope = "approved sandbox command produced its bound success receipt"
+            else:
+                scope = "bound governed tool receipt"
+        elif criterion.oracle_kind is EvidenceOracleKind.USER_CONFIRMATION:
+            scope = "explicit owner confirmation"
+        elif criterion.oracle_kind is EvidenceOracleKind.RESEARCH_PROVENANCE:
+            scope = "artifact bytes linked to recorded research source receipts"
+        elif criterion.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT:
+            scope = "recorded public Web source receipt"
+        elif criterion.oracle_kind is EvidenceOracleKind.BROWSER_READBACK:
+            scope = "approved browser action plus bound same-session readback"
+        else:  # pragma: no cover - enum expansion must add an explicit projection
+            scope = "bound closed-oracle evidence"
+        if scope not in scopes:
+            scopes.append(scope)
+    return tuple(scopes)
 
 
 def project_visible_source_views(

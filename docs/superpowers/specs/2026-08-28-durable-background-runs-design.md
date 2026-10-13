@@ -661,19 +661,19 @@ exact confirmed purge. The only routine object deletion is the exact terminal oc
 workspace cleanup defined in §5.1. Reaching the full-record bound blocks creation and shows
 safe-terminal `purge` candidates rather than silently removing private state.
 
-The first activation may install a wake adapter before committing the active definition:
+Manual reconciliation and cold wake are separate authorities. A definition whose
+`wake_adapter_policy_digest` is null can be previewed and activated without an operating-system
+wake adapter. A definition that requests cold wake can be activated only after the owner has run
+the separate `wake enable` action and exact readback reports the requested adapter as installed;
+task approval never installs an operating-system background item as a side effect.
 
-- install fails or is unknown: no automation is activated;
-- install succeeds but activation CAS fails: an idle adapter finds no due work;
-- retry first reconciles the exact adapter digest, then performs only the missing mutation.
+The user-visible activation states include `proposal`, `wake_not_enabled`,
+`wake_state_unknown`, `activation_conflict` and `active`. Every non-active state says that no
+occurrence can run, preserves the proposal and presents one safe next action: explicitly enable
+and inspect cold wake, retry qualification or resubmit approval.
 
-The user-visible activation states are `proposal`, `not_activated_install_failed`,
-`not_activated_install_unknown`, `adapter_installed_activation_conflict` and `active`. Every
-non-active state says that no occurrence can run, preserves the proposal and presents one safe
-next action: retry qualification, inspect/remove the idle adapter or resubmit approval.
-
-Adapter drift is never overwritten as compatibility repair. Disabling the last wake adapter is a
-separate exact-approved action and refuses while an occurrence is running.
+Adapter drift is never overwritten as compatibility repair. Enabling or disabling the wake
+adapter is a separate exact owner action; disabling refuses while an occurrence is running.
 
 ## 12. Owner-visible results and recovery UX
 

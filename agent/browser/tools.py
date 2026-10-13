@@ -24,6 +24,7 @@ from agent.browser.contracts import (
     BrowserMode,
     BrowserObservationV1,
     BrowserSessionSpecV1,
+    LoopbackOriginBindingV1,
 )
 from agent.browser.ports import (
     BrowserEnvironment,
@@ -50,6 +51,7 @@ from agent.browser.session_store import (
     BrowserSessionRecordV1,
     BrowserSessionStore,
     SessionActionOutcome,
+    SessionNotFoundError,
     SessionPhase,
     SessionRecovery,
 )
@@ -66,6 +68,7 @@ from agent.runtime.contracts import (
     ToolExecutionOutput,
     ToolRisk,
     ToolSpec,
+    canonical_json_digest,
 )
 from agent.runtime.tool_governance import BrowserActionToolPolicy
 from agent.runtime.tools import RegisteredTool
@@ -131,14 +134,15 @@ class _Session:
 class BrowserToolBundle:
     """browser tool owner 的静态组合产物（003）。
 
-    ``registrations`` 与 ``complete_takeover`` 绑定同一个 browser tool
-    owner：takeover completion 只能消费该 owner 持有的 exact writer lease，
-    不从 registration 反射、不经出动态 registry。bundle 不暴露 store、
-    environment 或 lease 本身。
+    ``registrations``、``complete_takeover`` 与 ``owner_shutdown`` 绑定同一个
+    browser tool owner：takeover completion 只能消费该 owner 持有的 exact
+    writer lease；owner shutdown 只关闭该 owner 的 active session 并落闭合
+    凭据。bundle 不暴露 store、environment 或 lease 本身。
     """
 
     registrations: tuple[RegisteredTool, ...]
     complete_takeover: Callable[[BrowserTakeoverRequestV1], int]
+    owner_shutdown: Callable[[], None]
 
 
 class _BrowserTools:
@@ -153,6 +157,7 @@ class _BrowserTools:
         monotonic_clock: Callable[[], float],
         workspace: Path | None = None,
         quarantine: BrowserQuarantine | None = None,
+        loopback_authority: object | None = None,
     ) -> None:
         if len(browser_identity_digest) != 64 or any(
             item not in "0123456789abcdef" for item in browser_identity_digest
@@ -171,6 +176,7 @@ class _BrowserTools:
         self._workspace = Path(workspace).absolute() if workspace is not None else None
         self._quarantine = quarantine
         self._upload_snapshots: dict[str, UploadFileSnapshotV1] = {}
+        self._loopback_authority = loopback_authority
 
     def prepare_open(self, arguments: dict) -> dict:
         mode = BrowserMode(arguments["mode"])
@@ -180,10 +186,28 @@ class _BrowserTools:
         action_budget = arguments.get("action_budget", 64)
         if type(action_budget) is not int or action_budget <= 0 or action_budget > 256:
             raise ValueError("browser action_budget must be in 1..256")
+        loopback_binding = None
+        managed_process_ref = arguments.get("managed_process_ref")
         if mode is BrowserMode.PUBLIC_READ_EPHEMERAL:
-            if profile_ref is not None or profile_revision is not None or origins:
+            if (
+                profile_ref is not None
+                or profile_revision is not None
+                or origins
+                or managed_process_ref is not None
+            ):
                 raise ValueError("public read cannot bind profile or origins")
+        elif mode is BrowserMode.TASK_LOOPBACK_EPHEMERAL:
+            if profile_ref is not None or profile_revision is not None or origins:
+                raise ValueError("task loopback cannot bind profile or caller origins")
+            if not isinstance(managed_process_ref, str) or self._loopback_authority is None:
+                raise ValueError("task loopback requires an active managed process")
+            loopback_binding = self._loopback_authority.prepare_loopback_binding(
+                managed_process_ref
+            )
+            origins = (loopback_binding.origin,)
         else:
+            if managed_process_ref is not None:
+                raise ValueError("interactive browser cannot bind a managed process")
             if not isinstance(profile_ref, str) or type(profile_revision) is not int:
                 raise ValueError("interactive browser requires profile_ref/revision")
             if not origins or any(not isinstance(item, str) for item in origins):
@@ -206,6 +230,10 @@ class _BrowserTools:
             "action_budget": action_budget,
             "browser_identity_digest": self._browser_identity_digest,
             "session_duration_seconds": _SESSION_SECONDS,
+            "managed_process_ref": managed_process_ref,
+            "loopback_binding": (
+                asdict(loopback_binding) if loopback_binding is not None else None
+            ),
             "effect_preview": (
                 f"Open dedicated {mode.value} Chromium session; origins="
                 + (", ".join(origins) if origins else "public HTTPS policy")
@@ -220,6 +248,30 @@ class _BrowserTools:
                 spec = BrowserSessionSpecV1.public_read(
                     goal_id=intent.goal_id or "",
                     goal_revision=intent.goal_revision or 0,
+                    action_budget=int(binding["action_budget"]),
+                )
+                profile = None
+                writer = None
+            elif mode is BrowserMode.TASK_LOOPBACK_EPHEMERAL:
+                if self._loopback_authority is None:
+                    raise ValueError("loopback authority is unavailable")
+                expected = LoopbackOriginBindingV1(
+                    **dict(binding["loopback_binding"])
+                )
+                current = self._loopback_authority.loopback_binding(
+                    str(binding["managed_process_ref"]),
+                    goal_id=intent.goal_id or "",
+                    goal_revision=intent.goal_revision or 0,
+                )
+                if current != expected:
+                    return KnownNotExecuted(
+                        code="browser_open_binding_changed",
+                        message="Managed loopback process changed before browser open.",
+                    )
+                spec = BrowserSessionSpecV1.task_loopback(
+                    goal_id=intent.goal_id or "",
+                    goal_revision=intent.goal_revision or 0,
+                    binding=current,
                     action_budget=int(binding["action_budget"]),
                 )
                 profile = None
@@ -366,6 +418,16 @@ class _BrowserTools:
     def _require_current_profile(self, session: _Session) -> None:
         if session.spec.mode is BrowserMode.PUBLIC_READ_EPHEMERAL:
             return
+        if session.spec.mode is BrowserMode.TASK_LOOPBACK_EPHEMERAL:
+            if (
+                self._loopback_authority is None
+                or session.spec.loopback_binding is None
+                or not self._loopback_authority.verify_loopback_binding(
+                    session.spec.loopback_binding
+                )
+            ):
+                raise ValueError("managed loopback process is no longer active")
+            return
         profile_ref = session.spec.profile_ref
         if profile_ref is None:
             raise ValueError("interactive browser profile binding is missing")
@@ -396,8 +458,36 @@ class _BrowserTools:
         }
 
     def prepare_session(self, arguments: dict) -> dict:
-        session = self._session(arguments.get("session_ref"))
+        session_ref = arguments.get("session_ref")
+        if isinstance(session_ref, str) and session_ref not in self._active:
+            # F2：重启后的补记 close 需要经同一 prepare 治理路径；ledger CLOSED
+            # 的可信凭据允许一个最小 binding（close invoke 不要求会话仍 active）。
+            self._verify_outclosing_record(session_ref)
+            return {
+                "session_ref": session_ref,
+                "browser_identity_digest": self._browser_identity_digest,
+                "outclosing": True,
+            }
+        session = self._session(session_ref)
         return self._session_binding(session, self._browser_identity_digest)
+
+    def _verify_outclosing_record(self, session_ref: str) -> None:
+        if not session_ref:
+            raise ValueError("browser session is not active in this process")
+        try:
+            record = self._sessions.load(session_ref)
+        except SessionNotFoundError as error:
+            raise ValueError(
+                "browser session is not active in this process"
+            ) from error
+        if (
+            record.phase is not SessionPhase.CLOSED
+            or record.browser_identity_digest != self._browser_identity_digest
+        ):
+            raise ValueError(
+                "browser session closure is unknown; a new owner cannot record "
+                "a cleaned close without a durable closure credential"
+            )
 
     def prepare_active_session(self, arguments: dict) -> dict:
         session = self._active_session(arguments.get("session_ref"))
@@ -422,6 +512,9 @@ class _BrowserTools:
             "session_ref": observation.session_ref,
             "page_id": observation.page_id,
             "frame_id": observation.frame_id,
+            # browser_act 的必填 single-observation binding；必须与 page/frame
+            # 一起对模型可见，否则模型无法构造任何合法动作。
+            "observation_digest": observation.observation_digest,
             "canonical_url": observation.canonical_url,
             "canonical_origin": observation.canonical_origin,
             "aria_projection": observation.aria_projection,
@@ -485,21 +578,26 @@ class _BrowserTools:
             or not isinstance(params["value"], str)
         ):
             raise ValueError("select requires exact target_ref and value")
-        if kind is BrowserActionKind.FILL_FORM and (
-            not isinstance(target_ref, str)
-            or not target_ref
-            or not isinstance(params, dict)
-            or set(params) != {"fields"}
-            or not isinstance(params["fields"], dict)
-            or not params["fields"]
-            or any(
+        if kind is BrowserActionKind.FILL_FORM:
+            if not isinstance(target_ref, str) or not target_ref:
+                raise ValueError(
+                    "fill_form target_ref must be one field ref from the latest observation"
+                )
+            if not isinstance(params, dict) or set(params) != {"fields"}:
+                raise ValueError(
+                    "fill_form params must be exactly "
+                    "{'fields': {<observed name>: <text>}}"
+                )
+            fields = params["fields"]
+            if not isinstance(fields, dict) or not fields:
+                raise ValueError("fill_form fields must be one non-empty object")
+            if any(
                 not isinstance(key, str)
                 or not key
                 or not isinstance(value, str)
-                for key, value in params["fields"].items()
-            )
-        ):
-            raise ValueError("fill_form requires exact string fields")
+                for key, value in fields.items()
+            ):
+                raise ValueError("fill_form field names and values must be strings")
         if kind is BrowserActionKind.UPLOAD and (
             not isinstance(target_ref, str)
             or not target_ref
@@ -708,8 +806,49 @@ class _BrowserTools:
             metadata=metadata,
         )
 
+    def owner_shutdown(self) -> None:
+        """F2（2026-10-02）：owner 收尾关闭全部 active session 并落闭合凭据。
+
+        每个 session 先取底层 close receipt：CLEANED 且无 pending recovery 才把
+        ledger 落 CLOSED（重启后补记的唯一可信凭据），并释放 site writer lease；
+        任何 UNKNOWN / recovery 未决 / ledger 拒绝都只汇总为 fail closed，不产生
+        闭合凭据。``environment.shutdown`` 最后只做 worker 收尾与最终核验
+        （worker 仍存活或 cleanup UNKNOWN 时抛 BrowserCleanupUnknownError）。
+        """
+
+        failures: list[str] = []
+        for session_ref, session in list(self._active.items()):
+            recovery = self._sessions.pending_recovery(session.record)
+            receipt = self._environment.close(session.handle)
+            if (
+                receipt.outcome is not BrowserCleanupOutcome.CLEANED
+                or recovery is not SessionRecovery.NONE
+            ):
+                failures.append(session_ref)
+                continue
+            try:
+                session.record = self._sessions.close(
+                    session.record,
+                    expected_profile_revision=session.spec.profile_revision,
+                )
+            except Exception:  # noqa: BLE001  ledger 拒绝即无凭据：fail closed
+                failures.append(session_ref)
+                continue
+            if session.writer_lease is not None:
+                self._profiles.release_writer(session.writer_lease)
+            self._active.pop(session_ref, None)
+        self._environment.shutdown()
+        if failures:
+            raise RuntimeError(
+                "browser owner shutdown failed closed for sessions: "
+                + ", ".join(sorted(failures))
+            )
+
     def close(self, intent: ExecutionIntent) -> ToolExecutionOutput:
-        session = self._session(intent.arguments.get("session_ref"))
+        session_ref = intent.arguments.get("session_ref")
+        if not isinstance(session_ref, str) or session_ref not in self._active:
+            return self._outclosing_result(session_ref)
+        session = self._session(session_ref)
         recovery = self._sessions.pending_recovery(session.record)
         receipt = self._environment.close(session.handle)
         cleanup_confirmed = (
@@ -742,6 +881,59 @@ class _BrowserTools:
                 "cleanup_outcome": receipt.outcome.value,
                 "session_recovery": recovery.value,
                 "receipt_digest": receipt.receipt_digest,
+            },
+        )
+
+    def _outclosing_result(self, session_ref: object) -> ToolExecutionOutput:
+        """F2：重启后用旧 opaque ref 补记正常关闭（幂等，零 environment 调用）。
+
+        可信凭据 = durable session ledger 的 CLOSED phase（owner_shutdown 在底层
+        CLEANED 后落盘）。其他 session、损坏记录、过期 browser identity、无凭据
+        （shutdown unknown / 未关闭）一律 fail closed，不签 cleaned。
+        """
+
+        if not isinstance(session_ref, str) or not session_ref:
+            raise ValueError("browser session is not active in this process")
+        try:
+            record = self._sessions.load(session_ref)
+        except SessionNotFoundError as error:
+            raise ValueError(
+                "browser session is not active in this process"
+            ) from error
+        # SessionIntegrityError（损坏/伪造 ledger）原样上抛：损坏记录不能补记成功。
+        if (
+            record.phase is not SessionPhase.CLOSED
+            or record.browser_identity_digest != self._browser_identity_digest
+        ):
+            raise ValueError(
+                "browser session closure is unknown; a new owner cannot record "
+                "a cleaned close without a durable closure credential"
+            )
+        closure_digest = canonical_json_digest(
+            {
+                "closure_basis": "durable_ledger_closed",
+                "session_id": record.session_id,
+                "spec_digest": record.spec_digest,
+                "browser_identity_digest": record.browser_identity_digest,
+            }
+        )
+        return ToolExecutionOutput(
+            content=json.dumps(
+                {
+                    "session_ref": session_ref,
+                    "outcome": "cleaned",
+                    "outclosing": True,
+                },
+                sort_keys=True,
+            ),
+            is_error=False,
+            metadata={
+                "browser_result_kind": "browser_close",
+                "session_ref": session_ref,
+                "cleanup_outcome": BrowserCleanupOutcome.CLEANED.value,
+                "session_recovery": SessionRecovery.NONE.value,
+                "closure_basis": "durable_ledger_closed",
+                "receipt_digest": closure_digest,
             },
         )
 
@@ -798,6 +990,7 @@ def build_browser_tools(
     monotonic_clock: Callable[[], float],
     workspace: Path | None = None,
     quarantine: BrowserQuarantine | None = None,
+    loopback_authority: object | None = None,
 ) -> BrowserToolBundle:
     """构造唯一 browser tool owner 的静态 bundle。
 
@@ -813,21 +1006,48 @@ def build_browser_tools(
         monotonic_clock=monotonic_clock,
         workspace=workspace,
         quarantine=quarantine,
+        loopback_authority=loopback_authority,
     )
     session_property = {"session_ref": {"type": "string"}}
     action_properties = {
         **session_property,
         "kind": {"type": "string", "enum": list(_ACTION_KINDS)},
-        "observation_digest": {"type": "string"},
-        "page_id": {"type": "string"},
-        "frame_id": {"type": "string"},
-        "target_ref": {"type": "string"},
+        "observation_digest": {
+            "type": "string",
+            "description": "copy verbatim from the latest browser_observe result",
+        },
+        "page_id": {
+            "type": "string",
+            "description": "copy verbatim from the latest browser_observe result",
+        },
+        "frame_id": {
+            "type": "string",
+            "description": "copy verbatim from the latest browser_observe result",
+        },
+        "target_ref": {
+            "type": "string",
+            "description": (
+                "exact element_refs[].ref from the latest browser_observe; for "
+                "fill_form use one of the fields being filled"
+            ),
+        },
         "params": {
             "type": "object",
+            "description": (
+                "exact shape by kind: fill_form={fields:{<exact element_refs[].name>:"
+                "<text>}}; click has no params; select={value:<text>}; "
+                "navigate={url:<url>}; scroll={delta_y:<integer>}. For fill_form, "
+                "params is the JSON object {\"fields\": {\"observed name\": "
+                "\"desired text\"}}. Do not add purpose or any other key."
+            ),
             "properties": {
                 "url": {"type": "string"},
                 "value": {"type": "string"},
-                "fields": {"type": "object"},
+                "fields": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": {"type": "string"},
+                },
                 "delta_y": {"type": "integer"},
                 "path": {"type": "string"},
                 "sha256": {"type": "string"},
@@ -851,6 +1071,7 @@ def build_browser_tools(
                             "items": {"type": "string"},
                         },
                         "action_budget": {"type": "integer", "minimum": 1},
+                        "managed_process_ref": {"type": "string"},
                     },
                     required=("mode",),
                     side_effect=SideEffectClass.EXTERNAL,
@@ -878,7 +1099,11 @@ def build_browser_tools(
             RegisteredTool(
                 spec=_spec(
                     "browser_act",
-                    "Execute one closed action bound to the current browser observation.",
+                    (
+                        "Execute one closed action bound to the latest browser_observe. "
+                        "For fill_form, copy the field's ref into target_ref and map its "
+                        "visible name to the desired text in params.fields."
+                    ),
                     action_properties,
                     required=(
                         "session_ref",
@@ -925,6 +1150,7 @@ def build_browser_tools(
             ),
         ),
         complete_takeover=tools.complete_takeover,
+        owner_shutdown=tools.owner_shutdown,
     )
 
 

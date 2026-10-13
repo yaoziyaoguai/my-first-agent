@@ -228,7 +228,8 @@ def _normalized_reason(longrepr) -> str | None:
     if longrepr is None:
         return None
     if isinstance(longrepr, tuple) and len(longrepr) == 3:
-        return str(longrepr[2])
+        reason = str(longrepr[2])
+        return reason.removeprefix("Skipped: ")
     return str(longrepr)
 
 
@@ -361,7 +362,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_argument_parser().parse_args(argv)
     # guard 必须先于 pytest 与 required module 的导入安装，保证产品根导入
     # 只能从 installed_site 解析；source_root 仅作记录，取当前源码检出目录。
-    install_guard(args.installed_site, os.getcwd(), args.origin_log)
+    install_guard(args.installed_site, args.test_tree, args.origin_log)
 
     origin_errors: list[dict] = []
     for module_name in args.required_module:
@@ -392,6 +393,8 @@ def main(argv: list[str] | None = None) -> int:
                 "--color=no",
                 "-p",
                 "no:cacheprovider",
+                "--rootdir",
+                str(args.test_tree),
                 "--basetemp",
                 str(args.basetemp),
             ],

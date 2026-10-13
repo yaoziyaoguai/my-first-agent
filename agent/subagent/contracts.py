@@ -65,7 +65,8 @@ class ChildProviderSpec:
       E2）。``sleep_seconds`` 让子进程的 generate 阻塞（用于 deterministic deadline-kill）。
     - ``kind="http"``：子进程用 ``build_model_provider`` 构造真实 HTTP adapter；
       credential 只按 ``credential_env_name`` 在子进程内从自身 env 读取（不跨进程序列化
-      credential 值），其余为非秘密 config。
+      credential 值），其余为非秘密 config。``attempt_ledger_path`` 与
+      ``max_model_attempts`` 让 child 在发送前复用 parent 的 owner-only 累计预算。
 
     无论哪种 kind，spec 本身都不含 credential 值；它不进入 parent checkpoint/event/manifest。
     """
@@ -83,6 +84,8 @@ class ChildProviderSpec:
     thinking_mode: str | None = None
     request_path: str | None = None
     strict_tools: bool = False
+    attempt_ledger_path: str | None = None
+    max_model_attempts: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,3 +99,53 @@ class ChildRunResult:
     model_calls: int
     tool_calls: int
     receipt_state: TerminationReceiptState
+    sources: tuple[ChildSourceEvidence, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ChildSourceEvidence:
+    """父侧重新核对过的 child workspace source；只证明读取来源，不授予写权限。"""
+
+    locator: str
+    snapshot_digest: str
+    content_digest: str
+    receipt_digest: str
+    truncated: bool
+
+    def __post_init__(self) -> None:
+        digests = (self.snapshot_digest, self.content_digest, self.receipt_digest)
+        if not isinstance(self.truncated, bool):
+            raise TypeError("child source truncated flag must be bool")
+        if not self.locator or any(
+            len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+            for value in digests
+        ):
+            raise ValueError("child source evidence identity is invalid")
+
+    def to_json(self) -> dict:
+        return {
+            "locator": self.locator,
+            "snapshot_digest": self.snapshot_digest,
+            "content_digest": self.content_digest,
+            "receipt_digest": self.receipt_digest,
+            "truncated": self.truncated,
+        }
+
+    @classmethod
+    def from_json(cls, value: object) -> ChildSourceEvidence:
+        if not isinstance(value, dict) or set(value) != {
+            "locator",
+            "snapshot_digest",
+            "content_digest",
+            "receipt_digest",
+            "truncated",
+        } or not isinstance(value["truncated"], bool):
+            raise ValueError("child source evidence shape is invalid")
+        return cls(
+            locator=str(value["locator"]),
+            snapshot_digest=str(value["snapshot_digest"]),
+            content_digest=str(value["content_digest"]),
+            receipt_digest=str(value["receipt_digest"]),
+            truncated=value["truncated"],
+        )

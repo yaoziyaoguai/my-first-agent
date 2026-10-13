@@ -258,6 +258,8 @@ class _AttemptFixture:
                 qualification_digest=_digest(f"{seed}:qualification"),
             ),
         )
+        if self.management.wake_enable().code != "wake_enabled":
+            raise RuntimeError("019 fixture could not explicitly enable cold wake")
         self._token_index = 1
         self._claim_index = 0
 

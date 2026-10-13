@@ -8,7 +8,7 @@ metadata、全部 A/AAAA answer 必须 public、site-bound exact origin allowlis
 
 import pytest
 
-from agent.browser.contracts import BrowserMode
+from agent.browser.contracts import BrowserMode, LoopbackOriginBindingV1
 from agent.browser.url_policy import (
     AdmittedURLV1,
     BrowserURLPolicy,
@@ -43,6 +43,59 @@ def admit_public(policy: BrowserURLPolicy, url: str) -> AdmittedURLV1:
     return policy.admit(
         url, mode=BrowserMode.PUBLIC_READ_EPHEMERAL, allowed_origins=(),
     )
+
+
+def loopback_binding() -> LoopbackOriginBindingV1:
+    return LoopbackOriginBindingV1(
+        resource_ref="managed-web-1",
+        origin="http://127.0.0.1:43123",
+        goal_id="goal-1",
+        goal_revision=1,
+        process_group_id=4321,
+        command_fingerprint="c" * 64,
+        issued_monotonic=100.0,
+        expires_monotonic=220.0,
+    )
+
+
+def test_task_loopback_admits_only_exact_bound_origin_without_dns() -> None:
+    policy, resolver = make_policy()
+    binding = loopback_binding()
+
+    admitted = policy.admit(
+        "http://127.0.0.1:43123/app?q=1",
+        mode=BrowserMode.TASK_LOOPBACK_EPHEMERAL,
+        allowed_origins=(binding.origin,),
+        loopback_binding=binding,
+    )
+
+    assert admitted.canonical_origin == binding.origin
+    assert admitted.canonical_url == "http://127.0.0.1:43123/app?q=1"
+    assert resolver.calls == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:43123/",
+        "http://127.0.0.1:43124/",
+        "http://0.0.0.0:43123/",
+        "https://127.0.0.1:43123/",
+        "http://127.0.0.1:43123.evil.test/",
+        "http://127.0.0.1:43123@evil.test/",
+    ],
+)
+def test_task_loopback_rejects_other_local_or_network_targets(url: str) -> None:
+    policy, resolver = make_policy({"evil.test": (PUBLIC_V4,)})
+    binding = loopback_binding()
+    with pytest.raises(URLPolicyError):
+        policy.admit(
+            url,
+            mode=BrowserMode.TASK_LOOPBACK_EPHEMERAL,
+            allowed_origins=(binding.origin,),
+            loopback_binding=binding,
+        )
+    assert resolver.calls == []
 
 
 def test_https_public_url_is_admitted_with_canonical_identity():

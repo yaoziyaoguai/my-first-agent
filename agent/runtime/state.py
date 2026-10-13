@@ -2587,6 +2587,7 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
         if not isinstance(pending, RecoveryRequest):
             raise ValueError("recovery request required")
         succeeded = action.resolution.value == "mark_succeeded"
+        intent = active.executing_intent
         synthetic = ConversationFact(
             fact_id=f"action:{action.action_seq}:recovery",
             kind=FactKind.TOOL_RESULT,
@@ -2599,6 +2600,15 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                 ),
                 "is_error": not succeeded,
                 "synthetic": True,
+                # RC-01（2026-10-11）：UNKNOWN 结果必须保守失效其前的旧验证。
+                # 标记失败不等于从未执行；分类来自可信执行意图（不采信模型文本），
+                # intent 缺失时不盖章 side_effect，证据/折叠消费者保守视为潜在写入。
+                "unknown_outcome": True,
+                **(
+                    {"side_effect": intent.side_effect.value}
+                    if intent is not None
+                    else {}
+                ),
                 **(
                     {"invocation_origin": InvocationOrigin.OPERATOR.value}
                     if active.invocation_origin is InvocationOrigin.OPERATOR
@@ -3538,6 +3548,117 @@ def admit_web_source_criterion(
     )
 
 
+def _close_orphaned_tool_batches(
+    state: ConversationState,
+    *,
+    action_seq: int,
+    live_call_ids: frozenset[str],
+) -> ConversationState:
+    """为已失去归属的未完结 tool 批次补记 durable 非执行结果。
+
+    丢 run 的转换（pause/cancel/decline/CancelRun/fail）会让 TOOL_CALLS
+    批次失去归属：calls 已入账而 results 永不产生。此后 compaction 的 turn
+    grammar 在批次覆盖校验上必然拒绝整段历史（新 run 在 MODEL 相规划即抛
+    ``ValueError: tool batch and its results cannot be split``），会话每次
+    重试同败。与 SubmitMessage-correction 的 superseded 先例同源：为每个
+    缺失 call 补记 executed=False 的结果，插在该批次已有结果之后（批次之后
+    可能已存在新的 user 边界，尾部追加不闭合批次），保持 Anthropic/OpenAI
+    的 tool continuity 闭合。
+
+    归属按 call_id 所有权判定（批次是原子单位）：live run 拥有的批次仍会由
+    审批/执行或 correction 分支补齐结果，绝不代答；畸形结构保持 parser 的
+    fail-closed 判定，不做部分愈合。
+    """
+
+    facts = state.facts
+    total = len(facts)
+    reserved_ids = {fact.fact_id for fact in facts}
+    insertions: dict[int, tuple[ConversationFact, ...]] = {}
+    index = 0
+    while index < total:
+        fact = facts[index]
+        if fact.kind is not FactKind.TOOL_CALLS:
+            index += 1
+            continue
+        raw_calls = fact.content.get("calls")
+        expected: list[str] = []
+        malformed = not isinstance(raw_calls, list) or not raw_calls
+        if not malformed:
+            for raw_call in raw_calls:
+                call_id = (
+                    raw_call.get("tool_call_id")
+                    if isinstance(raw_call, dict)
+                    else None
+                )
+                if (
+                    not isinstance(call_id, str)
+                    or not call_id
+                    or call_id in expected
+                ):
+                    malformed = True
+                    break
+                expected.append(call_id)
+        if malformed or any(call_id in live_call_ids for call_id in expected):
+            index += 1
+            continue
+        covered: set[str] = set()
+        cursor = index + 1
+        while cursor < total and facts[cursor].kind is FactKind.TOOL_RESULT:
+            result_call_id = facts[cursor].content.get("tool_call_id")
+            if (
+                not isinstance(result_call_id, str)
+                or result_call_id not in expected
+                or result_call_id in covered
+            ):
+                break
+            covered.add(result_call_id)
+            cursor += 1
+        missing = tuple(call_id for call_id in expected if call_id not in covered)
+        if missing:
+            invocation_origin = fact.content.get("invocation_origin")
+            healed: list[ConversationFact] = []
+            for call_id in missing:
+                fact_id = f"action:{action_seq}:superseded-tool:{call_id}"
+                if fact_id in reserved_ids:
+                    # 跨批次 call_id 撞名（供应商异常形状）：用批次 revision
+                    # 后缀确定性去重，不引入随机性，也不静默丢结果。
+                    suffix = fact.fact_id.rsplit(":", 1)[-1]
+                    fact_id = f"{fact_id}:{suffix}"
+                reserved_ids.add(fact_id)
+                healed.append(
+                    ConversationFact(
+                        fact_id=fact_id,
+                        kind=FactKind.TOOL_RESULT,
+                        content={
+                            "tool_call_id": call_id,
+                            "text": (
+                                "Tool call was not executed; its run was superseded "
+                                "before a result was recorded."
+                            ),
+                            "is_error": True,
+                            "executed": False,
+                            "superseded": True,
+                            **(
+                                {"invocation_origin": invocation_origin}
+                                if invocation_origin == InvocationOrigin.OPERATOR.value
+                                else {}
+                            ),
+                        },
+                    )
+                )
+            insertions[cursor] = tuple(healed)
+        index = cursor
+    if not insertions:
+        return state
+    merged: list[ConversationFact] = []
+    for position, fact in enumerate(facts):
+        merged.extend(insertions.get(position, ()))
+        merged.append(fact)
+    # 批次位于 facts 末尾（EOF）时插入点等于 total，循环到不了该位置。
+    merged.extend(insertions.get(total, ()))
+    return replace(state, facts=tuple(merged))
+
+
 def accept_action(
     state: ConversationState | None,
     action: Action,
@@ -3575,6 +3696,21 @@ def accept_action(
     legal, reason = _action_is_legal(state, action)
     if not legal:
         return _conflict(state, reason or "illegal_action_for_state")
+
+    # 丢 run 的转换把未完结批次变成孤儿；接受任何新动作前先补记非执行结果，
+    # 否则后续 MODEL 相 compaction 规划在批次覆盖校验上永久 fatal（自愈
+    # 磁盘上已损坏的 checkpoint）。live run 拥有的批次可能仍由审批/执行或
+    # correction 分支补齐，绝不代答。
+    live = state.active_run
+    state = _close_orphaned_tool_batches(
+        state,
+        action_seq=action.action_seq,
+        live_call_ids=(
+            frozenset(call.tool_call_id for call in live.tool_calls)
+            if live is not None
+            else frozenset()
+        ),
+    )
 
     with_replay = _append_replay_record(
         state,

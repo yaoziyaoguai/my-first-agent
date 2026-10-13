@@ -50,10 +50,12 @@ def test_workspace_search_tools_are_in_the_single_file_capability_factory(
 
     assert set(definitions) == {
         "read_file",
+        "confirm_file",
         "list_files",
         "search_paths",
         "search_text",
         "read_file_chunk",
+        "make_directory",
         "write_file",
         "edit_file",
     }
@@ -101,6 +103,37 @@ def test_path_search_is_deterministic_and_excludes_private_or_aliased_entries(
     receipts = result.metadata["source_receipts"]
     assert {receipt["source_kind"] for receipt in receipts} == {"workspace_path"}
     assert all(not receipt["origin_locator"].startswith("/") for receipt in receipts)
+
+
+def test_search_and_chunk_share_explicit_project_path_visibility(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    config = workspace / "config"
+    config.mkdir(parents=True)
+    (config / "app.yaml").write_text("needle: visible\nline: two\n", encoding="utf-8")
+    (config / "other.yaml").write_text("needle: hidden\n", encoding="utf-8")
+    runtime = build_file_tool_runtime(
+        workspace,
+        project_paths=("config/app.yaml",),
+    )
+
+    search = _invoke(
+        runtime,
+        ToolCall("search-1", "search_text", {"query": "needle", "root": "."}),
+    )
+    chunk = _invoke(
+        runtime,
+        ToolCall(
+            "chunk-1",
+            "read_file_chunk",
+            {"path": "config/app.yaml", "start_line": 2, "max_lines": 1},
+        ),
+    )
+
+    assert [item["path"] for item in json.loads(search.content)["results"]] == [
+        "config/app.yaml"
+    ]
+    assert "line: two" in chunk.content
+    assert "hidden" not in search.content
 
 
 def test_text_search_handles_unicode_replacement_and_skips_binary(tmp_path: Path) -> None:
@@ -200,6 +233,76 @@ def test_scan_output_and_byte_caps_are_reported_separately(tmp_path: Path) -> No
         "total_bytes",
     }
     assert len(text_payload["results"]) <= 2
+
+
+def test_large_repository_can_discover_scoped_instructions_and_narrow_truncated_search(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    target = workspace / "packages" / "exporter"
+    tests_dir = target / "tests"
+    tests_dir.mkdir(parents=True)
+    (workspace / "AGENTS.md").write_text("root rules\n", encoding="utf-8")
+    (target / "AGENTS.md").write_text("exporter rules\n", encoding="utf-8")
+    (workspace / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\ntestpaths = ['packages/exporter/tests']\n",
+        encoding="utf-8",
+    )
+    for index in range(225):
+        (workspace / f"module_{index:03d}_test.py").write_text(
+            "def test_placeholder(): pass\n",
+            encoding="utf-8",
+        )
+    (tests_dir / "test_export.py").write_text(
+        "def test_export(): pass\n",
+        encoding="utf-8",
+    )
+    runtime = build_file_tool_runtime(workspace)
+
+    instructions = _invoke(
+        runtime,
+        ToolCall("instructions", "search_paths", {"query": "AGENTS.md", "root": "."}),
+    )
+    broad_tests = _invoke(
+        runtime,
+        ToolCall("broad-tests", "search_paths", {"query": "test", "root": "."}),
+    )
+    scoped_tests = _invoke(
+        runtime,
+        ToolCall(
+            "scoped-tests",
+            "search_paths",
+            {"query": "test", "root": "packages/exporter"},
+        ),
+    )
+
+    assert [item["path"] for item in json.loads(instructions.content)["results"]] == [
+        "AGENTS.md",
+        "packages/exporter/AGENTS.md",
+    ]
+    broad_payload = json.loads(broad_tests.content)
+    assert broad_payload["truncated"] is True
+    assert broad_payload["truncation_reason"] == "matches"
+    assert json.loads(scoped_tests.content)["results"] == [
+        {"kind": "directory", "path": "packages/exporter/tests"},
+        {"kind": "file", "path": "packages/exporter/tests/test_export.py"},
+    ]
+    assert "root rules" in _invoke(
+        runtime,
+        ToolCall("read-root-rules", "read_file", {"path": "AGENTS.md"}),
+    ).content
+    assert "exporter rules" in _invoke(
+        runtime,
+        ToolCall(
+            "read-exporter-rules",
+            "read_file",
+            {"path": "packages/exporter/AGENTS.md"},
+        ),
+    ).content
+    assert "testpaths" in _invoke(
+        runtime,
+        ToolCall("read-test-config", "read_file", {"path": "pyproject.toml"}),
+    ).content
 
 
 def test_depth_and_deadline_are_independent_traversal_caps(

@@ -74,6 +74,30 @@ class TestRoundTripAndNormalization:
         save_provider_profile(state_root, saved)
         assert load_provider_profile(state_root) == saved
 
+    def test_deepseek_flash_enabled_profile_projects_max_reasoning(self) -> None:
+        profile = _profile(
+            model="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            thinking_mode="enabled",
+        )
+
+        config = to_provider_config(profile)
+
+        assert config.thinking_mode == "enabled"
+        assert config.reasoning_effort == "max"
+
+    def test_current_deepseek_flash_alias_projects_max_reasoning(self) -> None:
+        profile = _profile(
+            model="deepseek-flash",
+            base_url="https://api.deepseek.com",
+            thinking_mode="enabled",
+        )
+
+        config = to_provider_config(profile)
+
+        assert config.model == "deepseek-flash"
+        assert config.reasoning_effort == "max"
+
 
 class TestNoSecretContract:
     def test_profile_has_no_credential_field(self) -> None:
@@ -407,6 +431,37 @@ class TestProviderConfigProjection:
         descriptor = config.descriptor()
         assert descriptor.remote is True
         assert descriptor.family == "openai_compatible"
+
+    @pytest.mark.parametrize(
+        ("base_url", "request_path", "expected"),
+        (
+            (
+                "https://api.deepseek.com",
+                "/chat/completions",
+                "https://api.deepseek.com/chat/completions",
+            ),
+            (
+                "https://gateway.example/api/v2",
+                "/chat/completions",
+                "https://gateway.example/api/v2/chat/completions",
+            ),
+        ),
+    )
+    def test_explicit_request_path_has_one_unambiguous_destination(
+        self,
+        base_url: str,
+        request_path: str,
+        expected: str,
+    ) -> None:
+        config = AgentProviderConfig(
+            provider_type="openai_compatible",
+            model="model-1",
+            base_url=base_url,
+            request_path=request_path,
+        )
+
+        assert config.endpoint == expected
+        assert config.descriptor().canonical_destination == expected
 
     def test_projection_without_credential_for_descriptor_only(self) -> None:
         config = to_provider_config(_profile(), credential=None)

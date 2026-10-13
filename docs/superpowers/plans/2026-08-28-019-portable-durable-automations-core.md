@@ -267,7 +267,7 @@ Assert the rendered hierarchy is task/cadence/cancel, isolated workspace, unatte
 
 - [x] **Step 2: Implement proposal, preview and activation**
 
-`create` stores an inactive proposal. `preview` performs source scan and qualifications without state mutation. `approve` revalidates the complete preview and source manifest, captures the immutable source snapshot, and, when the approved policy requests cold wake, drives the typed install-before-activate protocol through `WakeAdapter` before submitting one exact `ApproveRevision` action. The portable core never implements an OS install itself. Deterministic faults cover `not_activated_install_failed`, `not_activated_install_unknown`, `adapter_installed_activation_conflict` and retry/readback reconciliation.
+`create` stores an inactive proposal. `preview` performs source scan and qualifications without state mutation. A null `wake_adapter_policy_digest` selects manual reconciliation and requires no wake qualification. When a definition requests cold wake, `approve` requires exact installed readback but never installs an OS item; the owner must first use the separate `wake enable` action. `approve` then revalidates the complete preview and source manifest, captures the immutable source snapshot, and submits one exact `ApproveRevision` action. Deterministic faults cover `wake_not_enabled`, `wake_state_unknown`, `activation_conflict` and exact readback reconciliation.
 
 - [x] **Step 3: Write update/cancel/open lifecycle Reds**
 

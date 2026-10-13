@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urlsplit, urlunsplit
 
-from agent.browser.contracts import BrowserMode
+from agent.browser.contracts import BrowserMode, LoopbackOriginBindingV1
 from agent.runtime.contracts import canonical_json_digest
 
 DEFAULT_HTTPS_PORT = 443
@@ -138,8 +138,18 @@ class BrowserURLPolicy:
         *,
         mode: BrowserMode,
         allowed_origins: tuple[str, ...] = (),
+        loopback_binding: LoopbackOriginBindingV1 | None = None,
     ) -> AdmittedURLV1:
         parts = urlsplit(url)
+        if mode is BrowserMode.TASK_LOOPBACK_EPHEMERAL:
+            return _admit_task_loopback(
+                url,
+                parts=parts,
+                allowed_origins=allowed_origins,
+                binding=loopback_binding,
+            )
+        if loopback_binding is not None:
+            raise URLPolicyError("unexpected_loopback_binding")
         if parts.scheme != "https":
             raise URLPolicyError("scheme_not_https")
         if parts.username is not None or parts.password is not None:
@@ -184,3 +194,44 @@ class BrowserURLPolicy:
             canonical_origin=canonical_origin,
             address_digest=address_digest,
         )
+
+
+def _admit_task_loopback(
+    url: str,
+    *,
+    parts,
+    allowed_origins: tuple[str, ...],
+    binding: LoopbackOriginBindingV1 | None,
+) -> AdmittedURLV1:
+    if binding is None:
+        raise URLPolicyError("loopback_binding_required")
+    if parts.username is not None or parts.password is not None:
+        raise URLPolicyError("userinfo_not_allowed")
+    try:
+        port = parts.port
+    except ValueError as error:
+        raise URLPolicyError("non_canonical_port") from error
+    if (
+        parts.scheme != "http"
+        or parts.hostname != "127.0.0.1"
+        or port is None
+        or tuple(allowed_origins) != (binding.origin,)
+    ):
+        raise URLPolicyError("origin_not_in_loopback_binding")
+    canonical_origin = f"http://127.0.0.1:{port}"
+    if canonical_origin != binding.origin:
+        raise URLPolicyError("origin_not_in_loopback_binding")
+    canonical_url = urlunsplit(
+        ("http", f"127.0.0.1:{port}", parts.path or "", parts.query, parts.fragment)
+    )
+    # 本地地址不使用 DNS identity；绑定 digest 是允许该 exact origin 的唯一身份。
+    return AdmittedURLV1(
+        canonical_url=canonical_url,
+        canonical_origin=canonical_origin,
+        address_digest=canonical_json_digest(
+            {
+                "origin": canonical_origin,
+                "loopback_binding_digest": binding.binding_digest,
+            }
+        ),
+    )

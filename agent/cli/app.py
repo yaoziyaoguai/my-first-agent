@@ -14,6 +14,7 @@ from agent.cli.actions import (
     build_recover_unknown_observation,
     build_resolve_approval,
     build_resume_goal,
+    build_revoke_goal_target_authority,
     build_revoke_process_authority,
     new_session_gate,
     parse_artifact_confirmation,
@@ -53,6 +54,24 @@ _RECOVERY_SUCCEEDED = frozenset({"已成功", "成功", "succeeded", "success"})
 _RECOVERY_FAILED = frozenset({"未成功", "失败", "failed", "failure"})
 _RECOVERY_STOP = frozenset({"先停止", "停止", "stop"})
 _OBSERVATION_CONTINUE = frozenset({"继续", "continue", "record unknown"})
+_HELP_TEXT = """Commands:
+/new — start a new conversation when no decision is pending
+/sources [--advanced] — show recorded sources
+/leases [--advanced] — show active process permissions
+/browser-profiles [list|create|revoke|clear] — manage browser profiles
+/pause, /resume, /cancel — control the current task or run
+/approve <request-id>, /reject <request-id> — resolve an exact approval
+/approve-goal-target <request-id> — approve this exact file target for the current task
+/approve-goal-directory <request-id> — approve files under an explicit Goal directory
+/approve-artifact <path> <sha256> — approve an exact artifact
+/ack-provider <digest> — acknowledge an exact provider disclosure
+/resolve-success <request-id>, /resolve-failed <request-id> — resolve an unknown effect
+/record-observation-unknown — continue after an unknown public observation
+/revoke <lease-id|all> — revoke process permission
+/revoke-goal-target — revoke all current-task file permissions
+/browser-done, /browser-cancel — finish or cancel browser takeover
+/exit — leave First Agent safely
+When a prompt offers y/n, success/failed/stop, or continue/stop, you may answer it directly."""
 
 
 def run_headless(
@@ -127,6 +146,9 @@ def run_repl(
                 continue
             write_fn("Starting a new task in this workspace (previous task kept).")
             return NEW_SESSION_REQUESTED
+        if raw.strip() == "/help":
+            write_fn(_HELP_TEXT)
+            continue
         if not raw.strip():
             continue
         if raw.strip().startswith("/browser-profiles"):
@@ -170,7 +192,16 @@ def run_repl(
         if action is None:
             continue
 
-        result = runtime.run_turn(action, snapshot)
+        renderer.render_working()
+        try:
+            result = runtime.run_turn(action, snapshot)
+        except KeyboardInterrupt:
+            write_fn(
+                "Run interrupted. Saved state was kept; restart First Agent to inspect "
+                "or recover the task. A remote request or in-flight effect may still "
+                "have completed."
+            )
+            return 130
         renderer.render_result(result)
         if result.status is RunStatus.CONFLICT:
             return 2
@@ -213,15 +244,6 @@ def _parse_action(
 
     approval = _approval_request(state)
     if approval is not None and normalized in _AFFIRMATIVE | _NEGATIVE:
-        if (
-            normalized in _AFFIRMATIVE
-            and approval.artifact_confirmation_requirement is not None
-        ):
-            return (
-                None,
-                "This artifact-producing command requires an explicit digest. "
-                "Use /approve-artifact <sha256> <workspace-relative-path>.",
-            )
         return (
             build_resolve_approval(
                 state,
@@ -230,6 +252,10 @@ def _parse_action(
                 approved=normalized in _AFFIRMATIVE,
                 approved_at=(
                     approval_time_factory() if normalized in _AFFIRMATIVE else None
+                ),
+                defer_artifact_confirmation=(
+                    normalized in _AFFIRMATIVE
+                    and approval.artifact_confirmation_requirement is not None
                 ),
             ),
             None,
@@ -310,30 +336,35 @@ def _parse_action(
             None,
         )
 
-    if command in {"/approve", "/reject"}:
+    if command in {
+        "/approve",
+        "/approve-goal-target",
+        "/approve-goal-directory",
+        "/reject",
+    }:
         request = _approval_request(state)
         if request is None:
             return None, "No approval request is pending."
         if not separator or argument != request.request_id:
             return None, "Use the exact pending request ID."
-        if (
-            command == "/approve"
-            and request.artifact_confirmation_requirement is not None
-        ):
-            return (
-                None,
-                "This request requires /approve-artifact <sha256> "
-                "<workspace-relative-path>.",
-            )
         return (
             build_resolve_approval(
                 state,
                 request_id=request.request_id,
                 binding_digest=request.binding_digest,
-                approved=command == "/approve",
+                approved=command != "/reject",
                 approved_at=(
-                    approval_time_factory() if command == "/approve" else None
+                    approval_time_factory()
+                    if command
+                    in {"/approve", "/approve-goal-target", "/approve-goal-directory"}
+                    else None
                 ),
+                defer_artifact_confirmation=(
+                    command != "/reject"
+                    and request.artifact_confirmation_requirement is not None
+                ),
+                authorize_goal_target=command == "/approve-goal-target",
+                authorize_goal_directory=command == "/approve-goal-directory",
             ),
             None,
         )
@@ -427,8 +458,16 @@ def _parse_action(
         except ValueError as error:
             return None, str(error)
 
+    if command == "/revoke-goal-target":
+        if separator:
+            return None, "/revoke-goal-target does not accept arguments."
+        try:
+            return build_revoke_goal_target_authority(state), None
+        except ValueError as error:
+            return None, str(error)
+
     if command.startswith("/"):
-        return None, "Unknown command."
+        return None, "Unknown command. Run /help to see available commands."
     if (
         state.active_run is not None
         and state.active_run.status is not ActiveRunStatus.AWAITING_APPROVAL

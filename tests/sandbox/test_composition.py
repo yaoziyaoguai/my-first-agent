@@ -162,6 +162,40 @@ def test_per_invocation_roots_live_outside_state_carveout(tmp_path):
     assert not (base / "temp").is_relative_to(tmp_path / "state")
 
 
+def test_system_temp_symlink_is_canonicalized_before_policy_binding(
+    tmp_path, monkeypatch
+):
+    import tempfile as _tempfile
+
+    workspace = _workspace(tmp_path)
+    state_root = tmp_path / "state"
+    host_home = tmp_path / "host-home"
+    state_root.mkdir()
+    host_home.mkdir()
+    real_temp = tmp_path / "real-temp"
+    real_temp.mkdir()
+    temp_alias = tmp_path / "temp-alias"
+    temp_alias.symlink_to(real_temp, target_is_directory=True)
+    monkeypatch.setattr(_tempfile, "gettempdir", lambda: str(temp_alias))
+
+    resources = build_sandbox_resources(
+        workspace=workspace,
+        state_root=state_root,
+        captured_path="/usr/bin:/bin",
+        host_home=host_home,
+        confiner=FakeConfiner(_qualified()),
+    )
+    registration = next(
+        item for item in resources.registrations if item.spec.name == "sandbox_exec"
+    )
+
+    binding = registration.prepare_binding(
+        {"executable": "/usr/bin/true", "mode": "read-only", "network": "off"}
+    )
+
+    assert binding["sandbox_mode"] == "read-only"
+
+
 def test_default_confiner_construction_is_lazy_and_backend_safe():
     # 默认路径构造 SeatbeltConfiner（探测延迟到 build 内一次只读 probe）；
     # 本测试不触发真实探测——仅验证符号存在与签名形状。

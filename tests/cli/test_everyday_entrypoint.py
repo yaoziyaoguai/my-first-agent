@@ -9,6 +9,7 @@ import pytest
 import main as entrypoint
 from agent.continuity import sessions
 from agent.continuity.archive import LocalConversationArchive
+from agent.memory.preferences import OwnerPreferenceStore
 from agent.memory.store import MemoryStore
 from agent.provider.fake_provider import FakeProvider
 from agent.provider.profile import (
@@ -178,7 +179,7 @@ def test_no_argument_start_uses_saved_profile_and_cwd(
     assert captured[0].request_path == "/v1/chat/completions"
     assert captured[0].strict_tools is False
     assert len(captured_limits) == 1
-    assert captured_limits[0].max_invalid_repairs == 8
+    assert captured_limits[0].max_invalid_repairs == 7
     # 020：交互入口注入 session state root 的本地 archive（长会话 compaction 前置）。
     assert len(captured_archives) == 1
     assert isinstance(captured_archives[0], LocalConversationArchive)
@@ -407,6 +408,71 @@ def test_explicit_fake_remains_available_without_a_saved_profile(tmp_path: Path)
 
     assert exit_code == 0
     assert "hello" in output
+
+
+def test_owner_preference_provider_mismatch_names_the_actual_store(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state-root"
+    state_root.mkdir(mode=0o700)
+    OwnerPreferenceStore.create(
+        state_root / "owner-preferences.json",
+        provider_trust_digest="different-provider-trust",
+    )
+    output: list[str] = []
+
+    exit_code = entrypoint.main(
+        [
+            "--workspace",
+            str(workspace),
+            "--state-root",
+            str(state_root),
+            "--provider",
+            "fake",
+        ],
+        input_fn=lambda _prompt: "/exit",
+        write_fn=output.append,
+    )
+
+    assert exit_code == 2
+    assert len(output) == 1
+    assert "Owner preference store" in output[0]
+    assert "different provider trust profile" in output[0]
+    assert "not a workspace Memory error" in output[0]
+    assert "were not changed" in output[0]
+
+
+def test_insecure_state_root_error_gives_a_non_mutating_recovery_choice(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "shared-state-root"
+    state_root.mkdir()
+    state_root.chmod(0o755)
+    output: list[str] = []
+
+    exit_code = entrypoint.main(
+        [
+            "--workspace",
+            str(workspace),
+            "--state-root",
+            str(state_root),
+            "--provider",
+            "fake",
+        ],
+        input_fn=lambda _prompt: "/exit",
+        write_fn=output.append,
+    )
+
+    assert exit_code == 2
+    assert len(output) == 1
+    assert "owner-only (0700)" in output[0]
+    assert "choose a different --state-root" in output[0]
+    assert "permissions were not changed" in output[0]
+    assert state_root.stat().st_mode & 0o777 == 0o755
 
 
 def test_missing_credential_reports_only_selected_environment_name(

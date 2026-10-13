@@ -33,6 +33,7 @@ from agent.runtime.contracts import (
     EvidenceOracleKind,
     ExecutionAuthorityClass,
     ExecutionIntent,
+    GoalAuthorizationBinding,
     JSONValue,
     KnownExecutedError,
     KnownNotExecuted,
@@ -279,7 +280,7 @@ class KernelToolRuntime:
                 source_authority=context.source_authority,
             )
             _canonical_json(binding)
-        except Exception:
+        except Exception as error:
             citation_rejection = self._citation_governance.binding_failure(
                 registration.spec.safety_policy
             )
@@ -288,6 +289,18 @@ class KernelToolRuntime:
                     call.tool_call_id,
                     citation_rejection.code,
                     citation_rejection.message,
+                )
+            if (
+                registration.spec.safety_policy.get("kind") == "browser_action"
+                and isinstance(error, (KeyError, TypeError, ValueError))
+            ):
+                # browser action 的 preparation 只解析 closed schema、opaque
+                # identity 与已存 observation；这些错误不含页面正文或凭据。
+                # 返回具体原因，避免模型在 fail-closed 边界外盲猜参数。
+                return self._error(
+                    call.tool_call_id,
+                    "binding_failure",
+                    f"Browser action parameters are invalid: {error}",
                 )
             return self._error(
                 call.tool_call_id,
@@ -306,6 +319,17 @@ class KernelToolRuntime:
                 "Tool policy evaluation failed closed.",
             )
         if decision is PolicyDecision.DENY:
+            if binding.get("reason") == "workspace_parent_missing":
+                return self._error(
+                    call.tool_call_id,
+                    "workspace_parent_missing",
+                    (
+                        "The target parent directory does not exist. Inspect the workspace, "
+                        "then use make_directory to create it explicitly one level at a time "
+                        "with approval, or choose an existing directory; no directory or file "
+                        "was created."
+                    ),
+                )
             if binding.get("reason") == "workspace_file_policy":
                 return self._error(
                     call.tool_call_id,
@@ -350,7 +374,9 @@ class KernelToolRuntime:
             return self._error(
                 call.tool_call_id,
                 "fact_admission_required",
-                "Workspace memory requires a Runtime-verified source fact.",
+                "Workspace Memory content must exactly match a prior "
+                "user message in this conversation. Ask the user to provide the exact "
+                "text as a separate message, then retry.",
             )
         if (
             registration.spec.safety_policy.get("kind")
@@ -362,11 +388,11 @@ class KernelToolRuntime:
                 "preference_admission_required",
                 "Owner preference mutation requires an exact user-confirmed source fact.",
             )
-        if decision is PolicyDecision.REQUIRE_APPROVAL and self._goal_authorizes(
-            registration.spec,
-            arguments,
-            context,
-        ):
+        goal_authorized = (
+            decision is PolicyDecision.REQUIRE_APPROVAL
+            and self._goal_authorizes(registration.spec, arguments, context)
+        )
+        if goal_authorized:
             decision = PolicyDecision.ALLOW
 
         process_candidate: ProcessAuthorityCandidateV1 | None = None
@@ -424,11 +450,12 @@ class KernelToolRuntime:
                 )
             try:
                 browser_candidate = self._build_browser_candidate(binding, context)
-            except (KeyError, TypeError, ValueError):
+            except (KeyError, TypeError, ValueError) as error:
                 return self._error(
                     call.tool_call_id,
                     "browser_binding_invalid",
-                    "Browser action safety binding is incomplete or invalid.",
+                    "Browser action safety binding is incomplete or invalid: "
+                    f"{error}",
                 )
             if decision is PolicyDecision.REQUIRE_APPROVAL:
                 browser_lease = self._match_browser_lease(browser_candidate, context)
@@ -446,6 +473,9 @@ class KernelToolRuntime:
             sandbox_lease=sandbox_lease,
             browser_lease=browser_lease,
             background_action_authority=background_action,
+            goal_authorization=(
+                context.goal_authorization if goal_authorized else None
+            ),
         )
         if background_action is not None:
             authority = context.background_execution_authority
@@ -496,8 +526,8 @@ class KernelToolRuntime:
                             request.preview
                             + "\nartifact verification required: "
                             + requirement.artifact_path
-                            + "\nplain yes/approve only authorizes the effect and is disabled "
-                            "for this request; use /approve-artifact <sha256> <path>"
+                            + "\napproval at this stage approves only the process effect; it "
+                            "does not confirm future artifact content"
                         ),
                     )
                 return ApprovalRequired(
@@ -784,13 +814,36 @@ class KernelToolRuntime:
                 executed=False,
                 metadata={"code": "tool_error"},
             )
+        metadata: dict[str, JSONValue] = {
+            "truncated": len(content) > registration.spec.output_limit_chars,
+            "tool_identity": registration.spec.identity_digest,
+        }
+        if registration.spec.side_effect is not SideEffectClass.READ_ONLY:
+            metadata.update(
+                {
+                    "tool_name": registration.spec.name,
+                    "governed_tool_receipt_kind": "governed_tool_v1",
+                    "receipt_digest": _digest_json(
+                        {
+                            "schema": "my-first-agent/governed-tool-receipt/v1",
+                            "tool_identity": registration.spec.identity_digest,
+                            "intent_digest": intent.intent_digest,
+                            "goal_id": intent.goal_id,
+                            "goal_revision": intent.goal_revision,
+                            "side_effect": intent.side_effect.value,
+                            "egress": intent.egress.value,
+                            "execution_authority": intent.execution_authority.value,
+                            "output_digest": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                            "executed": True,
+                            "is_error": False,
+                        }
+                    ),
+                }
+            )
         return ToolResult(
             tool_call_id=intent.tool_call_id,
             content=content[: registration.spec.output_limit_chars],
-            metadata={
-                "truncated": len(content) > registration.spec.output_limit_chars,
-                "tool_identity": registration.spec.identity_digest,
-            },
+            metadata=metadata,
         )
 
     @staticmethod
@@ -827,6 +880,7 @@ class KernelToolRuntime:
         sandbox_lease: SandboxAuthorityLeaseV1 | None = None,
         browser_lease: BrowserAuthorityLeaseV1 | None = None,
         background_action_authority: BackgroundActionAuthorityV1 | None = None,
+        goal_authorization: GoalAuthorizationBinding | None = None,
     ) -> ExecutionIntent:
         browser_takeover_request: BrowserTakeoverRequestV1 | None = None
         if spec.safety_policy.get("kind") == "browser_takeover":
@@ -881,7 +935,7 @@ class KernelToolRuntime:
             goal_id=context.goal_id,
             goal_revision=context.goal_revision,
             workspace_identity_digest=context.workspace_identity_digest,
-            goal_authorization=context.goal_authorization,
+            goal_authorization=goal_authorization,
             fact_admission=context.fact_admission,
             preference_admission=context.preference_admission,
             process_lease=process_lease,
@@ -1310,8 +1364,8 @@ class KernelToolRuntime:
         if action.action_fingerprint != expected_fingerprint:
             raise IntentConflictError("background action fingerprint changed")
 
-    @staticmethod
     def _goal_authorizes(
+        self,
         spec: ToolSpec,
         arguments: dict[str, JSONValue],
         context: ToolPrepareContext,
@@ -1326,7 +1380,17 @@ class KernelToolRuntime:
             or spec.side_effect is not SideEffectClass.WRITE
             or spec.safety_policy.get("workspace_scoped") is not True
             or not isinstance(target, str)
-            or target != binding.normalized_target
+            or binding.remaining_uses < 1
+        ):
+            return False
+        now = _parse_zoned_rfc3339(self._clock())
+        issued_at = _parse_zoned_rfc3339(binding.issued_at)
+        expires_at = _parse_zoned_rfc3339(binding.expires_at)
+        if (
+            now is None
+            or issued_at is None
+            or expires_at is None
+            or not issued_at <= now < expires_at
         ):
             return False
         return binding.authorizes(

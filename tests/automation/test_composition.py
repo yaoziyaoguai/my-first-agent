@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -9,7 +10,6 @@ from agent.automation.composition import (
     build_automation_control_core,
 )
 from agent.automation.contracts import OccurrenceControlStatus
-from agent.automation.management import ActivationUnavailableError
 from agent.automation.reconcile import ReconcileAutomationsV1
 from agent.automation.supervisor import (
     DeterministicOccurrenceExecutor,
@@ -33,6 +33,12 @@ def _active_core(
     wake: bool = True,
 ):
     service, repository, workspace, body = _service()
+    if not wake:
+        body = replace(
+            body,
+            wake_adapter_policy_digest=None,
+            definition_body_digest="",
+        )
     service.create(
         body,
         expected_snapshot_token="snapshot-token-0000",
@@ -161,8 +167,11 @@ def test_manual_reconcile_remains_available_without_a_cold_wake_adapter() -> Non
         wake=False,
     )
 
-    with pytest.raises(ActivationUnavailableError, match="wake qualification"):
-        core.management.preview(repository.load().records[0].automation_id)
+    preview = core.management.preview(repository.load().records[0].automation_id)
+    wake_section = next(
+        section for section in preview.sections if section.title == "wake_and_recovery"
+    )
+    assert "wake policy: manual reconcile only" in wake_section.lines
 
     result = core.reconcile(ReconcileAutomationsV1())
 

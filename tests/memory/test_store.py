@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import stat
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pytest
 from agent.memory.contracts import (
     MemoryCapacityError,
     MemoryCasMismatchError,
+    MemoryProviderProfileMismatchError,
     MemoryStoreError,
     ProviderTrustProfile,
 )
@@ -100,6 +102,23 @@ def test_malformed_store_fails_closed_without_overwrite(tmp_path: Path) -> None:
     original = path.read_bytes()
     with pytest.raises(MemoryStoreError):
         MemoryStore.load(path, workspace_scope_digest=SCOPE, profile=PROFILE)
+    assert path.read_bytes() == original
+
+
+def test_malformed_provider_profile_is_not_reported_as_a_trust_mismatch(
+    tmp_path: Path,
+) -> None:
+    path = _store_path(tmp_path)
+    MemoryStore.create(path, workspace_scope_digest=SCOPE, profile=PROFILE)
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["provider_profile"] = {"profile_id": PROFILE.profile_id}
+    path.write_text(json.dumps(document), encoding="utf-8")
+    original = path.read_bytes()
+
+    with pytest.raises(MemoryStoreError, match="profile is malformed") as caught:
+        MemoryStore.load(path, workspace_scope_digest=SCOPE, profile=PROFILE)
+
+    assert not isinstance(caught.value, MemoryProviderProfileMismatchError)
     assert path.read_bytes() == original
 
 

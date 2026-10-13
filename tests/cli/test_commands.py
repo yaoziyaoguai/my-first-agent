@@ -7,6 +7,7 @@ from agent.runtime.contracts import (
     ActiveRun,
     ActiveRunStatus,
     ApprovalRequest,
+    AuthoritySourceKind,
     BrowserTakeoverRequestV1,
     CancelBrowserTakeover,
     CancelGoal,
@@ -15,6 +16,7 @@ from agent.runtime.contracts import (
     ConversationState,
     ExecutingIntentRecord,
     ExecutionAuthorityClass,
+    GoalAuthorizationBinding,
     GoalStatus,
     LoadedSnapshot,
     PauseGoal,
@@ -24,6 +26,7 @@ from agent.runtime.contracts import (
     ResolveUnknownToolOutcome,
     Resume,
     ResumeGoal,
+    RevokeGoalTargetAuthority,
     RunResult,
     RunStatus,
     SubmitMessage,
@@ -48,6 +51,11 @@ class RecordingRuntime:
     def run_turn(self, action, snapshot):
         self.actions.append(action)
         return RunResult(RunStatus.COMPLETED, snapshot.state)
+
+
+class InterruptingRuntime:
+    def run_turn(self, action, snapshot):  # noqa: ANN001, ARG002
+        raise KeyboardInterrupt
 
 
 def _run_once(state: ConversationState, raw: str):
@@ -95,6 +103,47 @@ def test_approval_commands_require_the_exact_pending_id() -> None:
     assert action.request_id == request.request_id
     assert action.binding_digest == request.binding_digest
     assert action.approved is False
+
+    scoped_runtime, _, _ = _run_once(
+        state,
+        "/approve-goal-target approval-full-id",
+    )
+    scoped = scoped_runtime.actions[0]
+    assert isinstance(scoped, ResolveApproval)
+    assert scoped.approved is True
+    assert scoped.authorize_goal_target is True
+
+    directory_runtime, _, _ = _run_once(
+        state,
+        "/approve-goal-directory approval-full-id",
+    )
+    directory = directory_runtime.actions[0]
+    assert isinstance(directory, ResolveApproval)
+    assert directory.approved is True
+    assert directory.authorize_goal_directory is True
+
+
+def test_revoke_goal_target_command_maps_to_typed_action() -> None:
+    state = conversation_with_active_goal()
+    assert state.goal is not None
+    binding = GoalAuthorizationBinding.create(
+        binding_id="goal-target-authority:one",
+        goal_id=state.goal.goal_id,
+        goal_revision=state.goal.revision,
+        workspace_identity_digest=state.goal.workspace_identity_digest,
+        operation="write_file",
+        normalized_target="note.txt",
+        source_kind=AuthoritySourceKind.HUMAN_APPROVAL,
+        source_id="approval-one",
+        source_digest="action-one",
+        issued_at="2026-09-04T00:00:00Z",
+        expires_at="2026-09-04T01:00:00Z",
+    )
+    state = replace(state, goal_authorizations=(binding,))
+
+    runtime, _, _ = _run_once(state, "/revoke-goal-target")
+
+    assert isinstance(runtime.actions[0], RevokeGoalTargetAuthority)
 
 
 def test_recovery_and_resume_commands_map_to_typed_actions() -> None:
@@ -176,6 +225,71 @@ def test_exit_eof_and_idle_interrupt_never_submit_cancel() -> None:
 
         assert run_repl(runtime, StaticStore(state), input_fn=terminal_input) == 0
         assert runtime.actions == []
+
+
+def test_help_is_read_only_and_lists_real_commands() -> None:
+    runtime, output, exit_code = _run_once(ConversationState.new("conversation-1"), "/help")
+
+    assert exit_code == 0
+    assert runtime.actions == []
+    rendered = "\n".join(output)
+    for command in (
+        "/new",
+        "/sources",
+        "/leases",
+        "/browser-profiles",
+        "/pause",
+        "/resume",
+        "/cancel",
+        "/exit",
+    ):
+        assert command in rendered
+    assert "Unknown command" not in rendered
+
+
+def test_help_does_not_resolve_or_replace_a_pending_approval() -> None:
+    request = ApprovalRequest(
+        request_id="approval-help",
+        run_id="run-help",
+        tool_call_id="call-help",
+        binding_digest="binding-help",
+        preview="write fixture.txt (7 bytes)",
+    )
+    waiting = replace(
+        ConversationState.new("conversation-help"),
+        active_run=ActiveRun(
+            "run-help",
+            status=ActiveRunStatus.AWAITING_APPROVAL,
+            phase=ContinuationPhase.TOOL,
+            pending_request=request,
+            tool_calls=(ToolCall("call-help", "write_file", {}),),
+        ),
+    )
+
+    runtime, output, exit_code = _run_once(waiting, "/help")
+
+    assert exit_code == 0
+    assert runtime.actions == []
+    assert any("write fixture.txt" in item for item in output)
+    assert any("/approve <request-id>" in item for item in output)
+
+
+def test_provider_wait_interrupt_exits_cleanly_and_keeps_saved_state() -> None:
+    output: list[str] = []
+    state = conversation_with_active_goal()
+
+    exit_code = run_repl(
+        InterruptingRuntime(),
+        StaticStore(state),
+        input_fn=lambda _prompt: "continue the task",
+        write_fn=output.append,
+        run_id_factory=lambda: "run-interrupted",
+    )
+
+    assert exit_code == 130
+    assert output[0] == "Working..."
+    assert "Saved state was kept" in output[-1]
+    assert "may still have completed" in output[-1]
 
 
 def test_goal_controls_map_to_exact_typed_actions() -> None:

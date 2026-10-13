@@ -42,6 +42,39 @@ def test_private_roots_reject_case_variants_for_all_operations(tmp_path: Path) -
             boundary.validate_relative(f"{variant}/secret.txt")
 
 
+@pytest.mark.parametrize(
+    "project_path",
+    (
+        "",
+        ".",
+        "../config",
+        "/config",
+        "config/*",
+        "config/app?.yaml",
+        "config/.env",
+        "config/.envrc",
+        "config/.env-production",
+        "config/config.local",
+        "memory/private.key",
+        "sessions/public.txt",
+        ".claude/settings.json",
+    ),
+)
+def test_project_path_exceptions_reject_ambiguous_or_unapproved_roots(
+    tmp_path: Path,
+    project_path: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    with pytest.raises(WorkspaceSecurityError):
+        WorkspaceBoundary(
+            workspace,
+            private_roots=("config", "sessions"),
+            project_paths=(project_path,),
+        )
+
+
 def test_sensitive_exact_names_reject_case_variants(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -78,4 +111,3 @@ def test_sensitive_components_are_denied_at_every_depth(
 
     with pytest.raises(WorkspaceSecurityError):
         boundary.validate_relative(path)
-

@@ -79,6 +79,18 @@ class ProviderTransportError(ProviderRetryableError):
     code = "provider_transport"
 
 
+class ProviderStreamInterruptedError(ProviderRetryableError):
+    """请求已产生流式响应，结果未知；只能由显式 resume 再次发送。"""
+
+    code = "provider_stream_interrupted"
+
+
+class ProviderStreamCancelledError(ProviderRetryableError):
+    """流式连接已因当前 invocation 的受控取消请求而关闭。"""
+
+    code = "provider_stream_cancelled"
+
+
 __all__ = [
     "ModelProvider",
     "ProviderAuthError",
@@ -91,4 +103,6 @@ __all__ = [
     "ProviderRetryableError",
     "ProviderTimeoutError",
     "ProviderTransportError",
+    "ProviderStreamInterruptedError",
+    "ProviderStreamCancelledError",
 ]

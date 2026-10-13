@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +44,7 @@ from agent.subagent.contracts import (
     ChildProfile,
     ChildProviderSpec,
     ChildRunResult,
+    ChildSourceEvidence,
     ProviderDeadlineCapability,
     TerminationReceiptState,
 )
@@ -64,6 +66,14 @@ class _ChildConfig:
     objective: str
     handoff: str
     parent_idempotency_key: str
+    workspace_root: str | None
+    protected_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ChildExecution:
+    outcome: dict | None
+    interruption_reason: str | None = None
 
 
 class ChildProcessRunner:
@@ -77,6 +87,8 @@ class ChildProcessRunner:
         python: str | None = None,
         hard_deadline_seconds: float | None = None,
         poll_interval: float = _POLL_INTERVAL,
+        workspace_root: Path | None = None,
+        protected_paths: tuple[Path, ...] = (),
     ) -> None:
         self._spec = provider_spec
         self._profile = profile
@@ -89,6 +101,12 @@ class ChildProcessRunner:
         if self._hard_deadline <= 0:
             raise ValueError("hard_deadline_seconds must be positive")
         self._poll_interval = poll_interval
+        self._workspace_root = (
+            workspace_root.resolve(strict=True) if workspace_root is not None else None
+        )
+        self._protected_paths = tuple(
+            path.resolve(strict=False) for path in protected_paths
+        )
 
     @property
     def profile(self) -> ChildProfile:
@@ -113,15 +131,38 @@ class ChildProcessRunner:
         objective: str,
         handoff: str,
         parent_idempotency_key: str,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> ChildRunResult:
         child_run_id = derive_child_identity(parent_idempotency_key)[1]
-        config = _ChildConfig(self._spec, self._profile, objective, handoff, parent_idempotency_key)
+        if _cancellation_requested(cancellation_requested):
+            return ChildRunResult(
+                status=RunStatus.CANCELLED,
+                run_id=child_run_id,
+                message="",
+                reason="cancelled_before_start",
+                model_calls=0,
+                tool_calls=0,
+                receipt_state=TerminationReceiptState.TERMINATED,
+            )
+        config = _ChildConfig(
+            self._spec,
+            self._profile,
+            objective,
+            handoff,
+            parent_idempotency_key,
+            str(self._workspace_root) if self._workspace_root is not None else None,
+            tuple(str(path) for path in self._protected_paths),
+        )
         config_path = self._write_config(config)
         config_dir = config_path.parent
         cleanup_succeeded = False
         termination_unconfirmed = False
         try:
-            outcome = self._run_child(config_path)
+            execution = self._run_child(
+                config_path,
+                cancellation_requested=cancellation_requested,
+            )
+            outcome = execution.outcome
         except ProcessCleanupError:
             # group identity/终止/清理无法确认：不解析任何 child 输出，fail closed。
             outcome = None
@@ -153,8 +194,8 @@ class ChildProcessRunner:
                 run_id=child_run_id,
                 message="",
                 reason="cleanup_failed",
-                model_calls=1 if outcome is not None else 0,
-                tool_calls=0,
+                model_calls=_bounded_count(outcome, "model_calls") if outcome else 0,
+                tool_calls=_bounded_count(outcome, "tool_calls") if outcome else 0,
                 receipt_state=(
                     TerminationReceiptState.TERMINATED
                     if outcome is not None
@@ -164,14 +205,20 @@ class ChildProcessRunner:
 
         if outcome is not None:
             status = _status_from_name(outcome.get("status"))
+            sources = _verified_outcome_sources(
+                outcome,
+                workspace_root=self._workspace_root,
+                protected_paths=self._protected_paths,
+            )
             return ChildRunResult(
                 status=status,
                 run_id=child_run_id,
                 message=str(outcome.get("message") or "")[:4_000],
                 reason=child_status_reason(status),
-                model_calls=1,
-                tool_calls=0,
+                model_calls=_bounded_count(outcome, "model_calls", default=1),
+                tool_calls=_bounded_count(outcome, "tool_calls"),
                 receipt_state=TerminationReceiptState.TERMINATED,
+                sources=sources,
             )
 
         # deadline kill 或 child 未写出合法结果：provider call 可能已发生 → UNCONFIRMED。
@@ -179,13 +226,18 @@ class ChildProcessRunner:
             status=RunStatus.FAILED_FATAL,
             run_id=child_run_id,
             message="",
-            reason="unconfirmed_outcome",
+            reason=execution.interruption_reason or "unconfirmed_outcome",
             model_calls=0,
             tool_calls=0,
             receipt_state=TerminationReceiptState.UNCONFIRMED,
         )
 
-    def _run_child(self, config_path: Path) -> dict | None:
+    def _run_child(
+        self,
+        config_path: Path,
+        *,
+        cancellation_requested: Callable[[], bool] | None = None,
+    ) -> _ChildExecution:
         env = self._child_env()
         proc = subprocess.Popen(  # noqa: SUT603 - child is operator-trusted, bounded argv
             [self._python, "-m", "agent.subagent.child", str(config_path)],
@@ -211,8 +263,12 @@ class ChildProcessRunner:
                 raise
             deadline = time.monotonic() + self._hard_deadline
             timed_out = False
+            cancelled = False
             while True:
                 if proc.poll() is not None:
+                    break
+                if _cancellation_requested(cancellation_requested):
+                    cancelled = True
                     break
                 if time.monotonic() >= deadline:
                     timed_out = True
@@ -239,19 +295,20 @@ class ChildProcessRunner:
                 )
             # group 消失已确认 → stdout 的所有写端都已关闭，read 不会无限阻塞。
             stdout = _read_bounded(proc.stdout, _MAX_RESULT_BYTES)
+            if cancelled:
+                return _ChildExecution(None, "cancelled_unconfirmed")
             if timed_out or proc.returncode != 0:
-                return None
+                return _ChildExecution(None)
             if stdout is None:
                 # oversized child output → 无法信任为合法结果 → UNCONFIRMED。
-                return None
-            return _parse_result(stdout)
+                return _ChildExecution(None)
+            return _ChildExecution(_parse_result(stdout))
         finally:
             # 显式关闭 child stdout pipe（FileIO），避免残留到 GC 触发 unclosed
             # ResourceWarning / unraisable（与 MCP bridge transport 同类的资源泄漏）。
             # stdin 未用 PIPE、stderr 为 DEVNULL，均无需显式关闭。
             if proc.stdout is not None:
                 proc.stdout.close()
-
     def _child_env(self) -> dict:
         # 子进程必须 import 同一份 agent：用 parent 自身的 agent 源根作为 PYTHONPATH，
         # 不继承可能把 dirty-tree 代码混入的其它路径。credential 经 env name 在子进程内读取，
@@ -273,6 +330,8 @@ class ChildProcessRunner:
             "objective": config.objective,
             "handoff": config.handoff,
             "parent_idempotency_key": config.parent_idempotency_key,
+            "workspace_root": config.workspace_root,
+            "protected_paths": list(config.protected_paths),
         }
         blob = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         if len(blob) > 200_000:
@@ -284,6 +343,16 @@ class ChildProcessRunner:
         finally:
             os.close(fd)
         return config_path
+
+
+def _cancellation_requested(callback: Callable[[], bool] | None) -> bool:
+    if callback is None:
+        return False
+    try:
+        return bool(callback())
+    except Exception:
+        # control inbox observation is advisory; a broken observer cannot invent cancel.
+        return False
 
 
 def _remove_run_dir(config_path: Path, config_dir: Path) -> bool:
@@ -326,6 +395,8 @@ def _spec_to_dict(spec: ChildProviderSpec) -> dict:
         "thinking_mode": spec.thinking_mode,
         "request_path": spec.request_path,
         "strict_tools": spec.strict_tools,
+        "attempt_ledger_path": spec.attempt_ledger_path,
+        "max_model_attempts": spec.max_model_attempts,
     }
 
 
@@ -358,6 +429,37 @@ def _parse_result(stdout: bytes) -> dict | None:
     if not isinstance(parsed, dict) or "status" not in parsed:
         return None
     return parsed
+
+
+def _bounded_count(outcome: dict, name: str, *, default: int = 0) -> int:
+    value = outcome.get(name, default)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        return 0
+    return min(value, 1_000)
+
+
+def _verified_outcome_sources(
+    outcome: dict,
+    *,
+    workspace_root: Path | None,
+    protected_paths: tuple[Path, ...],
+) -> tuple[ChildSourceEvidence, ...]:
+    raw_sources = outcome.get("sources", [])
+    if not isinstance(raw_sources, list):
+        return ()
+    parsed: list[ChildSourceEvidence] = []
+    for raw in raw_sources[:16]:
+        try:
+            parsed.append(ChildSourceEvidence.from_json(raw))
+        except ValueError:
+            continue
+    from agent.subagent.evidence import filter_current_child_sources
+
+    return filter_current_child_sources(
+        parsed,
+        workspace_root=workspace_root,
+        protected_paths=protected_paths,
+    )
 
 
 def _read_bounded(stream, max_bytes: int) -> bytes | None:

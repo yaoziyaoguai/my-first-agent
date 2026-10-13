@@ -63,10 +63,12 @@ def test_public_signature_is_exactly_frozen(monkeypatch):
         "enabled",
         "resolver",
         "playwright_factory",
+        "loopback_authority",
     ]
     assert signature.parameters["enabled"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["resolver"].default is None
     assert signature.parameters["playwright_factory"].default is None
+    assert signature.parameters["loopback_authority"].default is None
 
 
 def test_missing_bundled_chromium_binary_fails_closed(tmp_path, monkeypatch):
@@ -201,6 +203,39 @@ def test_composition_gives_adapter_and_tools_the_same_quarantine(tmp_path, monke
 
     tool_owner = resources.registrations[2].func.__self__
     assert captured["quarantine"] is tool_owner._quarantine
+
+
+def test_composition_binds_same_managed_owner_to_browser_and_tools(tmp_path, monkeypatch):
+    import agent.browser.playwright_adapter as adapter_module
+    import agent.composition as composition_module
+    from agent.composition import build_managed_web_resources
+
+    captured = {}
+
+    class RecordingEnvironment:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def shutdown(self):
+            return None
+
+    monkeypatch.setattr(
+        composition_module, "_browser_binary_available_for_factory", lambda: True
+    )
+    monkeypatch.setattr(adapter_module, "PlaywrightBrowserEnvironment", RecordingEnvironment)
+    managed = build_managed_web_resources(tmp_path, captured_path="/usr/bin:/bin")
+    resources = build_browser_resources(
+        tmp_path,
+        tmp_path / "state-managed",
+        enabled=True,
+        playwright_factory=lambda: None,
+        loopback_authority=managed.owner,
+    )
+
+    tool_owner = resources.registrations[0].func.__self__
+    assert tool_owner._loopback_authority is managed.owner
+    assert captured["loopback_verifier"].__self__ is managed.owner
+    managed.closeables[0]()
 
 
 def test_profile_root_bad_permissions_give_single_closed_reason(tmp_path):

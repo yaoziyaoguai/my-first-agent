@@ -1473,47 +1473,15 @@ def test_rejected_unrelated_process_does_not_authorize_blocked() -> None:
         store.load(),
     )
 
-    assert second.status is RunStatus.AWAITING_APPROVAL
-    assert second.request is not None
-    assert second.request.tool_call_id == "exact-process"
+    assert second.status is RunStatus.CANCELLED
+    assert second.error_code == "approval_declined"
+    assert second.request is None
     assert invoked == []
-    assert any(
-        fact.content.get("code") == "blocked_claim_not_verified"
-        and "local_process" in fact.content.get("text", "")
-        for fact in store.state.facts
-    )
     assert store.state.goal is not None
     assert store.state.goal.status is not GoalStatus.BLOCKED
-
-    third = runtime.run_turn(
-        ResolveApproval(
-            conversation_id=state.conversation_id,
-            action_seq=store.state.next_action_seq,
-            expected_revision=store.state.revision,
-            request_id=second.request.request_id,
-            binding_digest=second.request.binding_digest,
-            approved=False,
-        ),
-        store.load(),
-    )
-
-    assert third.status is RunStatus.COMPLETED
-    assert third.message == (
-        "The requested local process was not run because you declined approval. "
-        "No process was started, so the task remains blocked."
-    )
-    assert invoked == []
-    assert store.state.goal is not None
-    assert store.state.goal.status is GoalStatus.BLOCKED
-    assert store.state.goal.next_step == "approve the exact requested local process"
-    assert store.state.facts[-1].content == {
-        "code": "blocked_claim",
-        "blocker": third.message,
-        "safe_attempts": [
-            "requested the exact local process and recorded the denial without starting it"
-        ],
-        "resume_condition": "approve the exact requested local process",
-    }
+    assert len(provider.calls) == 2
+    assert store.state.facts[-1].content["tool_call_id"] == "wrong-process"
+    assert store.state.facts[-1].content["rejected"] is True
 
 
 @pytest.mark.parametrize(

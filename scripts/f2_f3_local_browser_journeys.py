@@ -40,9 +40,50 @@ _COOPERATIVE_CLEANUP_SECONDS = 15.0
 _TERM_GRACE_SECONDS = 1.0
 _KILL_GRACE_SECONDS = 1.0
 _POST_KILL_VERIFY_SECONDS = 6.0
-# 子进程 stdout/stderr 有界排空上限。
+# 子进程 stdout/stderr 有界排空上限（真实字节）。
 _CHILD_STDOUT_LIMIT = 1 * 1024 * 1024
 _CHILD_STDERR_LIMIT = 64 * 1024
+# EV-01：select 单次切片与退出后排空期限。排空期限独立于工作预算——继承写端
+# 的后代可能让 pipe 永不 EOF，等待必须封顶。
+_SELECT_SLICE_SECONDS = 0.2
+_DRAIN_DEADLINE_SECONDS = 1.0
+
+# EV-03：外部参数与子进程记录里的规范 journey 名的唯一映射。两边名字不同，
+# 必须显式映射，不能直接比较导致正例全失败。
+_JOURNEY_CANONICAL = {
+    "f2": "f2_restart_outclosing",
+    "d06": "d06_submit_readback_cleanup",
+}
+
+
+class _BoundedBytes:
+    """EV-01：按真实**字节**计数的有界保留器。
+
+    超过上限后继续排空 pipe（避免子进程写满管道阻塞）但不再追加保留内容；
+    计数始终是字节，不因 UTF-8 分片解码而少计。UTF-8 分片在最后统一解码。
+    """
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self._chunks: list[bytes] = []
+        self.retained = 0
+        self.total = 0
+
+    def feed(self, chunk: bytes) -> None:
+        self.total += len(chunk)
+        room = self.limit - self.retained
+        if room <= 0:
+            return
+        kept = chunk[:room]
+        self._chunks.append(kept)
+        self.retained += len(kept)
+
+    @property
+    def overflowed(self) -> bool:
+        return self.total > self.limit
+
+    def text(self) -> str:
+        return b"".join(self._chunks).decode("utf-8", errors="replace")
 
 
 def _clock():
@@ -241,76 +282,143 @@ def _lease(candidate) -> ProcessAuthorityLeaseV1:
 def journey_f2_restart_outclosing(base: Path) -> dict:
     """A08/F2：真实 Chromium open → 正常 shutdown → 新 owner 用旧 ref 补记。
 
-    S3-A：两代 resources 各自独立词法作用域清理 owner；第一代退出作用域、
-    清理确认并核对 durable ledger 后，才创建第二代 owner；第一代失败不启动
-    第二代。清理失败有界聚合，任务失败与清理失败分开保留。
+    EV-02：每代有独立的词法清理 owner，且**取得资源后立刻登记、再运行可能失败
+    的 readiness/open/ledger 检查**——任何一点抛异常都由本代 finally 收口。
+    第一代确认清理并核对 durable ledger 后，才创建第二代；第一代失败不启动
+    第二代。清理失败有界聚合（逆序、每 callback 至多一次、一个抛错仍尝试剩余），
+    任务失败与清理失败按有界错误码分别保留。constructor 在返回前失败的资源由
+    constructor 自己负责——调用者拿不到 handle，也不假装清理过。
     """
-
-    _check_stop()
 
     _check_stop()
 
     workspace = base / "workspace"
     workspace.mkdir()
     state_root = base / "state"
+
+    # ---- 第一代 ----
     generation1 = _JourneyCleanup("gen1")
-    resources1 = build_browser_resources(workspace, state_root, enabled=True)
-    for closeable in resources1.closeables:
-        generation1.register(closeable)
-    assert resources1.readiness.value == "ready", resources1.reason_code
-    runtime1 = KernelToolRuntime(resources1.registrations, clock=_clock)
-    opened = _invoke_governed(
-        runtime1,
-        ToolCall("open-1", "browser_open", {"mode": "public_read_ephemeral"}),
-    )
-    assert isinstance(opened, ToolResult) and opened.is_error is False
-    session_ref = opened.metadata["session_ref"]
-    # 正常 shutdown：真实底层 close（CLEANED）+ 凭据落盘。
-    gen1_failures = generation1.close()
-    if gen1_failures:
+    generation1_failures: list[dict] = []
+    generation1_failure: str | None = None
+    session_ref: str | None = None
+    try:
+        resources1 = build_browser_resources(workspace, state_root, enabled=True)
+        for closeable in resources1.closeables:
+            generation1.register(closeable)
+        if resources1.readiness.value != "ready":
+            generation1_failure = "generation1_not_ready"
+        else:
+            runtime1 = KernelToolRuntime(resources1.registrations, clock=_clock)
+            opened = _invoke_governed(
+                runtime1,
+                ToolCall("open-1", "browser_open", {"mode": "public_read_ephemeral"}),
+            )
+            if isinstance(opened, ToolResult) and opened.is_error is False:
+                session_ref = opened.metadata["session_ref"]
+            else:
+                generation1_failure = "generation1_open_failed"
+    except _JourneyStopRequested:
+        generation1_failure = "stopped_by_parent"
+    except Exception as error:  # noqa: BLE001
+        generation1_failure = f"generation1_{type(error).__name__}"
+    finally:
+        generation1_failures = generation1.close()
+    if generation1_failures:
         return {
             "journey": "f2_restart_outclosing",
             "passed": False,
+            "cleanup_confirmed": False,
             "failure_codes": ["generation1_cleanup_failed"],
-            "cleanup_failures": gen1_failures,
+            "cleanup_failures": generation1_failures,
         }
-    record = BrowserSessionStore(root=state_root / "browser" / "sessions").load(
-        session_ref
-    )
+    if generation1_failure is not None:
+        return {
+            "journey": "f2_restart_outclosing",
+            "passed": False,
+            "cleanup_confirmed": True,
+            "failure_codes": [generation1_failure],
+        }
+    # 第一代已确认清理：核对 durable ledger 后才允许创建第二代。
+    try:
+        record = BrowserSessionStore(root=state_root / "browser" / "sessions").load(
+            session_ref
+        )
+    except _JourneyStopRequested:
+        return {
+            "journey": "f2_restart_outclosing",
+            "passed": False,
+            "cleanup_confirmed": True,
+            "failure_codes": ["stopped_by_parent"],
+        }
+    except Exception as error:  # noqa: BLE001
+        return {
+            "journey": "f2_restart_outclosing",
+            "passed": False,
+            "cleanup_confirmed": True,
+            "failure_codes": [f"generation1_ledger_{type(error).__name__}"],
+        }
     credential = record.phase is SessionPhase.CLOSED
     if not credential:
-        # 第一代未确认收口：不启动第二代（不掩盖清理缺口）。
+        # 第一代未确认收口：不启动第二代（不掩盖清理缺口）。清理本身已确认
+        # （generation1_failures 为空），失败在 target 层。
         return {
             "journey": "f2_restart_outclosing",
             "passed": False,
+            "cleanup_confirmed": True,
             "failure_codes": ["generation1_ledger_not_closed"],
         }
+
+    # ---- 第二代 ----
     generation2 = _JourneyCleanup("gen2")
-    resources2 = build_browser_resources(workspace, state_root, enabled=True)
-    for closeable in resources2.closeables:
-        generation2.register(closeable)
-    runtime2 = KernelToolRuntime(resources2.registrations, clock=_clock)
-    closed = _invoke_governed(
-        runtime2,
-        ToolCall("close-2", "browser_close", {"session_ref": session_ref}),
-    )
-    gen2_failures = generation2.close()
+    generation2_failures: list[dict] = []
+    generation2_failure: str | None = None
+    closed: ToolResult | None = None
+    try:
+        resources2 = build_browser_resources(workspace, state_root, enabled=True)
+        for closeable in resources2.closeables:
+            generation2.register(closeable)
+        runtime2 = KernelToolRuntime(resources2.registrations, clock=_clock)
+        closed = _invoke_governed(
+            runtime2,
+            ToolCall("close-2", "browser_close", {"session_ref": session_ref}),
+        )
+    except _JourneyStopRequested:
+        generation2_failure = "stopped_by_parent"
+    except Exception as error:  # noqa: BLE001
+        generation2_failure = f"generation2_{type(error).__name__}"
+    finally:
+        generation2_failures = generation2.close()
+    if generation2_failures:
+        return {
+            "journey": "f2_restart_outclosing",
+            "passed": False,
+            "cleanup_confirmed": False,
+            "failure_codes": ["generation2_cleanup_failed"],
+            "cleanup_failures": generation2_failures,
+        }
+    if generation2_failure is not None:
+        return {
+            "journey": "f2_restart_outclosing",
+            "passed": False,
+            "cleanup_confirmed": True,
+            "failure_codes": [generation2_failure],
+        }
     ok = (
         isinstance(closed, ToolResult)
         and closed.is_error is False
         and closed.metadata.get("cleanup_outcome") == "cleaned"
         and closed.metadata.get("closure_basis") == "durable_ledger_closed"
         and credential
-        and not gen2_failures
     )
     return {
         "journey": "f2_restart_outclosing",
         "passed": bool(ok),
+        "cleanup_confirmed": True,
         "session_ref": session_ref,
         "cleanup_outcome": closed.metadata.get("cleanup_outcome"),
         "closure_basis": closed.metadata.get("closure_basis"),
         "credential_persisted": credential,
-        "cleanup_failures": gen2_failures,
+        "cleanup_failures": generation2_failures,
     }
 
 
@@ -337,24 +445,28 @@ def _invoke_with_lease(runtime, call: ToolCall) -> ToolResult:
 
 
 def journey_d06_submit_readback_cleanup(base: Path, candidate: Path) -> dict:
-    """A13/D06：真实浏览器提交后列表更新；start/open/act/close/stop 全走治理路径。"""
+    """A13/D06：真实浏览器提交后列表更新；start/open/act/close/stop 全走治理路径。
+
+    EV-02：managed_web 与 browser 两组资源各自登记到同一个逆序清理 owner，且
+    **取得即登记**——readiness 检查、start/open/act/close/stop 任一点抛异常都由
+    finally 收口。清理失败不掩盖任务失败：两者按有界错误码分别保留，一个回调
+    抛错仍尝试剩余回调。
+    """
 
     workspace = base / "workspace"
     workspace.mkdir(exist_ok=True)
     state_root = base / "state"
-    managed = build_managed_web_resources(
-        candidate, captured_path="/usr/bin:/bin:/usr/local/bin"
-    )
-    port = _free_port()
-    runtime_m = KernelToolRuntime(managed.registrations, clock=_clock)
-    import contextlib
-
-    close_stack = contextlib.ExitStack()
-    for closeable in managed.closeables:
-        close_stack.callback(closeable)
-    browser_resources = None
-    started = stopped = None
+    owner = _JourneyCleanup("d06")
+    target_failure: str | None = None
+    result_payload: dict | None = None
     try:
+        managed = build_managed_web_resources(
+            candidate, captured_path="/usr/bin:/bin:/usr/local/bin"
+        )
+        for closeable in managed.closeables:
+            owner.register(closeable)
+        port = _free_port()
+        runtime_m = KernelToolRuntime(managed.registrations, clock=_clock)
         started = _invoke_with_lease(
             runtime_m,
             ToolCall(
@@ -369,158 +481,185 @@ def journey_d06_submit_readback_cleanup(base: Path, candidate: Path) -> dict:
                 },
             ),
         )
-        payload = json.loads(started.content)
-        resource_ref = payload["resource_ref"]
+        resource_ref = json.loads(started.content)["resource_ref"]
         browser_resources = build_browser_resources(
             workspace, state_root, enabled=True, loopback_authority=managed.owner
         )
-        assert browser_resources.readiness.value == "ready"
         for closeable in browser_resources.closeables:
-            close_stack.callback(closeable)
-        runtime_b = KernelToolRuntime(browser_resources.registrations, clock=_clock)
-        opened = _invoke_governed(
-            runtime_b,
-            ToolCall(
-                "open-1",
-                "browser_open",
-                {
-                    "mode": "task_loopback_ephemeral",
-                    "managed_process_ref": resource_ref,
-                },
-            ),
-        )
-        session_ref = opened.metadata["session_ref"]
-        observed = _invoke_governed(
-            runtime_b,
-            ToolCall(
-                "observe-1", "browser_observe", {"session_ref": session_ref}
-            ),
-        )
-        first_view = json.loads(observed.content)
-        target = next(
-            (ref for ref in first_view["element_refs"] if ref["role"] == "textbox"),
-            None,
-        )
-        if target is None:
-            raise RuntimeError("fixture textbox not found in ARIA projection")
-        button = next(
-            (ref for ref in first_view["element_refs"] if ref["role"] == "button"),
-            None,
-        )
-        if button is None:
-            raise RuntimeError("fixture submit button not found in ARIA projection")
-        acted = _invoke_browser_act(
-            runtime_b,
-            ToolCall(
-                "act-1",
-                "browser_act",
-                {
-                    "session_ref": session_ref,
-                    "kind": "fill_form",
-                    "observation_digest": observed.metadata["observation_digest"],
-                    "page_id": observed.metadata["page_id"],
-                    "frame_id": observed.metadata["frame_id"],
-                    "target_ref": target["ref"],
-                    "params": {"fields": {target["name"]: "journey item 42"}},
-                },
-            ),
-        )
-        assert acted.metadata.get("outcome") == "effect_applied"
-        observed2 = _invoke_governed(
-            runtime_b,
-            ToolCall(
-                "observe-2", "browser_observe", {"session_ref": session_ref}
-            ),
-        )
-        assert observed2.metadata["observation_digest"]
-        acted2 = _invoke_browser_act(
-            runtime_b,
-            ToolCall(
-                "act-2",
-                "browser_act",
-                {
-                    "session_ref": session_ref,
-                    "kind": "click",
-                    "observation_digest": observed2.metadata["observation_digest"],
-                    "page_id": observed2.metadata["page_id"],
-                    "frame_id": observed2.metadata["frame_id"],
-                    "target_ref": button["ref"],
-                },
-            ),
-        )
-        assert acted2.metadata.get("outcome") == "effect_applied"
-        observed3 = _invoke_governed(
-            runtime_b,
-            ToolCall(
-                "observe-3", "browser_observe", {"session_ref": session_ref}
-            ),
-        )
-        final_view = json.loads(observed3.content)
-        # ARIA 投影中 li 不携带文本 name：以 li 数量变化证明"提交后列表更新"。
-        list_updated = (
-            final_view["aria_projection"].count("- li")
-            > first_view["aria_projection"].count("- li")
-        )
-        closed = _invoke_governed(
-            runtime_b,
-            ToolCall("close-1", "browser_close", {"session_ref": session_ref}),
-        )
-        stopped = runtime_m.invoke(
-            runtime_m.prepare(
-                ToolCall("mstop-1", "managed_web_stop", {"resource_ref": resource_ref}),
-                _context(),
+            owner.register(closeable)
+        if browser_resources.readiness.value != "ready":
+            target_failure = "browser_not_ready"
+        else:
+            runtime_b = KernelToolRuntime(browser_resources.registrations, clock=_clock)
+            opened = _invoke_governed(
+                runtime_b,
+                ToolCall(
+                    "open-1",
+                    "browser_open",
+                    {
+                        "mode": "task_loopback_ephemeral",
+                        "managed_process_ref": resource_ref,
+                    },
+                ),
             )
-        )
-        ok = (
-            list_updated
-            and closed.is_error is False
-        )
-        ok = (
-            list_updated
-            and closed.is_error is False
-            and closed.metadata.get("cleanup_outcome") == "cleaned"
-            and json.loads(stopped.content).get("cleanup") == "confirmed"
-        )
+            session_ref = opened.metadata["session_ref"]
+            observed = _invoke_governed(
+                runtime_b,
+                ToolCall(
+                    "observe-1", "browser_observe", {"session_ref": session_ref}
+                ),
+            )
+            first_view = json.loads(observed.content)
+            target = next(
+                (ref for ref in first_view["element_refs"] if ref["role"] == "textbox"),
+                None,
+            )
+            if target is None:
+                raise RuntimeError("fixture textbox not found in ARIA projection")
+            button = next(
+                (ref for ref in first_view["element_refs"] if ref["role"] == "button"),
+                None,
+            )
+            if button is None:
+                raise RuntimeError("fixture submit button not found in ARIA projection")
+            acted = _invoke_browser_act(
+                runtime_b,
+                ToolCall(
+                    "act-1",
+                    "browser_act",
+                    {
+                        "session_ref": session_ref,
+                        "kind": "fill_form",
+                        "observation_digest": observed.metadata["observation_digest"],
+                        "page_id": observed.metadata["page_id"],
+                        "frame_id": observed.metadata["frame_id"],
+                        "target_ref": target["ref"],
+                        "params": {"fields": {target["name"]: "journey item 42"}},
+                    },
+                ),
+            )
+            assert acted.metadata.get("outcome") == "effect_applied"
+            observed2 = _invoke_governed(
+                runtime_b,
+                ToolCall(
+                    "observe-2", "browser_observe", {"session_ref": session_ref}
+                ),
+            )
+            assert observed2.metadata["observation_digest"]
+            acted2 = _invoke_browser_act(
+                runtime_b,
+                ToolCall(
+                    "act-2",
+                    "browser_act",
+                    {
+                        "session_ref": session_ref,
+                        "kind": "click",
+                        "observation_digest": observed2.metadata["observation_digest"],
+                        "page_id": observed2.metadata["page_id"],
+                        "frame_id": observed2.metadata["frame_id"],
+                        "target_ref": button["ref"],
+                    },
+                ),
+            )
+            assert acted2.metadata.get("outcome") == "effect_applied"
+            observed3 = _invoke_governed(
+                runtime_b,
+                ToolCall(
+                    "observe-3", "browser_observe", {"session_ref": session_ref}
+                ),
+            )
+            final_view = json.loads(observed3.content)
+            # ARIA 投影中 li 不携带文本 name：以 li 数量变化证明"提交后列表更新"。
+            list_updated = (
+                final_view["aria_projection"].count("- li")
+                > first_view["aria_projection"].count("- li")
+            )
+            closed = _invoke_governed(
+                runtime_b,
+                ToolCall("close-1", "browser_close", {"session_ref": session_ref}),
+            )
+            stopped = runtime_m.invoke(
+                runtime_m.prepare(
+                    ToolCall("mstop-1", "managed_web_stop", {"resource_ref": resource_ref}),
+                    _context(),
+                )
+            )
+            ok = (
+                list_updated
+                and closed.is_error is False
+                and closed.metadata.get("cleanup_outcome") == "cleaned"
+                and json.loads(stopped.content).get("cleanup") == "confirmed"
+            )
+            result_payload = {
+                "journey": "d06_submit_readback_cleanup",
+                "passed": bool(ok),
+                "list_updated_after_submit": list_updated,
+                "browser_close": closed.metadata.get("cleanup_outcome"),
+                "managed_web_stop": json.loads(stopped.content).get("cleanup"),
+                # R3b 分层：工具层 receipts（上面）/观察层（li 计数）/业务层（冻结
+                # 外置 grader 单独运行，不在此签署）；一层不能替代另一层。
+                "layers": {
+                    "tool_receipts": {
+                        "open": opened.is_error is False,
+                        "action_applied": (
+                            acted.metadata.get("outcome") == "effect_applied"
+                            and acted2.metadata.get("outcome") == "effect_applied"
+                        ),
+                        "close": closed.metadata.get("cleanup_outcome"),
+                        "managed_stop": json.loads(stopped.content).get("cleanup"),
+                    },
+                    "observation_layer": {
+                        "li_count_first": first_view["aria_projection"].count("- li"),
+                        "li_count_final": final_view["aria_projection"].count("- li"),
+                    },
+                    "business_layer": (
+                        "frozen external grader runs separately (d06_app_behavior.test.mjs)"
+                    ),
+                },
+                "final_aria": final_view["aria_projection"][:400],
+                "first_aria": first_view["aria_projection"][:400],
+            }
+    except _JourneyStopRequested:
+        target_failure = "stopped_by_parent"
+    except Exception as error:  # noqa: BLE001
+        # 有界错误码：只保留异常类型名，不把原始消息/路径写入报告。
+        target_failure = f"d06_{type(error).__name__}"
+    finally:
+        cleanup_failures = owner.close()
+    cleanup_confirmed = not cleanup_failures
+    if result_payload is None:
+        # 任务失败与清理失败分别保留；两者都不能总体 PASS。
+        codes = [target_failure or "d06_target_incomplete"]
+        if not cleanup_confirmed:
+            codes.append("d06_cleanup_failed")
         return {
             "journey": "d06_submit_readback_cleanup",
-            "passed": bool(ok),
-            "list_updated_after_submit": list_updated,
-            "browser_close": closed.metadata.get("cleanup_outcome"),
-            "managed_web_stop": json.loads(stopped.content).get("cleanup"),
-            # R3b 分层：工具层 receipts（上面）/观察层（li 计数）/业务层（冻结
-            # 外置 grader 单独运行，不在此签署）；一层不能替代另一层。
-            "layers": {
-                "tool_receipts": {
-                    "open": opened.is_error is False,
-                    "action_applied": (
-                        acted.metadata.get("outcome") == "effect_applied"
-                        and acted2.metadata.get("outcome") == "effect_applied"
-                    ),
-                    "close": closed.metadata.get("cleanup_outcome"),
-                    "managed_stop": json.loads(stopped.content).get("cleanup"),
-                },
-                "observation_layer": {
-                    "li_count_first": first_view["aria_projection"].count("- li"),
-                    "li_count_final": final_view["aria_projection"].count("- li"),
-                },
-                "business_layer": (
-                    "frozen external grader runs separately (d06_app_behavior.test.mjs)"
-                ),
-            },
-            "final_aria": final_view["aria_projection"][:400],
-            "first_aria": first_view["aria_projection"][:400],
+            "passed": False,
+            "cleanup_confirmed": cleanup_confirmed,
+            "failure_codes": codes,
+            "cleanup_failures": cleanup_failures,
         }
-    finally:
-        # R3b：ExitStack 逆序执行全部回调；单个 close 失败不跳过其余清理，
-        # 异常聚合上抛（不吞）。
-        close_stack.close()
+    result_payload["cleanup_confirmed"] = cleanup_confirmed
+    if not cleanup_confirmed:
+        # 清理失败保留为有界错误码；target 结果照常上报，但两者都不能总体 PASS。
+        result_payload["passed"] = False
+        result_payload["failure_codes"] = ["d06_cleanup_failed"]
+    result_payload["cleanup_failures"] = cleanup_failures
+    return result_payload
 
 
 def _run_bounded(journey: str, base: Path, *, budget_seconds: float) -> dict:
-    """S3-B：每条旅程一个隐藏子进程；stdin 管道 = cooperative stop 通道。
+    """EV-01/EV-03：每条旅程一个隐藏子进程；stdin 管道 = cooperative stop 通道。
 
-    预算拒绝在启动前完成；到期即锁存 timeout，关闭管道给 15s cooperative
-    清理，仍未退出时 terminate_group（TERM 1s / KILL 1s / post-KILL 6s）。
+    有界性（EV-01）：工作 deadline 在启动前算出并独立 latch——即使 child 在
+    select 返回前刚好退出，只要墙钟已过期限，本次运行就不是成功。读取用非阻塞
+    select 切片，stdout/stderr 各有真实**字节**保留上限；超限后仍排空 pipe
+    （避免写端阻塞）但不再追加保留。收尾排空与清理各有独立期限，不等待无限
+    EOF（继承 pipe 的后代不能让父进程挂住）。
+
+    协议（EV-03）：child 记录里的 journey 名经 ``_JOURNEY_CANONICAL`` 映射后与
+    本次请求比对；只有本次预期身份、字段类型合法、目标检查通过、清理确认且
+    child 正常退出（exit 0、非 signal）的记录才允许 PASS。
     """
 
     import contextlib
@@ -563,7 +702,7 @@ def _run_bounded(journey: str, base: Path, *, budget_seconds: float) -> dict:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
-        text=True,
+        text=False,
         cwd=str(ROOT),
         start_new_session=True,
     )
@@ -574,30 +713,50 @@ def _run_bounded(journey: str, base: Path, *, budget_seconds: float) -> dict:
         pgid = None
     opened_at = time.monotonic()
     deadline = opened_at + budget_seconds
-    stdout_cap = _CHILD_STDOUT_LIMIT
-    stderr_cap = _CHILD_STDERR_LIMIT
-    collected_out: list[str] = []
-    collected_err: list[str] = []
-    output_limit = False
+    stdout_sink = _BoundedBytes(_CHILD_STDOUT_LIMIT)
+    stderr_sink = _BoundedBytes(_CHILD_STDERR_LIMIT)
+
+    # EOF 后 pipe 会持续"可读"（读到空）：必须把已关闭的流移出 select 集合，
+    # 否则排空循环会空转到期限。
+    live_streams = [child.stdout, child.stderr]
+
+    def _read_available(stream) -> None:  # noqa: ANN001
+        """读取当前可读的字节：select 已确认可读，``read1`` 不再等待补满缓冲区。"""
+
+        with contextlib.suppress((OSError, ValueError)):
+            # 二进制 pipe：read1 只返回当前可用字节，不等待补满缓冲区。
+            chunk = stream.read1(65536)
+            if chunk:
+                sink = stdout_sink if stream is child.stdout else stderr_sink
+                sink.feed(chunk)
+            elif stream in live_streams:
+                live_streams.remove(stream)
+
+    def _drain_once(timeout: float) -> None:
+        """非阻塞切片读取；不等待 EOF（继承写端的后代不能让父进程挂住）。"""
+
+        if not live_streams:
+            if timeout:
+                time.sleep(timeout)
+            return
+        try:
+            readable, _, _ = select.select(live_streams, [], [], timeout)
+        except (OSError, ValueError):
+            return
+        for stream in readable:
+            _read_available(stream)
+
     while True:
         if child.poll() is not None:
             break
-        readable, _, _ = select.select(
-            [child.stdout, child.stderr], [], [], 0.2
-        )
-        for stream in readable:
-            line = stream.read(4096)
-            if stream is child.stdout:
-                collected_out.append(line)
-                stdout_cap -= len(line)
-            else:
-                collected_err.append(line)
-            if stdout_cap < 0 or stderr_cap < 0:
-                output_limit = True
-        now = time.monotonic()
-        if now >= deadline:
+        _drain_once(_SELECT_SLICE_SECONDS)
+        if time.monotonic() >= deadline:
             break
-    elapsed_timeout = child.poll() is None and time.monotonic() >= deadline
+    # EV-01：deadline latch 独立于 child 状态。墙钟越过期限即如实记为超时——
+    # 即使 child 恰好在同一轮刚退出，超期运行也不变成成功。观测分辨率上界是
+    # 一次 select 切片（``_SELECT_SLICE_SECONDS``），这是合同允许的 scheduler
+    # 分辨率误差，不是漏判量级超时。
+    elapsed_timeout = time.monotonic() >= deadline
     if elapsed_timeout:
         failure_codes.append("work_budget_timeout")
         with contextlib.suppress(OSError):
@@ -605,18 +764,8 @@ def _run_bounded(journey: str, base: Path, *, budget_seconds: float) -> dict:
         # cooperative 清理宽限：等 child 在 15s 内自行收口（finally + 终态 JSON）。
         coop_deadline = time.monotonic() + _COOPERATIVE_CLEANUP_SECONDS
         while child.poll() is None and time.monotonic() < coop_deadline:
-            readable, _, _ = select.select([child.stdout, child.stderr], [], [], 0.2)
-            for stream in readable:
-                line = stream.read(4096)
-                if stream is child.stdout:
-                    collected_out.append(line)
-                    stdout_cap -= len(line)
-                else:
-                    collected_err.append(line)
-                    stderr_cap -= len(line)
-                if stdout_cap < 0 or stderr_cap < 0:
-                    output_limit = True
-    if output_limit:
+            _drain_once(_SELECT_SLICE_SECONDS)
+    if stdout_sink.overflowed or stderr_sink.overflowed:
         failure_codes.append("output_limit")
     if child.poll() is None and pgid is not None:
         # cooperative 停止失败：仅对本次 verified group 有界 terminate。
@@ -642,24 +791,31 @@ def _run_bounded(journey: str, base: Path, *, budget_seconds: float) -> dict:
             child.wait(timeout=_POST_KILL_VERIFY_SECONDS)
     # 收尾排空只读"已缓冲"的残余（select 0 超时，非阻塞）：独立后代可能仍
     # 继承写端，全量 read() 会等 EOF 被拖到后代自然退出（实测 30s）。
-    for _attempt in range(64):
+    drain_deadline = time.monotonic() + _DRAIN_DEADLINE_SECONDS
+    while live_streams and time.monotonic() < drain_deadline:
         try:
-            readable, _, _ = select.select([child.stdout, child.stderr], [], [], 0)
+            readable, _, _ = select.select(live_streams, [], [], 0)
         except (OSError, ValueError):
             break
         if not readable:
             break
         for stream in readable:
-            with contextlib.suppress((OSError, ValueError)):
-                chunk = stream.read(4096)
-                if chunk:
-                    (collected_out if stream is child.stdout else collected_err).append(chunk)
-    full_out = "".join(collected_out)
-    full_err = "".join(collected_err)
-    if len(full_out) > _CHILD_STDOUT_LIMIT or len(full_err) > _CHILD_STDERR_LIMIT:
-        output_limit = True
+            _read_available(stream)
+    full_out = stdout_sink.text()
+    if (
+        stdout_sink.overflowed or stderr_sink.overflowed
+    ) and "output_limit" not in failure_codes:
         failure_codes.append("output_limit")
-    # 协议校验：恰好一条 JSON 记录；必需字段齐全；布尔必须真 bool。
+    # poll() 是既有访问器：进程已 reap 时返回退出码，运行中返回 None。
+    exit_status = child.poll()
+    if exit_status is None:
+        failure_codes.append("child_exit_unobserved")
+    elif exit_status < 0:
+        failure_codes.append("child_exit_signal")
+    elif exit_status != 0:
+        failure_codes.append("child_exit_nonzero")
+    # 协议校验：恰好一条 JSON 记录；必需字段齐全；布尔必须真 bool；journey
+    # 必须是本次请求经唯一映射后的规范名。
     reports = []
     for line in full_out.splitlines():
         line = line.strip()
@@ -698,6 +854,9 @@ def _run_bounded(journey: str, base: Path, *, budget_seconds: float) -> dict:
             if bad_types:
                 failure_codes.append("child_protocol_bad_types")
             else:
+                expected_journey = _JOURNEY_CANONICAL.get(journey, journey)
+                if report.get("journey") != expected_journey:
+                    failure_codes.append("child_journey_mismatch")
                 cleanup_confirmed = report["resource_cleanup_confirmed"]
                 target_checks_passed = report["target_checks_passed"]
                 child_codes = report["failure_codes"]
@@ -719,8 +878,11 @@ def _run_bounded(journey: str, base: Path, *, budget_seconds: float) -> dict:
         "failure_codes": failure_codes,
         "retained_base": str(base) if failure_codes else None,
         "details": {
-            "stdout_bytes": len(full_out),
-            "stderr_bytes": len(full_err),
+            "stdout_bytes": stdout_sink.total,
+            "stderr_bytes": stderr_sink.total,
+            "stdout_retained": stdout_sink.retained,
+            "stderr_retained": stderr_sink.retained,
+            "child_exit_status": exit_status,
             "child_details": report if isinstance(report, dict) else None,
         },
     }
@@ -775,9 +937,33 @@ def main() -> int:
     return 0 if results and all(item["passed"] for item in results) else 1
 
 
-def _run_child(journey: str, base: Path) -> int:
-    """隐藏子进程模式：同步运行既有旅程；异常时输出有界协议失败记录。"""
+def _journey_disposition(result: dict) -> tuple[bool, bool]:
+    """EV-03：从旅程结果区分 (target_checks_passed, resource_cleanup_confirmed)。
 
+    旅程显式声明 ``cleanup_confirmed``（清理回调全部执行且无失败）。字段缺失时
+    保守回落到 ``cleanup_failures`` 是否为空，仍缺失则 False——不把"没有清理
+    证据"当成清理成功。两类失败都不允许总体 PASS。
+    """
+
+    passed = result.get("passed") is True
+    declared = result.get("cleanup_confirmed")
+    if isinstance(declared, bool):
+        return passed, declared
+    cleanup_failures = result.get("cleanup_failures")
+    if isinstance(cleanup_failures, list):
+        return passed, not cleanup_failures
+    return passed, False
+
+
+def _run_child(journey: str, base: Path) -> int:
+    """隐藏子进程模式：同步运行既有旅程；异常时输出有界协议失败记录。
+
+    EV-03：记录里的 journey 名是**规范名**（``_JOURNEY_CANONICAL``）；父进程用
+    同一映射比对，外部参数名与内部规范名不同不会导致正例失败。退出码：全部
+    target 与清理都确认才 0；否则 1（父进程同时按退出码与记录判定）。
+    """
+
+    canonical = _JOURNEY_CANONICAL.get(journey)
     try:
         if journey == "f2":
             result = journey_f2_restart_outclosing(base)
@@ -806,16 +992,20 @@ def _run_child(journey: str, base: Path) -> int:
                 }
             )
             return 1
+        target_passed, cleanup_confirmed = _journey_disposition(result)
+        journey_codes = [
+            str(code) for code in (result.get("failure_codes") or [])[:8]
+        ]
         _child_emit(
             {
-                "journey": journey,
-                "target_checks_passed": bool(result.get("passed")) is True,
-                "resource_cleanup_confirmed": bool(result.get("passed")) is True,
-                "failure_codes": [],
+                "journey": canonical,
+                "target_checks_passed": target_passed,
+                "resource_cleanup_confirmed": cleanup_confirmed,
+                "failure_codes": journey_codes,
                 "details": result,
             }
         )
-        return 0
+        return 0 if (target_passed and cleanup_confirmed) else 1
     except BaseException as error:  # noqa: BLE001
         if isinstance(error, _JourneyStopRequested):
             codes = ["stopped_by_parent"]
@@ -823,7 +1013,7 @@ def _run_child(journey: str, base: Path) -> int:
             codes = [f"child_{type(error).__name__}"]
         _child_emit(
             {
-                "journey": journey,
+                "journey": canonical if canonical is not None else journey,
                 "target_checks_passed": False,
                 "resource_cleanup_confirmed": False,
                 "failure_codes": codes,

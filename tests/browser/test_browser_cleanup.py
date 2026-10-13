@@ -7,6 +7,7 @@ poison；roundtrip 超时 poison handle；启动失败 fail closed 无 fallback�
 """
 
 import threading
+import time
 
 import pytest
 
@@ -229,3 +230,25 @@ def test_execute_uses_session_mode_and_origins_from_spec():
     context.emit_request("http://site.example.test/plain", navigation=True)
     aborts = journal.calls("route", "abort")
     assert len(aborts) == 1
+
+
+def test_shutdown_does_not_reclose_unknown_session_to_dead_worker():
+    """B11/R3a：close UNKNOWN 后 shutdown 不再向已退出 worker 重发 close。"""
+
+    journal = Journal()
+    environment, playwright_handle = make_environment(
+        journal, response_timeout=0.15, join_timeout=0.15
+    )
+    handle = environment.open(SPEC)
+    playwright_handle.last_page.fail_on_close = True
+    receipt = environment.close(handle)
+    assert receipt.outcome is BrowserCleanupOutcome.CLEANUP_UNKNOWN
+    assert environment.worker_alive() is False
+    started = time.monotonic()
+    with pytest.raises(BrowserCleanupUnknownError):
+        environment.shutdown()
+    elapsed = time.monotonic() - started
+    # worker 已死：shutdown 不再向无消费者队列重发 close（0.15s 响应超时若
+    # 重发会有第二次完整等待）；UNKNOWN 语义保持 fail closed。
+    assert len(journal.calls("page", "close")) == 0
+    assert elapsed < 0.5, f"shutdown waited {elapsed:.2f}s on a dead worker"

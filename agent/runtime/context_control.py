@@ -313,7 +313,11 @@ def reserved_control_schema(
         progress_lifecycle = (
             "goal_progress is currently available once because a successful product tool "
             "result exists; it records material progress already achieved, is not a planning "
-            "loop, and must not repeat an intended next step. Exact goal_progress payload "
+            "loop, and must not repeat an intended next step. Keep summary concise but "
+            "restart-ready: name completed work, relevant changed/read files, the latest "
+            "valid check, and any failed approach that must not be repeated. Put unfinished "
+            "work only in next_step, including the next check or cleanup when applicable. "
+            "This record is advisory and never grants authority. Exact goal_progress payload "
             "shape: "
             + json.dumps(
                 {

@@ -21,7 +21,7 @@ from agent.runtime.contracts import (
     RunResult,
     RuntimeEvent,
 )
-from agent.runtime.control import ControlInbox
+from agent.runtime.control import ControlBinding, ControlInbox
 from agent.runtime.views import GoalView, project_goal_view
 
 
@@ -156,3 +156,14 @@ class TuiAdapter:
                 "control request does not bind the active invocation"
             ) from error
         return request
+
+    def active_control_binding(self, conversation_id: str) -> ControlBinding | None:
+        """只读观察：当前 conversation 是否仍有接受协作控制的活跃 binding。
+
+        UI 用它区分"未收到 receipt 但可能仍在排队（未知）"与"run 已收尾、
+        请求已被 Runtime 丢弃"（UI-03 终态判定）。不消费请求、不修改状态。
+        """
+
+        if self._control_inbox is None:
+            return None
+        return self._control_inbox.current(conversation_id)

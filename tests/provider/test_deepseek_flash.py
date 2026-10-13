@@ -700,3 +700,67 @@ def test_flash_default_thinking_json_response_keeps_reasoning_continuity() -> No
         == config.descriptor().identity_digest
     )
     assert response.provider_continuation.opaque_payload == "fresh reasoning"
+
+
+def test_w3_explicit_disabled_official_flash_accepts_plain_json_response() -> None:
+    """W3（2026-10-12）：family 推断不得覆盖显式 disabled。官方 Flash 端点
+    + thinking_mode=disabled：请求体真实表达 disabled（thinking={"type":
+    "disabled"}，无 stream/reasoning_effort），纯文本 JSON 响应必须放行，
+    不得以 missing_reasoning_continuity 拒绝。"""
+
+
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        captured.update(body)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "OK"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 7, "completion_tokens": 1},
+            },
+        )
+
+    config = _config(thinking_mode="disabled", reasoning_effort=None)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        response = OpenAICompatibleProvider(
+            config=config, http_client=client
+        ).generate(_context())
+
+    assert response.blocks == (ModelTextBlock("OK"),)  # w3-t1
+    assert captured["thinking"] == {"type": "disabled"}
+    assert "stream" not in captured
+    assert "reasoning_effort" not in captured
+    assert response.provider_continuation is None
+
+
+def test_w3_disabled_session_rejects_legacy_enabled_continuation() -> None:
+    """W3 矩阵行：disabled 会话收到旧 enabled 会话的 continuation → 拒绝，
+    不回放、不静默丢弃（fail closed）。"""
+
+    config = _config(thinking_mode="disabled", reasoning_effort=None)
+    continuation = ProviderContinuationV1.create(
+        provider_identity_digest=config.descriptor().identity_digest,
+        opaque_payload="legacy reasoning",
+    )
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500)  # 若发起 HTTP 即失败，证明拒绝发生在 HTTP 前。
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client, pytest.raises(
+        ProviderProtocolError, match="provider_continuity_mismatch"
+    ):
+        OpenAICompatibleProvider(
+            config=config, http_client=client
+        ).generate(_context(continuation=continuation))
+    assert calls == 0

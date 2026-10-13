@@ -1,0 +1,372 @@
+{
+  "schema": "first-agent-coding-handoff-baseline/v1",
+  "captured_at_utc": "2026-09-12T15:41:59Z",
+  "repo_name": "my-first-agent",
+  "head": "838cb2b66fbba674311d4d86fc7c4f4322fd8612",
+  "branch": "main",
+  "local_remote_tracking_comparison": {
+    "reference": "origin/main",
+    "ahead": 7,
+    "behind": 0,
+    "remote_fetched_by_packet_preparer": false
+  },
+  "authority_note": "Current working tree is the baseline; HEAD alone is insufficient. Hashes identify selected public source files, not a full repository seal. No automatic application or overwrite.",
+  "preexisting_tracked_changes": [
+    "README.md",
+    "agent/automation/contracts.py",
+    "agent/automation/management.py",
+    "docs/superpowers/plans/2026-08-28-019-macos-host-profile.md",
+    "docs/superpowers/plans/2026-08-28-019-portable-durable-automations-core.md",
+    "docs/superpowers/specs/2026-08-28-durable-background-runs-design.md",
+    "main.py",
+    "scripts/_019_installed_pytest.py",
+    "scripts/run_019_core_e3.py",
+    "scripts/run_019_macos_e3.py",
+    "scripts/verify_019_materialized_tree.py",
+    "tests/automation/test_composition.py",
+    "tests/automation/test_lifecycle.py",
+    "tests/automation/test_management.py",
+    "tests/automation/test_store.py",
+    "tests/automation_hosts/test_wake_management.py",
+    "tests/cli/test_016_startup_projection.py",
+    "tests/cli/test_entrypoint.py",
+    "tests/reference/test_019_macos_host_profile.py",
+    "tests/reference/test_019_materialized_verifier.py",
+    "tests/tui/test_app.py"
+  ],
+  "preexisting_untracked_public_documents": [
+    "docs/audits/2026-09-12-capability-dogfooding-session.md",
+    "docs/audits/2026-09-12-019-scheduling-product-review.md"
+  ],
+  "excluded_private_runtime_data": "Untracked tui/ and all credentials, private sessions, logs and runtime stores were not read, hashed or included.",
+  "selected_source_files": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "ffe57fe28fbf4b5aa269c6419e8a2b96ccf7daa46abde0b7ff983913ac830f6e"
+    },
+    {
+      "path": "README.md",
+      "sha256": "82415740cfe65c38304dde858ffe1ee40710836042bb94bb17662e373a648771"
+    },
+    {
+      "path": "pyproject.toml",
+      "sha256": "d53d29867661b649813ccc44defbffd24ad22244d80e84f72b12b45e075f1aab"
+    },
+    {
+      "path": "main.py",
+      "sha256": "e92a7c3a2a0ad1473a68b5f5ed07da55a377a1f5661f4894dd9aa22355daded3"
+    },
+    {
+      "path": "docs/architecture/KERNEL_ARCHITECTURE.md",
+      "sha256": "48a423555f59e1db3eb44b2b0b7cd3ed4acc2accd6605f572bed37ff81a08ad4"
+    },
+    {
+      "path": "docs/architecture/EXTENSION_CONTRACTS.md",
+      "sha256": "b8be9e299007d8f0436a69b08ab7f69e4b299e9394e3345a8bf80233e47b453b"
+    },
+    {
+      "path": "docs/architecture/CURRENT_CAPABILITY_STATUS.md",
+      "sha256": "07e14e0282a55f93b242c3d3f98ed9b65e384baa25d2b286827b0bd7f60cf92a"
+    },
+    {
+      "path": "docs/audits/2026-09-10-product-baseline-tasks.md",
+      "sha256": "9a11ce2944296219db5fb24bf2ffb5ad89c8621d0328f091a2db663789bcc066"
+    },
+    {
+      "path": "docs/audits/2026-09-12-capability-dogfooding-session.md",
+      "sha256": "4582427f47767992563fbc5ebb2936415e6dee4c4cebdcb7b775ae7d4741effc"
+    },
+    {
+      "path": "docs/audits/2026-09-12-019-scheduling-product-review.md",
+      "sha256": "43d61619fba584cd5131cddfdc0791aa09a3f851ae7fb019a777fa6da6f6e4b7"
+    },
+    {
+      "path": "agent/cli/actions.py",
+      "sha256": "182f5e9b4efe57d66178afeaa202b04a74b8cc2cbb2f8b298dae060a371927db"
+    },
+    {
+      "path": "agent/cli/app.py",
+      "sha256": "0a7ceb2dcabee7fdba967b5ae9778b55e1f3974f314acff0ecf98f92787ef6a1"
+    },
+    {
+      "path": "agent/cli/render.py",
+      "sha256": "51879add143b331aadf9c87b8840272ac2a1f43b9f68bcf23f023926deea804d"
+    },
+    {
+      "path": "agent/composition.py",
+      "sha256": "88b41ed17121bda602cf699e4d510a8ae1c5cbbe9d1e35a624a06fc06e5f2570"
+    },
+    {
+      "path": "agent/runtime/loop.py",
+      "sha256": "aa5a052e0ced3453eace775d92638bc58ab91997e32ee5098becd86345610857"
+    },
+    {
+      "path": "agent/runtime/context.py",
+      "sha256": "088f629ea598badf05d72bfa57f5b8a92fada61d2ba5d8f156df06860a68ebb6"
+    },
+    {
+      "path": "agent/runtime/ports.py",
+      "sha256": "386f92f8216cc7234e2391fec4edfd20acfddf861b6a03a5d4ce61862e9de4a5"
+    },
+    {
+      "path": "agent/runtime/state.py",
+      "sha256": "1862ce22b650fbdaa92d3eda9bcce45504059dce540c61fdf49fd108e808c7dc"
+    },
+    {
+      "path": "agent/runtime/contracts.py",
+      "sha256": "3ac3b8b11aa23ed64c6c4058863c197e95a8f2a0f84d7cdc1bfdd12e311885a7"
+    },
+    {
+      "path": "agent/runtime/evidence.py",
+      "sha256": "d85add18184ac903c5eb438a61f607e6d7a6d87b7f8e110c4a707bb5666b4020"
+    },
+    {
+      "path": "agent/runtime/views.py",
+      "sha256": "f445031bb98f0017c6de2847f6a8bf337900de75553a597311e2e52307fa6133"
+    },
+    {
+      "path": "agent/runtime/tools.py",
+      "sha256": "738d9e1fdb812cae19b65382a2e70b0ce6bd3656d3d900849b03b28211b39738"
+    },
+    {
+      "path": "agent/runtime/tool_governance.py",
+      "sha256": "15ab6e2394e9e1e32fef26bdfeaee56c8e088c35c5d9717dcbbf74725fb978dd"
+    },
+    {
+      "path": "agent/provider/profile.py",
+      "sha256": "a2556b5493a828bfa84ec6bdc2ca3803c92c72c5b5df4ea6c3a79dfdb84b1610"
+    },
+    {
+      "path": "agent/provider/normalize.py",
+      "sha256": "611619ae22102fbb46b137f866e74ba9b1073df7856b147396a6c1b1677cbfaf"
+    },
+    {
+      "path": "agent/provider/anthropic_http.py",
+      "sha256": "616c0005e9067708b1e1edb7682af44ebd5290e34d574309bfa8f509097445c9"
+    },
+    {
+      "path": "agent/provider/openai_http.py",
+      "sha256": "a637361bb0af7362df3db388b7553913213baa123cb9b6989076d696996f9858"
+    },
+    {
+      "path": "agent/process/tools.py",
+      "sha256": "6d2c75abb46748ce5daa394353be467770614d082a04196888ce5ab004bb24be"
+    },
+    {
+      "path": "agent/sandbox/shell.py",
+      "sha256": "ea36909432f627c6ddcfdd169859735ec02ac4762e4b5c1cc704c1b5ffb76508"
+    },
+    {
+      "path": "agent/memory/tools.py",
+      "sha256": "577b345af6a6b6e26bfae91639334ca682db6397e8514cbd40b101e6af566bd0"
+    },
+    {
+      "path": "agent/memory/source.py",
+      "sha256": "3b2dc8dc1280d8320dd537b6c00d59e5f73bd890eecafbefe56dd2eca5c2156f"
+    },
+    {
+      "path": "agent/subagent/tools.py",
+      "sha256": "8afbdb490c20e2ae15c10538d960df5900501f43d172b8402d294c291cc82b89"
+    },
+    {
+      "path": "agent/tui/adapter.py",
+      "sha256": "3411034f3417431f137f95ff63e2a2594b0c7c4e9b1e04be206dfc81987d417b"
+    },
+    {
+      "path": "agent/tui/render.py",
+      "sha256": "3a4dc6fe1a429450874ed40f0187083aaa50a89f77daeff2302aecb23643432f"
+    },
+    {
+      "path": "agent/automation/cli.py",
+      "sha256": "661c0f02896579fbf6f77a0119f8d298cf39bc25c6ea23c8a7ad4da0e54dc3a8"
+    },
+    {
+      "path": "agent/automation/composition.py",
+      "sha256": "83f3a040ab6546a5b9a9ca2db2605e355682cc12710da8fed797444ebcde11ef"
+    },
+    {
+      "path": "agent/automation/contracts.py",
+      "sha256": "6d826794aa4641646b319491be58cd5179f74b934da1eea803833326c01f3161"
+    },
+    {
+      "path": "agent/automation/management.py",
+      "sha256": "5776f8b6c18491d6bfe43b879152fcbb6a46939c29661a76fabc36349bb437cf"
+    },
+    {
+      "path": "agent/automation/reconcile.py",
+      "sha256": "a5261525bb2080659d07e98809629ac7bce17ba827173cbecd4b862cdaa1482e"
+    },
+    {
+      "path": "agent/automation/store.py",
+      "sha256": "55e783b8c2ae35e4b7c185e3a1618a7d5af677ab5e65e8030d4f96bd897f3cad"
+    },
+    {
+      "path": "agent/automation_hosts/macos_cli.py",
+      "sha256": "bf01773109f91706b5cfced2fc3cd23e4ca6a2984a9c98bd2cf7610145915641"
+    },
+    {
+      "path": "agent/automation_hosts/macos_runtime.py",
+      "sha256": "77bf7dd827dc254d6d436b11523bc62b89d92eededfd27ace3437169877b080b"
+    },
+    {
+      "path": "agent/automation_hosts/macos_profile.py",
+      "sha256": "5337626968b3dfa9f08fed4ec218c15839f84a98b95dec2ee903b5b6e93eb52f"
+    },
+    {
+      "path": "agent/automation_hosts/runtime_executor.py",
+      "sha256": "c14213684c47651a216f08c716e1737c33974e5e1ca3c1cd95275ce1a1065838"
+    },
+    {
+      "path": "tests/cli/test_render.py",
+      "sha256": "5d4269acf91c5b7efaf55246cf287bd0a31687047887b65868c973d5848dc5a5"
+    },
+    {
+      "path": "tests/cli/test_contextual_decisions.py",
+      "sha256": "c692f55b5e93311184b4361b133779be6a624503f870ed77c5ed7dff43081cbd"
+    },
+    {
+      "path": "tests/cli/test_016_packaging.py",
+      "sha256": "d62483428fd2597da88485c06a136b87d6c1472d4abb99045a30f8d5caa787d3"
+    },
+    {
+      "path": "tests/cli/test_016_startup_projection.py",
+      "sha256": "bc7568b9f2f56b6e86898bfa1cf43fc62af323c11af6c26f883b551bfe14a656"
+    },
+    {
+      "path": "tests/cli/test_entrypoint.py",
+      "sha256": "b3be3c1179d16f3b300c4479c8fb06239765cabde8d0c92e2d4f34b8adc1be16"
+    },
+    {
+      "path": "tests/kernel/test_event_ordering.py",
+      "sha256": "6f770bd75b4250a84044df7954d7fe1610b9f135d03014838b26daa9c8c1e5bb"
+    },
+    {
+      "path": "tests/kernel/test_evidence_registry.py",
+      "sha256": "db1e63dde28a631d760993a8a59ef044d1cedb7f680c0f78dd4bd574f66f56c2"
+    },
+    {
+      "path": "tests/provider/test_kernel_providers.py",
+      "sha256": "10cfab824bd89b3ff739e693d93726350644afc12785463d6f707d4cd21373e8"
+    },
+    {
+      "path": "tests/provider/test_provider_profile.py",
+      "sha256": "af5a62e899a7013e3d81d653731ad3b9db4d6d99ca1741e2b62bf66a0f9b0ca7"
+    },
+    {
+      "path": "tests/process/test_artifact_approval_contract.py",
+      "sha256": "010812749518145a2e536a8627d9438ecacff88f7dda591b4f67734300bb6c37"
+    },
+    {
+      "path": "tests/continuity/test_research_evidence.py",
+      "sha256": "8f92241efd5942ee5d292ac3a371ce8c8997d08066d55c8c97859c242960fa9c"
+    },
+    {
+      "path": "tests/automation/test_management.py",
+      "sha256": "df27411bbc6ff2b47fb0ea45afd0b15739382c07594cbff531c3dc9973c63a07"
+    },
+    {
+      "path": "tests/automation/test_reconcile.py",
+      "sha256": "ab5a7e801832958455127326b5bb8dfbeb4c312f51e1456a9a18c9c194229e5b"
+    },
+    {
+      "path": "tests/automation/test_reconcile_faults.py",
+      "sha256": "41980ba7b72c5ae15e7ee14a2c44e0646c861deceb5c0e6bc1b9240ea5ae96c9"
+    },
+    {
+      "path": "tests/automation/test_open_handoff.py",
+      "sha256": "2c73bda8be97e662338237de33da67e30381523eee49a9229f62636d5f8ceddd"
+    },
+    {
+      "path": "tests/automation/test_composition.py",
+      "sha256": "d2e00bc829a531adf44db88f3314712ed28e87949d39856b9a1a3ca646c299a4"
+    },
+    {
+      "path": "tests/automation/test_lifecycle.py",
+      "sha256": "59efd5ffcf210d6f2c01c2ff597f4289521f1a259563906b9438ed068ca2e385"
+    },
+    {
+      "path": "tests/automation/test_store.py",
+      "sha256": "00305da839a8e7335f83a718687b59da1f3946a3452193cd3c9a907480c61340"
+    },
+    {
+      "path": "tests/automation_hosts/test_macos_cli.py",
+      "sha256": "4359a2d322190447a3d5d3b7c360b83e00810f623db61844f088c64dfce02ac6"
+    },
+    {
+      "path": "tests/automation_hosts/test_macos_composition.py",
+      "sha256": "df700d2bc72e239f73ddca23e0f47d4ed8934199ab811a2aa7acf6315dc947fb"
+    },
+    {
+      "path": "tests/automation_hosts/test_wake_management.py",
+      "sha256": "23150a843d3441ff4643ea2c12bfefb5c0984ba5b223592ebc3db925101e7b85"
+    },
+    {
+      "path": "tests/subagent/test_tools.py",
+      "sha256": "996b8a8d00a909342373ed5a9e1af3e266b8d5464d2adb566ac2b8c9c0ebbff0"
+    },
+    {
+      "path": "tests/memory/test_tools.py",
+      "sha256": "aed63da64c5db616c01a276024cddfaca98b06bf2a08012bec249108385767a8"
+    },
+    {
+      "path": "tests/tui/test_app.py",
+      "sha256": "d46082efdfdad0323fdc24a36e496922bbbaa8dc286a6cef19c39488979b8d14"
+    },
+    {
+      "path": "tests/reference/test_019_macos_host_profile.py",
+      "sha256": "84298df02b60753e8420207dd524f9e7097c620a8d9fd833c4b119c65153d8cb"
+    },
+    {
+      "path": "tests/reference/test_019_materialized_verifier.py",
+      "sha256": "794469e73afdc7509578578abc3590b6a8707fa59127df46f50b3b94bfa05a54"
+    },
+    {
+      "path": "scripts/_019_installed_pytest.py",
+      "sha256": "7e55cc87b9cf231989ecd86c274848373643d06e2001b8ba7270ea6e8c163c44"
+    },
+    {
+      "path": "scripts/run_019_core_e3.py",
+      "sha256": "f4cfcf210503ba07e04fa92a69052951d24959a46527c67e013c06b8123682ca"
+    },
+    {
+      "path": "scripts/run_019_macos_e3.py",
+      "sha256": "5eb70a96807a6802e1758e76ed489cc9609c6fa6522bb74bc0d406fb525554b4"
+    },
+    {
+      "path": "scripts/verify_019_materialized_tree.py",
+      "sha256": "d0e7fa95c826fae961128b2d46a9b756ef67e5155c9b1db3e3f7329cabc688d1"
+    },
+    {
+      "path": "scripts/_019_macos_u2b_host.py",
+      "sha256": "ffa2935982b6995caf6eced5ba04eb734dc1bd461db79fd3a1b2de831acb2ed9"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-28-019-macos-host-profile.md",
+      "sha256": "fbc435e6fd641b9dc0ad3a16c9b59a5b8e43d4c98512194f6b0f9cd51e2b82a5"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-28-019-portable-durable-automations-core.md",
+      "sha256": "198721088802827803f0a1d10242cdc06afe01d257b94a035799ebbba5341024"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-08-28-durable-background-runs-design.md",
+      "sha256": "1b966c5fdfcd5209628859ab11f957be751be997b60e328c27e93cff4c69c5a2"
+    }
+  ],
+  "oracle": {
+    "session_id": "first-agent-daily-use-audit-20260912-7f3c",
+    "position": 5,
+    "prompt_submitted": true,
+    "status": "completed",
+    "scope": "20 public source/document excerpts",
+    "artifact": "evidence/oracle-transcript.md",
+    "full_test_suite_rerun": false,
+    "session_browser_profile_cleanup_verified": true
+  },
+  "prior_verification": {
+    "reported_full_suite": "3398 passed, 3 skipped (prior scheduling review)",
+    "codex_focused_checks": "17 passed (prior audit turn)",
+    "packet_preparation_runs_product_tests": false
+  },
+  "preparer_scope": "Documentation package only. S1/S2 are implementation recommendations for a subsequently authorized executor; S3 and backlog are optional."
+}

@@ -151,7 +151,7 @@ def test_pending_reopen_keyboard_journey_and_shared_lifecycle(tmp_path: Path) ->
 
 
 def test_pilot_reject_keyboard_journey_executes_nothing(tmp_path: Path) -> None:
-    """R19: reject 键盘路径——按 r 拒绝后工具不执行，run 继续到完成。"""
+    """拒绝后工具不执行，当前 run 收束且不再调用模型劝批。"""
     pytest.importorskip("textual")
 
     store = InMemoryCheckpointStore(conversation_with_active_goal("tui-reject"))
@@ -207,8 +207,10 @@ def test_pilot_reject_keyboard_journey_executes_nothing(tmp_path: Path) -> None:
                 pytest.fail("did not complete after reject")
 
             assert state.last_safe_result is not None
-            assert state.last_safe_result.status is RunStatus.COMPLETED
-            assert state.last_safe_result.message == "rejected and done"
+            assert state.last_safe_result.status is RunStatus.CANCELLED
+            assert state.last_safe_result.error_code == "approval_declined"
+            assert "remains available" in (state.last_safe_result.message or "")
             assert tool_calls_made == [], "rejected tool must not execute"
+            assert len(provider.calls) == 2
 
     asyncio.run(scenario())

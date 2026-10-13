@@ -1,4 +1,4 @@
-"""Composition of the four workspace-scoped Kernel file tools."""
+"""Composition of the workspace-scoped Kernel file tools."""
 
 from __future__ import annotations
 
@@ -15,8 +15,14 @@ from agent.runtime.contracts import (
     ToolSpec,
 )
 from agent.runtime.tools import DefaultToolPolicy, KernelToolRuntime, RegisteredTool
+from agent.tools.directory import make_directory, prepare_directory_binding
 from agent.tools.edit import edit_file, prepare_edit_binding
-from agent.tools.path_safety import TraversalLimits, WorkspaceBoundary, WorkspaceSecurityError
+from agent.tools.path_safety import (
+    MissingParentDirectoryError,
+    TraversalLimits,
+    WorkspaceBoundary,
+    WorkspaceSecurityError,
+)
 from agent.tools.search import (
     list_files_output,
     read_file_chunk_output,
@@ -37,6 +43,7 @@ DEFAULT_SNIPPET_CHARS = 600
 DEFAULT_CHUNK_LINES = 200
 DEFAULT_SEARCH_DEADLINE_SECONDS = 5.0
 DEFAULT_LIST_OUTPUT_CHARS = 50_000
+DEFAULT_CONFIRM_PREVIEW_CHARS = 16_000
 DEFAULT_PRIVATE_ROOTS = (
     "config",
     "session_snapshots",
@@ -58,6 +65,8 @@ class _WorkspaceFilePolicy(DefaultToolPolicy):
     def evaluate(self, spec, arguments, binding):
         if binding.get("denied") is True:
             return PolicyDecision.DENY
+        if spec.name == "make_directory" and binding.get("already_exists") is True:
+            return PolicyDecision.ALLOW
         return super().evaluate(spec, arguments, binding)
 
 
@@ -66,6 +75,7 @@ def build_file_tool_registrations(
     *,
     protected_paths: tuple[Path, ...] = (),
     private_roots: tuple[str, ...] = DEFAULT_PRIVATE_ROOTS,
+    project_paths: tuple[str, ...] = (),
     max_file_bytes: int = DEFAULT_FILE_LIMIT_BYTES,
     max_list_entries: int = DEFAULT_LIST_LIMIT,
     max_scan_entries: int = DEFAULT_SCAN_LIMIT,
@@ -77,7 +87,7 @@ def build_file_tool_registrations(
     max_chunk_lines: int = DEFAULT_CHUNK_LINES,
     search_deadline_seconds: float = DEFAULT_SEARCH_DEADLINE_SECONDS,
 ) -> tuple[RegisteredTool, ...]:
-    """返回四个 workspace-scoped 文件工具的 registrations。
+    """返回 workspace-scoped 文件工具的 registrations。
 
     capability factory 只贡献 registrations；composition root 显式拼接成唯一
     `KernelToolRuntime`。每个 registration 绑定自己的 `ToolPolicy`，不按工具名路由。
@@ -88,12 +98,22 @@ def build_file_tool_registrations(
         workspace_root,
         protected_paths=protected_paths,
         private_roots=private_roots,
+        project_paths=project_paths,
     )
 
-    def safe_binding(operation):
+    def safe_binding(operation, *, explain_missing_parent: bool = False):
         def prepare(arguments):
             try:
                 return operation(arguments)
+            except MissingParentDirectoryError:
+                return {
+                    "denied": True,
+                    "reason": (
+                        "workspace_parent_missing"
+                        if explain_missing_parent
+                        else "workspace_file_policy"
+                    ),
+                }
             except (OSError, UnicodeError, ValueError, WorkspaceSecurityError):
                 return {"denied": True, "reason": "workspace_file_policy"}
 
@@ -187,6 +207,37 @@ def build_file_tool_registrations(
             policy=file_policy,
         ),
         RegisteredTool(
+            _confirm_spec(),
+            lambda intent: read_file_output(
+                boundary,
+                intent,
+                max_bytes=max_file_bytes,
+            ),
+            prepare_binding=safe_binding(
+                lambda arguments: _prepare_confirm_binding(
+                    boundary,
+                    path=arguments["path"],
+                    max_bytes=max_file_bytes,
+                )
+            ),
+            policy=file_policy,
+        ),
+        RegisteredTool(
+            _directory_spec(),
+            lambda intent: make_directory(
+                boundary,
+                path=intent.arguments["path"],
+            ),
+            prepare_binding=safe_binding(
+                lambda arguments: prepare_directory_binding(
+                    boundary,
+                    path=arguments["path"],
+                ),
+                explain_missing_parent=True,
+            ),
+            policy=file_policy,
+        ),
+        RegisteredTool(
             _write_spec(),
             lambda intent: write_file(
                 boundary,
@@ -199,7 +250,8 @@ def build_file_tool_registrations(
                     path=arguments["path"],
                     content=arguments["content"],
                     max_bytes=max_file_bytes,
-                )
+                ),
+                explain_missing_parent=True,
             ),
             policy=file_policy,
         ),
@@ -231,6 +283,7 @@ def build_file_tool_runtime(
     *,
     protected_paths: tuple[Path, ...] = (),
     private_roots: tuple[str, ...] = DEFAULT_PRIVATE_ROOTS,
+    project_paths: tuple[str, ...] = (),
     max_file_bytes: int = DEFAULT_FILE_LIMIT_BYTES,
     max_list_entries: int = DEFAULT_LIST_LIMIT,
     max_scan_entries: int = DEFAULT_SCAN_LIMIT,
@@ -251,6 +304,7 @@ def build_file_tool_runtime(
             workspace_root,
             protected_paths=protected_paths,
             private_roots=private_roots,
+            project_paths=project_paths,
             max_file_bytes=max_file_bytes,
             max_list_entries=max_list_entries,
             max_scan_entries=max_scan_entries,
@@ -343,6 +397,36 @@ def _prepare_edit_binding(
     )
 
 
+def _prepare_confirm_binding(
+    boundary: WorkspaceBoundary,
+    *,
+    path: str,
+    max_bytes: int,
+) -> dict:
+    """固定“用户实际看到的当前 UTF-8 内容”与随后只读执行的同一文件快照。"""
+
+    document = boundary.read_document(path, max_bytes=max_bytes)
+    if document.encoding != "utf-8":
+        raise WorkspaceSecurityError(
+            "artifact confirmation requires exact UTF-8 content"
+        )
+    if len(document.content) > DEFAULT_CONFIRM_PREVIEW_CHARS:
+        raise WorkspaceSecurityError(
+            "artifact content exceeds the confirmation preview bound"
+        )
+    return {
+        "workspace_scoped": True,
+        "precondition_digest": document.snapshot_digest,
+        "new_content_digest": document.content_digest,
+        "effect_preview": (
+            f"confirm current content of {document.path}:\n"
+            "--- begin current content ---\n"
+            f"{document.content}\n"
+            "--- end current content ---"
+        ),
+    }
+
+
 def _schema(properties: dict, required: list[str]) -> dict:
     return {
         "type": "object",
@@ -366,6 +450,37 @@ def _read_spec() -> ToolSpec:
         safety_policy={
             "workspace_scoped": True,
             "sensitive_paths_denied": True,
+            "source_metadata_keys": [
+                "path",
+                "encoding",
+                "snapshot_digest",
+                "truncated",
+            ],
+        },
+        output_limit_chars=DEFAULT_FILE_LIMIT_BYTES,
+        source_kinds=(SourceKind.WORKSPACE_EXCERPT,),
+    )
+
+
+def _confirm_spec() -> ToolSpec:
+    return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name="confirm_file",
+        version="1",
+        description=(
+            "Show one bounded current UTF-8 workspace file for owner confirmation and "
+            "bind those exact bytes as artifact evidence. Use this after a program "
+            "creates or changes a final artifact; never ask the owner to type a digest."
+        ),
+        input_schema=_schema({"path": {"type": "string"}}, ["path"]),
+        risk=ToolRisk.LOW,
+        side_effect=SideEffectClass.READ_ONLY,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        safety_policy={
+            "workspace_scoped": True,
+            "sensitive_paths_denied": True,
+            "exact_current_content_confirmation": True,
             "source_metadata_keys": [
                 "path",
                 "encoding",
@@ -532,6 +647,29 @@ def _write_spec() -> ToolSpec:
         output_policy=OutputPolicy.BOUNDED_TEXT,
         approval_policy=ApprovalPolicy.ALWAYS,
         safety_policy={"workspace_scoped": True, "atomic_replace": True},
+        output_limit_chars=1_000,
+    )
+
+
+def _directory_spec() -> ToolSpec:
+    return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name="make_directory",
+        version="1",
+        description=(
+            "Create exactly one workspace directory level. The parent must already exist; "
+            "create multiple levels with separate approved calls before write_file."
+        ),
+        input_schema=_schema({"path": {"type": "string"}}, ["path"]),
+        risk=ToolRisk.HIGH,
+        side_effect=SideEffectClass.WRITE,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        safety_policy={
+            "workspace_scoped": True,
+            "single_level": True,
+            "no_follow": True,
+        },
         output_limit_chars=1_000,
     )
 

@@ -45,6 +45,7 @@ from tests.kernel.fakes import (
     RecordingEventSink,
     ScriptedProvider,
     conversation_with_active_goal,
+    goal_noop_response,
 )
 
 
@@ -207,7 +208,8 @@ def test_operator_rejection_and_recovery_results_remain_private() -> None:
         ),
         pending,
     )
-    assert result.status is RunStatus.COMPLETED
+    assert result.status is RunStatus.CANCELLED
+    assert result.error_code == "approval_declined"
     assert calls == []
     assert provider.calls == []
     context = _context_manager().build(
@@ -311,6 +313,7 @@ def test_operator_rejection_does_not_block_later_model_completion() -> None:
     )
     evidence_id = f"evidence:{goal.goal_id}:{goal.revision}:{criterion.criterion_id}"
     provider = ScriptedProvider(
+        goal_noop_response("continue-after-operator-rejection"),
         ModelResponse(
             (),
             control=BlockedClaim(
@@ -352,14 +355,17 @@ def test_operator_rejection_does_not_block_later_model_completion() -> None:
         ),
         store.load(),
     )
-    assert rejected.status is RunStatus.COMPLETED
+    assert rejected.status is RunStatus.CANCELLED
+    assert rejected.error_code == "approval_declined"
     assert calls == []
 
     completed = runtime.run_turn(
-        Resume(
+        SubmitMessage(
             conversation_id=store.state.conversation_id,
             action_seq=store.state.next_action_seq,
             expected_revision=store.state.revision,
+            run_id="run-after-operator-rejection",
+            message="continue using the evidence already available",
         ),
         store.load(),
     )
@@ -367,7 +373,7 @@ def test_operator_rejection_does_not_block_later_model_completion() -> None:
     assert completed.status is RunStatus.COMPLETED
     assert store.state.goal is not None
     assert store.state.goal.status is GoalStatus.VERIFIED_DONE
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 3
 
 
 def test_operator_unknown_observation_fact_stays_private() -> None:

@@ -33,11 +33,11 @@ def _activate(service: AutomationManagementService, automation_id: str) -> None:
 @pytest.mark.parametrize(
     ("outcome", "expected_code"),
     [
-        (WakeInstallOutcome.FAILED, "not_activated_install_failed"),
-        (WakeInstallOutcome.UNKNOWN, "not_activated_install_unknown"),
+        (WakeInstallOutcome.FAILED, "wake_enable_failed"),
+        (WakeInstallOutcome.UNKNOWN, "wake_enable_unknown"),
     ],
 )
-def test_wake_install_failure_preserves_the_inactive_proposal(
+def test_explicit_wake_enable_failure_preserves_the_inactive_proposal(
     outcome: WakeInstallOutcome,
     expected_code: str,
 ) -> None:
@@ -49,20 +49,13 @@ def test_wake_install_failure_preserves_the_inactive_proposal(
         expected_snapshot_token="snapshot-token-0000",
         next_snapshot_token="snapshot-token-0001",
     )
-    preview = service.preview(body.automation_id)
-
-    result = service.approve(
-        body.automation_id,
-        preview_digest=preview.preview_digest,
-        expected_snapshot_token="snapshot-token-0001",
-        next_snapshot_token="snapshot-token-0002",
-    )
+    result = service.wake_enable()
 
     assert result.code == expected_code
     assert repository.load().records[0].definition is None
 
 
-def test_wake_install_then_activation_conflict_is_reported_without_running() -> None:
+def test_activation_conflict_after_explicit_wake_enable_is_reported_without_running() -> None:
     repository_holder = {}
 
     def conflict_after_install() -> None:
@@ -87,6 +80,7 @@ def test_wake_install_then_activation_conflict_is_reported_without_running() -> 
         next_snapshot_token="snapshot-token-0001",
     )
     preview = service.preview(body.automation_id)
+    assert service.wake_enable().code == "wake_enabled"
 
     result = service.approve(
         body.automation_id,
@@ -95,7 +89,7 @@ def test_wake_install_then_activation_conflict_is_reported_without_running() -> 
         next_snapshot_token="snapshot-token-0002",
     )
 
-    assert result.code == "adapter_installed_activation_conflict"
+    assert result.code == "activation_conflict"
     assert repository.load().records[0].definition is None
 
     retried = service.approve(

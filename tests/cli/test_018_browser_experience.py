@@ -67,7 +67,7 @@ def test_unavailable_browser_gives_one_reason_and_one_next_action(
 def test_ready_browser_gives_single_readiness_line():
     lines = _browser_status_lines(_resources(BrowserReadiness.READY))
     assert lines == [
-        "Browser: public-read ready; interactive profiles available"
+        "Browser: public pages, task-owned local previews, and interactive profiles ready"
     ]
 
 

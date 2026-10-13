@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from agent.provider.protocol import ProviderStreamCancelledError
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ActiveRun,
@@ -12,7 +13,9 @@ from agent.runtime.contracts import (
     ClarificationRequest,
     CompletionClaim,
     ContinuationPhase,
+    ControlInboxRequest,
     ControlReceipt,
+    ControlRequestKind,
     ConversationFact,
     ConversationState,
     DirectResponse,
@@ -38,6 +41,7 @@ from agent.runtime.contracts import (
     ToolRisk,
     ToolSpec,
 )
+from agent.runtime.control import ControlInbox
 from agent.runtime.evidence import ClosedEvidenceRegistry
 from agent.runtime.loop import AgentRuntime, InvocationLimits, RetryableProviderError
 from agent.runtime.ports import InvalidProviderResponseError
@@ -65,6 +69,7 @@ def _run(
     provider,
     *,
     repairs=1,
+    retryable_provider_retries=0,
     no_progress_replans=2,
     max_model_calls=16,
     state: ConversationState | None = None,
@@ -72,6 +77,7 @@ def _run(
     tool_runtime=None,
     event_sink=None,
     action=None,
+    control_inbox=None,
 ):
     initial = state or ConversationState.new("conversation-1")
     store = InMemoryCheckpointStore(initial)
@@ -89,9 +95,11 @@ def _run(
         limits=InvocationLimits(
             max_model_calls=max_model_calls,
             max_invalid_repairs=repairs,
+            max_retryable_provider_retries=retryable_provider_retries,
             max_no_progress_replans=no_progress_replans,
         ),
         invocation_id_factory=lambda: "invocation-1",
+        control_inbox=control_inbox,
     )
     if action is None:
         action = SubmitMessage(
@@ -130,6 +138,99 @@ def test_transient_provider_error_is_retryable_pause() -> None:
 
     assert result.status is RunStatus.FAILED_RETRYABLE
     assert store.state.active_run is not None
+
+
+def test_transient_provider_error_retries_within_one_user_action_when_enabled() -> None:
+    class ProviderTimeoutError(RetryableProviderError):
+        code = "provider_timeout"
+
+    provider = ScriptedProvider(
+        ProviderTimeoutError("temporary timeout"),
+        ModelResponse((ModelTextBlock("recovered without another user prompt"),)),
+    )
+
+    result, store = _run(provider, retryable_provider_retries=1)
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.message == "recovered without another user prompt"
+    assert len(provider.calls) == 2
+    assert store.state.active_run is None
+
+
+def test_rate_limit_does_not_blindly_retry_even_when_transient_retry_is_enabled() -> None:
+    class ProviderRateLimitError(RetryableProviderError):
+        code = "provider_rate_limit"
+
+    provider = ScriptedProvider(
+        ProviderRateLimitError("quota window is exhausted"),
+        ModelResponse((ModelTextBlock("must not be dispatched"),)),
+    )
+
+    result, store = _run(provider, retryable_provider_retries=2)
+
+    assert result.status is RunStatus.FAILED_RETRYABLE
+    assert result.error_code == "provider_rate_limit"
+    assert len(provider.calls) == 1
+    assert store.state.active_run is not None
+
+
+def test_started_stream_is_not_automatically_resent() -> None:
+    class ProviderStreamInterruptedError(RetryableProviderError):
+        code = "provider_stream_interrupted"
+
+    provider = ScriptedProvider(
+        ProviderStreamInterruptedError("stream outcome is unknown"),
+        ModelResponse((ModelTextBlock("must not be dispatched"),)),
+    )
+
+    result, store = _run(provider, retryable_provider_retries=2)
+
+    assert result.status is RunStatus.FAILED_RETRYABLE
+    assert result.error_code == "provider_stream_interrupted"
+    assert len(provider.calls) == 1
+    assert store.state.active_run is not None
+
+
+def test_bound_stream_cancel_finishes_cancelled_without_another_request() -> None:
+    inbox = ControlInbox()
+    seed = conversation_with_active_goal()
+    assert seed.goal is not None
+    seed = replace(seed, active_run=ActiveRun(run_id="run-stream-cancel"))
+
+    class CancellingProvider:
+        calls = 0
+
+        def generate(self, _context, *, delta_observer=None):  # noqa: ANN001
+            self.calls += 1
+            binding = inbox.current(seed.conversation_id)
+            assert binding is not None
+            inbox.submit(
+                ControlInboxRequest(
+                    request_id="cancel-stream-1",
+                    kind=ControlRequestKind.CANCEL,
+                    conversation_id=binding.conversation_id,
+                    goal_id=binding.goal_id,
+                    goal_revision=binding.goal_revision,
+                    invocation_id=binding.invocation_id,
+                )
+            )
+            assert delta_observer.cancellation_requested() is True
+            raise ProviderStreamCancelledError()
+
+    provider = CancellingProvider()
+    result, store = _run(
+        provider,
+        state=seed,
+        action=_resume(seed),
+        retryable_provider_retries=2,
+        control_inbox=inbox,
+    )
+
+    assert result.status is RunStatus.CANCELLED
+    assert provider.calls == 1
+    assert store.state.active_run is None
+    assert store.state.goal is not None
+    assert store.state.goal.status is GoalStatus.CANCELLED
 
 
 def test_invalid_provider_output_has_bounded_repair_then_fails_fatal() -> None:
@@ -1399,13 +1500,24 @@ def test_resumed_batch_rebuilds_prefix_and_excludes_operator_results() -> None:
         )
         completed = runtime.run_turn(approval, store.load())
 
-        assert completed.status is RunStatus.FAILED_RETRYABLE
-        assert completed.error_code == "provider_retryable"
-        assert [
+        expected_results = [
             fact.content["tool_call_id"]
             for fact in store.state.facts
             if fact.kind is FactKind.TOOL_RESULT
-        ] == ["prefix-result", "approval-result", "suffix-failure"]
+        ]
+        if approved:
+            assert completed.status is RunStatus.FAILED_RETRYABLE
+            assert completed.error_code == "provider_retryable"
+            assert expected_results == [
+                "prefix-result",
+                "approval-result",
+                "suffix-failure",
+            ]
+        else:
+            assert completed.status is RunStatus.CANCELLED
+            assert completed.error_code == "approval_declined"
+            assert expected_results == ["prefix-result", "approval-result"]
+            assert store.state.facts[-1].content["rejected"] is True
         assert not any(
             fact.content.get("code") == "no_progress_replan_required"
             for fact in store.state.facts

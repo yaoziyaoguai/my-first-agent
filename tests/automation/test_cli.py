@@ -43,6 +43,14 @@ def test_public_parser_has_management_surface_without_old_raw_scheduler_fields()
         )
 
 
+def test_installed_scheduler_help_states_host_composition_is_unavailable() -> None:
+    help_text = build_parser().format_help()
+
+    assert "does not include a runnable host composition" in help_text
+    assert "needs_019_config" in help_text
+    assert "does not install login items or background jobs" in help_text
+
+
 def test_reconcile_cli_renders_only_bounded_closed_result() -> None:
     core, _, _, _ = _active_core(now=datetime(2026, 8, 27, tzinfo=UTC))
     output: list[str] = []

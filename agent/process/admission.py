@@ -185,6 +185,11 @@ def _resolve_symlink_chain(path: Path) -> _Resolved:
     current = path
     depth = 0
     while True:
+        # 只按当前链接节点判断环。``realpath(current)`` 会直接折叠到最终文件，
+        # 让 venv 常见的 python -> python3.x -> host python 两跳链接被误判成环。
+        node = os.path.abspath(os.path.normpath(str(current)))
+        if node in visited or depth >= _SYMLINK_MAX_DEPTH:
+            raise OSError("symlink loop or chain too deep")
         try:
             target = os.readlink(current)
         except OSError:
@@ -200,10 +205,7 @@ def _resolve_symlink_chain(path: Path) -> _Resolved:
                 "stat_digest": _stat_digest(info),
             }
         )
-        canonical = os.path.realpath(str(current))
-        if canonical in visited or depth >= _SYMLINK_MAX_DEPTH:
-            raise OSError("symlink loop or chain too deep")
-        visited.add(canonical)
+        visited.add(node)
         resolved_target = Path(target)
         if not resolved_target.is_absolute():
             resolved_target = current.parent / target

@@ -25,6 +25,7 @@ from agent.runtime.contracts import (
     ResolveUnknownToolOutcome,
     Resume,
     ResumeGoal,
+    RevokeGoalTargetAuthority,
     RevokeProcessAuthority,
     SubmitMessage,
 )
@@ -127,6 +128,9 @@ def build_resolve_approval(
     approved_at: str | None = None,
     confirmed_artifact_path: str | None = None,
     confirmed_artifact_sha256: str | None = None,
+    defer_artifact_confirmation: bool = False,
+    authorize_goal_target: bool = False,
+    authorize_goal_directory: bool = False,
 ) -> ResolveApproval:
     return ResolveApproval(
         conversation_id=state.conversation_id,
@@ -138,6 +142,9 @@ def build_resolve_approval(
         approved_at=approved_at,
         confirmed_artifact_path=confirmed_artifact_path,
         confirmed_artifact_sha256=confirmed_artifact_sha256,
+        defer_artifact_confirmation=defer_artifact_confirmation,
+        authorize_goal_target=authorize_goal_target,
+        authorize_goal_directory=authorize_goal_directory,
     )
 
 
@@ -287,4 +294,16 @@ def build_revoke_process_authority(
         action_seq=state.next_action_seq,
         expected_revision=state.revision,
         lease_id=lease_id,
+    )
+
+
+def build_revoke_goal_target_authority(
+    state: ConversationState,
+) -> RevokeGoalTargetAuthority:
+    if not state.goal_authorizations:
+        raise ValueError("no active goal target authorization to revoke")
+    return RevokeGoalTargetAuthority(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
     )

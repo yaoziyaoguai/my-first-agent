@@ -1217,3 +1217,136 @@ def test_default_cli_waits_with_heartbeat_before_blocking_provider_returns(
     assert final_lines, output
     # waiting 提示先于最终权威结果出现。
     assert output.index(waiting_lines[0]) < output.index(final_lines[0])
+
+
+# ---------------------------------------------------------------- LOG-01
+
+
+def test_state_failure_diagnostics_never_render_raw_message(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """LOG-01：虚构 CheckpointSecurityError 的敏感路径标记不出现在用户文本、
+    stdout/stderr 与默认日志；稳定错误码/类型/下一步仍保留。
+
+    Red：HEAD 的 ``_log_runtime_state_failure`` 直接 ``%s: %s`` 记录
+    ``str(error)`` → 标记出现在 stderr（未配置 logging 与配置普通 handler
+    两种进程都复现）。
+    """
+
+    import io
+    import logging
+
+    marker = "SECRET-PATH-MARKER-9f3a"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    from agent.runtime.checkpoint import CheckpointSecurityError
+
+    class FailingStore:
+        def load(self):
+            raise CheckpointSecurityError(
+                f"unsafe filesystem object during read: {marker}"
+            )
+
+    from agent.continuity.identity import WorkspaceIdentityV1
+    from agent.continuity.sessions import StartupDisposition, WorkspaceSession
+
+    def _fake_session(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        return WorkspaceSession(
+            disposition=StartupDisposition.CREATED,
+            state_root=tmp_path / "state-root",
+            workspace_identity=WorkspaceIdentityV1.resolve(workspace),
+            checkpoint_path=tmp_path / "state-root" / "conversation.json",
+            store=FailingStore(),
+            snapshot=None,
+        )
+
+    monkeypatch.setattr(entrypoint, "open_workspace_session", _fake_session)
+    monkeypatch.delenv("FIRST_AGENT_DEBUG_STATE_FAILURES", raising=False)
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setLevel(logging.DEBUG)
+    logger = logging.getLogger("agent.entrypoint")
+    previous_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    output: list[str] = []
+    try:
+        exit_code = entrypoint.main(
+            ["--workspace", str(workspace), "--provider", "fake"],
+            input_fn=lambda _: "hello",
+            write_fn=output.append,
+        )
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+
+    logged = stream.getvalue()
+    assert exit_code == 2
+    # 用户文本：类型名保留，原始消息不渲染。
+    assert output[-1] == "Runtime state failed: CheckpointSecurityError"
+    # 默认日志：无虚构 secret/path 标记。
+    assert marker not in logged, f"raw message leaked into log: {logged!r}"
+    assert marker not in "\n".join(output)
+    # 稳定错误码、类型与可执行的下一步仍然保留。
+    assert "code=checkpoint_security" in logged
+    assert "CheckpointSecurityError" in logged
+    assert "mode 0700" in logged
+    assert "next=" in logged
+
+
+def test_state_failure_diagnostics_bounded_for_generic_errors(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """LOG-01：非安全类 checkpoint 错误同样有界（类型名 + 通用下一步）。"""
+
+    import io
+    import logging
+
+    marker = "SECRET-PATH-MARKER-4b71"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class FailingStore:
+        def load(self):
+            raise OSError(f"disk exploded at {marker}")
+
+    from agent.continuity.identity import WorkspaceIdentityV1
+    from agent.continuity.sessions import StartupDisposition, WorkspaceSession
+
+    def _fake_session(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        return WorkspaceSession(
+            disposition=StartupDisposition.CREATED,
+            state_root=tmp_path / "state-root",
+            workspace_identity=WorkspaceIdentityV1.resolve(workspace),
+            checkpoint_path=tmp_path / "state-root" / "conversation.json",
+            store=FailingStore(),
+            snapshot=None,
+        )
+
+    monkeypatch.setattr(entrypoint, "open_workspace_session", _fake_session)
+    monkeypatch.delenv("FIRST_AGENT_DEBUG_STATE_FAILURES", raising=False)
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    logger = logging.getLogger("agent.entrypoint")
+    previous_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    output: list[str] = []
+    try:
+        exit_code = entrypoint.main(
+            ["--workspace", str(workspace), "--provider", "fake"],
+            input_fn=lambda _: "hello",
+            write_fn=output.append,
+        )
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+
+    logged = stream.getvalue()
+    assert exit_code == 2
+    assert marker not in logged
+    assert "code=checkpoint_OSError" in logged
+    assert "OSError" in logged

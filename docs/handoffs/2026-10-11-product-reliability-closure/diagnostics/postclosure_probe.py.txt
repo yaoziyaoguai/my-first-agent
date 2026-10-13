@@ -1,0 +1,95 @@
+"""2026-10-12 独立审计反例；无真实 provider、进程或私人文件访问。"""
+from __future__ import annotations
+
+import json
+from dataclasses import replace
+
+import httpx
+
+from agent.provider.openai_http import OpenAICompatibleProvider
+from agent.runtime.contracts import ConversationFact, FactKind, ModelMessage
+from agent.runtime.evidence import ClosedEvidenceRegistry, EvidenceVerificationError
+from agent.runtime.resource_lifecycle import active_task_resources
+from tests.kernel.test_validation_request_freshness import (
+    _calls_fact, _closure_claim, _closure_criterion, _receipt, _runtime,
+    _sandbox_fact, _state,
+)
+from tests.provider.test_deepseek_flash import _config, _context
+
+
+def managed_fact(name: str, call: str, payload: dict) -> ConversationFact:
+    return ConversationFact(
+        fact_id=f"run:run-fresh:tool-result:{call}:1",
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": call, "text": json.dumps(payload),
+            "is_error": False, "executed": True,
+            "metadata": {"tool_name": name, "governed_tool_receipt_kind": "governed_tool_v1"},
+        },
+    )
+
+
+calls = _calls_fact(
+    ("start", "managed_web_start", {"executable": "./server.py"}),
+    ("validate-a", "sandbox_exec", {"executable": "./check-a"}),
+    ("stop", "managed_web_stop", {"resource_ref": "managed-web:audit"}),
+)
+start = managed_fact("managed_web_start", "start", {
+    "resource_ref": "managed-web:audit", "status": "ready", "origin": "http://127.0.0.1:1",
+})
+stop = managed_fact("managed_web_stop", "stop", {
+    "resource_ref": "managed-web:audit", "cleanup": "confirmed",
+})
+validation = _sandbox_fact(_receipt())
+state = _state(calls, start, validation, stop)
+state = replace(state, goal=replace(state.goal, admitted_criteria=(_closure_criterion(),)))
+registry = ClosedEvidenceRegistry()
+claim = _closure_claim(registry, state)
+try:
+    records = registry.derive(state, claim, observed_at="2026-10-12T00:00:00Z")
+    old_accepted = any(validation.fact_id in x.source_fact_ids for x in records)
+except EvidenceVerificationError:
+    old_accepted = False
+resources = active_task_resources(state.facts)
+resources.require_closed()
+runtime = _runtime()
+digest = runtime._product_request_digest("sandbox_exec", {"executable": "./check-a"})
+print(json.dumps({
+    "case": "start_then_validate_then_potential_write_then_stop",
+    "resource_gate_closed": not resources.managed_processes,
+    "validation_before_writer_shutdown_accepted": old_accepted,
+    "same_validation_still_suppressed": digest in runtime._successful_product_request_inventory(state)[2],
+    "stop_invalidates": registry._may_invalidate_workspace_validation(stop),
+}))
+
+sent = []
+
+
+def respond(request):
+    sent.append(json.loads(request.content))
+    return httpx.Response(200, json={
+        "id": "offline-audit", "object": "chat.completion", "model": "deepseek-v4-flash",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "hello"},
+                     "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    })
+
+
+context = replace(_context(), messages=(
+    ModelMessage(role="user", content=({"type": "text", "text": "hello"},)),
+))
+with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+    provider = OpenAICompatibleProvider(
+        config=_config(thinking_mode="disabled", reasoning_effort=None), http_client=client,
+    )
+    try:
+        provider.generate(context)
+        outcome = "accepted"
+    except Exception as error:
+        outcome = {"type": type(error).__name__, "code": getattr(error, "code", None),
+                   "reason": str(error)}
+print(json.dumps({
+    "case": "explicit_thinking_disabled", "transport": "httpx.MockTransport; no network",
+    "request_count": len(sent), "thinking_sent": sent[0].get("thinking") if sent else None,
+    "result": outcome,
+}))

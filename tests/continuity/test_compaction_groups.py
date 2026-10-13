@@ -180,6 +180,31 @@ def test_full_closed_turn_selection_returns_facts_in_order() -> None:
     assert state.revision == 0
 
 
+def test_active_managed_resource_owner_turn_is_not_compactable() -> None:
+    facts = (
+        _user("action:1:user"),
+        _tool_calls("action:2:calls", "managed-start"),
+        ConversationFact(
+            fact_id="action:3:result",
+            kind=FactKind.TOOL_RESULT,
+            content={
+                "tool_call_id": "managed-start",
+                "text": '{"resource_ref":"managed-web-1","status":"ready"}',
+                "executed": True,
+                "is_error": False,
+                "metadata": {"tool_name": "managed_web_start"},
+            },
+        ),
+        _assistant("action:4:assistant"),
+    )
+
+    with pytest.raises(ValueError, match="active-resource owner turns"):
+        validate_compaction_removal(
+            _state(*facts),
+            tuple(fact.fact_id for fact in facts),
+        )
+
+
 def test_single_closed_turn_without_summary_is_valid() -> None:
     facts = (_user("action:1:user"), _assistant("action:2:assistant"))
     result = validate_compaction_removal(_state(*facts), ("action:2:assistant", "action:1:user"))

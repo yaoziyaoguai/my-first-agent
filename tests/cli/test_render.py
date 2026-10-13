@@ -13,6 +13,7 @@ from agent.runtime.contracts import (
     ConversationState,
     ExecutingIntentRecord,
     ExecutionAuthorityClass,
+    GoalStatus,
     ProcessAuthorityCandidateV1,
     ProviderDisclosureRequest,
     RecoveryRequest,
@@ -22,6 +23,7 @@ from agent.runtime.contracts import (
     RuntimeEventKind,
     ToolCall,
 )
+from tests.kernel.fakes import conversation_with_terminal_goal
 
 
 def _event(kind: RuntimeEventKind, *, event_id: str = "event-1", payload=None):
@@ -103,6 +105,57 @@ def test_run_result_owns_final_text_and_terminal_status() -> None:
     assert output == ["final answer"]
 
 
+def test_verification_scope_message_does_not_overclaim_semantic_correctness() -> None:
+    message = TerminalRenderer._verification_scope_message(  # noqa: SLF001
+        (
+            "exact current bytes of report.csv",
+            "approved local process exited with code 0",
+        )
+    )
+
+    assert "exact current bytes of report.csv" in message
+    assert "approved local process exited with code 0" in message
+    assert "does not independently establish numerical or semantic correctness" in message
+
+
+def test_completed_goal_renders_authoritative_verification_scope() -> None:
+    output: list[str] = []
+    renderer = TerminalRenderer(output.append)
+
+    renderer.render_result(
+        RunResult(
+            RunStatus.COMPLETED,
+            conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE),
+            message="The report is ready.",
+        )
+    )
+
+    assert output[0] == "The report is ready."
+    assert "Verified delivery:" in output[1]
+    assert "Targets: workspace" in output[1]
+    assert "Required evidence: 1/1 passed" in output[1]
+    assert "Durable task permissions: closed." in output[1]
+    assert "Evidence scope: exact current bytes of reports/final.md" in output[-2]
+    assert "does not independently establish numerical or semantic correctness" in output[-2]
+    assert output[-1] == "Task is closed. Use /new to start another task in this workspace."
+
+
+def test_terminal_goal_points_to_new_once_without_changing_goal_state() -> None:
+    output: list[str] = []
+    renderer = TerminalRenderer(output.append)
+    state = conversation_with_terminal_goal(GoalStatus.CANCELLED)
+    result = RunResult(RunStatus.CANCELLED, state)
+
+    renderer.render_result(result)
+    renderer.render_result(result)
+
+    assert output == [
+        "Run cancelled.",
+        "Task is closed. Use /new to start another task in this workspace.",
+        "Run cancelled.",
+    ]
+
+
 def test_conflict_and_retryable_results_give_operator_guidance() -> None:
     output: list[str] = []
     renderer = TerminalRenderer(output.append)
@@ -170,6 +223,21 @@ def test_default_renderer_hides_model_and_tool_progress_noise() -> None:
     assert output == []
 
 
+def test_renderer_shows_only_real_slow_provider_waiting_heartbeat() -> None:
+    output: list[str] = []
+    renderer = TerminalRenderer(output.append)
+
+    renderer.emit(
+        _event(
+            RuntimeEventKind.MODEL_PROGRESS,
+            event_id="model-waiting",
+            payload={"phase": "provider_waiting", "elapsed_seconds": 15.0},
+        )
+    )
+
+    assert output == ["Model is still working (15.0s elapsed)..."]
+
+
 def test_render_pending_owns_contextual_prompts_without_protocol_ids() -> None:
     """可操作提示由 authoritative state 的 render_pending 投影，不暴露内部 identity。"""
 
@@ -189,8 +257,8 @@ def test_render_pending_owns_contextual_prompts_without_protocol_ids() -> None:
     assert "/ack-provider" not in rendered
 
 
-def test_render_pending_artifact_approval_shows_exact_special_command() -> None:
-    """artifact approval 不显示通用 [y/N]；只展示精确 special command 与实际 path。"""
+def test_render_pending_artifact_generation_defers_content_confirmation() -> None:
+    """未来产物先批准生成；提示不得让普通用户猜或手抄摘要。"""
 
     output: list[str] = []
     renderer = TerminalRenderer(output.append)
@@ -198,13 +266,48 @@ def test_render_pending_artifact_approval_shows_exact_special_command() -> None:
     renderer.render_pending(_artifact_approval_pending_state())
 
     prompt = output[0]
-    assert "/approve-artifact <64-lowercase-hex-sha256> artifact.out" in prompt
     assert "artifact.out" in prompt
-    assert "[y/N]" not in prompt
-    # 不自动填 digest：提示里不得出现 64 位 hex。
+    assert "[y/N]" in prompt
+    assert "separate confirmation" in prompt
+    assert "/approve-artifact" not in prompt
     assert re.search(r"[0-9a-f]{64}", prompt) is None
-    # 明确 no 可拒绝。
-    assert "reject" in prompt.lower()
+
+
+def test_render_pending_confirm_file_shows_readable_literal_content() -> None:
+    output: list[str] = []
+    renderer = TerminalRenderer(output.append)
+    request = ApprovalRequest(
+        request_id="approval-confirm",
+        run_id="run-1",
+        tool_call_id="confirm-1",
+        binding_digest="binding-confirm",
+        preview=(
+            "confirm current content of report.txt:\n"
+            "--- begin current content ---\n"
+            "count=12\nerrors=3\x1b[2J\n"
+            "--- end current content ---"
+        ),
+        tool_name="confirm_file",
+    )
+    state = replace(
+        ConversationState.new("conversation-1"),
+        active_run=ActiveRun(
+            "run-1",
+            status=ActiveRunStatus.AWAITING_APPROVAL,
+            phase=ContinuationPhase.TOOL,
+            pending_request=request,
+            tool_calls=(ToolCall("confirm-1", "confirm_file", {"path": "report.txt"}),),
+        ),
+    )
+
+    renderer.render_pending(state)
+
+    prompt = output[0]
+    assert "count=12\nerrors=3" in prompt
+    assert "\x1b" not in prompt
+    assert "\\u001b[2J" in prompt
+    assert "[y/N]" in prompt
+    assert "sha256" not in prompt.lower()
 
 
 def test_fatal_result_carries_bounded_exception_summary() -> None:
@@ -351,3 +454,99 @@ def test_model_text_delta_streams_and_dedupes_final_message() -> None:
         message="Corrected final text",
     )
     assert renderer._result_message(other) == "Corrected final text"  # noqa: SLF001
+
+
+def test_model_text_delta_uses_literal_terminal_display_without_changing_final_text() -> None:
+    """流式通道与最终回答共用 literal display；显示转义不能污染权威原文去重。"""
+
+    output: list[str] = []
+    deltas: list[str] = []
+    renderer = TerminalRenderer(output.append, delta_write_fn=deltas.append)
+    raw = "safe\x1b[2J\ntext\u202ereversed"
+
+    renderer.emit(
+        _event(
+            RuntimeEventKind.MODEL_TEXT_DELTA,
+            event_id="delta-unsafe",
+            payload={"text": raw},
+        )
+    )
+    renderer.render_result(
+        RunResult(
+            RunStatus.COMPLETED,
+            ConversationState.new("conversation-1"),
+            run_id="run-1",
+            message=raw,
+        )
+    )
+
+    assert deltas == ["safe\\u001b[2J\ntext\\u202ereversed"]
+    assert output == []
+
+
+def test_model_text_delta_deduplication_is_scoped_to_one_rendered_result() -> None:
+    """同一 REPL renderer 连续处理回答时，每轮只与该轮流式原文比较。"""
+
+    output: list[str] = []
+    deltas: list[str] = []
+    renderer = TerminalRenderer(output.append, delta_write_fn=deltas.append)
+
+    for index, answer in enumerate(("first answer", "second answer"), start=1):
+        renderer.emit(
+            _event(
+                RuntimeEventKind.MODEL_TEXT_DELTA,
+                event_id=f"delta-{index}",
+                payload={"text": answer},
+            )
+        )
+        renderer.render_result(
+            RunResult(
+                RunStatus.COMPLETED,
+                ConversationState.new("conversation-1"),
+                run_id=f"run-{index}",
+                message=answer,
+            )
+        )
+
+    assert deltas == ["first answer", "second answer"]
+    assert output == []
+
+
+def test_model_text_delta_deduplication_tracks_the_latest_provider_response() -> None:
+    """一次 action 内多次模型响应时，最终回答只与最后一个响应去重。"""
+
+    output: list[str] = []
+    deltas: list[str] = []
+    renderer = TerminalRenderer(output.append, delta_write_fn=deltas.append)
+    first_response = replace(
+        _event(
+            RuntimeEventKind.MODEL_TEXT_DELTA,
+            event_id="delta-response-1",
+            payload={"text": "I will inspect the file."},
+        ),
+        revision=3,
+        causation_id="model-delta:run-1:3",
+    )
+    final_response = replace(
+        _event(
+            RuntimeEventKind.MODEL_TEXT_DELTA,
+            event_id="delta-response-2",
+            payload={"text": "The file is valid."},
+        ),
+        revision=4,
+        causation_id="model-delta:run-1:4",
+    )
+
+    renderer.emit(first_response)
+    renderer.emit(final_response)
+    renderer.render_result(
+        RunResult(
+            RunStatus.COMPLETED,
+            ConversationState.new("conversation-1"),
+            run_id="run-1",
+            message="The file is valid.",
+        )
+    )
+
+    assert deltas == ["I will inspect the file.", "The file is valid."]
+    assert output == []

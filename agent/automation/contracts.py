@@ -232,7 +232,7 @@ class AutomationDefinitionBodyV1:
     source_snapshot_digest: str
     background_environment_policy_digest: str | None
     browser_origin_policy_digest: str | None
-    wake_adapter_policy_digest: str
+    wake_adapter_policy_digest: str | None
     definition_body_digest: str = ""
 
     def __post_init__(self) -> None:
@@ -253,9 +253,13 @@ class AutomationDefinitionBodyV1:
             "trust_profile_digest",
             "provider_disclosure_request_digest",
             "source_snapshot_digest",
-            "wake_adapter_policy_digest",
         ):
             _require_hex64(getattr(self, field), field)
+        if self.wake_adapter_policy_digest is not None:
+            _require_hex64(
+                self.wake_adapter_policy_digest,
+                "wake_adapter_policy_digest",
+            )
         for field in (
             "background_environment_policy_digest",
             "browser_origin_policy_digest",

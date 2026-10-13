@@ -30,13 +30,18 @@ def test_state_and_ports_depend_only_on_leaf_contracts() -> None:
     context_control_imports = _imports(ROOT / "agent/runtime/context_control.py")
     context_source_imports = _imports(ROOT / "agent/runtime/context_source.py")
     compaction_rules_imports = _imports(ROOT / "agent/runtime/compaction_rules.py")
+    resource_lifecycle_imports = _imports(
+        ROOT / "agent/runtime/resource_lifecycle.py"
+    )
 
     leaf_only = {"agent.runtime.contracts"}
-    # state 额外依赖唯一的窄 leaf compaction_rules（turn grammar/removal 校验）；
-    # context 依赖同一 leaf 并可依赖 ports（ContextSource 等）。禁止 context -> state。
+    # state 额外依赖两个窄 leaf：compaction_rules 负责 turn grammar/removal，
+    # resource_lifecycle 只从 closed receipts 推导 active ownership。context 依赖
+    # compaction leaf 并可依赖 ports（ContextSource 等）。禁止 context -> state。
     assert {name for name in state_imports if name.startswith("agent.")} <= {
         "agent.runtime.contracts",
         "agent.runtime.compaction_rules",
+        "agent.runtime.resource_lifecycle",
     }
     assert {name for name in port_imports if name.startswith("agent.")} <= leaf_only
     assert {name for name in context_imports if name.startswith("agent.")} <= {
@@ -52,10 +57,13 @@ def test_state_and_ports_depend_only_on_leaf_contracts() -> None:
     assert {
         name for name in context_source_imports if name.startswith("agent.")
     } <= leaf_only
-    # compaction_rules 是只依赖 contracts 的窄 leaf：不得反向依赖
-    # state/context/ports 等任何服务层。
+    # 两个 leaf 不得反向依赖 state/context/ports 等任何服务层；
+    # compaction_rules 可复用 resource lifecycle 的同一 ownership 解释。
     assert {
         name for name in compaction_rules_imports if name.startswith("agent.")
+    } <= leaf_only | {"agent.runtime.resource_lifecycle"}
+    assert {
+        name for name in resource_lifecycle_imports if name.startswith("agent.")
     } <= leaf_only
     all_imports = state_imports | port_imports | context_imports
     assert "agent.core" not in all_imports

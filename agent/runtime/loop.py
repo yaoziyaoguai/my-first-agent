@@ -31,6 +31,7 @@ from agent.runtime.contracts import (
     AbandonUnknownModelOutcome,
     Action,
     ActionDisposition,
+    ActiveRun,
     ActiveRunStatus,
     ApprovalRequest,
     ApprovalRequired,
@@ -98,6 +99,7 @@ from agent.runtime.contracts import (
 from agent.runtime.control import ControlBinding, ControlInbox, ControlRequestKind
 from agent.runtime.evidence import (
     WORKSPACE_WRITE_TOOLS,
+    WRITABLE_PROCESS_TOOLS,
     ClosedEvidenceRegistry,
     EvidenceVerificationError,
     trusted_readonly_native_sandbox_success,
@@ -115,6 +117,7 @@ from agent.runtime.ports import (
     RetryableProviderError,
     ToolRuntime,
 )
+from agent.runtime.resource_lifecycle import managed_process_receipts
 from agent.runtime.state import (
     accept_action,
     accept_begin_answer,
@@ -3236,6 +3239,9 @@ class AgentRuntime:
         request = self._control_inbox.poll(binding)
         if request is None:
             return None
+        # RC-03（2026-10-11）：apply_control_request 会清空 active_run；在 reducer
+        # 前捕获本次 run 的实际用量，随终态记录与返回值保全。
+        pre_control_active = state.active_run
         controlled = apply_control_request(state, request)
         current = self._save(current, controlled)
         cancelled = request.kind is ControlRequestKind.CANCEL
@@ -3252,6 +3258,7 @@ class AgentRuntime:
             event_kind=(RuntimeEventKind.CANCELLED if cancelled else RuntimeEventKind.COMPLETED),
             message=message,
             outcome_state=current.state,
+            usage_active=pre_control_active,
         )
 
     def _finish_pending(
@@ -3982,8 +3989,43 @@ class AgentRuntime:
         ordinary: set[str] = set()
         mutable_observation: set[str] = set()
         native_validation: set[str] = set()
+        # W1（2026-10-12）：managed writer 在场集合，与 active_task_resources
+        # 共用同一 receipt 形状解释（managed_process_receipts）；验证取得时
+        # 在场即失格。跨 run 的 managed receipt 也参与追踪（与资源门一致）。
+        active_writers: set[str] = set()
         for fact in state.facts:
-            if not fact.fact_id.startswith(run_prefix):
+            if fact.kind is FactKind.CONTEXT_SUMMARY:
+                # RC-01/020（2026-10-11）：与证据判定共用同一保守边界——
+                # summary 代表被裁剪掉的任意历史跨度，Runtime 无法再证明其中
+                # 没有写入；早于它的成功请求不再抑制同参重试，否则压缩后
+                # 「不能完成也不能显式重验」。晚于 summary 的新结果正常累积。
+                #
+                # P2-1（2026-10-13）：writer 在场状态不随 summary 清空——它是
+                # durable resource ownership 事实（存活 writer 的 start
+                # receipt 受压缩保护、保留在 facts 中），前向折叠在 summary
+                # 处的值恰是 retained 前缀的折叠结果，与 evidence 侧
+                # managed_writer_active_at 同一语义；清空会让 summary 之后取得
+                # 的验证被错误计入 native_validation，而 evidence 侧拒绝它，
+                # 同参重验又被该错误抑制挡住，两侧分叉。
+                ordinary.clear()
+                mutable_observation.clear()
+                native_validation.clear()
+                continue
+            # W1（2026-10-12）：writer 在场追踪跨 run 生效（资源门看全序列），
+            # 因此置于 run 前缀过滤之前；只解释 managed receipt 形状。
+            for event, resource_ref in managed_process_receipts((fact,)):
+                if event == "started":
+                    active_writers.add(resource_ref)
+                else:
+                    active_writers.discard(resource_ref)
+            if not fact.fact_id.startswith(run_prefix) and not (
+                fact.fact_id.startswith("action:")
+                and fact.kind is FactKind.TOOL_RESULT
+                and fact.content.get("unknown_outcome") is True
+            ):
+                # RC-01（2026-10-11）：UNKNOWN 恢复事实不带 run 前缀
+                # （action:N:recovery），不能被 run-prefix 过滤漏掉其失效含义；
+                # 通过 tool_call_id 关联本 run 的调用清单参与折叠。
                 continue
             if fact.kind is FactKind.TOOL_CALLS:
                 raw_calls = fact.content.get("calls")
@@ -4017,16 +4059,25 @@ class AgentRuntime:
             if not isinstance(call_id, str) or call_id not in request_by_call_id:
                 continue
             request_digest, tool_name = request_by_call_id[call_id]
+            if fact.content.get("unknown_outcome") is True:
+                # RC-01/RC-02（2026-10-11）：结果未知 → 保守失效，不授予新豁免。
+                # 与证据判定共用同一谓词（统一证据与去重判断）；mark_failed 不豁免。
+                if ClosedEvidenceRegistry._may_invalidate_workspace_validation(fact):
+                    native_validation.clear()
+                if tool_name in state_changing_tools:
+                    ordinary.difference_update(mutable_observation)
+                    mutable_observation.clear()
+                continue
             if fact.content.get("executed") is not True:
                 # executed=false 的拒绝不产生新豁免，也不构成失效。
                 continue
             metadata = fact.content.get("metadata")
             metadata_dict = metadata if isinstance(metadata, dict) else None
-            if tool_name in WORKSPACE_WRITE_TOOLS or (
+            if tool_name in WORKSPACE_WRITE_TOOLS or tool_name in WRITABLE_PROCESS_TOOLS or (
                 metadata_dict is not None and "process_receipt" in metadata_dict
             ):
-                # 写入与 same-UID process 的已执行结果（成功/失败/超时）都可能
-                # 已改写验证输入；先失效再记录本次成功。
+                # 写入、可写 same-UID 进程启动与 same-UID process 的已执行结果
+                # （成功/失败/超时）都可能已改写验证输入；先失效再记录本次成功。
                 native_validation.clear()
             trusted_sandbox = False
             if metadata_dict is not None and (
@@ -4049,7 +4100,12 @@ class AgentRuntime:
                 request_digest is not None
                 and fact.content.get("is_error") is False
             ):
-                if trusted_sandbox:
+                if trusted_sandbox and active_writers:
+                    # W1（2026-10-12）：验证取得时存在未确认关闭的 managed
+                    # writer → 取得即失格：既不进 native_validation，也不
+                    # 回落 ordinary（同参重验不被抑制，普通工具抑制不变）。
+                    pass
+                elif trusted_sandbox:
                     native_validation.add(request_digest)
                 else:
                     ordinary.add(request_digest)
@@ -4070,10 +4126,13 @@ class AgentRuntime:
         request: PendingRequest | None = None,
         error_code: str | None = None,
         outcome_state: ConversationState | None = None,
+        usage_active: ActiveRun | None = None,
     ) -> RunResult:
         state = outcome_state if outcome_state is not None else current.state
         # terminal reducer 会清空 active_run；用 reducer 前的 current 保留本次 run 用量。
-        usage_active = current.state.active_run or state.active_run
+        # RC-03（2026-10-11）：apply_control_request 先清空 active_run，两边都
+        # None → 控制终态用量丢失；调用方在 reducer 前捕获并显式传入。
+        usage_active = usage_active or current.state.active_run or state.active_run
         model_calls_used = (
             usage_active.model_calls_used if usage_active is not None else 0
         )

@@ -12,6 +12,7 @@ from agent.runtime.contracts import (
     EgressClass,
     ExecutionAuthorityClass,
     FactKind,
+    ProviderContinuationV1,
     RecoveryRequest,
     RecoveryResolution,
     ResolveUnknownToolOutcome,
@@ -195,3 +196,32 @@ def test_tool_batch_rejects_duplicate_call_ids_before_any_effect() -> None:
                 ToolCall("duplicate", "second_tool", {}),
             ),
         )
+
+
+def test_tool_batch_persists_provider_bound_continuation_with_the_assistant_fact() -> None:
+    started = accept_action(
+        None,
+        SubmitMessage(
+            conversation_id="conversation-1",
+            action_seq=1,
+            expected_revision=0,
+            run_id="run-1",
+            message="hello",
+        ),
+    ).state
+    continuation = ProviderContinuationV1.create(
+        provider_identity_digest="a" * 64,
+        opaque_payload="private reasoning",
+    )
+
+    batched = start_tool_batch(
+        started,
+        (ToolCall("call-1", "read_file", {"path": "README.md"}),),
+        provider_continuation=continuation,
+    )
+
+    assert batched.facts[-1].content["provider_continuation"] == {
+        "provider_identity_digest": "a" * 64,
+        "opaque_payload": "private reasoning",
+        "opaque_payload_digest": continuation.opaque_payload_digest,
+    }

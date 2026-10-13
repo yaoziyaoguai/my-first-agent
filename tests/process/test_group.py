@@ -152,3 +152,44 @@ def test_terminate_group_unconfirmable_raises_within_budget(monkeypatch) -> None
         monkeypatch.undo()
         os.killpg(pgid, signal.SIGKILL)
         survivor.wait(timeout=5)
+
+
+def test_terminate_group_transient_probe_error_recovers_within_budget(
+    monkeypatch,
+) -> None:
+    """macOS killpg 对消失中的 pgid 偶发 EPERM（errno 1，实测第 33 轮捕获）：
+
+    verify 预算内瞬态探测错误必须继续探测直到 ESRCH 确认，而不是让单次
+    fail-closed 探测异常穿透、提前失败（cleanup_unknown 假阴性）。
+    """
+
+    survivor = _spawn("import time; time.sleep(30)")
+    pgid = verified_group_identity(survivor.pid)
+    probes = {"n": 0}
+
+    def transient_eperm_killpg(target, sig):  # noqa: ANN001, ANN202
+        if target != pgid:
+            return os.killpg(target, sig)
+        if sig == 0:
+            probes["n"] += 1
+            if probes["n"] <= 3:
+                raise PermissionError(1, "Operation not permitted")
+            raise ProcessLookupError(3, "No such process")
+        return None  # TERM/KILL 假装送达；探测序列 EPERM×3 → ESRCH
+
+    monkeypatch.setattr(os, "killpg", transient_eperm_killpg)
+    try:
+        term_sent, kill_sent = terminate_group(
+            survivor,
+            pgid,
+            term_grace_seconds=0.1,
+            kill_grace_seconds=0.1,
+            verify_budget_seconds=2.0,
+        )
+    finally:
+        monkeypatch.undo()
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(pgid, signal.SIGKILL)
+        survivor.wait(timeout=5)
+    assert (term_sent, kill_sent) == (True, True)
+    assert probes["n"] >= 4

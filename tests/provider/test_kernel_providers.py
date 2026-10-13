@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import httpx
 import pytest
@@ -39,7 +40,8 @@ from agent.runtime.contracts import (
     ModelToolCall,
     ToolDefinition,
 )
-from agent.runtime.ports import ModelProvider
+from agent.runtime.ports import ModelAttemptBudgetExhaustedError, ModelProvider
+from agent.transport_audit import TransportAttemptLedger
 
 PROVIDER_CASES = [
     ("anthropic_compatible", AnthropicCompatibleProvider),
@@ -146,6 +148,59 @@ def test_http_provider_records_attempt_before_transport_failure(
             provider.generate(_context())
 
     assert attempts == [("model", "https://provider.invalid")]
+
+
+@pytest.mark.parametrize(
+    ("provider_type", "provider_class"),
+    PROVIDER_CASES,
+)
+def test_http_provider_does_not_dispatch_after_transport_budget_is_exhausted(
+    tmp_path: Path,
+    provider_type: str,
+    provider_class: type[AnthropicCompatibleProvider | OpenAICompatibleProvider],
+) -> None:
+    path = tmp_path / "attempts.jsonl"
+    ledger = TransportAttemptLedger(path, max_model_attempts=1)
+    ledger.record("model", "https://provider.invalid")
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(500)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        provider = provider_class(
+            config=_config(provider_type),
+            http_client=client,
+            attempt_recorder=ledger.record,
+        )
+        with pytest.raises(ModelAttemptBudgetExhaustedError):
+            provider.generate(_context())
+
+    assert requests == []
+
+
+def test_failed_http_dispatch_still_consumes_its_reserved_budget(tmp_path: Path) -> None:
+    path = tmp_path / "attempts.jsonl"
+    ledger = TransportAttemptLedger(path, max_model_attempts=1)
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        raise httpx.ConnectError("fixture connect", request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleProvider(
+            config=_config("openai_compatible"),
+            http_client=client,
+            attempt_recorder=ledger.record,
+        )
+        with pytest.raises(ProviderTransportError):
+            provider.generate(_context())
+        with pytest.raises(ModelAttemptBudgetExhaustedError):
+            provider.generate(_context())
+
+    assert len(requests) == 1
 
 
 def test_http_protocols_project_only_kernel_validated_opaque_source_refs() -> None:

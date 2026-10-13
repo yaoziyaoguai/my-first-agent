@@ -166,12 +166,12 @@ def test_launchd_probe_reports_an_unavailable_standard_root_without_leaking_test
     assert not probe_root.exists()
 
 
-def test_preflight_does_not_touch_launchd_when_seatbelt_is_unavailable(
+def test_read_only_preflight_never_registers_a_launchagent(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(runner.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(runner, "_launchd_domain_available", lambda: True)
-    monkeypatch.setattr(runner, "_seatbelt_available", lambda: False)
+    monkeypatch.setattr(runner, "_seatbelt_available", lambda: True)
     monkeypatch.setattr(runner, "_browser_runtime_available", lambda: True)
     monkeypatch.setattr(
         runner,
@@ -182,8 +182,29 @@ def test_preflight_does_not_touch_launchd_when_seatbelt_is_unavailable(
     result = runner.run_preflight()
 
     assert result.status == "not_qualified"
-    assert result.reason == "seatbelt_unavailable"
+    assert result.reason == "launchd_wake_not_probed"
     assert result.launchd_wake_observed is False
+    assert result.launchd_cleanup_confirmed is True
+
+
+def test_explicit_launchd_probe_observes_and_cleans_up_a_temporary_agent(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(runner.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(runner, "_launchd_domain_available", lambda: True)
+    monkeypatch.setattr(runner, "_seatbelt_available", lambda: True)
+    monkeypatch.setattr(runner, "_browser_runtime_available", lambda: True)
+    monkeypatch.setattr(
+        runner,
+        "_launchd_wake_probe",
+        lambda: (True, True, None),
+    )
+
+    result = runner.run_preflight(probe_launchd=True)
+
+    assert result.status == "qualified"
+    assert result.reason == "qualified"
+    assert result.launchd_wake_observed is True
     assert result.launchd_cleanup_confirmed is True
 
 
@@ -330,7 +351,11 @@ def test_u2b_run_stops_before_receipt_when_host_is_not_qualified(
         reason="seatbelt_unavailable",
         seatbelt_available=False,
     )
-    monkeypatch.setattr(runner, "run_preflight", lambda: unavailable)
+    monkeypatch.setattr(
+        runner,
+        "run_preflight",
+        lambda *, probe_launchd=False: unavailable,
+    )
 
     exit_code = runner.main(
         [

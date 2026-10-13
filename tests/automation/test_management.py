@@ -50,10 +50,13 @@ def _service(
         definition_body_digest="",
     )
     repository = DeterministicAutomationRepository(_empty_snapshot())
+    resolved_wake_adapter = wake_adapter or DeterministicWakeAdapter()
+    if wake_adapter is None:
+        resolved_wake_adapter.install(resolved_wake_adapter.configured_policy_digest)
     service = AutomationManagementService(
         controller=AutomationController(repository),
         workspace_repository=workspace,
-        wake_adapter=wake_adapter or DeterministicWakeAdapter(),
+        wake_adapter=resolved_wake_adapter,
         source_bindings={body.source_workspace_binding_digest: binding},
         workspace_bounds=WorkspaceBoundsV1(),
         qualifications=qualifications
@@ -97,6 +100,76 @@ def test_create_preview_and_approve_activate_one_exact_revision() -> None:
     assert activated.code == "active"
     assert repository.load().records[0].definition is not None
     assert workspace.owned_object_count == 1
+
+
+def test_manual_automation_activates_without_installing_a_wake_adapter() -> None:
+    wake = DeterministicWakeAdapter()
+    service, repository, _, body = _service(
+        wake_adapter=wake,
+        qualifications=ActivationQualificationsV1(
+            provider_ready=True,
+            sandbox_qualified=True,
+            browser_qualified=True,
+            wake_qualified=False,
+            qualification_digest="a" * 64,
+        ),
+    )
+    body = replace(
+        body,
+        wake_adapter_policy_digest=None,
+        definition_body_digest="",
+    )
+    service.create(
+        body,
+        expected_snapshot_token="snapshot-token-0000",
+        next_snapshot_token="snapshot-token-0001",
+    )
+
+    preview = service.preview(body.automation_id)
+    activated = service.approve(
+        body.automation_id,
+        preview_digest=preview.preview_digest,
+        expected_snapshot_token="snapshot-token-0001",
+        next_snapshot_token="snapshot-token-0002",
+    )
+
+    assert activated.code == "active"
+    assert repository.load().records[0].definition is not None
+    assert wake.install_count == 0
+
+
+def test_cold_wake_requires_an_explicit_enable_before_task_approval() -> None:
+    wake = DeterministicWakeAdapter()
+    service, repository, _, body = _service(wake_adapter=wake)
+    service.create(
+        body,
+        expected_snapshot_token="snapshot-token-0000",
+        next_snapshot_token="snapshot-token-0001",
+    )
+    preview = service.preview(body.automation_id)
+
+    refused = service.approve(
+        body.automation_id,
+        preview_digest=preview.preview_digest,
+        expected_snapshot_token="snapshot-token-0001",
+        next_snapshot_token="snapshot-token-0002",
+    )
+
+    assert refused.code == "wake_not_enabled"
+    assert repository.load().records[0].definition is None
+    assert wake.install_count == 0
+
+    assert service.wake_enable().code == "wake_enabled"
+    activated = service.approve(
+        body.automation_id,
+        preview_digest=preview.preview_digest,
+        expected_snapshot_token="snapshot-token-0001",
+        next_snapshot_token="snapshot-token-0002",
+    )
+
+    assert activated.code == "active"
+    assert repository.load().records[0].definition is not None
+    assert wake.install_count == 1
 
 
 def test_list_and_show_are_bounded_owner_views() -> None:

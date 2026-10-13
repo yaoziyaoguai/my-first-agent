@@ -27,17 +27,21 @@ from agent.runtime.checkpoint import (
 from agent.runtime.contracts import (
     ActiveRun,
     ActiveRunStatus,
+    AuthoritySourceKind,
     ContinuationPhase,
     ConversationState,
     ConversationWorkspaceBindingV1,
     EgressClass,
     ExecutingIntentRecord,
     ExecutionAuthorityClass,
+    GoalAuthorizationBinding,
+    GoalAuthorizationScope,
     ProcessAuthorityLeaseV1,
     ProposedCriterion,
     RecoveryRequest,
     SideEffectClass,
     ToolCall,
+    canonical_json_digest,
 )
 from tests.continuity.test_contracts import _goal
 
@@ -155,6 +159,7 @@ def _pre_015_v3_document() -> dict:
 def _remove_v8_active_fields(document: dict) -> None:
     active = document["state"].get("active_run")
     if active is not None:
+        active.pop("run_started_at")
         active.pop("invocation_origin")
         active.pop("provider_call_intent")
         active.pop("persisted_model_response")
@@ -166,14 +171,14 @@ def _remove_v8_active_fields(document: dict) -> None:
         active.pop("output_tokens_used")
 
 
-def test_current_state_encodes_as_v9_and_round_trips(tmp_path) -> None:
+def test_current_state_encodes_as_v10_and_round_trips(tmp_path) -> None:
     state = _current_state()
     path = tmp_path / "conversation.json"
     store = LocalCheckpointStore.initialize(path, state)
 
     document = json.loads(path.read_text(encoding="utf-8"))
-    assert document["schema_version"] == 9, (
-        "020a invocation origin makes v9 the current checkpoint schema"
+    assert document["schema_version"] == 10, (
+        "durable run timing makes v10 the current checkpoint schema"
     )
     restored = store.load().state
     assert restored == state
@@ -184,14 +189,93 @@ def test_current_state_encodes_as_v9_and_round_trips(tmp_path) -> None:
     )
 
 
-def test_process_leases_alone_use_current_v9_schema(tmp_path) -> None:
-    """current writer 统一写 v9；v6-v8 只作为可读取 migration source。"""
+def test_v10_persists_durable_run_start_time(tmp_path) -> None:
+    state = _current_state()
+    assert state.active_run is not None
+    state = replace(
+        state,
+        active_run=replace(
+            state.active_run,
+            run_started_at="2026-09-13T00:00:00Z",
+        ),
+    )
+    path = tmp_path / "conversation-timing.json"
+
+    restored = LocalCheckpointStore.initialize(path, state).load().state
+
+    assert restored.active_run is not None
+    assert restored.active_run.run_started_at == "2026-09-13T00:00:00Z"
+
+
+def test_v10_persists_directory_authorization_and_v9_migrates_exact_scope(
+    tmp_path,
+) -> None:
+    goal = _goal(targets=("reports",))
+    directory = GoalAuthorizationBinding.create(
+        binding_id="authority-directory",
+        goal_id=goal.goal_id,
+        goal_revision=goal.revision,
+        workspace_identity_digest=goal.workspace_identity_digest,
+        operation="write_file",
+        normalized_target="reports",
+        scope=GoalAuthorizationScope.DIRECTORY,
+        source_kind=AuthoritySourceKind.HUMAN_APPROVAL,
+        source_id="approval-directory",
+        source_digest="source-directory",
+        issued_at="2026-09-13T00:00:00Z",
+        expires_at="2026-09-13T01:00:00Z",
+    )
+    current = replace(_current_state(), goal=goal, goal_authorizations=(directory,))
+    current_path = tmp_path / "directory-scope.json"
+    restored = LocalCheckpointStore.initialize(current_path, current).load().state
+    assert restored.goal_authorizations[0].scope is GoalAuthorizationScope.DIRECTORY
+
+    exact = GoalAuthorizationBinding.create(
+        binding_id="authority-exact",
+        goal_id=goal.goal_id,
+        goal_revision=goal.revision,
+        workspace_identity_digest=goal.workspace_identity_digest,
+        operation="write_file",
+        normalized_target="reports/final.md",
+        source_kind=AuthoritySourceKind.HUMAN_APPROVAL,
+        source_id="approval-exact",
+        source_digest="source-exact",
+        issued_at="2026-09-13T00:00:00Z",
+        expires_at="2026-09-13T01:00:00Z",
+    )
+    legacy_state = replace(
+        _current_state(),
+        goal=goal,
+        goal_authorizations=(exact,),
+    )
+    document = json.loads(_encode_state(legacy_state))
+    document["schema_version"] = 9
+    document["state"]["active_run"].pop("run_started_at")
+    encoded_binding = document["state"]["goal_authorizations"][0]
+    encoded_binding.pop("scope")
+    encoded_binding["binding_digest"] = canonical_json_digest(
+        {
+            key: value
+            for key, value in encoded_binding.items()
+            if key != "binding_digest"
+        }
+    )
+    legacy_path = tmp_path / "exact-v9.json"
+    _write_document(legacy_path, document)
+
+    migrated = LocalCheckpointStore(legacy_path).load().state
+
+    assert migrated.goal_authorizations[0].scope is GoalAuthorizationScope.EXACT_FILE
+
+
+def test_process_leases_alone_use_current_v10_schema(tmp_path) -> None:
+    """current writer 统一写 v10；v6-v9 只作为可读取 migration source。"""
 
     state = replace(
         ConversationState.new(CONVERSATION), goal=_goal(), process_leases=(_lease(),)
     )
     document = json.loads(_encode_state(state).decode("utf-8"))
-    assert document["schema_version"] == 9
+    assert document["schema_version"] == 10
 
 
 def test_015_pre_015_v3_whole_state_migrates_completely(tmp_path) -> None:
@@ -316,11 +400,11 @@ def test_015_v6_missing_proposed_oracle_fails_closed(tmp_path) -> None:
 
 def test_015_unknown_schema_version_still_rejected(tmp_path) -> None:
     document = json.loads(_encode_state(_current_state()).decode("utf-8"))
-    document["schema_version"] = 10
+    document["schema_version"] = 11
     path = tmp_path / "conversation.json"
     _write_document(path, document)
 
-    with pytest.raises(CheckpointVersionError, match="schema version: 10"):
+    with pytest.raises(CheckpointVersionError, match="schema version: 11"):
         LocalCheckpointStore(path).load()
 
 

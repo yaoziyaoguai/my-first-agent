@@ -59,6 +59,14 @@ identity 成立。2026-09-09 r18 收尾轮对 consolidated 候选（commit `684f
   CLI 实时增量显示（与最终 message 完全一致时不重复打印）；TUI 周期 drain 显示。
   不含即时取消/工具抢占/后台化。受管 E3 脚本（013/014/015/018/019）的 provider 包装
   签名随产品合同同步。
+  **r19 后续（2026-09-13，编码自主性候选）**：精确 DeepSeek Flash 官方入口现支持
+  `thinking=enabled` + `reasoning_effort=max` 的 SSE 路径。opaque `reasoning_content` 与
+  provider identity 绑定后 checkpoint/replay，不进入 UI、Memory 或 compaction summary；断流
+  不铸造响应且不自动重发。受当前 invocation 绑定的取消可在 SSE 读取边界协作
+  停止，最终状态仍只由 `AgentRuntime` 落盘。2026-09-14 增加精确 provider capacity 档案：
+  官方 Flash identity 使用 1M context window 与 384K output 上限，并联动有界 SSE 字节预算；
+  未知兼容 endpoint 不继承。真实 D01 CSV 修复在 13 次 model attempt 内自主完成，产品测试和
+  workspace 外 grader 均 PASS；该单场景证据不改变 capability promotion 状态。
 - 后续重开条件（用户明确授权才生效）：现有支持范围内出现可复现的合同缺陷，或出现能回答新学习
   问题的具体 reference task。（2026-09-09 晚用户确认产品化转向，冻结约束由 r19 审计解除；
   小步 1 基线见 `docs/audits/2026-09-10-product-baseline-tasks.md`。）

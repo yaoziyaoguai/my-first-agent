@@ -1,0 +1,81 @@
+"""独立审计探针：只创建合成子进程，不启动浏览器或真实 provider。"""
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from types import SimpleNamespace
+
+REPO = Path.cwd()
+sys.path.insert(0, str(REPO))
+spec = importlib.util.spec_from_file_location('audit_journey', REPO / 'scripts/f2_f3_local_browser_journeys.py')
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module._COOPERATIVE_CLEANUP_SECONDS = 0.05
+module._TERM_GRACE_SECONDS = 0.05
+module._KILL_GRACE_SECONDS = 0.05
+
+
+def run_case(name: str, code: str, budget: float = 0.15) -> None:
+    child = subprocess.Popen([sys.executable, '-c', code], stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, start_new_session=True)
+    module.subprocess = SimpleNamespace(Popen=lambda *a, **k: child,
+                                        PIPE=subprocess.PIPE,
+                                        TimeoutExpired=subprocess.TimeoutExpired)
+    def guard(_signum, _frame):
+        raise TimeoutError('audit outer guard')
+    previous = signal.signal(signal.SIGALRM, guard)
+    signal.setitimer(signal.ITIMER_REAL, 4)
+    started = time.monotonic()
+    try:
+        with tempfile.TemporaryDirectory(prefix='fa-driver-audit-', dir='/private/tmp') as directory:
+            result = module._run_bounded('f2', Path(directory), budget_seconds=budget)
+        print(json.dumps({'case': name, 'elapsed': round(time.monotonic()-started, 3),
+                          'budget': budget, 'child_exit': child.returncode,
+                          'timeout': result['timeout'], 'passed': result['passed'],
+                          'cleanup': result['resource_cleanup_confirmed'],
+                          'failures': result['failure_codes']}))
+    except TimeoutError:
+        print(json.dumps({'case': name, 'outer_guard': True}))
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+        if child.poll() is None:
+            assert os.getpgid(child.pid) == child.pid
+            os.killpg(child.pid, signal.SIGKILL)
+        child.wait(timeout=3)
+        for stream in (child.stdin, child.stdout, child.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
+
+
+report = {'journey': 'f2', 'target_checks_passed': True,
+          'resource_cleanup_confirmed': True, 'failure_codes': [], 'details': {}}
+payload = json.dumps(report)
+run_case('small_flush_delays_deadline', f'import time; print({payload!r}, flush=True); time.sleep(1.2)')
+run_case('success_record_nonzero_exit', f'import sys; print({payload!r}, flush=True); sys.exit(7)', 1)
+report['journey'] = 'different_journey'
+payload = json.dumps(report)
+run_case('wrong_journey_record', f'print({payload!r}, flush=True)', 1)
+
+calls = []
+module.build_browser_resources = lambda *a, **k: SimpleNamespace(
+    readiness=SimpleNamespace(value='ready'), reason_code='',
+    closeables=(lambda: calls.append('closed'),), registrations=())
+module.KernelToolRuntime = lambda *a, **k: object()
+def fail_open(*args, **kwargs):
+    raise RuntimeError('synthetic first open failure')
+module._invoke_governed = fail_open
+with tempfile.TemporaryDirectory(prefix='fa-cleanup-audit-', dir='/private/tmp') as directory:
+    try:
+        module.journey_f2_restart_outclosing(Path(directory))
+    except RuntimeError as error:
+        print(json.dumps({'case': 'f2_open_failure_cleanup', 'error': type(error).__name__,
+                          'cleanup_calls': len(calls)}))

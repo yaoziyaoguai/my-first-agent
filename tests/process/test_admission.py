@@ -145,6 +145,39 @@ def test_015_resolve_absolute_executable_binds_identity() -> None:
         assert identity.size == len(b"#!/bin/sh\necho hi\n")
 
 
+def test_015_resolve_multihop_executable_symlink_binds_the_final_identity(
+    tmp_path,
+) -> None:
+    """常见 venv 的 python → python3.x → host python 两跳链接不是 symlink loop。"""
+
+    _require_admission()
+    _make_executable(tmp_path, "python-real")
+    target = tmp_path / "python-real"
+    second = tmp_path / "python3.12"
+    second.symlink_to(target)
+    first = tmp_path / "python"
+    first.symlink_to(second.name)
+
+    identity = resolve_executable(str(first), search_paths=())
+
+    assert isinstance(identity, ExecutableIdentityV1)
+    assert identity.resolved_path == str(target)
+    assert len(identity.symlink_chain) == 2
+
+
+def test_015_resolve_executable_rejects_a_real_symlink_cycle(tmp_path) -> None:
+    _require_admission()
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.symlink_to(second.name)
+    second.symlink_to(first.name)
+
+    rejected = resolve_executable(str(first), search_paths=())
+
+    assert isinstance(rejected, KnownNotExecuted)
+    assert rejected.code == "symlink_loop"
+
+
 def test_015_admission_rejects_missing_non_executable_and_directory() -> None:
     """R12 / AE6：missing / non-executable / directory 在 spawn 前 fail closed。"""
 

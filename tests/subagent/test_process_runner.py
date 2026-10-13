@@ -8,12 +8,14 @@ killed by the parent's process-group termination and surfaces UNCONFIRMED — no
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from agent.runtime.contracts import RunStatus
 from agent.subagent.contracts import ChildProfile, ChildProviderSpec
 from agent.subagent.process_runner import ChildProcessRunner
+from agent.transport_audit import TransportAttemptLedger
 
 SCOPE = "scope-1"
 
@@ -51,11 +53,51 @@ def test_http_child_spec_preserves_explicit_thinking_mode_without_credential() -
         thinking_mode="disabled",
         request_path="/chat/completions",
         strict_tools=True,
+        attempt_ledger_path="/private/tmp/synthetic-attempts.jsonl",
+        max_model_attempts=8,
     )
 
     raw = _spec_to_dict(original)
     assert "credential" not in raw
     assert _spec_from_config(raw) == original
+
+
+def test_http_child_stops_before_dispatch_when_shared_budget_is_exhausted(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    secure = tmp_path / "secure"
+    secure.mkdir(mode=0o700)
+    ledger_path = secure / "attempts.jsonl"
+    TransportAttemptLedger(ledger_path, max_model_attempts=1).record(
+        "model",
+        "https://provider.example",
+    )
+    monkeypatch.setenv("SYNTHETIC_CHILD_KEY", "synthetic")
+    runner = ChildProcessRunner(
+        provider_spec=ChildProviderSpec(
+            kind="http",
+            provider_type="openai_compatible",
+            model="synthetic",
+            base_url="https://provider.invalid",
+            credential_env_name="SYNTHETIC_CHILD_KEY",
+            timeout=0.1,
+            attempt_ledger_path=str(ledger_path),
+            max_model_attempts=1,
+        ),
+        profile=_profile(hard_deadline_seconds=5.0),
+        hard_deadline_seconds=5.0,
+    )
+
+    result = runner.run(
+        objective="return a short answer",
+        handoff="",
+        parent_idempotency_key="parent:budget:child-1",
+    )
+
+    assert result.receipt_state == "terminated"
+    assert result.status is RunStatus.LIMIT_REACHED
+    assert len(ledger_path.read_text(encoding="utf-8").splitlines()) == 1
 
 
 def test_process_runner_terminated_on_completion() -> None:
@@ -94,6 +136,58 @@ def test_process_runner_deadline_kill_is_unconfirmed() -> None:
     assert result.reason == "unconfirmed_outcome"
 
 
+def test_process_runner_parent_cancel_kills_child_before_deadline() -> None:
+    """父任务出现 bound control request 后，process runner 必须尽快回收 child group。
+
+    provider 可能已经开始，因此结果只能是 UNCONFIRMED，不能伪装成一次干净的取消。
+    """
+    observations = 0
+
+    def cancellation_requested() -> bool:
+        nonlocal observations
+        observations += 1
+        return observations >= 3
+
+    runner = ChildProcessRunner(
+        provider_spec=_fake_spec(text="never reached", sleep=5.0),
+        profile=_profile(),
+        hard_deadline_seconds=5.0,
+        poll_interval=0.01,
+    )
+
+    result = runner.run(
+        objective="cancel while running",
+        handoff="",
+        parent_idempotency_key="parent:run-1:call-cancel",
+        cancellation_requested=cancellation_requested,
+    )
+
+    assert observations >= 3
+    assert result.receipt_state == "unconfirmed"
+    assert result.status is RunStatus.FAILED_FATAL
+    assert result.reason == "cancelled_unconfirmed"
+
+
+def test_process_runner_cancel_before_start_is_known_not_started() -> None:
+    runner = ChildProcessRunner(
+        provider_spec=_fake_spec(text="must not run", sleep=5.0),
+        profile=_profile(),
+        hard_deadline_seconds=5.0,
+    )
+
+    result = runner.run(
+        objective="cancel before start",
+        handoff="",
+        parent_idempotency_key="parent:run-1:call-pre-cancel",
+        cancellation_requested=lambda: True,
+    )
+
+    assert result.receipt_state == "terminated"
+    assert result.status is RunStatus.CANCELLED
+    assert result.reason == "cancelled_before_start"
+    assert result.model_calls == 0
+
+
 def test_process_runner_nonterminal_is_terminated_known_error() -> None:
     """G8: child 自己报告 nonterminal（tool call）并 exit 0 → TERMINATED + child_nonterminal。
 
@@ -101,9 +195,7 @@ def test_process_runner_nonterminal_is_terminated_known_error() -> None:
     crash = UNCONFIRMED。
     """
     runner = ChildProcessRunner(
-        provider_spec=ChildProviderSpec(
-            kind="fake", fake_tool=("read_file", {"path": "x"})
-        ),
+        provider_spec=ChildProviderSpec(kind="fake", fake_tool=("read_file", {"path": "x"})),
         profile=_profile(),
         hard_deadline_seconds=120.0,
     )
@@ -165,7 +257,9 @@ def test_process_runner_large_stderr_does_not_cause_false_unconfirmed() -> None:
     进入结果。"""
     runner = ChildProcessRunner(
         provider_spec=ChildProviderSpec(
-            kind="fake", fake_text="ok", stderr_chars=128 * 1024  # > 64KB pipe buffer
+            kind="fake",
+            fake_text="ok",
+            stderr_chars=128 * 1024,  # > 64KB pipe buffer
         ),
         profile=_profile(),
         hard_deadline_seconds=120.0,
@@ -204,9 +298,7 @@ def test_process_runner_temp_dir_removed_after_run(tmp_path, monkeypatch) -> Non
         profile=_profile(),
         hard_deadline_seconds=120.0,
     )
-    res_ok = runner_ok.run(
-        objective="ok", handoff="", parent_idempotency_key="parent:run-1:dir-ok"
-    )
+    res_ok = runner_ok.run(objective="ok", handoff="", parent_idempotency_key="parent:run-1:dir-ok")
     assert res_ok.receipt_state == "terminated"
     assert created_dirs and not created_dirs[-1].exists(), "temp dir leaked after success"
 
@@ -256,9 +348,7 @@ def test_parse_result_rejects_malformed_and_oversized() -> None:
     }
 
 
-def test_015_config_dir_cleanup_retries_transient_rmdir_failure(
-    tmp_path, monkeypatch
-) -> None:
+def test_015_config_dir_cleanup_retries_transient_rmdir_failure(tmp_path, monkeypatch) -> None:
     """F5/U10 review-hardening：清理的一次瞬时 ``rmdir`` 失败不得静默泄漏 per-run 目录。
 
     全 suite 负载下实测（U10 复验 1 failed, 1026 passed）：``unlink``/``rmdir`` 各自
@@ -302,9 +392,7 @@ def test_015_config_dir_cleanup_retries_transient_rmdir_failure(
     assert not run_dir.exists(), "transient rmdir failure must not leak the per-run dir"
 
 
-def test_015_persistent_config_cleanup_failure_cannot_report_success(
-    tmp_path, monkeypatch
-) -> None:
+def test_015_persistent_config_cleanup_failure_cannot_report_success(tmp_path, monkeypatch) -> None:
     """持续清理失败时 child 已终止，但整体调用必须准确失败。"""
 
     import tempfile as _tempfile
@@ -394,9 +482,7 @@ def _write_child_seam_config(tmp_path) -> object:
     return path
 
 
-def _capture_child_main_stdout(
-    tmp_path, monkeypatch, capsysbinary, message: str
-) -> bytes:
+def _capture_child_main_stdout(tmp_path, monkeypatch, capsysbinary, message: str) -> bytes:
     """对实际 ``child.main`` 输出 seam 注入返回 completed 的合成 runtime，捕获真实 stdout bytes。"""
     import agent.subagent.runner as runner_mod
     from agent.subagent.child import main as child_main
@@ -449,9 +535,9 @@ def test_child_main_envelope_fits_shared_utf8_byte_budget(
     assert capped.startswith(parsed["message"]), (
         f"[{label}] emitted message must be a prefix of the original child message"
     )
-    full_blob = json.dumps(
-        {"status": "completed", "message": capped}, ensure_ascii=False
-    ).encode("utf-8")
+    full_blob = json.dumps({"status": "completed", "message": capped}, ensure_ascii=False).encode(
+        "utf-8"
+    )
     if len(full_blob) <= _ENVELOPE_BUDGET_BYTES:
         assert parsed["message"] == capped, (
             f"[{label}] messages whose full envelope fits must be preserved verbatim"

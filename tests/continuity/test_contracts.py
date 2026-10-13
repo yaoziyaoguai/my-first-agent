@@ -1,4 +1,4 @@
-from dataclasses import FrozenInstanceError, asdict
+from dataclasses import FrozenInstanceError, asdict, replace
 
 import pytest
 
@@ -42,6 +42,7 @@ from agent.runtime.contracts import (
     ModelToolCall,
     PauseGoal,
     ProposedCriterion,
+    ProviderContinuationV1,
     ProviderDescriptor,
     RecoveryRequest,
     ResumeGoal,
@@ -110,6 +111,23 @@ def test_goal_draft_model_response_round_trips_typed_evidence_oracles() -> None:
     restored = model_response_from_payload(model_response_payload(response))
 
     assert restored == response
+
+
+def test_provider_continuation_round_trips_without_entering_visible_blocks() -> None:
+    continuation = ProviderContinuationV1.create(
+        provider_identity_digest="a" * 64,
+        opaque_payload="private reasoning",
+    )
+    response = ModelResponse(
+        (ModelToolCall("call-1", "read_file", {"path": "README.md"}),),
+        provider_continuation=continuation,
+    )
+
+    restored = model_response_from_payload(model_response_payload(response))
+
+    assert restored == response
+    assert restored.blocks == response.blocks
+    assert "private reasoning" not in repr(restored)
 
 
 def _goal(**overrides) -> GoalFrame:
@@ -511,6 +529,54 @@ def test_goal_draft_derives_explicit_web_and_process_obligations_from_user_fact(
     oracle_kinds = {item.oracle_kind for item in accepted.goal.proposed_criteria}
     assert EvidenceOracleKind.WEB_SOURCE_RECEIPT in oracle_kinds
     assert EvidenceOracleKind.TOOL_RECEIPT in oracle_kinds
+
+
+def test_goal_draft_derives_semantic_validation_obligation_from_authoritative_user_fact() -> None:
+    user = ConversationFact(
+        fact_id="fact:user:semantic-validation",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "Fix the bug and make all tests pass."},
+    )
+    state = ConversationState(
+        conversation_id="conversation:semantic-validation",
+        facts=(user,),
+    )
+    bootstrap = GoalBootstrap(
+        source_fact_id=user.fact_id,
+        workspace_identity_digest="workspace:v1:" + "c" * 64,
+        authority_snapshot="authority:v1:" + "d" * 64,
+    )
+    draft = GoalDraftProposal(
+        correlation_id="proposal:semantic-validation",
+        user_outcome="Fix the bug with passing tests",
+        beneficiary="owner",
+        targets=("src/bug.py",),
+        scope=("workspace",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(
+            ProposedCriterion(
+                criterion_id="criterion:fixed-source",
+                description="the corrected source is present",
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path="src/bug.py",
+            ),
+        ),
+        requires_local_process=True,
+    )
+
+    accepted = accept_goal_draft_proposal(
+        state,
+        draft,
+        bootstrap,
+        admitted_at="2026-08-20T00:00:00Z",
+    )
+
+    assert accepted.goal is not None
+    assert EvidenceOracleKind.TOOL_RECEIPT in {
+        item.oracle_kind for item in accepted.goal.proposed_criteria
+    }
+    assert accepted.goal.authority_snapshot == bootstrap.authority_snapshot
 
 
 @pytest.mark.parametrize(
@@ -1565,6 +1631,8 @@ def test_goal_authorization_requires_user_authoritative_source_binding() -> None
         source_kind=AuthoritySourceKind.USER_FACT,
         source_id="fact:user:1",
         source_digest="a" * 64,
+        issued_at="2026-09-04T00:00:00Z",
+        expires_at="2026-09-04T01:00:00Z",
     )
 
     assert binding.authorizes(
@@ -1592,6 +1660,8 @@ def test_goal_authorization_requires_user_authoritative_source_binding() -> None
             source_kind="model_output",  # type: ignore[arg-type]
             source_id="control:goal:1",
             source_digest="b" * 64,
+            issued_at="2026-09-04T00:00:00Z",
+            expires_at="2026-09-04T01:00:00Z",
         )
     with pytest.raises(ValueError, match="digest"):
         GoalAuthorizationBinding(
@@ -1604,6 +1674,10 @@ def test_goal_authorization_requires_user_authoritative_source_binding() -> None
             source_kind=binding.source_kind,
             source_id=binding.source_id,
             source_digest=binding.source_digest,
+            issued_at=binding.issued_at,
+            expires_at=binding.expires_at,
+            max_uses=binding.max_uses,
+            uses_consumed=binding.uses_consumed,
             binding_digest="forged",
         )
 
@@ -1927,6 +2001,72 @@ def test_goal_completion_requires_current_claimed_evidence_and_no_unknown_effect
     )
     with pytest.raises(ValueError, match="unknown effect"):
         verify_goal_completion(unsafe)
+
+
+def test_goal_completion_requires_browser_and_managed_server_cleanup() -> None:
+    evidence = _evidence()
+    claim = CompletionClaim(
+        correlation_id="control:claim:resources",
+        goal_id="goal:1",
+        goal_revision=1,
+        criterion_evidence_refs=(evidence.evidence_id,),
+    )
+
+    def result(fact_id: str, text: str, metadata: dict) -> ConversationFact:
+        return ConversationFact(
+            fact_id=fact_id,
+            kind=FactKind.TOOL_RESULT,
+            content={
+                "tool_call_id": fact_id,
+                "text": text,
+                "is_error": False,
+                "executed": True,
+                "metadata": metadata,
+            },
+        )
+
+    opened = ConversationState(
+        conversation_id="conversation:1",
+        goal=_goal(status=GoalStatus.EXECUTING),
+        evidence_records=(evidence,),
+        completion_claim=claim,
+        facts=(
+            result(
+                "open",
+                '{"session_ref":"session-1"}',
+                {"browser_result_kind": "browser_open", "session_ref": "session-1"},
+            ),
+            result(
+                "start",
+                '{"resource_ref":"managed-web-1","status":"ready"}',
+                {"tool_name": "managed_web_start"},
+            ),
+        ),
+    )
+    with pytest.raises(ValueError, match="browser_close, managed_web_stop"):
+        verify_goal_completion(opened)
+
+    closed = replace(
+        opened,
+        facts=(
+            *opened.facts,
+            result(
+                "close",
+                '{"session_ref":"session-1","outcome":"cleaned"}',
+                {
+                    "browser_result_kind": "browser_close",
+                    "session_ref": "session-1",
+                    "cleanup_outcome": "cleaned",
+                },
+            ),
+            result(
+                "stop",
+                '{"resource_ref":"managed-web-1","cleanup":"confirmed"}',
+                {"tool_name": "managed_web_stop"},
+            ),
+        ),
+    )
+    assert verify_goal_completion(closed).goal.status is GoalStatus.VERIFIED_DONE
 
 
 def test_014_contract_extensions_preserve_preexisting_positional_prefixes() -> None:

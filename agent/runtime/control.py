@@ -65,6 +65,20 @@ class ControlInbox:
                     return self._requests.pop(index)
             return None
 
+    def pending(self, binding: ControlBinding) -> bool:
+        """只观察当前 binding 是否已有请求；不消费、不修改 durable state。"""
+
+        with self._lock:
+            if self._bindings.get(binding.conversation_id) != binding:
+                return False
+            return any(
+                request.conversation_id == binding.conversation_id
+                and request.goal_id == binding.goal_id
+                and request.goal_revision == binding.goal_revision
+                and request.invocation_id == binding.invocation_id
+                for request in self._requests
+            )
+
     def close(self, binding: ControlBinding) -> None:
         with self._lock:
             if self._bindings.get(binding.conversation_id) == binding:

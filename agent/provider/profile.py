@@ -19,7 +19,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from agent.provider.config import AgentProviderConfig
+from agent.provider.config import (
+    DEEPSEEK_FLASH_MODEL_IDS,
+    AgentProviderConfig,
+)
 
 PROFILE_FILE_NAME = "provider-profile.json"
 PROFILE_SCHEMA_VERSION = 1
@@ -128,10 +131,23 @@ class ProviderProfileV1:
         if not _ENV_NAME.fullmatch(self.credential_env):
             raise ProviderProfileError("credential env name is not a safe variable name")
 
-        if self.thinking_mode is not None and (
-            self.thinking_mode != "disabled" or self.provider_type != "openai_compatible"
+        if self.thinking_mode not in {None, "disabled", "enabled"}:
+            raise ProviderProfileError("thinking_mode is unsupported")
+        if self.thinking_mode == "disabled" and self.provider_type != "openai_compatible":
+            raise ProviderProfileError("thinking_mode disabled only supports openai compatible")
+        if self.thinking_mode == "enabled" and (
+            self.provider_type != "openai_compatible"
+            or self.model not in DEEPSEEK_FLASH_MODEL_IDS
+            or self.base_url not in {
+                "https://api.deepseek.com",
+                "https://api.deepseek.com/v1",
+            }
+            or self.request_path not in {None, "/v1/chat/completions"}
+            or self.strict_tools
         ):
-            raise ProviderProfileError("thinking_mode only supports openai disabled")
+            raise ProviderProfileError(
+                "enabled thinking only supports the DeepSeek Flash max-effort profile"
+            )
         object.__setattr__(self, "request_path", _validate_request_path(self.request_path))
         if not isinstance(self.strict_tools, bool):
             raise ProviderProfileError("strict_tools must be a boolean")
@@ -162,6 +178,7 @@ def to_provider_config(
         credential=credential,
         timeout=profile.timeout_seconds,
         thinking_mode=profile.thinking_mode,
+        reasoning_effort=("max" if profile.thinking_mode == "enabled" else None),
         request_path=profile.request_path,
         strict_tools=profile.strict_tools,
     )

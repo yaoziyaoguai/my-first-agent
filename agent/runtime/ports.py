@@ -37,6 +37,12 @@ class InvalidProviderResponseError(RuntimeError):
     """远端响应无法安全归一化；允许 Runtime 做零副作用的有界重试。"""
 
 
+class ModelAttemptBudgetExhaustedError(RuntimeError):
+    """发送前累计模型请求预算已经耗尽；Runtime 应暂停而不是重试。"""
+
+    code = "model_attempt_budget_exhausted"
+
+
 class CheckpointCASConflictError(RuntimeError):
     """CAS loser 可返回已经在同一次比较中读到的当前 snapshot。"""
 
@@ -80,6 +86,10 @@ class ModelDeltaObserver(Protocol):
 
     def on_text_delta(self, text: str) -> None: ...
 
+    def cancellation_requested(self) -> bool:
+        """只读观察当前 invocation 是否已有受绑定控制请求。"""
+        ...
+
 
 @runtime_checkable
 class ModelProvider(Protocol):
@@ -92,7 +102,8 @@ class ModelProvider(Protocol):
         """执行一次有限时的模型调用。
 
         非流式 adapter 忽略 delta_observer(不发现成事件);流式 adapter 只把
-        公开回答文本增量转发给 observer,最终 ModelResponse 仍一次返回。
+        公开回答文本增量转发给 observer,并可在读取流的安全边界
+        观察受当前 invocation 绑定的取消请求;最终 ModelResponse 仍一次返回。
         """
 
 

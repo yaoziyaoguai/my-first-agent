@@ -25,8 +25,9 @@ gate：3372 passed, 3 skipped、ruff 与 `git diff --check` PASS；这只是 sou
 
 - 多轮文本对话
 - 确定性、限额明确的上下文构建
-- 串行工具调用与精确审批
-- `read_file`、`list_files`、`write_file`、`edit_file`
+- 串行工具调用与精确审批；文件修改可由用户显式选择当前任务的精确目标复用授权
+- `read_file`、`list_files`、`write_file`、`edit_file`；缺失目录可经独立审批的
+  `make_directory` 逐层创建，文件写入仍需另一次精确审批
 - 经 exact approval 的结构化 `local_process`；Goal-scoped 权限租约可过期、限次并可撤销
 - 经同一治理路径的 `sandbox_exec`（macOS Seatbelt，`read-only` / `workspace-write`）与 `shell_exec`（exact shell command string，`/bin/sh -c`，任何模式下 network off）；两者都走 exact approval、`EXECUTING` checkpoint 与 bounded runner
 - 压力触发的自动上下文压缩：只在安全边界（无 pending approval / takeover / unknown effect）分批进行；压缩摘要只作 untrusted context，不替代 Goal、Approval、Recovery、Evidence 或任何 authority
@@ -36,7 +37,8 @@ gate：3372 passed, 3 skipped、ruff 与 `git diff --check` PASS；这只是 sou
 - 固定 Tavily Search/Extract 公开 Web 工具：每次 exact query/URL batch 单独批准
 - Runtime 铸造的来源回执、统一 Sources 视图、citation sidecar 与 provenance evidence
 - 本地 v1 checkpoint、暂停、恢复与未知工具结果处置
-- FakeProvider；OpenAI-compatible 非流式 HTTP adapter；Anthropic-compatible **流式** HTTP adapter
+- FakeProvider；通用 OpenAI-compatible 非流式 HTTP adapter；Anthropic-compatible 与精确
+  DeepSeek Flash 推理配置的 **流式** HTTP adapter
   （SSE：回答文本增量在生成期间实时到达 CLI/TUI，最终响应仍由 Runtime 一次接纳——增量只是
   advisory 显示，丢失/重复/断流不改变权威结果与 durable state）
 - 同一套 typed action / event / result 合同下的 CLI 与 headless 调用
@@ -94,8 +96,44 @@ Provider flags，也不会静默 fallback 到 FakeProvider。
 
 默认启动即持久化：状态保存在 workspace 之外的 owner-only 产品目录
 `~/.local/state/my-first-agent/v1`（目录 `0700`、文件 `0600`），按 workspace identity
-确定性选择会话。重启后唯一安全候选自动恢复；多个候选要求显式选择，workspace 被替换或
+确定性选择会话。重启后唯一安全候选自动恢复；多个候选要求显式选择，超过 16 个时用 `n` / `p`
+翻页后按当前页编号选择；workspace 被替换或
 存在结果未知的 effect 时准确停下，不自动调用 Provider/Tool。
+
+普通项目中的 `config/`、`pytest.ini` 等保留名字默认仍隐藏；操作者可以只为本次启动明确开放一个
+具体普通路径。敏感文件、符号链接、运行时私有状态和未列出的相邻文件不会因此开放：
+
+```bash
+first-agent --project-path config/app.yaml --project-path pytest.ini
+```
+
+切换 provider/model 但不希望加载旧的跨 workspace owner preferences 时，可使用
+`--without-owner-preferences`。这不会删除或迁移旧偏好，也不会关闭另行配置的 workspace Memory。
+需要为诊断或付费 dogfood 设置跨重启硬预算时，`--max-model-attempts N` 必须与同一个 owner-only
+`--transport-audit-ledger PATH` 配套使用；额度在 HTTP 发出前累计占位，失败请求也不会退还。开启
+HTTP SubAgent 时，隔离子进程也使用这一本 ledger 和同一上限，不会另起一份额度。
+
+每个 workspace 最多保留 256 个 active-history 会话。到达上限时新会话会被拒绝，既有会话仍可
+恢复和选择；产品不会自动删除历史。`--status` 会显示可复制的完整 conversation ID。只允许把已经
+`VERIFIED_DONE` 或 `CANCELLED`、且没有未决运行/授权/进程/浏览器资源的会话显式归档：
+
+```bash
+first-agent --workspace "$PWD" --status
+first-agent --workspace "$PWD" archive CONVERSATION_ID
+first-agent --workspace "$PWD" archive CONVERSATION_ID --yes
+```
+
+第一次 `archive` 只显示 exact revision 预览，不做修改；加 `--yes` 后才把完整 checkpoint 写入并
+重读不可变 owner-only archive，成功后释放 active-history 容量。成功输出包含 exact digest 和恢复
+命令；`restore` 同样先预览、再显式确认，且不会删除归档：
+
+```bash
+first-agent --workspace "$PWD" restore CONVERSATION_ID SOURCE_CHECKPOINT_DIGEST
+first-agent --workspace "$PWD" restore CONVERSATION_ID SOURCE_CHECKPOINT_DIGEST --yes
+```
+
+会话在预览后变化、正在使用、归档损坏、workspace identity 不匹配、active history 已满或同 ID
+已经存在时都会 fail closed，不覆盖其它会话。
 
 开发或测试时仍可显式选择 FakeProvider；它不会成为保存的日常 profile：
 
@@ -118,6 +156,12 @@ digest/request ID。以下 slash command 只保留为高级精确接口：
 
 - `/ack-provider DIGEST`
 - `/approve ID`、`/reject ID`
+- `/approve-goal-target ID`（仅对当前 Goal/revision、当前 workspace、同一文件工具与同一精确
+  Goal target 复用；最多 16 次实际执行、60 分钟后到期，任务修订/终态也立即失效；普通
+  `yes`、`a`、`/approve` 仍是逐笔批准）
+- `/approve-goal-directory ID`（仅在 Goal 已明确列出父目录时，授权同一文件工具访问该目录下
+  的普通项目文件；不会从当前文件自动猜父目录，敏感路径仍拒绝；TUI 使用 `Shift+D`）
+- `/revoke-goal-target`（撤销当前任务的全部文件授权；TUI 可用 `Shift+A` 授予精确文件）
 - `/resolve-success ID`、`/resolve-failed ID`
 - `/pause`、`/resume`、`/cancel`、`/exit`
 - `/new`（显式开始新任务：旧 Goal 与 checkpoint 原样保留，同一进程内进入新 conversation；
@@ -188,11 +232,10 @@ first-agent \
   --base-url https://provider.example
 ```
 
-DeepSeek 官方 OpenAI-compatible 入口推荐使用 strict Tool Calls（beta）配置：strict 模式在合同上
-保证工具参数与 schema 一致（普通模式没有这一承诺），同时用显式非思考模式避免把
-provider-specific opaque `reasoning_content` 引入 checkpoint/replay 合同（官方文档：
+DeepSeek 现有两条精确支持的配置。需要 strict Tool Calls 时使用 beta 入口与显式非思考模式：
+strict 模式在合同上保证工具参数与 schema 一致（普通模式没有这一承诺）。官方文档：
 [Tool Calls](https://api-docs.deepseek.com/zh-cn/guides/tool_calls/)、
-[Create Chat Completion](https://api-docs.deepseek.com/api/create-chat-completion/)）：
+[Create Chat Completion](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/)。
 
 ```bash
 export FIRST_AGENT_API_KEY='set-in-your-shell'
@@ -211,6 +254,30 @@ first-agent
 `--request-path` 与 `--strict-tools` 都是显式 opt-in；产品不会按 base URL 或 model 名猜测 strict
 模式。013 的真实验收即在此配置下连续三次通过（见
 [`docs/acceptance/013_EVERYDAY_WORKSPACE_AGENT_E3.md`](docs/acceptance/013_EVERYDAY_WORKSPACE_AGENT_E3.md)）。
+
+需要 DeepSeek Flash 的思考与流式回答时，使用官方普通入口；开启后推理强度固定为
+`max`，不允许同时开启 strict，也不猜测其他模型或兼容 endpoint：
+
+```bash
+export FIRST_AGENT_API_KEY='set-in-your-shell'
+first-agent setup \
+  --provider openai_compatible \
+  --model deepseek-v4-flash \
+  --base-url https://api.deepseek.com \
+  --thinking-mode enabled
+
+first-agent
+```
+
+该路径只展示公开回答文本增量。`reasoning_content` 作为与 provider identity 绑定的
+opaque continuation 进入 checkpoint/replay，不进入 UI、Memory 或 compaction summary；缺失或身份不匹配时
+在 HTTP 前拒绝。流式必须完整收到 finish 与 `[DONE]` 才能推进 Runtime；断流不拼凑响应，
+也不自动重发已经开始计费的请求。用户取消会在下一个 SSE 读取边界协作停止，
+并由唯一 Runtime 落盘最终状态。官方 endpoint 与 Flash model identity 精确匹配时，provider
+capacity 档案把当前公开规格投影为 1M context window、384K 单次 output 上限，并同步扩大有界 SSE
+传输预算；未知兼容 endpoint 仍使用保守默认，显式调用者限额优先。2026-09-14 使用真实
+DeepSeek Flash 完成 D01 CSV 修复：13 次已记录 model attempt，产品自主写入、读回并运行测试，
+外部业务 grader PASS；这只证明该场景，不代表全部任务成功率。
 
 `--strict-tools` 有一个组合限制：当本次请求的工具 schema 含开放 object（object 缺失 `properties`，或
 `additionalProperties` 未显式为 `false`）时，OpenAI-compatible strict 投影会在发送请求前以
@@ -276,7 +343,9 @@ active recall，并保留 tombstone/provenance；不声称擦除历史或已发�
 
 ## SubAgent delegation
 
-`--subagent` 开启 `subagent__delegate`（HIGH + EXTERNAL，每次审批）。它把一个 bounded 只读 objective 交给一个 isolated child：child 复用同一个 `AgentRuntime.run_turn` 实现，但拥有独立 in-memory state、空 ToolRuntime、无 ContextSource、最多一次 model call，且不继承 parent history/Memory/Skill/MCP/workspace/credential。只有 child 返回 `COMPLETED` 才是成功；其他明确终态成为已知失败，runner/provider 无法分类的异常进入 parent unknown-outcome recovery。
+`--subagent` 开启 `subagent__delegate`（HIGH + EXTERNAL，每次审批）。它把一个 bounded 只读 objective 交给 isolated child：child 复用同一个 `AgentRuntime.run_turn`，拥有独立 in-memory state、无 ContextSource，并只注册 workspace-scoped 的 `read_file`、`list_files`、`search_paths`、`search_text`、`read_file_chunk`。单次调查最多 6 次 model call、8 次只读 tool call；不继承 parent history/Memory/Skill/MCP，也没有写入、shell、网络或再次派生能力。checkpoint/state 文件仍受保护。
+
+child 返回的 workspace 来源由 runner 按当前文件 snapshot/content digest 再核对，过期或截断来源不会进入结果；可核对项以 path/line/digest appendix 返回，并明确只是 advisory，不能授予父侧写权限或替父侧宣布完成。HTTP child 会与 parent 共享显式配置的累计 model-attempt ledger；额度耗尽时在发送前终止。当前 Goal/invocation 的 pause、correct 或 cancel 请求会传到 process-isolated runner：尚未启动时按 known-not-executed 返回，已经启动时回收整个 child process group，并诚实进入 unknown-outcome recovery，因为远端请求可能已经发生。只有 child 返回 `COMPLETED` 才是成功；其他明确终态成为已知失败，runner/provider 无法分类的异常进入 parent unknown-outcome recovery。Everyday 的 durable run 总墙钟上限为 2 小时，恢复或重启不重置；它在新模型/工具 effect 前生效。单次 provider/process 仍由各自 timeout/cancel 合同约束。
 
 ## Scheduler（external caller）
 
@@ -284,6 +353,12 @@ active recall，并保留 tombstone/provenance；不声称擦除历史或已发�
 从 CLI 参数发现 workspace、state root、task text、provider 或 credential。控制平面将定义、
 UTC due-time、CAS lifecycle 和 one-shot reconciliation 保持为 portable core；合格的本机 host
 composition 才能在固定 owner root 上构造它并提供可选 cold wake。
+
+普通任务采用 manual reconcile 时：definition 中的 `wake_adapter_policy_digest` 为 `null`，
+不会创建 macOS“登录项与扩展”。只有明确需要退出交互程序后仍由系统启动检查时，才先执行
+`first-agent-schedule wake enable`，再批准绑定该 policy digest 的 cold-wake definition；批准任务
+本身不会顺带安装系统后台项。普通 `scripts/run_019_macos_e3.py --preflight` 也是只读检查；
+只有显式 `--probe-launchd` 或完整 `--run` 才会注册并清理临时 LaunchAgent。
 
 ```bash
 first-agent-schedule reconcile --delivery-id delivery:one
@@ -295,9 +370,14 @@ first-agent-schedule reconcile --delivery-id delivery:one
 `wake enable/disable` 与 `reconcile`。重复 reconciliation 重放 authoritative result，不会重复
 provider/effect；approval、recovery 和 host qualification 始终交还人类。
 
+当前 wheel 中的 `first-agent-schedule` 只装配 portable typed dispatcher，并未装配可运行的
+host composition；因此直接执行 `list`、`create` 或 `reconcile` 都会返回
+`needs_019_config`/`host_profile_unavailable`（exit 2），不是一个空的可用 Scheduler。
+开发用注入测试证明的是控制接口，不代表安装入口可调度。该命令不会自行创建登录项或后台任务。
+
 ## TUI（optional Textual adapter）
 
-`--tui` 启动可选的 Textual 界面（与 CLI/headless 共享同一 typed action、reducer、checkpoint 与 recovery 语义）。它通过 single-flight thread worker 调用同一个 Runtime；`RunResult`/checkpoint 始终权威，events 只作 advisory 显示，不提供伪造的 in-flight 取消。
+`--tui` 启动可选的 Textual 界面（与 CLI/headless 共享同一 typed action、reducer、checkpoint 与 recovery 语义）。它通过 single-flight thread worker 调用同一个 Runtime；`RunResult`/checkpoint 始终权威，events 只作 advisory 显示。慢模型调用会显示真实等待时长；运行中按 `Ctrl-C` 会立即确认取消请求，但只有当前 provider/tool 返回并到达安全边界后才写入取消终态，界面不会把“请求已收到”假报成“已经停止”。
 
 ```bash
 python -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[tui]"
@@ -317,12 +397,16 @@ git diff --check
 架构与状态语义见 [Kernel Architecture](docs/architecture/KERNEL_ARCHITECTURE.md)。此次重建是 breaking change：旧 CLI、旧状态格式和旧 Python 接口均不兼容，也不会被自动发现或迁移；未跟踪的旧运行数据保持原样。
 ## Browser（018，可选治理 Chromium）
 
-可选的受治理专属隔离 Chromium 能力：public-read 会话、site-bound 交互 profile、exact approval、
-显式 user takeover、egress guard 与 download quarantine。默认关闭；在快速开始构建的本地 wheel 上安装
+可选的受治理专属隔离 Chromium 能力：public-read 会话、site-bound 交互 profile，以及绑定本任务
+受管开发进程的 exact `127.0.0.1` 页面验收；包含 exact approval、显式 user takeover、egress guard
+与 download quarantine。本地模式只接受 `managed_web_start` 返回的 opaque resource，不接受 `localhost`、
+其他端口、LAN 或既有本机服务；父进程退出或生命周期到界时监督器回收该进程组，完成前必须有
+`browser_close` 与 `managed_web_stop` 的确认 receipt。默认关闭；在快速开始构建的本地 wheel 上安装
 `browser` extra 后用 `--browser` 启用。历史 PASS 只绑定当时 identity，当前为
 `implemented-candidate`，状态由
 [`018_GOVERNED_BROWSER_TASKS_INDEPENDENT_REVIEW.md`](docs/acceptance/018_GOVERNED_BROWSER_TASKS_INDEPENDENT_REVIEW.md)
-决定。不是个人浏览器、桌面控制、任意网站兼容、后台自治或 production-ready 第三方集成。
+决定。该本地旅程目前只有离线/本机合成测试证据，尚未完成 D06 真实模型验收；它不是个人浏览器、
+桌面控制、任意网站兼容、后台自治或 production-ready 第三方集成。
 
 ## Durable automations（019，split delivery）
 

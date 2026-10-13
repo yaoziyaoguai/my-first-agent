@@ -1,0 +1,115 @@
+from __future__ import annotations
+import asyncio
+import json
+from dataclasses import replace
+from agent.runtime.contracts import ConversationState, ConversationFact, FactKind, GoalStatus, RunResult, RunStatus, RuntimeEvent, RuntimeEventKind
+from agent.tui.adapter import TuiAdapter
+from agent.tui.app import build_app
+from agent.tui.dialogs import build_f3_pages
+from tests.kernel.fakes import InMemoryCheckpointStore, conversation_with_terminal_goal
+
+class RecordingRuntime:
+    def __init__(self, fail=False):
+        self.actions=[]
+        self.fail=fail
+    def run_turn(self, action, snapshot):
+        self.actions.append(action)
+        if self.fail:
+            raise OSError('synthetic failure before persistence')
+        return RunResult(status=RunStatus.COMPLETED, state=snapshot.state)
+
+def report(kind, **details):
+    print(json.dumps(dict(kind=kind, **details), ensure_ascii=False))
+
+async def main():
+    # Past equal text is not proof that this particular action persisted.
+    old=ConversationFact(fact_id='action:1:user', kind=FactKind.USER_MESSAGE, content={'text':'continue'})
+    state=replace(ConversationState.new('repeat'), facts=(old,), next_action_seq=2, replay_floor=2, revision=2)
+    runtime=RecordingRuntime(fail=True)
+    adapter=TuiAdapter(runtime, InMemoryCheckpointStore(state))
+    app=build_app(adapter, run_id_factory=lambda:'new-run')
+    async with app.run_test() as pilot:
+        msg=app.query_one('#message')
+        msg.value='continue'
+        await pilot.pause()
+        await pilot.press('enter')
+        await pilot.pause(0.15)
+        report('historical_fact_false_consumption', dispatched=len(runtime.actions), draft=app.draft_text, visible=msg.value, facts=len(adapter._store.state.facts), error=app._last_worker_error)
+
+    # F4 sends and dismisses, but failure cannot restore the edited message.
+    runtime=RecordingRuntime(fail=True)
+    app=build_app(TuiAdapter(runtime, InMemoryCheckpointStore(ConversationState.new('multi'))), run_id_factory=lambda:'new-run')
+    async with app.run_test() as pilot:
+        await pilot.press('f4')
+        app.screen.query_one('#f4_editor').text='important first line\nimportant second line'
+        await pilot.press('f6')
+        await pilot.pause(0.15)
+        report('multiline_failure_loses_draft', dispatched=len(runtime.actions), draft=app.draft_text, visible=app.query_one('#message').value, screen=type(app.screen).__name__)
+
+    # F4 while approval is shown closes and loses text even without a failure.
+    from tests.tui.test_app import _approval_state
+    runtime=RecordingRuntime()
+    app=build_app(TuiAdapter(runtime, InMemoryCheckpointStore(_approval_state())), run_id_factory=lambda:'new-run')
+    async with app.run_test() as pilot:
+        await pilot.press('f4')
+        app.screen.query_one('#f4_editor').text='please change the plan\nand preserve this request'
+        await pilot.press('f6')
+        await pilot.pause(0.10)
+        report('multiline_gate_loses_draft', dispatched=len(runtime.actions), draft=app.draft_text, visible=app.query_one('#message').value, screen=type(app.screen).__name__)
+
+    # Successful completion rendering drops authoritative delivery summary.
+    state=conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE)
+    app=build_app(TuiAdapter(RecordingRuntime(), InMemoryCheckpointStore(state)), run_id_factory=lambda:'new-run')
+    async with app.run_test() as pilot:
+        before=str(app.query_one('#status').render())
+        app._refresh(RunResult(status=RunStatus.COMPLETED, state=state, message='All done.'))
+        after=str(app.query_one('#status').render())
+        report('delivery_summary_overlay', before=before, after=after)
+
+    # Most recent user/assistant messages are hidden by unrelated retained tool facts.
+    facts=(old,)+tuple(ConversationFact(fact_id=f'tool:{i}',kind=FactKind.TOOL_RESULT,content={'text':'not for display'}) for i in range(20))
+    pages, shown=build_f3_pages(facts)
+    report('f3_filter_order', displayable_fact_exists=True, shown=shown, pages=len(pages))
+    long=ConversationFact(fact_id='a',kind=FactKind.ASSISTANT_MESSAGE,content={'text':'x'*20000})
+    pages, shown=build_f3_pages((long,))
+    report('f3_unbounded_page', shown=shown, pages=len(pages), lengths=[sum(map(len,p)) for p in pages])
+
+    # Two in-flight corrections: only first applies, second survives only in UI map
+    # and then cannot be explicitly re-submitted after runtime closes its inbox.
+    from agent.runtime.context import ContextLimits, KernelContextManager
+    from agent.runtime.control import ControlInbox
+    from agent.runtime.loop import AgentRuntime, InvocationLimits
+    from agent.runtime.tools import KernelToolRuntime
+    from tests.kernel.fakes import CollectingSink, conversation_with_active_goal
+    from tests.tui.test_app import _BlockingProvider
+    state=conversation_with_active_goal('corrections')
+    store=InMemoryCheckpointStore(state)
+    inbox=ControlInbox()
+    provider=_BlockingProvider()
+    runtime=AgentRuntime(provider=provider, context_manager=KernelContextManager(system_policy='policy',limits=ContextLimits(max_input_tokens=8000,output_reserve=200)),tool_runtime=KernelToolRuntime(()),checkpoint_store=store,event_sink=CollectingSink(),limits=InvocationLimits(),control_inbox=inbox,invocation_id_factory=lambda:'inv-1')
+    adapter=TuiAdapter(runtime, store, control_inbox=inbox)
+    app=build_app(adapter, run_id_factory=lambda:'new-run')
+    async with app.run_test() as pilot:
+        msg=app.query_one('#message')
+        msg.value='continue'
+        await pilot.press('enter')
+        for _ in range(30):
+            if inbox.current('corrections') is not None:
+                break
+            await pilot.pause(0.01)
+        msg.value='first correction'
+        await pilot.press('enter')
+        msg.value='second correction'
+        await pilot.press('enter')
+        pending_before=list(app._pending_control_texts.values())
+        provider.event.set()
+        for _ in range(30):
+            await pilot.pause(0.01)
+            if not app._busy():
+                break
+        before_seq=store.state.next_action_seq
+        await pilot.press('enter')
+        await pilot.pause(0.05)
+        report('second_correction_cannot_resubmit', pending_before=pending_before, pending_after=list(app._pending_control_texts.values()), busy=app._busy(), inbox_binding=inbox.current('corrections') is not None, seq_before=before_seq, seq_after=store.state.next_action_seq, current_draft=app.draft_text, status=str(app.query_one('#status').render()), receipts=len(store.state.control_receipts))
+
+asyncio.run(main())

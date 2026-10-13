@@ -20,6 +20,7 @@ from agent.memory.contracts import (
     MemoryBusyError,
     MemoryCapacityError,
     MemoryCasMismatchError,
+    MemoryProviderProfileMismatchError,
     MemoryRecord,
     MemoryStoreError,
     ProviderTrustProfile,
@@ -37,6 +38,7 @@ _READ_CHUNK = 65_536
 _KNOWN_TOP_LEVEL_KEYS = frozenset(
     {"version", "workspace_scope_digest", "provider_profile", "revision", "records"}
 )
+_KNOWN_PROFILE_KEYS = frozenset({"profile_id", "provider_family", "destination"})
 _KNOWN_RECORD_KEYS = frozenset(
     {
         "content",
@@ -174,14 +176,23 @@ class MemoryStore:
         if data["workspace_scope_digest"] != workspace_scope_digest:
             raise MemoryStoreError("memory store scope does not match the workspace")
         stored_profile = data.get("provider_profile")
-        if not isinstance(stored_profile, dict):
+        if (
+            not isinstance(stored_profile, dict)
+            or set(stored_profile) != _KNOWN_PROFILE_KEYS
+            or any(
+                not isinstance(stored_profile[field], str) or not stored_profile[field]
+                for field in _KNOWN_PROFILE_KEYS
+            )
+        ):
             raise MemoryStoreError("memory store profile is malformed")
         if (
             stored_profile.get("profile_id") != profile.profile_id
             or stored_profile.get("provider_family") != profile.provider_family
             or stored_profile.get("destination") != profile.destination
         ):
-            raise MemoryStoreError("memory store provider profile does not match")
+            raise MemoryProviderProfileMismatchError(
+                "memory store provider profile does not match"
+            )
         if not isinstance(data.get("revision"), int) or isinstance(data.get("revision"), bool):
             raise MemoryStoreError("memory store revision must be an integer")
         revision = data["revision"]

@@ -12,6 +12,9 @@ receipt 分类：
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Protocol
+
 from agent.runtime.contracts import (
     ApprovalPolicy,
     ExecutionAuthorityClass,
@@ -22,9 +25,23 @@ from agent.runtime.contracts import (
     ToolRisk,
     ToolSpec,
 )
+from agent.runtime.control import ControlInbox
 from agent.runtime.tools import RegisteredTool
 from agent.subagent.contracts import TerminationReceiptState
-from agent.subagent.runner import ChildAgentRunner
+
+
+class _ChildRunner(Protocol):
+    @property
+    def profile(self): ...  # noqa: ANN201
+
+    def run(
+        self,
+        *,
+        objective: str,
+        handoff: str,
+        parent_idempotency_key: str,
+        cancellation_requested: Callable[[], bool] | None = None,
+    ): ...  # noqa: ANN201
 
 SUBAGENT_POLICY_VERSION = "subagent-tool-v1"
 _MAX_OBJECTIVE = 2_000
@@ -33,7 +50,9 @@ _OUTPUT_CAP = 2_000
 
 
 def build_subagent_tool_registrations(
-    runner: ChildAgentRunner,
+    runner: _ChildRunner,
+    *,
+    control_inbox: ControlInbox | None = None,
 ) -> tuple[RegisteredTool, ...]:
     profile = runner.profile
     spec = ToolSpec(
@@ -68,7 +87,7 @@ def build_subagent_tool_registrations(
     return (
         RegisteredTool(
             spec,
-            _make_executor(runner),
+            _make_executor(runner, control_inbox=control_inbox),
             prepare_binding=_make_binding(profile),
         ),
     )
@@ -78,7 +97,7 @@ class SubAgentUnknownOutcomeError(RuntimeError):
     """unconfirmed provider termination → parent unknown-outcome recovery。"""
 
 
-def _make_executor(runner: ChildAgentRunner):
+def _make_executor(runner: _ChildRunner, *, control_inbox: ControlInbox | None):
     def delegate(intent):
         objective = str(intent.arguments.get("objective", ""))
         handoff = str(intent.arguments.get("handoff", ""))
@@ -87,10 +106,24 @@ def _make_executor(runner: ChildAgentRunner):
         if len(handoff) > _MAX_HANDOFF:
             raise ValueError("handoff exceeds the schema limit")
 
+        binding = None
+        if control_inbox is not None:
+            current = control_inbox.current(intent.conversation_id)
+            if (
+                current is not None
+                and current.goal_id == intent.goal_id
+                and current.goal_revision == intent.goal_revision
+            ):
+                binding = current
         result = runner.run(
             objective=objective,
             handoff=handoff,
             parent_idempotency_key=intent.idempotency_key,
+            cancellation_requested=(
+                (lambda: control_inbox.pending(binding))
+                if control_inbox is not None and binding is not None
+                else None
+            ),
         )
 
         if result.receipt_state is TerminationReceiptState.UNCONFIRMED:
@@ -99,7 +132,29 @@ def _make_executor(runner: ChildAgentRunner):
             )
 
         if result.status is RunStatus.COMPLETED:
-            return result.message[:_OUTPUT_CAP] if result.message else "child returned no text"
+            message = result.message if result.message else "child returned no text"
+            if not result.sources:
+                return message[:_OUTPUT_CAP]
+            evidence_lines = [
+                (
+                    f"- {source.locator} snapshot_sha256={source.snapshot_digest} "
+                    f"content_sha256={source.content_digest}"
+                )
+                for source in result.sources
+            ]
+            appendix = (
+                "\n\nParent-verified child source snapshots (advisory only; no write or "
+                "completion authority):\n" + "\n".join(evidence_lines)
+            )
+            return message[: max(_OUTPUT_CAP - len(appendix), 0)] + appendix[:_OUTPUT_CAP]
+
+        if result.reason == "cancelled_before_start":
+            from agent.runtime.contracts import KnownNotExecuted
+
+            return KnownNotExecuted(
+                code="child_cancelled_before_start",
+                message="child review was cancelled before its provider started",
+            )
 
         return KnownExecutedError(
             code="child_nonterminal",

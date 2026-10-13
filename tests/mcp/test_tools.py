@@ -163,6 +163,8 @@ def test_executed_outcome_returns_text(tmp_path: Path) -> None:
     result = runtime.invoke(intent)
     assert result.is_error is False
     assert result.content == "hello back"
+    assert result.metadata["governed_tool_receipt_kind"] == "governed_tool_v1"
+    assert len(str(result.metadata["receipt_digest"])) == 64
 
 
 def test_executed_remote_iserror_maps_to_known_executed_error_not_success(tmp_path: Path) -> None:
@@ -187,6 +189,7 @@ def test_executed_remote_iserror_maps_to_known_executed_error_not_success(tmp_pa
     assert result.is_error is True
     assert result.executed is True
     assert result.metadata["code"] == "remote_error"
+    assert "receipt_digest" not in result.metadata
     # the server's error text must still reach the model so it can correct its arguments
     assert "fixture tool failed" in result.content
 

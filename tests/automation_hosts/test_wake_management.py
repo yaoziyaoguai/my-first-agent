@@ -52,6 +52,7 @@ def test_portable_management_refuses_disable_while_an_occurrence_is_active() -> 
         next_snapshot_token="snapshot-token-0001",
     )
     preview = service.preview(body.automation_id)
+    assert service.wake_enable().code == "wake_enabled"
     service.approve(
         body.automation_id,
         preview_digest=preview.preview_digest,

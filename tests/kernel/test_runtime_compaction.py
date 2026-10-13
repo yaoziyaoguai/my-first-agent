@@ -27,8 +27,12 @@ from agent.continuity.archive import ArchiveError
 from agent.runtime.context import ContextLimitError, ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     Action,
+    ActionDisposition,
+    ActiveRun,
     ActiveRunStatus,
+    ApprovalRequest,
     ArchivedConversation,
+    BlockedClaim,
     BudgetReport,
     CompactionPlanV1,
     CompactionTrigger,
@@ -38,14 +42,20 @@ from agent.runtime.contracts import (
     ConversationSummaryV1,
     ConversationWorkspaceBindingV1,
     DirectResponse,
+    EgressClass,
     FactKind,
+    GoalStatus,
     LoadedSnapshot,
     ModelResponse,
     ModelTextBlock,
+    PauseGoal,
     ProviderDescriptor,
+    ResumeGoal,
     RunStatus,
     RuntimeEventKind,
+    SideEffectClass,
     SubmitMessage,
+    ToolCall,
     ToolDefinition,
     canonical_json_digest,
 )
@@ -55,8 +65,15 @@ from agent.runtime.ports import (
     CheckpointUsage,
     RetryableProviderError,
 )
+from agent.runtime.state import accept_action, pause_for_approval, start_tool_batch
 from agent.runtime.tools import KernelToolRuntime
-from tests.kernel.fakes import CollectingSink, InMemoryCheckpointStore, ScriptedProvider
+from tests.kernel.fakes import (
+    CollectingSink,
+    InMemoryCheckpointStore,
+    ScriptedProvider,
+    conversation_with_active_goal,
+    goal_noop_response,
+)
 
 
 class RecordingArchive:
@@ -796,6 +813,228 @@ def test_plan_compaction_maps_ineligible_history_to_no_candidate() -> None:
 
     assert plan.trigger is CompactionTrigger.NO_CANDIDATE
     assert plan.removable_fact_ids == ()
+
+
+# --------------------------------------------------------------------------- #
+# V1 真实旅程缺陷回归：审批边界 pause 丢弃 run 后的孤儿 tool 批次
+# --------------------------------------------------------------------------- #
+
+
+def test_pause_at_approval_boundary_keeps_next_run_usable() -> None:
+    """审批边界 /pause 丢弃 run 后，下一轮必须闭合遗留批次并正常运行。
+
+    形状复刻真实旅程 state-root7：MODEL 批次已入账、审批 pending 时被
+    /pause 丢弃 active_run（批次只剩 calls 没有 results）→ /resume →
+    推进输入。修复前新 run 在 MODEL 相 plan_compaction 解析时抛
+    ``ValueError: tool batch and its results cannot be split`` →
+    runtime_failure，会话每次重试同败。修复：接受新动作前为不属于当前
+    live run 的未完结批次补记 durable 非执行结果；历史退化为合法
+    ineligible → NO_CANDIDATE 降级，run 照常推进且零压缩副作用。
+    """
+
+    calls: list[str] = []
+    seed = conversation_with_active_goal()
+    state = replace(seed, active_run=ActiveRun(run_id="run-paused"))
+    state = start_tool_batch(
+        state,
+        (
+            ToolCall(
+                "call-orphan",
+                "write_file",
+                {"path": "retry_app/service.py", "content": "retry"},
+            ),
+        ),
+    )
+    pending = ApprovalRequest(
+        request_id="approval-orphan",
+        run_id="run-paused",
+        tool_call_id="call-orphan",
+        binding_digest="binding-orphan",
+        preview="write retry_app/service.py",
+        tool_name="write_file",
+        side_effect=SideEffectClass.WRITE.value,
+        egress=EgressClass.NONE.value,
+    )
+    state = pause_for_approval(state, pending)
+    assert state.active_run is not None
+    assert state.active_run.status is ActiveRunStatus.AWAITING_APPROVAL
+
+    store = CompactionCountingStore(state, calls)
+    archive = RecordingArchive()
+    context_manager = RecordingContextManager()
+    provider = ScriptedProvider(
+        goal_noop_response("resume-supplement"),
+        ModelResponse(
+            (),
+            control=BlockedClaim(
+                correlation_id="resume-blocked",
+                goal_id="goal-1",
+                goal_revision=1,
+                blocker="no safe action can advance the unchanged Goal after resume",
+                safe_attempts=(),
+                resume_condition="operator supplies a new instruction",
+            ),
+        ),
+    )
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=context_manager,
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        conversation_archive=archive,
+    )
+
+    # /pause：丢弃 active run 的安全边界；live 批次不由 pause 闭合。
+    paused = runtime.run_turn(
+        PauseGoal(
+            conversation_id="conversation-1",
+            action_seq=store.state.next_action_seq,
+            expected_revision=store.state.revision,
+            goal_id="goal-1",
+            goal_revision=1,
+        ),
+        store.load(),
+    )
+
+    assert paused.status is RunStatus.COMPLETED
+    assert paused.state.active_run is None
+    assert paused.state.goal is not None
+    assert paused.state.goal.status is GoalStatus.PAUSED
+    assert not any(
+        fact.content.get("superseded") is True for fact in paused.state.facts
+    )
+
+    # /resume：接受新动作前闭合孤儿批次（插入在批次之后）。
+    resumed = runtime.run_turn(
+        ResumeGoal(
+            conversation_id="conversation-1",
+            action_seq=store.state.next_action_seq,
+            expected_revision=store.state.revision,
+            goal_id="goal-1",
+            goal_revision=1,
+        ),
+        store.load(),
+    )
+
+    assert resumed.status is RunStatus.COMPLETED
+    healed = [
+        fact
+        for fact in resumed.state.facts
+        if fact.content.get("superseded") is True
+    ]
+    assert len(healed) == 1
+    assert healed[0].content["tool_call_id"] == "call-orphan"
+    assert healed[0].content["executed"] is False
+    assert healed[0].content["is_error"] is True
+
+    # 推进输入：修复前这里以 runtime_failure 永久 bricked。
+    advanced = runtime.run_turn(
+        SubmitMessage(
+            conversation_id="conversation-1",
+            action_seq=store.state.next_action_seq,
+            expected_revision=store.state.revision,
+            run_id="run-resumed",
+            message="继续当前任务",
+        ),
+        store.load(),
+    )
+
+    assert advanced.status is RunStatus.COMPLETED
+    assert advanced.message == (
+        "no safe action can advance the unchanged Goal after resume"
+    )
+    assert len(provider.calls) == 2
+    assert advanced.state.goal is not None
+    assert advanced.state.goal.status is GoalStatus.BLOCKED
+    # ineligible 历史只落 NO_CANDIDATE：零 archive 写、零缩减 CAS、零 build。
+    assert archive.calls == []
+    assert "archive" not in calls
+    assert store.reduction_cas_calls == 0
+    assert context_manager.build_compaction_calls == 0
+    # 孤儿批次已就地闭合，新 user fact 与后续收尾照常追加。
+    assert tuple(fact.kind for fact in store.state.facts) == (
+        FactKind.USER_MESSAGE,
+        FactKind.TOOL_CALLS,
+        FactKind.TOOL_RESULT,
+        FactKind.USER_MESSAGE,
+        FactKind.POLICY_RESULT,
+        FactKind.POLICY_RESULT,
+    )
+
+
+def test_accept_action_closes_orphaned_batch_in_place_before_trailing_user_fact() -> None:
+    """孤儿批次缺失结果插入在批次已有结果之后，而不是 facts 尾部。
+
+    ws7 真实形状：批次之后已存在新的 user fact；尾部追加不闭合批次，
+    解析仍抛 split ValueError。修复必须就地插入。
+    """
+
+    state = ConversationState(
+        conversation_id="conversation-1",
+        revision=10,
+        next_action_seq=8,
+        replay_floor=1,
+        facts=(
+            ConversationFact(
+                fact_id="action:1:user",
+                kind=FactKind.USER_MESSAGE,
+                content={"text": "first"},
+            ),
+            ConversationFact(
+                fact_id="run:run-orphan:tool-batch:10",
+                kind=FactKind.TOOL_CALLS,
+                content={
+                    "calls": [
+                        {"tool_call_id": "call-1", "name": "write_file", "arguments": {}},
+                        {"tool_call_id": "call-2", "name": "write_file", "arguments": {}},
+                    ]
+                },
+            ),
+            ConversationFact(
+                fact_id="run:run-orphan:tool-result:call-1:12",
+                kind=FactKind.TOOL_RESULT,
+                content={
+                    "tool_call_id": "call-1",
+                    "text": "ok",
+                    "is_error": False,
+                    "executed": True,
+                },
+            ),
+            ConversationFact(
+                fact_id="action:7:user",
+                kind=FactKind.USER_MESSAGE,
+                content={"text": "继续当前任务", "control": "goal_correction"},
+            ),
+        ),
+    )
+
+    transition = accept_action(
+        state,
+        SubmitMessage(
+            conversation_id="conversation-1",
+            action_seq=8,
+            expected_revision=10,
+            run_id="run-resumed",
+            message="继续当前任务",
+        ),
+    )
+
+    assert transition.disposition is ActionDisposition.ACCEPTED
+    healed = [
+        fact
+        for fact in transition.state.facts
+        if fact.content.get("superseded") is True
+    ]
+    assert len(healed) == 1
+    assert healed[0].content["tool_call_id"] == "call-2"
+    assert healed[0].content["executed"] is False
+    fact_ids = [fact.fact_id for fact in transition.state.facts]
+    assert fact_ids.index(healed[0].fact_id) == (
+        fact_ids.index("run:run-orphan:tool-result:call-1:12") + 1
+    )
+    assert fact_ids.index("action:7:user") == fact_ids.index(healed[0].fact_id) + 1
 
 
 # --------------------------------------------------------------------------- #

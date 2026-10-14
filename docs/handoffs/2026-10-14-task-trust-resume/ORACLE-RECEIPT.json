@@ -1,0 +1,62 @@
+{
+  "schema": "oracle-audit-receipt-v1",
+  "session": "mfa-resume-audit-20261014-64be7c",
+  "status": "completed",
+  "started_at": "2026-10-14T06:31:04.766Z",
+  "completed_at": "2026-10-14T06:42:02.635Z",
+  "timezone": "Asia/Shanghai",
+  "strength": {
+    "position": 5,
+    "visible_label": "Power, item 5 of 5 (slider ARIA)",
+    "verified": true,
+    "source": "thinking-time-control"
+  },
+  "submission": {
+    "prompt_submitted": true,
+    "conversation_url": "https://chatgpt.com/c/6acf21c9-6e60-83ea-80ce-92580d08afd2",
+    "conversation_id": "6acf21c9-6e60-83ea-80ce-92580d08afd2",
+    "committed_turn_evidence": "Fresh conversation ID plus completed assistant answer captured by wrapper"
+  },
+  "answer": {
+    "path": "docs/handoffs/2026-10-14-task-trust-resume/ORACLE-ANSWER.md",
+    "sha256": "b972e1923939d5bddff06a7dc67ae14993ed8bb29c3b3f3965ba5d1191f2376f",
+    "complete": true
+  },
+  "cleanup": {
+    "chrome_pid": 1276,
+    "chrome_target_id": "33082C415CF75CD62DDC677A1E26E2FD",
+    "temporary_user_data_dir": "/var/folders/0y/bqp593v95dqdf62qylfn92ch0000gq/T/oracle-browser-VWKmul",
+    "chrome_alive": false,
+    "temporary_profile_exists": false
+  },
+  "inputs": [
+    {
+      "path": "docs/handoffs/2026-10-14-task-trust-resume/oracle-input/CONSULTATION.md",
+      "sha256": "78b63c661c62e3a342baaa4e882651819701098d391a73aec4affecebc6e51d4"
+    },
+    {
+      "path": "docs/handoffs/2026-10-14-task-trust-resume/oracle-input/WORKING-TREE.patch",
+      "sha256": "afddb0bee1a5affb8d1b747780fb0bc5d9b45827dbcec9f1b91fb8995b18000f"
+    },
+    {
+      "path": "docs/handoffs/2026-10-14-task-trust-resume/oracle-input/SOURCE-CONTEXT.md",
+      "sha256": "a5dc4c17e50a8484333e00bd1d5fe89c8a949182566e221103c69a3b377b3d8b"
+    },
+    {
+      "path": "docs/handoffs/2026-10-13-task-trust-repair/WORK-PACKAGES.md",
+      "sha256": "bc134f22dba9b459d881cf4753b3e91eeb0b501976076434805f8794c778653e"
+    },
+    {
+      "path": "docs/handoffs/2026-10-13-task-trust-repair/VALIDATION.md",
+      "sha256": "599223866db080a87e18b1d858bcd0587cc1f82f64baf79a7a3f2891b9462931"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "ffe57fe28fbf4b5aa269c6419e8a2b96ccf7daa46abde0b7ff983913ac830f6e"
+    }
+  ],
+  "notes": [
+    "Requested CLI model is not proof of submitted web model; strength is verified from ARIA.",
+    "No followup, manual send, CLI upgrade, or source-profile cleanup."
+  ]
+}

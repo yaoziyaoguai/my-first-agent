@@ -781,6 +781,7 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
         ModelResponse,
         ModelToolCall,
         ProposedCriterion,
+        RequirementCoverage,
         ResolveApproval,
         SubmitMessage,
     )
@@ -1021,6 +1022,12 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
                     for block in self._blocks(context)
                     if block.get("type") == "trusted_goal"
                 )
+                # R2：coverage 引用投影的 source_fact_ids 与全部 mandatory ids。
+                mandatory_ids = tuple(
+                    item["criterion_id"]
+                    for item in goal_block["admitted_criteria"]
+                    if item.get("mandatory") is True
+                )
                 return ModelResponse(
                     (),
                     control=CompletionClaim(
@@ -1029,6 +1036,19 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
                         goal_revision=goal_block["goal_revision"],
                         criterion_evidence_refs=tuple(
                             goal_block["expected_completion_evidence_refs"]
+                        ),
+                        requirement_coverage=(
+                            RequirementCoverage(
+                                requirement_id="requirement:grounded-artifact",
+                                requirement=(
+                                    "生成带引用的 grounded 报告并交付"
+                                ),
+                                source_fact_ids=tuple(
+                                    goal_block["source_fact_ids"]
+                                ),
+                                status="satisfied",
+                                criterion_ids=mandatory_ids,
+                            ),
                         ),
                     ),
                 )

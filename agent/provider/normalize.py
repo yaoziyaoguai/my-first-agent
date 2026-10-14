@@ -27,6 +27,7 @@ from agent.runtime.contracts import (
     ModelToolCall,
     ProposedCriterion,
     ProviderContinuationV1,
+    RequirementCoverage,
     SourceKind,
 )
 
@@ -380,6 +381,7 @@ def _validate_trusted_control_context(
         "interaction_state",
         "progress_summary",
         "next_step",
+        "source_fact_ids",
         "proposed_criteria",
         "admitted_criteria",
         "evidence_gaps",
@@ -406,6 +408,7 @@ def _validate_trusted_control_context(
         "scope",
         "non_goals",
         "assumptions",
+        "source_fact_ids",
         "proposed_criteria",
         "admitted_criteria",
         "evidence_gaps",
@@ -416,6 +419,10 @@ def _validate_trusted_control_context(
     if any(
         not isinstance(item, str) or not item
         for item in block["expected_completion_evidence_refs"]
+    ):
+        raise _fail("malformed_context_block")
+    if any(
+        not isinstance(item, str) or not item for item in block["source_fact_ids"]
     ):
         raise _fail("malformed_context_block")
     for key in ("progress_summary", "next_step"):
@@ -939,12 +946,36 @@ def _decode_goal_delta_proposal(arguments: dict[str, Any]) -> GoalDeltaProposal:
     )
 
 
+def _decode_requirement_coverage(value: Any) -> tuple[RequirementCoverage, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("requirement_coverage must be an array")
+    items: list[RequirementCoverage] = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            raise ValueError("requirement_coverage entry must be an object")
+        items.append(
+            RequirementCoverage(
+                requirement_id=_control_str(raw["requirement_id"]),
+                requirement=_control_str(raw["requirement"]),
+                source_fact_ids=_control_tuple(
+                    raw["source_fact_ids"], _control_str
+                ),
+                status=_control_str(raw["status"]),
+                criterion_ids=_control_tuple(raw["criterion_ids"], _control_str),
+            )
+        )
+    return tuple(items)
+
+
 def _decode_completion_claim(arguments: dict[str, Any]) -> CompletionClaim:
     return CompletionClaim(
         correlation_id=_control_str(arguments["correlation_id"]),
         goal_id=_control_str(arguments["goal_id"]),
         goal_revision=_control_int(arguments["goal_revision"]),
         criterion_evidence_refs=_control_tuple(arguments["criterion_evidence_refs"], _control_str),
+        requirement_coverage=_decode_requirement_coverage(
+            arguments["requirement_coverage"]
+        ),
     )
 
 
@@ -1000,7 +1031,13 @@ _CONTROL_DECODERS: dict[
     ),
     "goal_delta_proposal": (_COMMON_CONTROL_KEYS | {"delta"}, _decode_goal_delta_proposal),
     "completion_claim": (
-        _COMMON_CONTROL_KEYS | {"goal_id", "goal_revision", "criterion_evidence_refs"},
+        _COMMON_CONTROL_KEYS
+        | {
+            "goal_id",
+            "goal_revision",
+            "criterion_evidence_refs",
+            "requirement_coverage",
+        },
         _decode_completion_claim,
     ),
     "blocked_claim": (

@@ -348,7 +348,10 @@ def reserved_control_schema(
             'before>","goal_id":"<trusted_goal.goal_id>","goal_revision":'
             '<trusted_goal.revision>,"criterion_evidence_refs":<copy '
             "trusted_goal.expected_completion_evidence_refs exactly, element for "
-            "element and in order>}."
+            "element and in order>,\"requirement_coverage\":<one entry per concrete "
+            "requirement of the current authoritative user input and every correction, "
+            "citing trusted_goal.source_fact_ids and admitted criterion ids; any pending "
+            "entry blocks completion>}."
         )
     elif answer_mode_active:
         lifecycle_description = (
@@ -470,6 +473,58 @@ def reserved_control_schema(
             "updates": strict_updates,
         },
     }
+    requirement_coverage_entry = {
+        "type": "object",
+        "properties": {
+            "requirement_id": string,
+            "requirement": {
+                **string,
+                "description": (
+                    "One concrete requirement from the current authoritative user "
+                    "input/corrections, in your own words."
+                ),
+            },
+            "source_fact_ids": {
+                **string_array,
+                "description": (
+                    "Authoritative source fact ids of the current goal that state "
+                    "this requirement (see trusted_goal.source_fact_ids)."
+                ),
+            },
+            "status": {
+                "type": "string",
+                "enum": ["satisfied", "pending"],
+                "description": (
+                    "pending when the requirement is not yet done; a claim with any "
+                    "pending requirement cannot complete the goal."
+                ),
+            },
+            "criterion_ids": {
+                **string_array,
+                "description": (
+                    "For satisfied: the admitted mandatory criterion ids that prove "
+                    "it (see trusted_goal.admitted_criteria). Empty for pending."
+                ),
+            },
+        },
+        "required": [
+            "requirement_id",
+            "requirement",
+            "source_fact_ids",
+            "status",
+            "criterion_ids",
+        ],
+        "additionalProperties": False,
+    }
+    requirement_coverage = {
+        "type": "array",
+        "items": requirement_coverage_entry,
+        "description": (
+            "Per-requirement coverage of the current authoritative user input and "
+            "every correction; every authoritative source fact and every mandatory "
+            "criterion must be covered before the goal can be verified."
+        ),
+    }
     strict_fields = {
         "direct_response": {"text": string},
         "begin_answer": {},
@@ -516,6 +571,7 @@ def reserved_control_schema(
             "goal_id": trusted_goal_id,
             "goal_revision": trusted_goal_revision,
             "criterion_evidence_refs": trusted_completion_refs,
+            "requirement_coverage": requirement_coverage,
         },
         "blocked_claim": {
             "goal_id": trusted_goal_id,
@@ -564,6 +620,7 @@ def reserved_control_schema(
             "goal_id": trusted_goal_id,
             "goal_revision": trusted_goal_revision,
             "criterion_evidence_refs": trusted_completion_refs,
+            "requirement_coverage": requirement_coverage,
         },
         "blocked_claim": {
             "goal_id": trusted_goal_id,

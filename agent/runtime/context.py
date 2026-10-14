@@ -1297,6 +1297,9 @@ class KernelContextManager:
             "interaction_state": state.interaction_state.value,
             "progress_summary": goal.progress_summary,
             "next_step": goal.next_step,
+            # R2：完成复核必须引用当前权威用户输入/纠正的 fact id；模型只读投影，
+            # Runtime 仍校验其确实是 created_from_fact_ids 的 USER_MESSAGE 子集。
+            "source_fact_ids": list(goal.created_from_fact_ids),
             "proposed_criteria": [
                 {
                     "criterion_id": criterion.criterion_id,

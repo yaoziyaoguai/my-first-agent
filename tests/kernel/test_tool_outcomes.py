@@ -9,7 +9,6 @@ from agent.runtime.contracts import (
     ActiveRunStatus,
     ApprovalPolicy,
     BlockedClaim,
-    CompletionClaim,
     ConversationState,
     EvidenceOracleKind,
     ExecutionAuthorityClass,
@@ -30,7 +29,6 @@ from agent.runtime.contracts import (
     ToolPrepareContext,
     ToolRisk,
     ToolSpec,
-    closed_evidence_id,
 )
 from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.tools import KernelToolRuntime, RegisteredTool
@@ -38,6 +36,7 @@ from tests.kernel.fakes import (
     CollectingSink,
     InMemoryCheckpointStore,
     ScriptedProvider,
+    completion_claim_from_trusted,
     conversation_with_active_goal,
     goal_noop_response,
 )
@@ -180,17 +179,7 @@ def test_approved_governed_tool_receipt_can_close_its_exact_goal_criterion() -> 
     provider = ScriptedProvider(
         goal_noop_response("governed-receipt-user-supplement"),
         ModelResponse((ModelToolCall("call-receipt", "mcp__fixture__remote", {}),)),
-        ModelResponse(
-            (),
-            control=CompletionClaim(
-                correlation_id="governed-receipt-completion",
-                goal_id="goal-1",
-                goal_revision=1,
-                criterion_evidence_refs=(
-                    closed_evidence_id("goal-1", 1, criterion_id),
-                ),
-            ),
-        ),
+        completion_claim_from_trusted("governed-receipt-completion"),
     )
     store = InMemoryCheckpointStore(state)
     spec = replace(
@@ -202,7 +191,9 @@ def test_approved_governed_tool_receipt_can_close_its_exact_goal_criterion() -> 
         provider=provider,
         context_manager=KernelContextManager(
             system_policy="policy",
-            limits=ContextLimits(max_input_tokens=2_000, output_reserve=200),
+            # R2 起 trusted_goal 投影含 source_fact_ids 且完成 schema 增加
+            # requirement_coverage 指引，2_000 token 预算会令 core 超限。
+            limits=ContextLimits(max_input_tokens=2_600, output_reserve=200),
         ),
         tool_runtime=KernelToolRuntime((RegisteredTool(spec, lambda intent: "HELIX-13"),)),
         checkpoint_store=store,

@@ -248,7 +248,10 @@ def test_run_turn_consumes_bundle_complete_takeover_with_exact_lease(tmp_path):
         provider=provider,
         context_manager=KernelContextManager(
             system_policy="Be concise.",
-            limits=ContextLimits(max_input_tokens=2_000, output_reserve=200),
+            # R2 起 trusted_goal 投影含 source_fact_ids 且完成 schema 增加
+            # requirement_coverage 指引，2_000 token 预算会令 core 超限
+            # （context_core_too_large），按同一测试意图提高预算。
+            limits=ContextLimits(max_input_tokens=2_600, output_reserve=200),
         ),
         tool_runtime=tool_runtime,
         checkpoint_store=store,

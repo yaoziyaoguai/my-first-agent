@@ -22,6 +22,7 @@ from agent.runtime.contracts import (
     ActionTransition,
     ActiveRun,
     ActiveRunStatus,
+    AdmittedCriterion,
     ApprovalGrant,
     ApprovalRequest,
     AuthoritySourceKind,
@@ -119,8 +120,12 @@ _EXPLICIT_PUBLIC_WEB_PATTERNS = (
     ),
 )
 _EXPLICIT_LOCAL_PROCESS_PATTERNS = (
+    # R3：中文连接词后的运行/执行动词与句首同权（并/并且、然后/接着/随后/继而、
+    # 好后/完后/毕后/以后），明确执行要求不能因连接方式不同而丢义务；
+    # (?<!合) 排除"合并运行"这类词内误匹配。
     re.compile(
-        r"(?:^|[\n:：])\s*(?:(?:please\s+)?(?:run|execute)\s+|"
+        r"(?:^|[\n:：]|(?<!合)并(?:且)?|然后|接着|随后|继而|(?:好|完|毕|以)后)\s*"
+        r"(?:(?:please\s+)?(?:run|execute)\s+|"
         r"(?:请\s*)?(?:运行|执行)\s*)"
         r"[A-Za-z0-9_.-]+\b",
         re.IGNORECASE,
@@ -430,23 +435,37 @@ def _is_runtime_owned_obligation(criterion: ProposedCriterion) -> bool:
     )
 
 
+# R3：可由 authoritative correction 撤回的义务仅限 classification 直接铸造的
+# 两类；required-governed-tool 来自单独的用户审批，不随 effect 禁止撤回。
+_WITHDRAWABLE_RUNTIME_OBLIGATION_PREFIXES = {
+    EvidenceOracleKind.WEB_SOURCE_RECEIPT: "criterion:required-public-web:",
+    EvidenceOracleKind.TOOL_RECEIPT: "criterion:required-local-process:",
+}
+
+
 def _apply_correction_lower_bounds(
     goal: GoalFrame,
     correction: ConversationFact,
 ) -> GoalFrame:
-    """从 authoritative correction 补铸模型不能省略的 Web/process 义务。"""
+    """按 authoritative correction 补铸或撤回 Web/process 义务。"""
 
     text = correction.content.get("text")
     source_text = text if isinstance(text, str) else ""
+    classifications = (
+        (EvidenceOracleKind.WEB_SOURCE_RECEIPT, _public_web_requirement(source_text)),
+        (EvidenceOracleKind.TOOL_RECEIPT, _local_process_requirement(source_text)),
+    )
     required = tuple(
         oracle_kind
-        for oracle_kind, classification in (
-            (EvidenceOracleKind.WEB_SOURCE_RECEIPT, _public_web_requirement(source_text)),
-            (EvidenceOracleKind.TOOL_RECEIPT, _local_process_requirement(source_text)),
-        )
+        for oracle_kind, classification in classifications
         if classification is True
     )
-    if not required:
+    prohibited = tuple(
+        oracle_kind
+        for oracle_kind, classification in classifications
+        if classification is False
+    )
+    if not required and not prohibited:
         return goal
     identity = canonical_json_digest(
         {
@@ -456,6 +475,22 @@ def _apply_correction_lower_bounds(
         }
     )
     criteria = goal.proposed_criteria
+    # R3 撤回：correction 明确禁止该 effect 时，Runtime 早前为此铸的 proposed
+    # 义务必须随现行版本失效；残留会让 verify_goal_completion 的 "process
+    # criterion must be admitted" 检查永久失败，Goal 被 brick。未命中任何
+    # 现存义务时语义未变化，保持 Goal 原样（noop 判定依赖此相等性）。
+    for oracle_kind in prohibited:
+        prefix = _WITHDRAWABLE_RUNTIME_OBLIGATION_PREFIXES[oracle_kind]
+        criteria = tuple(
+            item
+            for item in criteria
+            if not (
+                item.oracle_kind is oracle_kind
+                and item.criterion_id.startswith(prefix)
+            )
+        )
+    if not required and criteria == goal.proposed_criteria:
+        return goal
     for oracle_kind in required:
         runtime_owned = tuple(
             item
@@ -1195,6 +1230,73 @@ def _stop_safe_active_run(
     return None, RecordedRunResult(status=status, run_id=active.run_id, message=message)
 
 
+def _superseded_tool_result_fact(
+    *,
+    fact_id: str,
+    call_id: str,
+    text: str,
+    invocation_origin: str | None,
+) -> ConversationFact:
+    return ConversationFact(
+        fact_id=fact_id,
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": call_id,
+            "text": text,
+            "is_error": True,
+            "executed": False,
+            "superseded": True,
+            **(
+                {"invocation_origin": invocation_origin}
+                if invocation_origin == InvocationOrigin.OPERATOR.value
+                else {}
+            ),
+        },
+    )
+
+
+def _unstarted_batch_suffix_facts(
+    state: ConversationState,
+    *,
+    text: str,
+    already_accounted: int = 0,
+) -> tuple[ConversationFact, ...]:
+    """为「确定尚未开始」的当前 batch suffix 生成 durable 非执行结果。
+
+    R1：只有转换仍持有当时 active run 的 phase/cursor 时，非执行才可证明——
+    TOOL 相（含 AWAITING_APPROVAL）的 cursor 指向尚未 prepare/执行的首个
+    call；calls[cursor:] 全部未开始。EXECUTING 相可能已发生效果，由
+    unknown-effect 守卫排除在丢 run 入口之外，绝不在此闭合。调用方负责把
+    结果与清空/替换 run 落在同一 CAS，并保持结果位于该批次已有结果之后、
+    后续 user/assistant fact 之前。``already_accounted`` 用于拒绝审批等
+    「cursor call 已有本次转换专属结果」的入口。
+    """
+
+    active = state.active_run
+    if active is None or active.phase is not ContinuationPhase.TOOL:
+        return ()
+    missing = active.tool_calls[active.batch_cursor + already_accounted :]
+    if not missing:
+        return ()
+    reserved = {fact.fact_id for fact in state.facts}
+    origin = active.invocation_origin.value
+    closed: list[ConversationFact] = []
+    for call in missing:
+        fact_id = f"run:{active.run_id}:superseded-tool:{call.tool_call_id}"
+        if fact_id in reserved:
+            fact_id = f"{fact_id}:{state.revision}"
+        reserved.add(fact_id)
+        closed.append(
+            _superseded_tool_result_fact(
+                fact_id=fact_id,
+                call_id=call.tool_call_id,
+                text=text,
+                invocation_origin=origin,
+            )
+        )
+    return tuple(closed)
+
+
 def pause_goal(
     state: ConversationState,
     *,
@@ -1212,6 +1314,13 @@ def pause_goal(
         raise ValueError("terminal goal cannot be paused")
     if goal.status is GoalStatus.PAUSED:
         raise ValueError("goal is already paused")
+    closed_suffix = _unstarted_batch_suffix_facts(
+        state,
+        text=(
+            "Tool call was not executed because the Goal was paused before this "
+            "call started."
+        ),
+    )
     active_run, result = _stop_safe_active_run(
         state,
         status=RunStatus.COMPLETED,
@@ -1220,6 +1329,7 @@ def pause_goal(
     return replace(
         state,
         revision=state.revision + 1,
+        facts=(*state.facts, *closed_suffix),
         goal=replace(goal, status=GoalStatus.PAUSED),
         active_run=active_run,
         last_safe_result=result,
@@ -1270,6 +1380,13 @@ def cancel_goal(
         raise ValueError("verified goal cannot be cancelled")
     if goal.status is GoalStatus.CANCELLED:
         raise ValueError("goal is already cancelled")
+    closed_suffix = _unstarted_batch_suffix_facts(
+        state,
+        text=(
+            "Tool call was not executed because the Goal was cancelled before this "
+            "call started."
+        ),
+    )
     active_run, result = _stop_safe_active_run(
         state,
         status=RunStatus.CANCELLED,
@@ -1278,6 +1395,7 @@ def cancel_goal(
     return replace(
         state,
         revision=state.revision + 1,
+        facts=(*state.facts, *closed_suffix),
         goal=replace(goal, status=GoalStatus.CANCELLED, next_step=None),
         completion_claim=None,
         active_run=active_run,
@@ -1332,10 +1450,18 @@ def apply_control_request(
             kind=FactKind.USER_MESSAGE,
             content={"text": request.message, "control": "goal_correction"},
         )
+        # R1：纠正丢弃 run 前，cursor 之后确定未开始的 suffix 与清空落在同一 CAS。
+        closed_suffix = _unstarted_batch_suffix_facts(
+            state,
+            text=(
+                "Tool call was not executed because the Goal was corrected before "
+                "this call started."
+            ),
+        )
         updated = replace(
             state,
             revision=state.revision + 1,
-            facts=(*state.facts, correction),
+            facts=(*state.facts, *closed_suffix, correction),
             goal=replace(
                 goal,
                 revision=goal.revision + 1,
@@ -1501,6 +1627,74 @@ def record_evidence(
     )
 
 
+def _require_requirement_coverage(
+    state: ConversationState,
+    claim: CompletionClaim,
+    *,
+    goal: GoalFrame,
+    mandatory: tuple[AdmittedCriterion, ...],
+) -> None:
+    """R2 完成门：物理证据齐全是必要条件，不是完整业务完成的充分条件。
+
+    最终结束必须经过针对当前 Goal revision 与当前权威用户输入/最新 correction
+    的逐项覆盖复核（模型提供语义映射，Runtime 校验结构与版本/来源/证据绑定）。
+    缺失时拒绝并给出可修复的下一步；不铸造 evidence/permission，不引入第二
+    模型裁判。引用整条 fact、空列表或首个文件 digest 的组合不能充当逐项复核。
+    """
+
+    coverage = claim.requirement_coverage
+    if not coverage:
+        raise ValueError(
+            "completion claim must include per-requirement coverage of the current "
+            "authoritative user input and corrections before the goal can be verified"
+        )
+    source_ids = set(goal.created_from_fact_ids)
+    authoritative_ids = {
+        fact.fact_id
+        for fact in state.facts
+        if fact.fact_id in source_ids and fact.kind is FactKind.USER_MESSAGE
+    }
+    cited: set[str] = set()
+    for item in coverage:
+        cited.update(item.source_fact_ids)
+        if any(fact_id not in source_ids for fact_id in item.source_fact_ids):
+            raise ValueError(
+                "requirement coverage must cite the authoritative source facts of "
+                "the current goal"
+            )
+    uncited = authoritative_ids - cited
+    if uncited:
+        raise ValueError(
+            "requirement coverage does not cite every authoritative user input or "
+            f"correction: {sorted(uncited)}"
+        )
+    mandatory_ids = {criterion.criterion_id for criterion in mandatory}
+    pending = tuple(item for item in coverage if item.status == "pending")
+    if pending:
+        raise ValueError(
+            "completion claim lists pending requirements that are not yet satisfied: "
+            + ", ".join(item.requirement_id for item in pending)
+        )
+    for item in coverage:
+        unknown = set(item.criterion_ids) - mandatory_ids
+        if unknown:
+            raise ValueError(
+                "requirement coverage binds criterion ids that are not current "
+                f"admitted mandatory criteria: {sorted(unknown)}"
+            )
+    covered = {
+        criterion_id
+        for item in coverage
+        for criterion_id in item.criterion_ids
+    }
+    uncovered = mandatory_ids - covered
+    if uncovered:
+        raise ValueError(
+            "requirement coverage does not bind every mandatory criterion: "
+            f"{sorted(uncovered)}"
+        )
+
+
 def verify_goal_completion(state: ConversationState) -> ConversationState:
     goal = state.goal
     claim = state.completion_claim
@@ -1558,6 +1752,7 @@ def verify_goal_completion(state: ConversationState) -> ConversationState:
             raise ValueError(
                 "process criterion must be admitted before completion verification"
             )
+    _require_requirement_coverage(state, claim, goal=goal, mandatory=mandatory)
     evidence_by_criterion = {
         record.criterion_id: record for record in referenced.values()
     }
@@ -2567,10 +2762,19 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
         # 拒绝是用户的强控制信号：结束当前 run，把控制权交还用户。不能继续
         # 同一 model batch 的剩余工具，也不能再调用 provider 来游说或换命令。
         # Goal 与此前已持久化的结果保留；后续新指令会形成新的 run 和新绑定。
+        # R1：cursor 之后的 suffix 确定未开始，与清空 run 落在同一 CAS。
+        closed_suffix = _unstarted_batch_suffix_facts(
+            state,
+            text=(
+                "Tool call was not executed because the run stopped at a declined "
+                "approval before this call started."
+            ),
+            already_accounted=1,
+        )
         return replace(
             state,
             active_run=None,
-            facts=(*state.facts, rejection),
+            facts=(*state.facts, rejection, *closed_suffix),
             last_safe_result=RecordedRunResult(
                 status=RunStatus.CANCELLED,
                 run_id=active.run_id,
@@ -2690,8 +2894,19 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
         )
 
     if isinstance(action, CancelRun):
+        # R1：TOOL 相（含 AWAITING_APPROVAL）的 cursor 之后确定未开始，
+        # 与清空 run 落在同一 CAS；EXECUTING/AWAITING_RECOVERY 由合法性
+        # 守卫拒绝，不会经此路径丢 UNKNOWN。
+        closed_suffix = _unstarted_batch_suffix_facts(
+            state,
+            text=(
+                "Tool call was not executed because the run was cancelled before "
+                "this call started."
+            ),
+        )
         return replace(
             state,
+            facts=(*state.facts, *closed_suffix),
             active_run=None,
             last_safe_result=RecordedRunResult(
                 status=RunStatus.CANCELLED,
@@ -3553,21 +3768,23 @@ def _close_orphaned_tool_batches(
     *,
     action_seq: int,
     live_call_ids: frozenset[str],
-) -> ConversationState:
-    """为已失去归属的未完结 tool 批次补记 durable 非执行结果。
+) -> ConversationState | None:
+    """为**可核实**的旧孤儿 tool 批次补记 durable 非执行结果；不可证则拒绝。
 
-    丢 run 的转换（pause/cancel/decline/CancelRun/fail）会让 TOOL_CALLS
-    批次失去归属：calls 已入账而 results 永不产生。此后 compaction 的 turn
-    grammar 在批次覆盖校验上必然拒绝整段历史（新 run 在 MODEL 相规划即抛
-    ``ValueError: tool batch and its results cannot be split``），会话每次
-    重试同败。与 SubmitMessage-correction 的 superseded 先例同源：为每个
-    缺失 call 补记 executed=False 的结果，插在该批次已有结果之后（批次之后
-    可能已存在新的 user 边界，尾部追加不闭合批次），保持 Anthropic/OpenAI
-    的 tool continuity 闭合。
+    V1 修复轮曾在此处无条件为任何缺结果的批次补 ``executed=False``。R1 审计
+    证明该推断没有依据：缺 active_run、缺 result、``last_safe_result`` 或旧
+    ``superseded`` 文案都不能证明某个 call 未执行（效果可能已发生而结果保存
+    失败）。自愈据此收窄为唯一可核实的旧形状：同批**完整连续 prefix**、
+    最后一个结果为 Runtime 拒绝审批结果，缺失项全部位于其后——该形状下批次
+    在拒绝处停止，suffix 必未开始。其余形状保留原 facts/checkpoint，由
+    accept_action 以动作冲突拒绝，不发 provider/tool、不伪造非执行。
+
+    新代码的安全停机（pause/cancel/decline/end/complete/CancelRun/控制纠正）
+    已在丢 run 的同一 CAS 内闭合各自确定的 suffix，不再依赖本函数。
 
     归属按 call_id 所有权判定（批次是原子单位）：live run 拥有的批次仍会由
     审批/执行或 correction 分支补齐结果，绝不代答；畸形结构保持 parser 的
-    fail-closed 判定，不做部分愈合。
+    fail-closed 判定，不做部分愈合。返回 ``None`` 表示存在不可证孤儿。
     """
 
     facts = state.facts
@@ -3601,52 +3818,75 @@ def _close_orphaned_tool_batches(
         if malformed or any(call_id in live_call_ids for call_id in expected):
             index += 1
             continue
-        covered: set[str] = set()
+        covered: list[str] = []
+        covered_ids: set[str] = set()
+        last_result_is_rejection = False
         cursor = index + 1
         while cursor < total and facts[cursor].kind is FactKind.TOOL_RESULT:
             result_call_id = facts[cursor].content.get("tool_call_id")
             if (
                 not isinstance(result_call_id, str)
                 or result_call_id not in expected
-                or result_call_id in covered
+                or result_call_id in covered_ids
             ):
                 break
-            covered.add(result_call_id)
+            covered_ids.add(result_call_id)
+            covered.append(result_call_id)
+            last_result_is_rejection = (
+                facts[cursor].content.get("rejected") is True
+            )
             cursor += 1
-        missing = tuple(call_id for call_id in expected if call_id not in covered)
-        if missing:
-            invocation_origin = fact.content.get("invocation_origin")
-            healed: list[ConversationFact] = []
-            for call_id in missing:
-                fact_id = f"action:{action_seq}:superseded-tool:{call_id}"
-                if fact_id in reserved_ids:
-                    # 跨批次 call_id 撞名（供应商异常形状）：用批次 revision
-                    # 后缀确定性去重，不引入随机性，也不静默丢结果。
-                    suffix = fact.fact_id.rsplit(":", 1)[-1]
-                    fact_id = f"{fact_id}:{suffix}"
-                reserved_ids.add(fact_id)
-                healed.append(
-                    ConversationFact(
-                        fact_id=fact_id,
-                        kind=FactKind.TOOL_RESULT,
-                        content={
-                            "tool_call_id": call_id,
-                            "text": (
-                                "Tool call was not executed; its run was superseded "
-                                "before a result was recorded."
-                            ),
-                            "is_error": True,
-                            "executed": False,
-                            "superseded": True,
-                            **(
-                                {"invocation_origin": invocation_origin}
-                                if invocation_origin == InvocationOrigin.OPERATOR.value
-                                else {}
-                            ),
-                        },
-                    )
+        missing = tuple(call_id for call_id in expected if call_id not in covered_ids)
+        if not missing:
+            index = cursor
+            continue
+        # 结果段被畸形结果（重复/乱序/异批 call_id）截断时，前缀无法核实：
+        # 保持未确定，不做部分愈合（parser 对畸形结构仍是 fail closed）。
+        if cursor < total and facts[cursor].kind is FactKind.TOOL_RESULT:
+            return None
+        # 唯一可核实的旧形状：covered 恰为 expected 的完整连续前缀（按序、
+        # 无缺位），且最后一个结果为 Runtime 拒绝审批结果。缺 prefix、乱序、
+        # 重复或末结果非拒绝时，调用结果无法证明，保持未确定。
+        prefix_is_exact = (
+            bool(covered)
+            and len(covered) <= len(expected)
+            and covered == expected[: len(covered)]
+            and last_result_is_rejection
+        )
+        if not prefix_is_exact:
+            return None
+        invocation_origin = fact.content.get("invocation_origin")
+        healed: list[ConversationFact] = []
+        for call_id in missing:
+            fact_id = f"action:{action_seq}:superseded-tool:{call_id}"
+            if fact_id in reserved_ids:
+                # 跨批次 call_id 撞名（供应商异常形状）：用批次 revision
+                # 后缀确定性去重，不引入随机性，也不静默丢结果。
+                suffix = fact.fact_id.rsplit(":", 1)[-1]
+                fact_id = f"{fact_id}:{suffix}"
+            reserved_ids.add(fact_id)
+            healed.append(
+                ConversationFact(
+                    fact_id=fact_id,
+                    kind=FactKind.TOOL_RESULT,
+                    content={
+                        "tool_call_id": call_id,
+                        "text": (
+                            "Tool call was not executed; its run was superseded "
+                            "before a result was recorded."
+                        ),
+                        "is_error": True,
+                        "executed": False,
+                        "superseded": True,
+                        **(
+                            {"invocation_origin": invocation_origin}
+                            if invocation_origin == InvocationOrigin.OPERATOR.value
+                            else {}
+                        ),
+                    },
                 )
-            insertions[cursor] = tuple(healed)
+            )
+        insertions[cursor] = tuple(healed)
         index = cursor
     if not insertions:
         return state
@@ -3697,12 +3937,13 @@ def accept_action(
     if not legal:
         return _conflict(state, reason or "illegal_action_for_state")
 
-    # 丢 run 的转换把未完结批次变成孤儿；接受任何新动作前先补记非执行结果，
-    # 否则后续 MODEL 相 compaction 规划在批次覆盖校验上永久 fatal（自愈
-    # 磁盘上已损坏的 checkpoint）。live run 拥有的批次可能仍由审批/执行或
-    # correction 分支补齐，绝不代答。
+    # 丢 run 的转换把未完结批次变成孤儿；接受任何新动作前先补记可核实前缀的
+    # 非执行结果，否则后续 MODEL 相 compaction 规划在批次覆盖校验上永久
+    # fatal（自愈磁盘上已损坏的 checkpoint）。live run 拥有的批次可能仍由
+    # 审批/执行或 correction 分支补齐，绝不代答。不可证实的旧孤儿返回 None：
+    # 其调用结果无法证明，不能自动继续或伪造非执行，保持原状态并拒绝动作。
     live = state.active_run
-    state = _close_orphaned_tool_batches(
+    healed_state = _close_orphaned_tool_batches(
         state,
         action_seq=action.action_seq,
         live_call_ids=(
@@ -3711,6 +3952,9 @@ def accept_action(
             else frozenset()
         ),
     )
+    if healed_state is None:
+        return _conflict(state, "unprovable_tool_batch_outcome")
+    state = healed_state
 
     with_replay = _append_replay_record(
         state,
@@ -3782,7 +4026,19 @@ def complete_run(
     active = state.active_run
     if active is None:
         raise ValueError("active run required")
-    facts = state.facts
+    # R1 窄不变量：UNKNOWN 只能经 recovery 分类收尾；正常完成不得抹去它。
+    if _has_unknown_effect(state):
+        raise ValueError(
+            "unknown effect recovery has priority over run completion"
+        )
+    closed_suffix = _unstarted_batch_suffix_facts(
+        state,
+        text=(
+            "Tool call was not executed because the run completed before this "
+            "call started."
+        ),
+    )
+    facts = (*state.facts, *closed_suffix)
     if message is not None:
         content = {"text": message}
         continuation_payload = _provider_continuation_payload(provider_continuation)
@@ -4159,6 +4415,18 @@ def end_run(
     active = state.active_run
     if active is None:
         raise ValueError("active run required")
+    # R1 窄不变量：未知 effect 只能经 recovery 分类收尾，普通终态不得抹去它。
+    if _has_unknown_effect(state):
+        raise ValueError(
+            "unknown effect recovery has priority over run termination"
+        )
+    closed_suffix = _unstarted_batch_suffix_facts(
+        state,
+        text=(
+            "Tool call was not executed because the run ended before this call "
+            "started."
+        ),
+    )
     result = RecordedRunResult(
         status=status,
         run_id=active.run_id,
@@ -4168,6 +4436,7 @@ def end_run(
     return replace(
         state,
         revision=state.revision + 1,
+        facts=(*state.facts, *closed_suffix),
         active_run=None,
         last_safe_result=result,
     )

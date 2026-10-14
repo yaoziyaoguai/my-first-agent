@@ -38,7 +38,13 @@ def _ledger_count(workspace: Path, tag: str) -> int:
     )
 
 
-def _build_runtime(store, provider, workspace: Path):
+def _build_runtime(
+    store,
+    provider,
+    workspace: Path,
+    *,
+    require_approval: bool = False,
+):
     from agent.runtime.checkpoint import LocalCheckpointStore  # noqa: F401
     from agent.runtime.context import ContextLimits, KernelContextManager
     from agent.runtime.contracts import (
@@ -85,7 +91,9 @@ def _build_runtime(store, provider, workspace: Path):
         risk=ToolRisk.HIGH,
         side_effect=SideEffectClass.WRITE,
         output_policy=OutputPolicy.BOUNDED_TEXT,
-        approval_policy=ApprovalPolicy.NEVER,
+        approval_policy=(
+            ApprovalPolicy.ALWAYS if require_approval else ApprovalPolicy.NEVER
+        ),
         safety_policy={},
         output_limit_chars=100,
         execution_authority=ExecutionAuthorityClass.IN_PROCESS,
@@ -572,12 +580,280 @@ def _run_b_after_crash(workspace: Path, state_root: Path) -> None:
     )
 
 
+def _run_approval_pause(workspace: Path, state_root: Path) -> None:
+    """R1-T6 进程 A：审批 pending 时 /pause，同一 CAS 闭合未开始批次。"""
+
+    from agent.runtime.checkpoint import LocalCheckpointStore
+    from agent.runtime.contracts import (
+        ConversationState,
+        GoalDraftProposal,
+        ModelResponse,
+        ModelToolCall,
+        PauseGoal,
+        ProposedCriterion,
+        RunStatus,
+        SubmitMessage,
+    )
+
+    workspace.mkdir(parents=True, exist_ok=True)
+    store = LocalCheckpointStore.initialize(
+        state_root / "checkpoint.json",
+        ConversationState.new("conversation-approval"),
+    )
+    provider = _StageProvider(
+        [
+            ModelResponse(
+                (),
+                control=GoalDraftProposal(
+                    correlation_id="draft-approval",
+                    user_outcome="append the A effect to the ledger",
+                    beneficiary="user",
+                    targets=("workspace",),
+                    scope=("workspace",),
+                    non_goals=(),
+                    assumptions=(),
+                    proposed_criteria=(
+                        ProposedCriterion(
+                            "criterion-a",
+                            "the ledger holds the A effect",
+                        ),
+                    ),
+                    next_step="append A",
+                ),
+            ),
+            ModelResponse(
+                (ModelToolCall("call-approve", "ledger_append", {"tag": "A"}),),
+            ),
+        ]
+    )
+    runtime = _build_runtime(store, provider, workspace, require_approval=True)
+    state = store.load().state
+    submitted = runtime.run_turn(
+        SubmitMessage(
+            conversation_id=state.conversation_id,
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            run_id="run-approval",
+            message="append the A effect to the ledger",
+        ),
+        store.load(),
+    )
+    assert submitted.status is RunStatus.AWAITING_APPROVAL, submitted.status
+    assert _ledger_count(workspace, "A") == 0
+    durable = store.load().state
+    assert durable.active_run is not None
+    assert durable.active_run.pending_request is not None
+    assert durable.goal is not None
+    paused = runtime.run_turn(
+        PauseGoal(
+            conversation_id=durable.conversation_id,
+            action_seq=durable.next_action_seq,
+            expected_revision=durable.revision,
+            goal_id=durable.goal.goal_id,
+            goal_revision=durable.goal.revision,
+        ),
+        store.load(),
+    )
+    assert paused.status is RunStatus.COMPLETED, paused.error_code
+    durable = store.load().state
+    assert durable.active_run is None
+    assert durable.goal is not None
+    _print_result(
+        {
+            "stage": "run_approval_pause",
+            "goal_status": durable.goal.status.value,
+            "ledger_a": _ledger_count(workspace, "A"),
+        }
+    )
+
+
+def _run_approval_resume_continue(workspace: Path, state_root: Path) -> None:
+    """R1-T6 进程 B：新进程重开审批 pause 现场；无重述继续，零执行。"""
+
+    from agent.runtime.checkpoint import LocalCheckpointStore
+    from agent.runtime.contracts import (
+        BlockedClaim,
+        FactKind,
+        GoalDelta,
+        GoalDeltaProposal,
+        GoalStatus,
+        ModelResponse,
+        ModelToolCall,
+        ResumeGoal,
+        RunStatus,
+        SubmitMessage,
+    )
+    from tests.kernel.fakes import RUNTIME_GOAL_ID
+
+    store = LocalCheckpointStore(state_root / "checkpoint.json")
+    state = store.load().state
+    goal = state.goal
+    assert goal is not None
+    assert goal.status is GoalStatus.PAUSED
+    assert state.active_run is None
+    closed = [
+        fact
+        for fact in state.facts
+        if fact.content.get("tool_call_id") == "call-approve"
+    ]
+    assert len(closed) == 1, "pause must close the unapproved call in the same CAS"
+    assert closed[0].content.get("executed") is False
+    assert closed[0].content.get("superseded") is True
+    assert closed[0].content.get("is_error") is True
+    kinds = [fact.kind for fact in state.facts]
+    assert kinds[kinds.index(FactKind.TOOL_CALLS) + 1] is FactKind.TOOL_RESULT
+
+    provider = _StageProvider(
+        [
+            ModelResponse(
+                (),
+                control=GoalDeltaProposal(
+                    correlation_id="delta-approval",
+                    delta=GoalDelta(
+                        goal_id=RUNTIME_GOAL_ID,
+                        expected_revision=goal.revision,
+                        reason="the user asked to continue the existing Goal",
+                        updates={"targets": list(goal.targets)},
+                    ),
+                ),
+            ),
+            ModelResponse(
+                (ModelToolCall("call-read-approval", "ledger_read", {}),),
+            ),
+            ModelResponse(
+                (),
+                control=BlockedClaim(
+                    correlation_id="blocked-approval",
+                    goal_id=RUNTIME_GOAL_ID,
+                    goal_revision=goal.revision,
+                    blocker="the paused batch is closed; a new instruction is required",
+                    safe_attempts=("read the ledger",),
+                    resume_condition="provide the next instruction",
+                ),
+            ),
+        ]
+    )
+    runtime = _build_runtime(store, provider, workspace)
+    resumed = runtime.run_turn(
+        ResumeGoal(
+            conversation_id=state.conversation_id,
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            goal_id=goal.goal_id,
+            goal_revision=goal.revision,
+        ),
+        store.load(),
+    )
+    assert resumed.status is RunStatus.COMPLETED, resumed.error_code
+    assert len(provider.calls) == 0
+    state = store.load().state
+    advanced = runtime.run_turn(
+        SubmitMessage(
+            conversation_id=state.conversation_id,
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            run_id="run-approval-continue",
+            message="继续当前任务",
+        ),
+        store.load(),
+    )
+    assert advanced.status is RunStatus.COMPLETED, advanced.error_code
+    durable = store.load().state
+    assert durable.goal is not None
+    assert durable.goal.status is GoalStatus.BLOCKED
+    assert _ledger_count(workspace, "A") == 0
+    _print_result(
+        {
+            "stage": "run_approval_resume_continue",
+            "resume_provider_calls": 0,
+            "ledger_a": 0,
+            "continue_goal_status": durable.goal.status.value,
+            "closed_executed": False,
+        }
+    )
+
+
+def _run_b_after_crash_resolve(workspace: Path, state_root: Path) -> None:
+    """R1-T6 进程 B：崩溃后的 UNKNOWN 由操作者分类；同一 run 继续，零重放。"""
+
+    from agent.runtime.checkpoint import LocalCheckpointStore
+    from agent.runtime.contracts import (
+        BlockedClaim,
+        ModelResponse,
+        RecoveryResolution,
+        ResolveUnknownToolOutcome,
+        Resume,
+        RunStatus,
+    )
+    from tests.kernel.fakes import RUNTIME_GOAL_ID
+
+    store = LocalCheckpointStore(state_root / "checkpoint.json")
+    assert _ledger_count(workspace, "X") == 1
+    provider = _StageProvider(
+        [
+            ModelResponse(
+                (),
+                control=BlockedClaim(
+                    correlation_id="blocked-after-recovery",
+                    goal_id=RUNTIME_GOAL_ID,
+                    goal_revision=1,
+                    blocker="the classified effect is recorded; no further safe action",
+                    safe_attempts=("classified the unknown X effect as succeeded",),
+                    resume_condition="provide the next instruction",
+                ),
+            ),
+        ]
+    )
+    runtime = _build_runtime(store, provider, workspace)
+    state = store.load().state
+    resumed = runtime.run_turn(
+        Resume(
+            conversation_id=state.conversation_id,
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+        ),
+        store.load(),
+    )
+    assert resumed.status is RunStatus.AWAITING_RECOVERY, resumed.status
+    assert resumed.request is not None
+    assert len(provider.calls) == 0
+    assert _ledger_count(workspace, "X") == 1
+    state = store.load().state
+    resolved = runtime.run_turn(
+        ResolveUnknownToolOutcome(
+            conversation_id=state.conversation_id,
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            request_id=resumed.request.request_id,
+            binding_digest=resumed.request.binding_digest,
+            resolution=RecoveryResolution.MARK_SUCCEEDED,
+        ),
+        store.load(),
+    )
+    assert resolved.status is RunStatus.COMPLETED, resolved.error_code
+    assert len(provider.calls) == 1
+    assert _ledger_count(workspace, "X") == 1
+    durable = store.load().state
+    assert durable.active_run is None
+    _print_result(
+        {
+            "stage": "run_b_after_crash_resolve",
+            "status": resolved.status.value,
+            "provider_calls": 1,
+            "ledger_x": 1,
+        }
+    )
+
+
 _STAGES = {
     "run_a": _run_a_stage,
     "run_b_resume_only": _run_b_resume_only,
     "run_b_xy": _run_b_xy,
     "run_b_duplicate": _run_b_duplicate,
     "run_b_after_crash": _run_b_after_crash,
+    "run_approval_pause": _run_approval_pause,
+    "run_approval_resume_continue": _run_approval_resume_continue,
+    "run_b_after_crash_resolve": _run_b_after_crash_resolve,
 }
 
 
@@ -658,3 +934,69 @@ def test_v1_executing_crash_windows_surface_unknown_without_replay(tmp_path):
         assert payload["status"] == "awaiting_recovery"
         assert payload["provider_calls"] == 0
         assert payload["ledger_x"] == expected_x
+
+
+def test_r1_t6_approval_pause_closes_batch_and_new_process_continues(tmp_path):
+    """R1-T6：审批边界 pause 关闭 checkpoint，新进程重开不再 bricked。
+
+    形状复刻 V1 真实旅程 state-root7：MODEL 批次已入账、审批 pending 时
+    /pause。R1 前该 checkpoint 含未完结 tool batch，新进程任何推进都在
+    compaction_rules 的 "tool batch and its results cannot be split" 上
+    fatal。修复后 pause 在同一 CAS 闭合未开始 call；新进程 ResumeGoal
+    零 provider 调用，继续推进到 BlockedClaim，全程零执行、无人工重述。
+    """
+
+    workspace = tmp_path / "ws"
+    state_root = tmp_path / "state"
+    workspace.mkdir()
+    state_root.mkdir()
+    code, payload = _run_stage("run_approval_pause", workspace, state_root)
+    assert code == 0
+    assert payload == {
+        "stage": "run_approval_pause",
+        "goal_status": "paused",
+        "ledger_a": 0,
+    }
+    code, payload = _run_stage(
+        "run_approval_resume_continue", workspace, state_root
+    )
+    assert code == 0
+    assert payload == {
+        "stage": "run_approval_resume_continue",
+        "resume_provider_calls": 0,
+        "ledger_a": 0,
+        "continue_goal_status": "blocked",
+        "closed_executed": False,
+    }
+
+
+def test_r1_t6_crashed_unknown_resolves_in_new_process_without_replay(tmp_path):
+    """R1-T6：EXECUTING 崩溃后的 UNKNOWN 在新进程走既有分类流程，零重放。
+
+    效果已发生（ledger X 计数 1）且结果保存失败窗口崩溃；新进程 Resume
+    进入 AWAITING_RECOVERY（零 provider/tool），操作者标记 succeeded 后
+    同一 run 继续。ledger 恒为 1，证明分类不触发任何工具重放。
+    """
+
+    workspace = tmp_path / "ws"
+    state_root = tmp_path / "state"
+    workspace.mkdir()
+    state_root.mkdir()
+    code, payload = _run_stage(
+        "run_a",
+        workspace,
+        state_root,
+        crash_mode="after",
+    )
+    assert code == 9
+    assert payload is None
+    code, payload = _run_stage(
+        "run_b_after_crash_resolve", workspace, state_root
+    )
+    assert code == 0
+    assert payload == {
+        "stage": "run_b_after_crash_resolve",
+        "status": "completed",
+        "provider_calls": 1,
+        "ledger_x": 1,
+    }

@@ -1,6 +1,95 @@
 # 本轮执行记录（唯一可变进度）
 
-## 当前摘要
+## 当前摘要（2026-10-13：任务结果可信修复包执行中）
+
+- **执行中：R1 本地修复已闭合；R3 本地修复已闭合**（等义连接词 + 撤回缺陷，详见下方小节）；按 R1 → R3 → R2 → R4 顺序推进，R2 进行中。修复包入口 [任务结果可信修复包](../2026-10-13-task-trust-repair/START-HERE.md)。本文件继续是唯一可变执行记录。
+- **授权边界（本轮）：** 允许本地代码/测试/文档修改、离线测试、合成工作区、本次专属候选构建安装；不授权付费 API、凭据读取、旧私人会话/日志、commit/push/merge/tag/publish。真实层未获授权前标记 BLOCKED_AUTHORIZATION。
+- **Git实况已核对：** PR #4 于2026-10-13 03:12:10 UTC合并，main=`ff686bd14642e8ec5041cced6a21daf7c03f8d17`；下方前轮“合并流程中”是历史文字。本轮未commit/push。
+- **四项对应：** R1 UNKNOWN保存失败后被补成未执行；R2 D04漏做业务却VERIFIED_DONE；R3等义中文漏记必做校验；R4默认CLI任务范围授权要求隐藏ID。实施顺序R1→R3→R2→R4，原因是R2依赖R3，不删减R2。
+- **范围排除：** 不新增自然续改、运行中抢占、后台常驻、跨平台host、工具/记忆/多Agent能力、通用评测平台或全项目promotion。安装验证、既有P2-2/P2-3组合回归只是四项修复的交付门。
+- **下一动作：** R2（D04 fixture 临时副本两条可区分 Red：自动早收尾反例 + admission→显式claim遗漏反例）。
+
+### 本次包执行状态（实施者在此续写）
+
+| 项 | 产品修复 | 本地 | 安装 | 真实层 | 说明 |
+| --- | --- | --- | --- | --- | --- |
+| R1 UNKNOWN | DONE（本地） | T1–T9 全绿 224 passed | NOT_RUN | 不要求付费模型 | 保留未知执行事实，限制无证据healing |
+| R2 COMPLETION | NOT_STARTED | 待确定性业务反例 | NOT_RUN | BLOCKED_AUTHORIZATION | 禁止只改文案或把业务失败归咎模型后结案 |
+| R3 INTENT | DONE（本地） | 冻结表12/12 + 撤回缺陷 Red→Green + 152 passed | NOT_RUN | 随R2真实旅程 | 等义明确执行要求一致、禁止要求仍有效 |
+| R4 CONSENT | NOT_STARTED | 基线交互断口已复现 | NOT_RUN | 本地CLI即可 | 接通已有范围授权，不新增权限 |
+| C1/C2 | C2（R1-T9）DONE | 需新增跨层固定回归 | 按受影响节点 | 不要求API | 对应前轮P2-2/P2-3；C1待R2后 |
+| I1/G1 | NOT_STARTED | 待最终代码 | 待新wheel | 不适用 | 不复用旧artifact证明新代码 |
+
+### R1 执行记录（2026-10-13，本地修复闭合）
+
+**缺陷链确认（ff686bd 基线）**：`_drive` TOOL 相 `record_tool_result` 保存失败 → `_handle_unexpected_error` 重试 recovery 保存也失败 → 落入 `fail_run` 清空 active_run（UNKNOWN 丢失）→ 后续 `_close_orphaned_tool_batches` 把缺结果调用补成 `executed=False, superseded=True`。REPRODUCERS 探针在基线复现 effect=1 却补 executed=False。
+
+**最小修复（`agent/runtime/state.py` + `agent/runtime/loop.py`）**：
+1. `loop.py::_handle_unexpected_error`：durable EXECUTING+intent 时 recovery 保存失败不再落入清空路径，改走新增 `_finish_unknown_effect_persistence_failure`（`error_code="recovery_persistence_failed"`，保留 durable 未知态；存储恢复后由既有 Resume/Resolve 继续，零工具重放）。
+2. `state.py::end_run/complete_run`：窄不变量 `_has_unknown_effect` → raise（普通无未知副作用失败不受影响）。
+3. 新增 `_unstarted_batch_suffix_facts`：丢 run 的安全转换（pause/cancel/decline/CancelRun/correction/end/complete）在**同一 CAS** 闭合"确定尚未开始的 TOOL 相 suffix"（EXECUTING/AWAITING_RECOVERY 由守卫排除，绝不在此闭合）。
+4. `_close_orphaned_tool_batches` 收窄：仅"同批完整连续 prefix + 末结果为 Runtime 拒绝审批结果"可自愈；其余形状（fatal/完成文字/last_safe_result/复用 run_id/旧 superseded/缺 prefix/已执行 prefix/跨批 call_id/重复/畸形）返回 None → `accept_action` 以 `_conflict(state, "unprovable_tool_batch_outcome")` 拒绝，零伪造。
+
+**Red→Green 矩阵（全部先在 pristine HEAD `ff686bd` worktree 快照上确认精确 Red）**：
+- T1 `test_unknown_effect_survives_result_and_recovery_save_failures`（语义注入：EXECUTING+TOOL_RESULT fact = result save；AWAITING_RECOVERY status = recovery save；`attempted_clears==0` 证明从未尝试清空）——effect=1、durable EXECUTING 保留、Resume 进 AWAITING_RECOVERY、零重放。
+- T2 `test_all_followup_saves_failing_reports_persistence_failure_honestly`——持续失败时如实 `recovery_persistence_failed`、不报安全终态。
+- T4 `test_cancel_run_closes_unstarted_suffix_in_same_transition`——已执行 prefix 不变，只闭合未开始 suffix。
+- T5 `test_capacity_end_run_closes_unstarted_tail_in_same_cas`——end/complete 同 CAS 闭合 tail，assistant fact 在闭合结果之后。
+- T6 `test_r1_t6_approval_pause_closes_batch_and_new_process_continues` + `test_r1_t6_crashed_unknown_resolves_in_new_process_without_replay`——真实 LocalCheckpointStore、独立 OS 进程、可数非幂等 ledger：审批 pause 新进程重开不再 bricked（pristine 上精确 Red：`assert 1 == 0`，stage 2 子进程 `provider_failure`）、崩溃 UNKNOWN 新进程分类零重放（ledger 恒 1）。
+- T7 `test_legacy_orphan_matrix_rejects_unprovable_and_heals_only_evidenced`——前组（last_safe_result/fatal 文字/旧 superseded/缺 prefix）全部 CONFLICT + facts 原样；对照组（拒绝 prefix）可补尾部。
+- T8 `test_legacy_orphan_matrix_multi_batch_and_malformed_fail_closed`——多批次不跨批借证明、跨批 call_id/重复结果拒绝、畸形批次 healer skip 且 `parse_compaction_turns` fail-closed、重复 action 走既有 replay 保护。
+- T9/C2 `test_r1_closed_suffix_facts_project_into_paired_wire_messages`（tests/provider/test_continuity_control.py）——闭合 suffix 经真实 KernelContextManager→OpenAI/Anthropic wire 投影 exact 配对。
+- T3 = 既有 `test_result_save_failure_enters_unknown_outcome_recovery`（原恢复行为不变，Green 保持）。
+
+**契约更新（5 处既有测试，均为 R1 新合同的正确断言）**：`test_pause_at_approval_boundary_keeps_next_run_usable`（pause 自身闭合）、`test_accept_action_closes_rejection_prefix_orphan_in_place`（不可证形状 CONFLICT）、`test_resumed_batch_rebuilds_prefix_and_excludes_operator_results`（declined 分支含 suffix-failure superseded）、`test_declining_one_item_stops_the_rest_of_its_batch_and_keeps_prior_results`（call-3 superseded）、`test_unknown_outcome_recovery_invalidates_old_validation`（夹具重建为自洽批次）。
+
+**验证**：R1 focused（VALIDATION 第 2 节命令）**224 passed**；完整门 3799 passed/1 skipped 后新增测试再跑（见 §4）。`git diff --check` + `ruff check` clean。**未 commit/push**（默认禁止）。
+
+**完整门差异说明**：首次全库门（含 R1 修改）4 failed——全部在 `tests/automation_hosts/test_posix_supervisor_cleanup.py`（`ready_timeout`：0.35s 子进程启动预算被系统负载挤爆）。定性证据：同一文件在 pristine HEAD `ff686bd` 快照上失败更多（7/10），机器 load average 87（外部 VM/Codex/Defender 占用）；负载稍降后同文件连跑 10/10、10/10 全绿。属环境性 flake，与 R1 修改无关。最终门在代码冻结后重跑。
+
+**R1 未决**：无本地未决项；真实层按 VALIDATION 不要求付费模型（语义故障注入 + 真实保存/reopen + 新进程恢复已覆盖）。
+
+### R3 执行记录（2026-10-13，本地修复闭合）
+
+**缺陷一（连接词漏记）确认（ff686bd 基线）**：`_EXPLICIT_LOCAL_PROCESS_PATTERNS` pattern 0 仅锚定行首/换行/冒号，`修复功能并运行 pytest -q` 中的"运行"因前置连接词不被识别 → runtime-owned process 义务缺失（REPRODUCERS 探针基线 `True / False / False`）。修复前同时复现等义输入结果不一致。
+
+**缺陷二（撤回不生效，本包 e2e 断言范围内）**：admission 已铸造的 runtime-owned process/web 义务，在用户 correction 明确禁止后仍残留 `proposed_criteria`；`verify_goal_completion` 的 "process criterion must be admitted" 检查对残留 proposed 义务永久失败 → Goal 被 brick，无法完成。探针确认：correction "不要运行测试，只修改 app.py" 后义务仍在。
+
+**最小修复（`agent/runtime/state.py`）**：
+1. `_EXPLICIT_LOCAL_PROCESS_PATTERNS` pattern 0 锚点扩展中文连接词（`并/并且/然后/接着/随后/继而/好后/完后/毕后/以后`），`(?<!合)` 反向断言排除"合并运行"词内误匹配；明确执行要求不因连接方式不同丢义务。
+2. `_apply_correction_lower_bounds` 增加撤回分支：correction classification 为 False 时移除对应 oracle_kind 的 runtime-owned proposed 义务（仅 `required-public-web`/`required-local-process` 两类；`required-governed-tool` 来自独立审批不随 effect 禁止撤回）；未命中任何现存义务时保持 Goal 原样（不破坏 noop 判定与既有 negative-correction 语义）。
+
+**Red→Green 矩阵（均先在 pristine HEAD `ff686bd` worktree 快照确认精确 Red）**：
+- 冻结输入表 `test_r3_explicit_requirement_survives_connective_variants`（12 输入 × model_flag True/False = 24 用例）：`_R3_FROZEN_INPUTS` 逐字复刻 WORK-PACKAGES R3 冻结表；expected=True 断言恰好 1 个 runtime-owned process criterion，否则断言为空 tuple（模型 flag 不能扩权/掩盖）。pristine 6 failed Red → 修复树 Green。
+- 撤回 `test_explicit_correction_withdrawal_removes_runtime_owned_obligation`（TOOL/WEB 双参数）：pristine Red（义务残留）→ Green；对照 `test_silent_correction_keeps_runtime_owned_obligation` 锁定"未表态不撤回"。
+- 撤回 e2e `test_withdrawn_process_obligation_cannot_brick_completion_gate`（tests/continuity/test_verified_done.py）：pristine 精确 Red `ValueError: process criterion must be admitted before completion verification`（与缺陷根因逐字吻合）→ 修复树正常到 VERIFIED_DONE。
+- 工具输出不扩权 `test_tool_output_cannot_create_process_authority`：工具输出文本含"运行 pytest -q"且模型 flag=True 时仍不铸造义务。
+- REPRODUCERS R3 探针复跑：`True / True / False` 达标（前两项一致，禁止项仍 False）。
+
+**验证**：R3 focused（`test_contracts.py` + `test_entry_routing.py` + `test_verified_done.py`）**152 passed**；touched-area `tests/kernel/ tests/provider/ tests/cli/` **968 passed**；`tests/continuity/ tests/process/` 654 passed / 1 failed——`test_managed_web.py::test_managed_web_supervisor_reaps_descendants_when_direct_child_exits`（`ProcessLookupError`，高负载下 subprocess 时序），单独复跑当前树 3/3 passed、pristine 亦通过，定性为与 R1 同族的环境性 flake（当时 load 75），最终门冻结后重跑确认。**未 commit/push**。
+
+**R3 未决**：无本地未决项；真实层随 R2 旅程（BLOCKED_AUTHORIZATION）。
+
+### R2 设计记录（2026-10-13，先设计后实施，符合 WORK-PACKAGES 要求）
+
+**最小结构扩展：`CompletionClaim.requirement_coverage`（revision-bound 逐项覆盖复核）**
+
+- **字段（`agent/runtime/contracts.py`）**：新增 frozen dataclass `RequirementCoverage`：
+  - `requirement_id: str`（非空、claim 内唯一）
+  - `requirement: str`（非空；模型对当前权威用户输入/最新 correction 的逐项语义映射）
+  - `source_fact_ids: tuple[str, ...]`（非空；必须是 `goal.created_from_fact_ids` 子集——复核输入含当前权威原文，不只是旧 draft）
+  - `status: str`（`"satisfied"` 或 `"pending"`）
+  - `criterion_ids: tuple[str, ...]`（satisfied 时非空且 ⊆ 当前 admitted mandatory ids；pending 时为空）
+  `CompletionClaim` 增加 `requirement_coverage: tuple[RequirementCoverage, ...] = ()`（默认空保持旧构造/旧 wire 兼容）。
+- **来源**：模型在 completion_claim control 中提供（模型负责语义映射）；Runtime 只做结构/版本/来源/证据绑定校验，不做自然语言解析、不引入第二模型裁判。
+- **完成门（`state.py::verify_goal_completion`）**：① coverage 非空；② 每个 coverage 的 `source_fact_ids` ⊆ `created_from_fact_ids` 且全部 USER_MESSAGE 权威 fact（初始输入与每条已消费 correction）至少被一条引用；③ status 合法；④ satisfied 必须绑定当前 admitted mandatory criterion，pending 必须为空绑定；⑤ 存在 pending → 拒绝（可修复的下一步）；⑥ 每个 mandatory criterion 至少被一条 satisfied 引用（防覆盖与证据脱节）。证据全量仍由既有 exact `criterion_evidence_refs` 检查承载。
+- **失效条件**：复用既有 revision 机制——correction/Goal delta 使 revision+1，旧 claim/coverage 变 stale 被 `GoalRevisionConflictError` 拒绝；后续相关写入使旧 evidence 失效的既有 freshness（`_may_invalidate_workspace_validation`）不变。
+- **checkpoint 读写（`checkpoint.py`）**：`_completion_claim_to_dict/from_dict` 增加 `requirement_coverage`；旧记录缺字段 → `()`（旧活动 checkpoint 不被默认视为复核已满足，模型在主 loop 正常补复核；已终结历史记录不重验）。
+- **wire 读写**：`contracts.model_response_payload/from_payload`、`provider/normalize.py::_decode_completion_claim`、`context_control.py` strict+portable schema 与完成指引文案同步增加 `requirement_coverage`（模型必须显式提供）。
+- **自动路径**：`loop.py::_finish_if_durable_evidence_is_complete` 合成的 claim coverage 为空 → 同一完成门拒绝 → 函数返回 None → 返回原 model/tool loop（"readback 自动路径不能自行合成'已复核所有业务要求'"）。blocked 强制完成路径只拒 blocked 并指引模型走 claim，天然共享同一门。
+- **不承诺**：不机械证明任意自然语言语义；结构完整后模型仍可能理解错原文——由独立业务验收（D04 grader + 补充 SPEC 断言）揭露，不新增解析器或第二 evaluator。
+
+## 前轮摘要（历史：截至PR #4合并前）
 
 - 状态：**补漏轮 W1–W4/V1/V2 已执行完毕（2026-10-12→13）；独立复核发现的三项缺陷已修复并验证**：RC-02 时序（W1 按验证取得时的 writer 事实判资格）、候选构建防误删（W2 重写为只创建全新 output）、全量复跑失败（W4 定位为 zombie/orphan 收敛窗口耗尽 harness 私有 2.0s 预算，已对齐共享 6.0s）。此外真实旅程暴露的 `/pause`→新进程 `/resume` bricked 缺陷已修复（V1 修复轮，accept_action 单点闭合孤儿 tool 批次）。历史 REOPENED 结论与下方历史 VERIFIED/PASS 只保留当时主张，不覆盖本摘要。
 - 已完成：接手核对与探针基线；S0 依赖闭包盘点；13 项修复；干净候选（653 文件）构建与独立 venv 安装验证（收口重跑 3679 passed / 0 failed）；Q1 指南一致性；Q2 持久化 + worker-owner 屏障证据；Q3 真实正例（产品自报 `Verified delivery:`）/负例/PAUSE→新进程恢复；真实浏览器 f2+d06 旅程。**补漏轮**：W2/W1/W3/W4 修复 + V1 本地证据（两段式零重放证明）+ V2 候选/安装/完整门。

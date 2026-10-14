@@ -26,6 +26,7 @@ from agent.subagent.contracts import ChildProfile
 from agent.subagent.runner import ChildAgentRunner
 from agent.subagent.tools import build_subagent_tool_registrations
 from tests.kernel.fakes import (
+    RUNTIME_GOAL_ID,
     CollectingSink,
     InMemoryCheckpointStore,
     ScriptedProvider,
@@ -67,7 +68,7 @@ def test_parent_delegates_and_uses_child_finding() -> None:
             (ModelTextBlock("Risk: SECRET-OMEGA confirmed"),),
             control=CompletionClaim(
                 correlation_id="subagent-finding-complete",
-                goal_id="goal-1",
+                goal_id=RUNTIME_GOAL_ID,
                 goal_revision=1,
                 criterion_evidence_refs=(
                     closed_evidence_id(

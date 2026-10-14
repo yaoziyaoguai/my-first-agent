@@ -1516,8 +1516,26 @@ def test_resumed_batch_rebuilds_prefix_and_excludes_operator_results() -> None:
         else:
             assert completed.status is RunStatus.CANCELLED
             assert completed.error_code == "approval_declined"
-            assert expected_results == ["prefix-result", "approval-result"]
-            assert store.state.facts[-1].content["rejected"] is True
+            # R1：拒绝是丢 run 的安全转换，cursor 之后确定未开始的 suffix
+            # 与清空 run 落在同一 CAS（既有 prefix 结果保持原值）。
+            assert expected_results == [
+                "prefix-result",
+                "approval-result",
+                "suffix-failure",
+            ]
+            rejected = next(
+                fact
+                for fact in store.state.facts
+                if fact.content.get("rejected") is True
+            )
+            assert rejected.content["tool_call_id"] == "approval-result"
+            suffix = next(
+                fact
+                for fact in store.state.facts
+                if fact.content.get("superseded") is True
+            )
+            assert suffix.content["tool_call_id"] == "suffix-failure"
+            assert suffix.content["executed"] is False
         assert not any(
             fact.content.get("code") == "no_progress_replan_required"
             for fact in store.state.facts

@@ -50,6 +50,7 @@ from agent.runtime.contracts import (
     ModelTextBlock,
     ModelToolCall,
     ProposedCriterion,
+    RequirementCoverage,
     SubmitMessage,
     ToolDefinition,
     canonical_json_digest,
@@ -874,6 +875,7 @@ def test_installed_goal_control_schema_no_longer_advertises_goal_proposal() -> N
         "goal_id",
         "goal_revision",
         "criterion_evidence_refs",
+        "requirement_coverage",
         "blocker",
         "safe_attempts",
         "resume_condition",
@@ -960,6 +962,7 @@ def test_portable_schema_gives_exact_goal_progress_payload_when_available() -> N
         "summary",
         "next_step",
         "criterion_evidence_refs",
+        "requirement_coverage",
         "blocker",
         "safe_attempts",
         "resume_condition",
@@ -1463,6 +1466,15 @@ _COMPLETION_ARGUMENTS: dict[str, object] = {
     "goal_id": "goal-1",
     "goal_revision": 2,
     "criterion_evidence_refs": ["evid-1", "evid-2"],
+    "requirement_coverage": [
+        {
+            "requirement_id": "requirement:report",
+            "requirement": "the report exists with exact content",
+            "source_fact_ids": ["fact:user:1"],
+            "status": "satisfied",
+            "criterion_ids": ["criterion:report-exists"],
+        }
+    ],
 }
 
 _EXPECTED_COMPLETION = CompletionClaim(
@@ -1470,6 +1482,15 @@ _EXPECTED_COMPLETION = CompletionClaim(
     goal_id="goal-1",
     goal_revision=2,
     criterion_evidence_refs=("evid-1", "evid-2"),
+    requirement_coverage=(
+        RequirementCoverage(
+            requirement_id="requirement:report",
+            requirement="the report exists with exact content",
+            source_fact_ids=("fact:user:1",),
+            status="satisfied",
+            criterion_ids=("criterion:report-exists",),
+        ),
+    ),
 )
 
 _BLOCKED_ARGUMENTS: dict[str, object] = {
@@ -2008,3 +2029,160 @@ def test_ordinary_tool_call_before_reserved_control_fails_closed(
         provider = provider_cls(config=_config(provider_type), http_client=client)
         with pytest.raises(ProviderProtocolError):
             provider.generate(_context())
+
+
+# --------------------------------------------------------------------------- #
+# R1-T9 / C2：安全闭合的 tool facts 经真实 context/provider wire 投影配对
+# --------------------------------------------------------------------------- #
+
+
+def test_r1_closed_suffix_facts_project_into_paired_wire_messages() -> None:
+    """R1-T9：丢 run 时闭合的 suffix facts 必须经真实投影成对出现。
+
+    从真实 Runtime 走一遍 pause-at-approval（R1 在同一 CAS 闭合未开始
+    suffix），再把 durable state 经真实 KernelContextManager 构建上下文，
+    分别用 OpenAI/Anthropic 投影序列化：批次 calls/results exact 配对，
+    已执行 prefix 与既有 continuation 不被改写。离线合成数据即可证明。
+    """
+
+    from agent.provider.normalize import context_to_anthropic_messages
+    from agent.runtime.contracts import (
+        ActiveRun,
+        ApprovalPolicy,
+        ApprovalRequest,
+        ExecutionAuthorityClass,
+        OutputPolicy,
+        PauseGoal,
+        RunStatus,
+        SideEffectClass,
+        ToolCall,
+        ToolRisk,
+        ToolSpec,
+    )
+    from agent.runtime.loop import AgentRuntime, InvocationLimits
+    from agent.runtime.state import pause_for_approval, start_tool_batch
+    from agent.runtime.tools import RegisteredTool
+    from tests.kernel.fakes import (
+        CollectingSink,
+        InMemoryCheckpointStore,
+        ScriptedProvider,
+        conversation_with_active_goal,
+    )
+
+    seed = conversation_with_active_goal()
+    state = replace(seed, active_run=ActiveRun(run_id="run-wire"))
+    state = start_tool_batch(
+        state,
+        (
+            ToolCall("wire-call-1", "write_fixture", {"content": "one"}),
+            ToolCall("wire-call-2", "write_fixture", {"content": "two"}),
+        ),
+    )
+    state = pause_for_approval(
+        state,
+        ApprovalRequest(
+            request_id="approval-wire",
+            run_id="run-wire",
+            tool_call_id="wire-call-1",
+            binding_digest="binding-wire",
+            preview="write fixture",
+            tool_name="write_fixture",
+        ),
+    )
+    spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name="write_fixture",
+        version="1",
+        description="Write fixture",
+        input_schema={
+            "type": "object",
+            "properties": {"content": {"type": "string"}},
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.HIGH,
+        side_effect=SideEffectClass.WRITE,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        safety_policy={},
+        output_limit_chars=50,
+    )
+    store = InMemoryCheckpointStore(state)
+    runtime = AgentRuntime(
+        provider=ScriptedProvider(),
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+        ),
+        tool_runtime=KernelToolRuntime(
+            (RegisteredTool(spec, lambda intent: "written"),)
+        ),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-wire",
+    )
+    paused = runtime.run_turn(
+        PauseGoal(
+            conversation_id="conversation-1",
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            goal_id="goal-1",
+            goal_revision=1,
+        ),
+        store.load(),
+    )
+    assert paused.status is RunStatus.COMPLETED
+    durable = store.load().state
+    closed = [
+        fact
+        for fact in durable.facts
+        if fact.content.get("superseded") is True
+    ]
+    assert [fact.content["tool_call_id"] for fact in closed] == [
+        "wire-call-1",
+        "wire-call-2",
+    ]
+
+    context = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+    ).build(
+        durable,
+        SubmitMessage(
+            conversation_id=durable.conversation_id,
+            action_seq=durable.next_action_seq,
+            expected_revision=durable.revision,
+            run_id="run-after-pause",
+            message="继续",
+        ),
+        (),
+    )
+
+    openai_messages = context_to_openai_messages(context)
+    pending: set[str] = set()
+    for message in openai_messages:
+        raw_calls = message.get("tool_calls")
+        if raw_calls is not None:
+            pending.update(call["id"] for call in raw_calls)
+            continue
+        if message.get("role") == "tool":
+            assert message["tool_call_id"] in pending
+            pending.discard(message["tool_call_id"])
+    assert pending == set(), "every projected tool call must be paired"
+
+    anthropic_messages = context_to_anthropic_messages(context)
+    use_ids = [
+        block["id"]
+        for message in anthropic_messages
+        for block in message["content"]
+        if block.get("type") == "tool_use"
+    ]
+    result_ids = [
+        block["tool_use_id"]
+        for message in anthropic_messages
+        for block in message["content"]
+        if block.get("type") == "tool_result"
+    ]
+    assert sorted(use_ids) == sorted(result_ids)
+    assert "wire-call-1" in result_ids
+    assert "wire-call-2" in result_ids

@@ -1648,9 +1648,15 @@ class _J1JourneyProvider:
             # process-artifact (FILESYSTEM_DIGEST) + process 成功后铸造的 process-receipt
             # (TOOL_RECEIPT)。criterion_evidence_refs 顺序 = admitted_criteria 顺序
             # （artifact 先、receipt 后），derive 要求精确匹配。
-            from agent.runtime.contracts import CompletionClaim
+            # R2：requirement_coverage 按 trusted_goal 投影逐项复核权威用户要求。
+            from agent.runtime.contracts import CompletionClaim, RequirementCoverage
 
             goal = _trusted_goal_block(context)
+            mandatory_ids = tuple(
+                item["criterion_id"]
+                for item in goal["admitted_criteria"]
+                if item.get("mandatory") is True
+            )
             return ModelResponse(
                 (),
                 control=CompletionClaim(
@@ -1659,6 +1665,15 @@ class _J1JourneyProvider:
                     goal_revision=goal["goal_revision"],
                     criterion_evidence_refs=tuple(
                         goal["expected_completion_evidence_refs"]
+                    ),
+                    requirement_coverage=(
+                        RequirementCoverage(
+                            requirement_id="requirement:015-j1",
+                            requirement="生成 artifact 并核对过程与产物证据",
+                            source_fact_ids=tuple(goal["source_fact_ids"]),
+                            status="satisfied",
+                            criterion_ids=mandatory_ids,
+                        ),
                     ),
                 ),
             )

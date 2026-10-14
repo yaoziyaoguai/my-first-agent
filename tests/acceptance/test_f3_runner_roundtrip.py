@@ -15,6 +15,7 @@ from agent.runtime.contracts import (
     ModelResponse,
     ModelToolCall,
     ProposedCriterion,
+    RequirementCoverage,
 )
 from scripts.grade_coding_autonomy import grade
 from scripts.run_real_coding_scenario import MANIFEST, run
@@ -128,6 +129,12 @@ def _scripted_steps(*, run_validation: bool):
             for block in msg.content
             if block.get("type") == "trusted_goal"
         )
+        # R2：coverage 引用投影的 source_fact_ids 与全部 mandatory ids。
+        mandatory_ids = tuple(
+            item["criterion_id"]
+            for item in goal_block["admitted_criteria"]
+            if item.get("mandatory") is True
+        )
         return ModelResponse(
             (),
             control=CompletionClaim(
@@ -136,6 +143,15 @@ def _scripted_steps(*, run_validation: bool):
                 goal_revision=goal_block["goal_revision"],
                 criterion_evidence_refs=tuple(
                     goal_block["expected_completion_evidence_refs"]
+                ),
+                requirement_coverage=(
+                    RequirementCoverage(
+                        requirement_id="requirement:r2d-task",
+                        requirement="完成用户要求的修复并通过验证",
+                        source_fact_ids=tuple(goal_block["source_fact_ids"]),
+                        status="satisfied",
+                        criterion_ids=mandatory_ids,
+                    ),
                 ),
             ),
         )

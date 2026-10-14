@@ -549,9 +549,20 @@ def test_declining_one_item_stops_the_rest_of_its_batch_and_keeps_prior_results(
         and fact.content.get("rejected") is True
         for fact in declined.state.facts
     )
+    # R1-T4：拒绝是丢 run 的安全转换，cursor 之后确定未开始的 suffix
+    # （call-3）与清空 run 落在同一 CAS 补记为非执行，不再是留待后续
+    # 动作自愈的孤儿；已执行 prefix（call-1）保持原值。
+    assert any(
+        fact.kind.value == "tool_result"
+        and fact.content.get("tool_call_id") == "call-3"
+        and fact.content.get("executed") is False
+        and fact.content.get("superseded") is True
+        for fact in declined.state.facts
+    )
     assert not any(
         fact.kind.value == "tool_result"
         and fact.content.get("tool_call_id") == "call-3"
+        and fact.content.get("executed") is True
         for fact in declined.state.facts
     )
 

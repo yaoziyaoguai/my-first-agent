@@ -28,6 +28,7 @@ from agent.runtime.contracts import (
     ModelTextBlock,
     ModelToolCall,
     ProposedCriterion,
+    RequirementCoverage,
     RunStatus,
     SubmitMessage,
 )
@@ -110,12 +111,27 @@ class _J1ProductionProvider:
                 block for msg in reversed(context.messages)
                 for block in msg.content if block.get("type") == "trusted_goal"
             )
+            # R2：coverage 必须引用投影的 source_fact_ids 与全部 mandatory ids。
+            mandatory_ids = tuple(
+                item["criterion_id"]
+                for item in goal_block["admitted_criteria"]
+                if item.get("mandatory") is True
+            )
             return ModelResponse((), control=CompletionClaim(
                 correlation_id="completion-j1",
                 goal_id=goal_block["goal_id"],
                 goal_revision=goal_block["goal_revision"],
                 criterion_evidence_refs=tuple(
                     goal_block["expected_completion_evidence_refs"]
+                ),
+                requirement_coverage=(
+                    RequirementCoverage(
+                        requirement_id="requirement:j1-task",
+                        requirement="生成并核对用户要求的产物",
+                        source_fact_ids=tuple(goal_block["source_fact_ids"]),
+                        status="satisfied",
+                        criterion_ids=mandatory_ids,
+                    ),
                 ),
             ))
         return ModelResponse((ModelTextBlock("done"),))

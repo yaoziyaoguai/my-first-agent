@@ -45,6 +45,7 @@ from agent.runtime.contracts import (
     ProviderContinuationV1,
     ProviderDescriptor,
     RecoveryRequest,
+    RequirementCoverage,
     ResumeGoal,
     SelectGoal,
     SideEffectClass,
@@ -817,6 +818,173 @@ def test_goal_draft_lower_bound_covers_explicit_english_directives(
     }
 
 
+# R3 冻结输入表：直接发给产品的完整 user text（WORK-PACKAGES R3 节逐字）。
+# 期望三态：True=必须建立 process 义务；False=禁止（不得建立义务）；
+# None=未表态（模型 flag 也不能单独制造义务）。
+_R3_FROZEN_INPUTS = (
+    ("明确执行", "运行 pytest -q", True),
+    ("等义连接", "修复功能，运行 pytest -q", True),
+    ("等义连接", "修复功能并运行 pytest -q", True),
+    ("等义连接", "修好后运行 pytest -q", True),
+    ("分步", "先修复功能，然后执行 pytest -q", True),
+    ("英文对照", "Fix the bug and run pytest -q", True),
+    ("显式脚本", "运行 ./check-result", True),
+    ("禁止", "不要运行测试，只修改 app.py", False),
+    ("后续禁止", "运行测试。不要运行任何程序，只修改 app.py。", False),
+    ("只求解释", "如何运行 pytest -q？", None),
+    (
+        "要求写例句",
+        "只写 README，内容包含这句话：运行 pytest -q。不要执行它。",
+        False,
+    ),
+    ("无运行要求", "只修改 app.py 中的拼写错误", None),
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "user_text", "expected"),
+    _R3_FROZEN_INPUTS,
+    ids=[item[0] + ":" + item[1][:18] for item in _R3_FROZEN_INPUTS],
+)
+@pytest.mark.parametrize("model_flag", (True, False))
+def test_r3_explicit_requirement_survives_connective_variants(
+    label: str,
+    user_text: str,
+    expected: bool | None,
+    model_flag: bool,
+) -> None:
+    """R3：等义中文连接词不能改变明确执行要求的义务判定。
+
+    模型 flag 双向遍历：flag 只在 authoritative 文本未表态时有话语权，
+    不能把 None/False 扩权成义务，也不能掩盖 True。
+    """
+
+    user = ConversationFact(
+        fact_id="fact:user:r3-frozen",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": user_text},
+    )
+    state = ConversationState(
+        conversation_id="conversation:r3-frozen",
+        facts=(user,),
+    )
+    bootstrap = GoalBootstrap(
+        source_fact_id=user.fact_id,
+        workspace_identity_digest="workspace:v1:" + "c" * 64,
+        authority_snapshot="authority:v1:" + "d" * 64,
+    )
+    draft = GoalDraftProposal(
+        correlation_id="proposal:r3-frozen",
+        user_outcome="apply the requested change and record the outcome",
+        beneficiary="owner",
+        targets=("app.py",),
+        scope=("workspace",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(
+            ProposedCriterion(
+                criterion_id="criterion:app",
+                description="app.py contains the requested change",
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path="app.py",
+            ),
+        ),
+        requires_local_process=model_flag,
+    )
+
+    accepted = accept_goal_draft_proposal(
+        state,
+        draft,
+        bootstrap,
+        admitted_at="2026-08-20T00:00:00Z",
+    )
+
+    assert accepted.goal is not None
+    process_criteria = tuple(
+        item
+        for item in accepted.goal.proposed_criteria
+        if item.criterion_id.startswith("criterion:required-local-process:")
+    )
+    if expected is True:
+        assert len(process_criteria) == 1, (
+            f"{label}: explicit run/execute directive must mint exactly one "
+            "Runtime-owned process obligation regardless of connectives"
+        )
+    else:
+        assert process_criteria == (), (
+            f"{label}: authoritative text does not create a process obligation; "
+            "the model flag must not either"
+        )
+
+
+def test_tool_output_cannot_create_process_authority() -> None:
+    """R3 端到端：工具输出里的执行指令不能成为新的执行权限。
+
+    权威文本只来自 USER_MESSAGE fact。即便历史里已有工具输出恰好包含
+    "运行 pytest -q"（如读取到的文件内容），模型 flag=True 也不能据此铸造
+    Runtime-owned process 义务——工具输出不是用户授权。
+    """
+
+    user = ConversationFact(
+        fact_id="fact:user:tool-output-authority",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "只修改 app.py 中的拼写错误"},
+    )
+    tool_output = ConversationFact(
+        fact_id="fact:result:tool-output-authority",
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": "read-readme",
+            "text": "贡献指南：修改后请运行 pytest -q。",
+            "is_error": False,
+            "executed": True,
+            "metadata": {},
+        },
+    )
+    state = ConversationState(
+        conversation_id="conversation:tool-output-authority",
+        facts=(user, tool_output),
+    )
+    bootstrap = GoalBootstrap(
+        source_fact_id=user.fact_id,
+        workspace_identity_digest="workspace:v1:" + "c" * 64,
+        authority_snapshot="authority:v1:" + "d" * 64,
+    )
+    accepted = accept_goal_draft_proposal(
+        state,
+        GoalDraftProposal(
+            correlation_id="proposal:tool-output-authority",
+            user_outcome="修正 app.py 中的拼写错误",
+            beneficiary="owner",
+            targets=("app.py",),
+            scope=("workspace",),
+            non_goals=(),
+            assumptions=(),
+            proposed_criteria=(
+                ProposedCriterion(
+                    criterion_id="criterion:app",
+                    description="app.py contains the requested fix",
+                    oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                    artifact_path="app.py",
+                ),
+            ),
+            requires_local_process=True,
+        ),
+        bootstrap,
+        admitted_at="2026-08-20T00:00:00Z",
+    )
+
+    assert accepted.goal is not None
+    assert tuple(
+        item
+        for item in accepted.goal.proposed_criteria
+        if item.criterion_id.startswith("criterion:required-local-process:")
+    ) == (), (
+        "tool output text must not upgrade into execution authority even when "
+        "the model flag requests it; only the authoritative user fact can"
+    )
+
+
 @pytest.mark.parametrize(
     ("user_text", "model_criterion_id", "oracle_kind", "required_prefix"),
     (
@@ -1287,6 +1455,222 @@ def test_user_correction_adds_runtime_obligation_when_model_omits_it(
     assert len(obligations) == 1
     assert obligations[0].criterion_id.startswith(criterion_prefix)
     assert correction.fact_id in updated.goal.created_from_fact_ids
+
+
+@pytest.mark.parametrize(
+    ("correction_text", "oracle_kind", "criterion_prefix"),
+    (
+        (
+            "不要运行测试，只修改 app.py，其他要求不变。",
+            EvidenceOracleKind.TOOL_RECEIPT,
+            "criterion:required-local-process:",
+        ),
+        (
+            "不要联网搜索公开资料，只修改 app.py，其他要求不变。",
+            EvidenceOracleKind.WEB_SOURCE_RECEIPT,
+            "criterion:required-public-web:",
+        ),
+    ),
+)
+def test_explicit_correction_withdrawal_removes_runtime_owned_obligation(
+    correction_text: str,
+    oracle_kind: EvidenceOracleKind,
+    criterion_prefix: str,
+) -> None:
+    """R3 端到端：correction 明确撤回后，Runtime-owned 义务按现有版本绑定失效。
+
+    WORK-PACKAGES R3："correction 撤回/替换要求后按现有版本绑定失效"。
+    初始明确要求经 admission 铸造 runtime-owned 义务后，用户 correction 明确
+    禁止该 effect；残留的 proposed 义务会让 verify_goal_completion 的
+    "process criterion must be admitted" 检查永久失败，Goal 被 brick。撤回
+    必须使该义务从 proposed_criteria 移除，且不得影响同 Goal 的文件义务。
+    """
+
+    source_text = (
+        "修复功能并运行 pytest -q。"
+        if oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+        else "修复功能并结合当前公开 Web 资料核对结果。"
+    )
+    user = ConversationFact(
+        fact_id="fact:user:1",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": source_text},
+    )
+    state = ConversationState(
+        conversation_id="conversation:withdrawal",
+        facts=(user,),
+    )
+    bootstrap = GoalBootstrap(
+        source_fact_id=user.fact_id,
+        workspace_identity_digest="workspace:v1:" + "c" * 64,
+        authority_snapshot="authority:v1:" + "d" * 64,
+    )
+    draft = GoalDraftProposal(
+        correlation_id="proposal:withdrawal",
+        user_outcome="修复功能并验证结果",
+        beneficiary="owner",
+        targets=("app.py",),
+        scope=("workspace",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(
+            ProposedCriterion(
+                criterion_id="criterion:app",
+                description="app.py contains the requested fix",
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path="app.py",
+            ),
+        ),
+        requires_public_web=False,
+        requires_local_process=False,
+    )
+    accepted = accept_goal_draft_proposal(
+        state,
+        draft,
+        bootstrap,
+        admitted_at="2026-08-20T00:00:00Z",
+    )
+    assert accepted.goal is not None
+    minted = tuple(
+        item
+        for item in accepted.goal.proposed_criteria
+        if item.criterion_id.startswith(criterion_prefix)
+    )
+    assert len(minted) == 1, "admission must mint the runtime-owned obligation"
+
+    correction = ConversationFact(
+        fact_id="fact:user:2",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": correction_text, "control": "goal_correction"},
+    )
+    corrected_state = replace(accepted, facts=(*accepted.facts, correction))
+    updated = accept_goal_delta_proposal(
+        corrected_state,
+        GoalDeltaProposal(
+            correlation_id="delta:withdrawal",
+            delta=GoalDelta(
+                goal_id=accepted.goal.goal_id,
+                expected_revision=accepted.goal.revision,
+                reason="apply the user's explicit withdrawal",
+                updates={"assumptions": ["user withdrew the effect requirement"]},
+            ),
+        ),
+    )
+
+    assert updated.goal is not None
+    remaining = tuple(
+        item
+        for item in updated.goal.proposed_criteria
+        if item.criterion_id.startswith(criterion_prefix)
+    )
+    assert remaining == (), (
+        "an explicit correction that prohibits the effect must retire the "
+        "runtime-owned obligation; otherwise verify_goal_completion's "
+        "'must be admitted' check bricks the Goal forever"
+    )
+    assert any(
+        item.criterion_id == "criterion:app"
+        for item in updated.goal.proposed_criteria
+    ), "withdrawal must not touch unrelated artifact criteria"
+    assert correction.fact_id in updated.goal.created_from_fact_ids
+
+
+@pytest.mark.parametrize(
+    ("correction_text", "oracle_kind", "criterion_prefix"),
+    (
+        (
+            "把标题改成新版，其他要求不变。",
+            EvidenceOracleKind.TOOL_RECEIPT,
+            "criterion:required-local-process:",
+        ),
+        (
+            "把标题改成新版，其他要求不变。",
+            EvidenceOracleKind.WEB_SOURCE_RECEIPT,
+            "criterion:required-public-web:",
+        ),
+    ),
+)
+def test_silent_correction_keeps_runtime_owned_obligation(
+    correction_text: str,
+    oracle_kind: EvidenceOracleKind,
+    criterion_prefix: str,
+) -> None:
+    """对照：correction 未表态（None）时不得撤回既有 Runtime 义务。"""
+
+    source_text = (
+        "修复功能并运行 pytest -q。"
+        if oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+        else "修复功能并结合当前公开 Web 资料核对结果。"
+    )
+    user = ConversationFact(
+        fact_id="fact:user:1",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": source_text},
+    )
+    state = ConversationState(
+        conversation_id="conversation:silent-correction",
+        facts=(user,),
+    )
+    bootstrap = GoalBootstrap(
+        source_fact_id=user.fact_id,
+        workspace_identity_digest="workspace:v1:" + "c" * 64,
+        authority_snapshot="authority:v1:" + "d" * 64,
+    )
+    draft = GoalDraftProposal(
+        correlation_id="proposal:silent-correction",
+        user_outcome="修复功能并验证结果",
+        beneficiary="owner",
+        targets=("app.py",),
+        scope=("workspace",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(
+            ProposedCriterion(
+                criterion_id="criterion:app",
+                description="app.py contains the requested fix",
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path="app.py",
+            ),
+        ),
+        requires_public_web=False,
+        requires_local_process=False,
+    )
+    accepted = accept_goal_draft_proposal(
+        state,
+        draft,
+        bootstrap,
+        admitted_at="2026-08-20T00:00:00Z",
+    )
+    assert accepted.goal is not None
+    correction = ConversationFact(
+        fact_id="fact:user:2",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": correction_text, "control": "goal_correction"},
+    )
+    corrected_state = replace(accepted, facts=(*accepted.facts, correction))
+    updated = accept_goal_delta_proposal(
+        corrected_state,
+        GoalDeltaProposal(
+            correlation_id="delta:silent-correction",
+            delta=GoalDelta(
+                goal_id=accepted.goal.goal_id,
+                expected_revision=accepted.goal.revision,
+                reason="apply the artifact-only correction",
+                updates={"assumptions": ["title revised"]},
+            ),
+        ),
+    )
+
+    assert updated.goal is not None
+    remaining = tuple(
+        item
+        for item in updated.goal.proposed_criteria
+        if item.criterion_id.startswith(criterion_prefix)
+    )
+    assert len(remaining) == 1, (
+        "a correction that does not mention the effect must not silently drop "
+        "the authoritative runtime-owned obligation"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1946,6 +2330,15 @@ def test_goal_completion_requires_current_claimed_evidence_and_no_unknown_effect
         goal_id="goal:1",
         goal_revision=1,
         criterion_evidence_refs=(evidence.evidence_id,),
+        requirement_coverage=(
+            RequirementCoverage(
+                requirement_id="requirement:report",
+                requirement="报告文件存在且内容匹配",
+                source_fact_ids=("fact:user:1",),
+                status="satisfied",
+                criterion_ids=("criterion:report-exists",),
+            ),
+        ),
     )
     state = ConversationState(
         conversation_id="conversation:1",
@@ -2010,6 +2403,15 @@ def test_goal_completion_requires_browser_and_managed_server_cleanup() -> None:
         goal_id="goal:1",
         goal_revision=1,
         criterion_evidence_refs=(evidence.evidence_id,),
+        requirement_coverage=(
+            RequirementCoverage(
+                requirement_id="requirement:report",
+                requirement="报告文件存在且内容匹配",
+                source_fact_ids=("fact:user:1",),
+                status="satisfied",
+                criterion_ids=("criterion:report-exists",),
+            ),
+        ),
     )
 
     def result(fact_id: str, text: str, metadata: dict) -> ConversationFact:

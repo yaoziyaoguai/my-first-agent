@@ -666,6 +666,11 @@ class AgentRuntime:
             and executing is not None
             and active.phase is ContinuationPhase.EXECUTING
         ):
+            # R1：durable snapshot 处于 EXECUTING（效果可能已发生）或已落盘
+            # AWAITING_RECOVERY（同相同 intent 不变量）时，UNKNOWN 不能被
+            # fail_run 清成确定终态。先按既有路径尝试落 recovery；保存不了
+            # 则返回明确失败并保留 durable 未知态，存储恢复后由 Resume/
+            # Resolve 继续，零工具重放。
             request = RecoveryRequest(
                 request_id=f"recovery-{executing.intent_digest[:16]}",
                 run_id=active.run_id,
@@ -685,6 +690,12 @@ class AgentRuntime:
                 warnings.append(
                     "recovery persistence failed: "
                     f"{type(recovery_error).__name__}: {recovery_error}"
+                )
+                return self._finish_unknown_effect_persistence_failure(
+                    action,
+                    current,
+                    warnings,
+                    error,
                 )
         if state.active_run is not None:
             try:
@@ -719,6 +730,53 @@ class AgentRuntime:
             message=f"{type(error).__name__}: {error}",
             delivery_warnings=tuple(warnings),
         )
+
+    def _finish_unknown_effect_persistence_failure(
+        self,
+        action: Action,
+        current: LoadedSnapshot,
+        warnings: list[str],
+        error: Exception,
+    ) -> RunResult:
+        """UNKNOWN 的 recovery 落盘失败：如实失败，保留 durable 未知态。
+
+        不能报告任何尚未落盘的安全终态，也不能清空 run；action 本身仍按
+        replay 合同收尾（能保存时），使同一 action 的重复提交得到确定性结果。
+        """
+
+        message = (
+            "The tool effect outcome is unknown and its recovery checkpoint could "
+            "not be saved. The durable state still records the unclassified "
+            "execution; resume the run to classify it before continuing. "
+            f"{type(error).__name__}: {error}"
+        )
+        try:
+            return self._finish(
+                current,
+                action,
+                status=RunStatus.FAILED_FATAL,
+                warnings=warnings,
+                event_kind=RuntimeEventKind.FAILED,
+                error_code="recovery_persistence_failed",
+                message=message,
+                outcome_state=current.state,
+            )
+        except Exception as finalize_error:
+            warnings.append(
+                f"fatal persistence failed: {type(finalize_error).__name__}"
+            )
+            active = current.state.active_run
+            return RunResult(
+                status=RunStatus.FAILED_FATAL,
+                state=current.state,
+                run_id=active.run_id if active is not None else None,
+                error_code="recovery_persistence_failed",
+                message=message,
+                delivery_warnings=tuple(warnings),
+                model_calls_used=(
+                    active.model_calls_used if active is not None else 0
+                ),
+            )
 
     def _resume_background_replay(
         self,
@@ -1393,15 +1451,6 @@ class AgentRuntime:
                         native_validation_successes,
                     ) = self._successful_product_request_inventory(current.state)
                 if active.invocation_origin is InvocationOrigin.MODEL:
-                    if tool_result.executed and not tool_result.is_error:
-                        verified = self._finish_if_durable_evidence_is_complete(
-                            current,
-                            action,
-                            warnings,
-                            tool_name=call.name,
-                        )
-                        if verified is not None:
-                            return verified
                     if tool_result.executed and not tool_result.is_error:
                         tool_batch.has_success = True
                     else:
@@ -3579,106 +3628,6 @@ class AgentRuntime:
             and fact.fact_id.startswith(prefix)
             and fact.content.get("code") == code
             for fact in state.facts
-        )
-
-    def _finish_if_durable_evidence_is_complete(
-        self,
-        current: LoadedSnapshot,
-        action: Action,
-        warnings: list[str],
-        *,
-        tool_name: str,
-    ) -> RunResult | None:
-        """最终 read-back 已闭合全部 oracle 时，由 Runtime 确定性收尾。
-
-        ``completion_claim`` 的模型字段只是逐字复制 Runtime 已发布的 evidence refs，
-        不携带新的用户意图或 authority。继续要求模型抄写会在研究任务的双文件
-        read-back 后造成无意义 churn。这里仍先用同一个 ``ClosedEvidenceRegistry``
-        完整重算，再按原有 evidence → claim → VERIFIED_DONE checkpoint 顺序持久化；
-        任一 criterion 尚不可证明时不写入任何状态，继续唯一 model/tool loop。
-        只读 ``read_file`` 是窄触发 seam；process/Web/effect result 仍需经过后续
-        模型控制，从而不截断复用、变更重批或拒绝零执行等既有安全路径。
-        """
-
-        if tool_name != "read_file":
-            return None
-        goal = current.state.goal
-        active = current.state.active_run
-        if (
-            goal is None
-            or active is None
-            or goal.status not in {GoalStatus.GOAL_READY, GoalStatus.EXECUTING}
-            # 中间 result 已 durable，但 reducer 仍保留 TOOL phase 与剩余 calls；
-            # 只有批次最终 result 回到 MODEL 后，read-back 才有资格终结 run。
-            or active.phase is not ContinuationPhase.MODEL
-            or active.tool_calls
-        ):
-            return None
-        mandatory_refs = tuple(
-            ClosedEvidenceRegistry.evidence_id(
-                goal.goal_id,
-                goal.revision,
-                criterion.criterion_id,
-            )
-            for criterion in goal.admitted_criteria
-            if criterion.mandatory
-        )
-        if not mandatory_refs:
-            return None
-        claim = CompletionClaim(
-            correlation_id=(
-                "runtime-completion:"
-                + canonical_json_digest(
-                    {
-                        "run_id": active.run_id,
-                        "goal_id": goal.goal_id,
-                        "goal_revision": goal.revision,
-                        "evidence_refs": mandatory_refs,
-                    }
-                )[:24]
-            ),
-            goal_id=goal.goal_id,
-            goal_revision=goal.revision,
-            criterion_evidence_refs=mandatory_refs,
-        )
-        try:
-            records = self._evidence_registry.derive(
-                current.state,
-                claim,
-                observed_at=self._evidence_time_factory(),
-            )
-            existing_ids = {
-                record.evidence_id for record in current.state.evidence_records
-            }
-            fresh = tuple(
-                record for record in records if record.evidence_id not in existing_ids
-            )
-            candidate = current.state
-            if fresh:
-                candidate = record_evidence(candidate, fresh)
-            candidate = record_completion_claim(candidate, claim)
-            verify_goal_completion(candidate)
-        except (EvidenceVerificationError, ValueError):
-            return None
-
-        if fresh:
-            current = self._save(current, record_evidence(current.state, fresh))
-        current = self._save(current, record_completion_claim(current.state, claim))
-        current = self._save(current, verify_goal_completion(current.state))
-        run_id = active.run_id
-        completed = complete_run(
-            current.state,
-            message="Goal completion verified by closed evidence oracles.",
-        )
-        return self._finish(
-            current,
-            action,
-            status=RunStatus.COMPLETED,
-            warnings=warnings,
-            event_kind=RuntimeEventKind.COMPLETED,
-            run_id=run_id,
-            message="Goal completion verified by closed evidence oracles.",
-            outcome_state=completed,
         )
 
     @staticmethod

@@ -687,11 +687,27 @@ def test_unknown_outcome_recovery_invalidates_old_validation() -> None:
     assert validate_digest in native_rejection
 
     # 只读工具的 UNKNOWN 恢复不失效旧验证（不无端清掉合法只读组合）。
+    # R1：durable 批次必须自洽——validate-a 已有结果，批次只含它。旧夹具的
+    # [validate-a, mutate] 缺 mutate 结果属于"结果无法证明的孤儿"，R1 起
+    # accept_action 拒绝自动继续，不能再用它构造历史。
+    read_only_base = replace(
+        _state(
+            _calls_fact(("validate-a", "sandbox_exec", {"executable": "./check-a"})),
+            _sandbox_fact(_receipt()),
+        ),
+        goal=replace(
+            build().goal,
+            admitted_criteria=(_closure_criterion(),),
+        ),
+    )
     read_only_recovered = replace(
-        recovering(build()),
+        read_only_base,
         active_run=replace(
-            recovering(build()).active_run,
+            read_only_base.active_run,
+            status=ActiveRunStatus.AWAITING_RECOVERY,
+            phase=ContinuationPhase.EXECUTING,
             tool_calls=(ToolCall("peek", "read_only_probe", {"path": "artifact.txt"}),),
+            batch_cursor=0,
             pending_request=RecoveryRequest(
                 request_id="recovery-ro",
                 run_id="run-fresh",

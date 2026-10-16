@@ -1297,6 +1297,9 @@ class KernelContextManager:
             "interaction_state": state.interaction_state.value,
             "progress_summary": goal.progress_summary,
             "next_step": goal.next_step,
+            # R2：完成复核必须引用当前权威用户输入/纠正的 fact id；模型只读投影，
+            # Runtime 仍校验其确实是 created_from_fact_ids 的 USER_MESSAGE 子集。
+            "source_fact_ids": list(goal.created_from_fact_ids),
             "proposed_criteria": [
                 {
                     "criterion_id": criterion.criterion_id,
@@ -1638,6 +1641,12 @@ class KernelContextManager:
         user_fact_ids = [fact.fact_id for fact in state.facts if fact.kind is FactKind.USER_MESSAGE]
         if user_fact_ids:
             pinned_fact_ids.add(user_fact_ids[-1])
+        # R2：Goal 的权威用户原文（初始输入 + 已消费 correction）是完成复核的
+        # 必要材料。只固定 Goal 当前 created_from_fact_ids 命中的组——有界于
+        # Goal 自身的来源链，不固定无限历史；预算连它们都放不下时保持既有
+        # ContextLimitError 的可读失败，不静默裁成"只剩来源 ID"。
+        if state.goal is not None:
+            pinned_fact_ids.update(state.goal.created_from_fact_ids)
 
         tool_groups = [group for group in groups if group.has_tool_result]
         if tool_groups:

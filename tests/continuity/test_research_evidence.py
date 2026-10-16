@@ -29,7 +29,6 @@ from agent.runtime.contracts import (
     GoalFrame,
     GoalStatus,
     InvocationOrigin,
-    ModelResponse,
     ProposedCriterion,
     ResolveApproval,
     RunStatus,
@@ -58,6 +57,7 @@ from tests.kernel.fakes import (
     CollectingSink,
     InMemoryCheckpointStore,
     ScriptedProvider,
+    completion_claim_from_trusted,
     goal_noop_response,
 )
 
@@ -1695,12 +1695,12 @@ def test_research_oracle_accepts_repeated_reference_to_same_source() -> None:
 
 
 def test_runtime_completion_path_reaches_verified_done_only_after_research_oracle() -> None:
-    state, claim, _manifest = _fixture()
+    state, _claim, _manifest = _fixture()
     store = InMemoryCheckpointStore(state)
     runtime = AgentRuntime(
         provider=ScriptedProvider(
             goal_noop_response("research-completion-user-supplement"),
-            ModelResponse((), control=claim),
+            completion_claim_from_trusted("completion-research"),
         ),
         context_manager=KernelContextManager(
             system_policy="policy",

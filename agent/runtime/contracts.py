@@ -673,11 +673,47 @@ class EvidenceRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class RequirementCoverage:
+    """R2：completion claim 对当前权威用户要求的逐项覆盖复核（模型语义映射）。
+
+    Runtime 只校验结构与版本/来源/证据绑定，不做自然语言解析；requirement
+    文本由模型给出，其正确性由独立业务验收揭露。
+    """
+
+    requirement_id: str
+    requirement: str
+    source_fact_ids: tuple[str, ...]
+    status: str
+    criterion_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.requirement_id or not self.requirement.strip():
+            raise ValueError("requirement coverage identity must not be empty")
+        if self.status not in {"satisfied", "pending"}:
+            raise ValueError("requirement coverage status must be satisfied or pending")
+        if not self.source_fact_ids or any(not item for item in self.source_fact_ids):
+            raise ValueError("requirement coverage must cite at least one source fact")
+        if self.status == "satisfied" and not self.criterion_ids:
+            raise ValueError(
+                "satisfied requirement coverage must bind admitted criterion ids"
+            )
+        if self.status == "pending" and self.criterion_ids:
+            raise ValueError(
+                "pending requirement coverage must not bind criterion ids"
+            )
+        if any(not item for item in self.criterion_ids):
+            raise ValueError("requirement coverage criterion ids must not be empty")
+        object.__setattr__(self, "source_fact_ids", tuple(self.source_fact_ids))
+        object.__setattr__(self, "criterion_ids", tuple(self.criterion_ids))
+
+
+@dataclass(frozen=True, slots=True)
 class CompletionClaim:
     correlation_id: str
     goal_id: str
     goal_revision: int
     criterion_evidence_refs: tuple[str, ...]
+    requirement_coverage: tuple[RequirementCoverage, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.correlation_id or not self.goal_id:
@@ -688,10 +724,25 @@ class CompletionClaim:
             raise ValueError("completion claim evidence refs must not be empty strings")
         if len(set(self.criterion_evidence_refs)) != len(self.criterion_evidence_refs):
             raise ValueError("completion claim evidence refs must be unique")
+        if any(
+            not isinstance(item, RequirementCoverage)
+            for item in self.requirement_coverage
+        ):
+            raise TypeError(
+                "completion claim requirement_coverage must contain RequirementCoverage"
+            )
+        coverage_ids = [item.requirement_id for item in self.requirement_coverage]
+        if len(set(coverage_ids)) != len(coverage_ids):
+            raise ValueError("requirement coverage ids must be unique")
         object.__setattr__(
             self,
             "criterion_evidence_refs",
             tuple(self.criterion_evidence_refs),
+        )
+        object.__setattr__(
+            self,
+            "requirement_coverage",
+            tuple(self.requirement_coverage),
         )
 
 
@@ -5184,6 +5235,45 @@ def _payload_int(value: object, label: str) -> int:
     return value
 
 
+def _requirement_coverage_from_payload(value: object) -> tuple[RequirementCoverage, ...]:
+    if not isinstance(value, list):
+        raise ValueError("requirement_coverage must be an array")
+    items: list[RequirementCoverage] = []
+    for raw in value:
+        entry = _exact_payload(
+            raw,
+            {
+                "requirement_id",
+                "requirement",
+                "source_fact_ids",
+                "status",
+                "criterion_ids",
+            },
+            "requirement_coverage entry",
+        )
+        if not isinstance(entry["source_fact_ids"], list) or not isinstance(
+            entry["criterion_ids"], list
+        ):
+            raise ValueError("requirement_coverage id lists must be arrays")
+        items.append(
+            RequirementCoverage(
+                requirement_id=_payload_string(entry["requirement_id"], "requirement_id"),
+                requirement=_payload_string(entry["requirement"], "requirement"),
+                # ID 列表逐元素必须是字符串：非字符串元素不得进入 tuple。
+                source_fact_ids=tuple(
+                    _payload_string(item, "source_fact_id")
+                    for item in entry["source_fact_ids"]
+                ),
+                status=_payload_string(entry["status"], "status"),
+                criterion_ids=tuple(
+                    _payload_string(item, "criterion_id")
+                    for item in entry["criterion_ids"]
+                ),
+            )
+        )
+    return tuple(items)
+
+
 def model_response_from_payload(value: object) -> ModelResponse:
     raw = _exact_payload(
         value,
@@ -5353,8 +5443,15 @@ def model_response_from_payload(value: object) -> ModelResponse:
                 delta=GoalDelta(**delta),
             )
         elif control_type == "CompletionClaim":
+            # R2：requirement_coverage 对旧 checkpoint 持久化的 response 缺失时按空
+            # 迁移（旧 claim 不被默认视为复核已满足，模型在主 loop 补复核）；新的
+            # provider wire 仍由 normalize 精确键集强制显式提供。
+            if not isinstance(payload, dict):
+                raise ValueError("model_control.payload must be an object")
+            normalized = dict(payload)
+            raw_coverage = normalized.pop("requirement_coverage", [])
             payload = _exact_payload(
-                payload,
+                normalized,
                 {"correlation_id", "goal_id", "goal_revision", "criterion_evidence_refs"},
                 control_type,
             )
@@ -5363,6 +5460,7 @@ def model_response_from_payload(value: object) -> ModelResponse:
                 goal_id=_payload_string(payload["goal_id"], "goal_id"),
                 goal_revision=_payload_int(payload["goal_revision"], "goal_revision"),
                 criterion_evidence_refs=tuple(payload["criterion_evidence_refs"]),
+                requirement_coverage=_requirement_coverage_from_payload(raw_coverage),
             )
         elif control_type == "BlockedClaim":
             payload = _exact_payload(

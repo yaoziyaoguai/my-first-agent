@@ -1,0 +1,4218 @@
+diff --git a/agent/provider/normalize.py b/agent/provider/normalize.py
+index 9c5a9f6..90a44b0 100644
+--- a/agent/provider/normalize.py
++++ b/agent/provider/normalize.py
+@@ -27,6 +27,7 @@ from agent.runtime.contracts import (
+     ModelToolCall,
+     ProposedCriterion,
+     ProviderContinuationV1,
++    RequirementCoverage,
+     SourceKind,
+ )
+ 
+@@ -380,6 +381,7 @@ def _validate_trusted_control_context(
+         "interaction_state",
+         "progress_summary",
+         "next_step",
++        "source_fact_ids",
+         "proposed_criteria",
+         "admitted_criteria",
+         "evidence_gaps",
+@@ -406,6 +408,7 @@ def _validate_trusted_control_context(
+         "scope",
+         "non_goals",
+         "assumptions",
++        "source_fact_ids",
+         "proposed_criteria",
+         "admitted_criteria",
+         "evidence_gaps",
+@@ -418,6 +421,10 @@ def _validate_trusted_control_context(
+         for item in block["expected_completion_evidence_refs"]
+     ):
+         raise _fail("malformed_context_block")
++    if any(
++        not isinstance(item, str) or not item for item in block["source_fact_ids"]
++    ):
++        raise _fail("malformed_context_block")
+     for key in ("progress_summary", "next_step"):
+         value = block.get(key)
+         if value is not None and not isinstance(value, str):
+@@ -939,12 +946,36 @@ def _decode_goal_delta_proposal(arguments: dict[str, Any]) -> GoalDeltaProposal:
+     )
+ 
+ 
++def _decode_requirement_coverage(value: Any) -> tuple[RequirementCoverage, ...]:
++    if not isinstance(value, (list, tuple)):
++        raise ValueError("requirement_coverage must be an array")
++    items: list[RequirementCoverage] = []
++    for raw in value:
++        if not isinstance(raw, dict):
++            raise ValueError("requirement_coverage entry must be an object")
++        items.append(
++            RequirementCoverage(
++                requirement_id=_control_str(raw["requirement_id"]),
++                requirement=_control_str(raw["requirement"]),
++                source_fact_ids=_control_tuple(
++                    raw["source_fact_ids"], _control_str
++                ),
++                status=_control_str(raw["status"]),
++                criterion_ids=_control_tuple(raw["criterion_ids"], _control_str),
++            )
++        )
++    return tuple(items)
++
++
+ def _decode_completion_claim(arguments: dict[str, Any]) -> CompletionClaim:
+     return CompletionClaim(
+         correlation_id=_control_str(arguments["correlation_id"]),
+         goal_id=_control_str(arguments["goal_id"]),
+         goal_revision=_control_int(arguments["goal_revision"]),
+         criterion_evidence_refs=_control_tuple(arguments["criterion_evidence_refs"], _control_str),
++        requirement_coverage=_decode_requirement_coverage(
++            arguments["requirement_coverage"]
++        ),
+     )
+ 
+ 
+@@ -1000,7 +1031,13 @@ _CONTROL_DECODERS: dict[
+     ),
+     "goal_delta_proposal": (_COMMON_CONTROL_KEYS | {"delta"}, _decode_goal_delta_proposal),
+     "completion_claim": (
+-        _COMMON_CONTROL_KEYS | {"goal_id", "goal_revision", "criterion_evidence_refs"},
++        _COMMON_CONTROL_KEYS
++        | {
++            "goal_id",
++            "goal_revision",
++            "criterion_evidence_refs",
++            "requirement_coverage",
++        },
+         _decode_completion_claim,
+     ),
+     "blocked_claim": (
+diff --git a/agent/runtime/checkpoint.py b/agent/runtime/checkpoint.py
+index 8a2badb..3f2110c 100644
+--- a/agent/runtime/checkpoint.py
++++ b/agent/runtime/checkpoint.py
+@@ -57,6 +57,7 @@ from agent.runtime.contracts import (
+     RecordedRunResult,
+     RecoveryRequest,
+     ReplayRecord,
++    RequirementCoverage,
+     RunStatus,
+     SandboxAuthorityCandidateV1,
+     SandboxAuthorityLeaseV1,
+@@ -1340,6 +1341,16 @@ def _completion_claim_to_dict(value: CompletionClaim | None) -> dict | None:
+         "goal_id": value.goal_id,
+         "goal_revision": value.goal_revision,
+         "criterion_evidence_refs": list(value.criterion_evidence_refs),
++        "requirement_coverage": [
++            {
++                "requirement_id": item.requirement_id,
++                "requirement": item.requirement,
++                "source_fact_ids": list(item.source_fact_ids),
++                "status": item.status,
++                "criterion_ids": list(item.criterion_ids),
++            }
++            for item in value.requirement_coverage
++        ],
+     }
+ 
+ 
+@@ -1347,11 +1358,47 @@ def _completion_claim_from_dict(value) -> CompletionClaim | None:
+     if value is None:
+         return None
+     value = _object(value, "completion_claim")
+-    _expect_keys(
+-        value,
+-        {"correlation_id", "goal_id", "goal_revision", "criterion_evidence_refs"},
+-        "completion_claim",
+-    )
++    # R2：旧活动 checkpoint 缺 requirement_coverage 时按空迁移——旧记录不被
++    # 默认视为复核已满足，模型在主 loop 正常补复核。
++    keys = {
++        "correlation_id",
++        "goal_id",
++        "goal_revision",
++        "criterion_evidence_refs",
++    }
++    if "requirement_coverage" in value:
++        keys.add("requirement_coverage")
++    _expect_keys(value, keys, "completion_claim")
++    raw_coverage = value.get("requirement_coverage") or []
++    coverage: list[RequirementCoverage] = []
++    for item in _array(raw_coverage, "requirement_coverage"):
++        entry = _object(item, "requirement_coverage entry")
++        _expect_keys(
++            entry,
++            {
++                "requirement_id",
++                "requirement",
++                "source_fact_ids",
++                "status",
++                "criterion_ids",
++            },
++            "requirement_coverage entry",
++        )
++        coverage.append(
++            RequirementCoverage(
++                requirement_id=_string(entry["requirement_id"], "requirement_id"),
++                requirement=_string(entry["requirement"], "requirement"),
++                source_fact_ids=tuple(
++                    _string(item, "source_fact_id")
++                    for item in _array(entry["source_fact_ids"], "source_fact_ids")
++                ),
++                status=_string(entry["status"], "status"),
++                criterion_ids=tuple(
++                    _string(item, "criterion_id")
++                    for item in _array(entry["criterion_ids"], "criterion_ids")
++                ),
++            )
++        )
+     return CompletionClaim(
+         correlation_id=_string(value["correlation_id"], "correlation_id"),
+         goal_id=_string(value["goal_id"], "completion_claim.goal_id"),
+@@ -1363,6 +1410,7 @@ def _completion_claim_from_dict(value) -> CompletionClaim | None:
+                 "criterion_evidence_refs",
+             )
+         ),
++        requirement_coverage=tuple(coverage),
+     )
+ 
+ 
+diff --git a/agent/runtime/context.py b/agent/runtime/context.py
+index 1eb093b..91701b8 100644
+--- a/agent/runtime/context.py
++++ b/agent/runtime/context.py
+@@ -1297,6 +1297,9 @@ class KernelContextManager:
+             "interaction_state": state.interaction_state.value,
+             "progress_summary": goal.progress_summary,
+             "next_step": goal.next_step,
++            # R2：完成复核必须引用当前权威用户输入/纠正的 fact id；模型只读投影，
++            # Runtime 仍校验其确实是 created_from_fact_ids 的 USER_MESSAGE 子集。
++            "source_fact_ids": list(goal.created_from_fact_ids),
+             "proposed_criteria": [
+                 {
+                     "criterion_id": criterion.criterion_id,
+diff --git a/agent/runtime/context_control.py b/agent/runtime/context_control.py
+index 1bbbb10..822e8cf 100644
+--- a/agent/runtime/context_control.py
++++ b/agent/runtime/context_control.py
+@@ -348,7 +348,10 @@ def reserved_control_schema(
+             'before>","goal_id":"<trusted_goal.goal_id>","goal_revision":'
+             '<trusted_goal.revision>,"criterion_evidence_refs":<copy '
+             "trusted_goal.expected_completion_evidence_refs exactly, element for "
+-            "element and in order>}."
++            "element and in order>,\"requirement_coverage\":<one entry per concrete "
++            "requirement of the current authoritative user input and every correction, "
++            "citing trusted_goal.source_fact_ids and admitted criterion ids; any pending "
++            "entry blocks completion>}."
+         )
+     elif answer_mode_active:
+         lifecycle_description = (
+@@ -470,6 +473,58 @@ def reserved_control_schema(
+             "updates": strict_updates,
+         },
+     }
++    requirement_coverage_entry = {
++        "type": "object",
++        "properties": {
++            "requirement_id": string,
++            "requirement": {
++                **string,
++                "description": (
++                    "One concrete requirement from the current authoritative user "
++                    "input/corrections, in your own words."
++                ),
++            },
++            "source_fact_ids": {
++                **string_array,
++                "description": (
++                    "Authoritative source fact ids of the current goal that state "
++                    "this requirement (see trusted_goal.source_fact_ids)."
++                ),
++            },
++            "status": {
++                "type": "string",
++                "enum": ["satisfied", "pending"],
++                "description": (
++                    "pending when the requirement is not yet done; a claim with any "
++                    "pending requirement cannot complete the goal."
++                ),
++            },
++            "criterion_ids": {
++                **string_array,
++                "description": (
++                    "For satisfied: the admitted mandatory criterion ids that prove "
++                    "it (see trusted_goal.admitted_criteria). Empty for pending."
++                ),
++            },
++        },
++        "required": [
++            "requirement_id",
++            "requirement",
++            "source_fact_ids",
++            "status",
++            "criterion_ids",
++        ],
++        "additionalProperties": False,
++    }
++    requirement_coverage = {
++        "type": "array",
++        "items": requirement_coverage_entry,
++        "description": (
++            "Per-requirement coverage of the current authoritative user input and "
++            "every correction; every authoritative source fact and every mandatory "
++            "criterion must be covered before the goal can be verified."
++        ),
++    }
+     strict_fields = {
+         "direct_response": {"text": string},
+         "begin_answer": {},
+@@ -516,6 +571,7 @@ def reserved_control_schema(
+             "goal_id": trusted_goal_id,
+             "goal_revision": trusted_goal_revision,
+             "criterion_evidence_refs": trusted_completion_refs,
++            "requirement_coverage": requirement_coverage,
+         },
+         "blocked_claim": {
+             "goal_id": trusted_goal_id,
+@@ -564,6 +620,7 @@ def reserved_control_schema(
+             "goal_id": trusted_goal_id,
+             "goal_revision": trusted_goal_revision,
+             "criterion_evidence_refs": trusted_completion_refs,
++            "requirement_coverage": requirement_coverage,
+         },
+         "blocked_claim": {
+             "goal_id": trusted_goal_id,
+diff --git a/agent/runtime/contracts.py b/agent/runtime/contracts.py
+index 72a121d..4115b1d 100644
+--- a/agent/runtime/contracts.py
++++ b/agent/runtime/contracts.py
+@@ -672,12 +672,48 @@ class EvidenceRecord:
+         object.__setattr__(self, "source_fact_ids", tuple(self.source_fact_ids))
+ 
+ 
++@dataclass(frozen=True, slots=True)
++class RequirementCoverage:
++    """R2：completion claim 对当前权威用户要求的逐项覆盖复核（模型语义映射）。
++
++    Runtime 只校验结构与版本/来源/证据绑定，不做自然语言解析；requirement
++    文本由模型给出，其正确性由独立业务验收揭露。
++    """
++
++    requirement_id: str
++    requirement: str
++    source_fact_ids: tuple[str, ...]
++    status: str
++    criterion_ids: tuple[str, ...] = ()
++
++    def __post_init__(self) -> None:
++        if not self.requirement_id or not self.requirement.strip():
++            raise ValueError("requirement coverage identity must not be empty")
++        if self.status not in {"satisfied", "pending"}:
++            raise ValueError("requirement coverage status must be satisfied or pending")
++        if not self.source_fact_ids or any(not item for item in self.source_fact_ids):
++            raise ValueError("requirement coverage must cite at least one source fact")
++        if self.status == "satisfied" and not self.criterion_ids:
++            raise ValueError(
++                "satisfied requirement coverage must bind admitted criterion ids"
++            )
++        if self.status == "pending" and self.criterion_ids:
++            raise ValueError(
++                "pending requirement coverage must not bind criterion ids"
++            )
++        if any(not item for item in self.criterion_ids):
++            raise ValueError("requirement coverage criterion ids must not be empty")
++        object.__setattr__(self, "source_fact_ids", tuple(self.source_fact_ids))
++        object.__setattr__(self, "criterion_ids", tuple(self.criterion_ids))
++
++
+ @dataclass(frozen=True, slots=True)
+ class CompletionClaim:
+     correlation_id: str
+     goal_id: str
+     goal_revision: int
+     criterion_evidence_refs: tuple[str, ...]
++    requirement_coverage: tuple[RequirementCoverage, ...] = ()
+ 
+     def __post_init__(self) -> None:
+         if not self.correlation_id or not self.goal_id:
+@@ -688,11 +724,26 @@ class CompletionClaim:
+             raise ValueError("completion claim evidence refs must not be empty strings")
+         if len(set(self.criterion_evidence_refs)) != len(self.criterion_evidence_refs):
+             raise ValueError("completion claim evidence refs must be unique")
++        if any(
++            not isinstance(item, RequirementCoverage)
++            for item in self.requirement_coverage
++        ):
++            raise TypeError(
++                "completion claim requirement_coverage must contain RequirementCoverage"
++            )
++        coverage_ids = [item.requirement_id for item in self.requirement_coverage]
++        if len(set(coverage_ids)) != len(coverage_ids):
++            raise ValueError("requirement coverage ids must be unique")
+         object.__setattr__(
+             self,
+             "criterion_evidence_refs",
+             tuple(self.criterion_evidence_refs),
+         )
++        object.__setattr__(
++            self,
++            "requirement_coverage",
++            tuple(self.requirement_coverage),
++        )
+ 
+ 
+ @dataclass(frozen=True, slots=True)
+@@ -5184,6 +5235,38 @@ def _payload_int(value: object, label: str) -> int:
+     return value
+ 
+ 
++def _requirement_coverage_from_payload(value: object) -> tuple[RequirementCoverage, ...]:
++    if not isinstance(value, list):
++        raise ValueError("requirement_coverage must be an array")
++    items: list[RequirementCoverage] = []
++    for raw in value:
++        entry = _exact_payload(
++            raw,
++            {
++                "requirement_id",
++                "requirement",
++                "source_fact_ids",
++                "status",
++                "criterion_ids",
++            },
++            "requirement_coverage entry",
++        )
++        if not isinstance(entry["source_fact_ids"], list) or not isinstance(
++            entry["criterion_ids"], list
++        ):
++            raise ValueError("requirement_coverage id lists must be arrays")
++        items.append(
++            RequirementCoverage(
++                requirement_id=_payload_string(entry["requirement_id"], "requirement_id"),
++                requirement=_payload_string(entry["requirement"], "requirement"),
++                source_fact_ids=tuple(entry["source_fact_ids"]),
++                status=_payload_string(entry["status"], "status"),
++                criterion_ids=tuple(entry["criterion_ids"]),
++            )
++        )
++    return tuple(items)
++
++
+ def model_response_from_payload(value: object) -> ModelResponse:
+     raw = _exact_payload(
+         value,
+@@ -5353,8 +5436,15 @@ def model_response_from_payload(value: object) -> ModelResponse:
+                 delta=GoalDelta(**delta),
+             )
+         elif control_type == "CompletionClaim":
++            # R2：requirement_coverage 对旧 checkpoint 持久化的 response 缺失时按空
++            # 迁移（旧 claim 不被默认视为复核已满足，模型在主 loop 补复核）；新的
++            # provider wire 仍由 normalize 精确键集强制显式提供。
++            if not isinstance(payload, dict):
++                raise ValueError("model_control.payload must be an object")
++            normalized = dict(payload)
++            raw_coverage = normalized.pop("requirement_coverage", [])
+             payload = _exact_payload(
+-                payload,
++                normalized,
+                 {"correlation_id", "goal_id", "goal_revision", "criterion_evidence_refs"},
+                 control_type,
+             )
+@@ -5363,6 +5453,7 @@ def model_response_from_payload(value: object) -> ModelResponse:
+                 goal_id=_payload_string(payload["goal_id"], "goal_id"),
+                 goal_revision=_payload_int(payload["goal_revision"], "goal_revision"),
+                 criterion_evidence_refs=tuple(payload["criterion_evidence_refs"]),
++                requirement_coverage=_requirement_coverage_from_payload(raw_coverage),
+             )
+         elif control_type == "BlockedClaim":
+             payload = _exact_payload(
+diff --git a/agent/runtime/loop.py b/agent/runtime/loop.py
+index 14f0bdb..d08999a 100644
+--- a/agent/runtime/loop.py
++++ b/agent/runtime/loop.py
+@@ -666,6 +666,11 @@ class AgentRuntime:
+             and executing is not None
+             and active.phase is ContinuationPhase.EXECUTING
+         ):
++            # R1：durable snapshot 处于 EXECUTING（效果可能已发生）或已落盘
++            # AWAITING_RECOVERY（同相同 intent 不变量）时，UNKNOWN 不能被
++            # fail_run 清成确定终态。先按既有路径尝试落 recovery；保存不了
++            # 则返回明确失败并保留 durable 未知态，存储恢复后由 Resume/
++            # Resolve 继续，零工具重放。
+             request = RecoveryRequest(
+                 request_id=f"recovery-{executing.intent_digest[:16]}",
+                 run_id=active.run_id,
+@@ -686,6 +691,12 @@ class AgentRuntime:
+                     "recovery persistence failed: "
+                     f"{type(recovery_error).__name__}: {recovery_error}"
+                 )
++                return self._finish_unknown_effect_persistence_failure(
++                    action,
++                    current,
++                    warnings,
++                    error,
++                )
+         if state.active_run is not None:
+             try:
+                 failed = fail_run(
+@@ -720,6 +731,53 @@ class AgentRuntime:
+             delivery_warnings=tuple(warnings),
+         )
+ 
++    def _finish_unknown_effect_persistence_failure(
++        self,
++        action: Action,
++        current: LoadedSnapshot,
++        warnings: list[str],
++        error: Exception,
++    ) -> RunResult:
++        """UNKNOWN 的 recovery 落盘失败：如实失败，保留 durable 未知态。
++
++        不能报告任何尚未落盘的安全终态，也不能清空 run；action 本身仍按
++        replay 合同收尾（能保存时），使同一 action 的重复提交得到确定性结果。
++        """
++
++        message = (
++            "The tool effect outcome is unknown and its recovery checkpoint could "
++            "not be saved. The durable state still records the unclassified "
++            "execution; resume the run to classify it before continuing. "
++            f"{type(error).__name__}: {error}"
++        )
++        try:
++            return self._finish(
++                current,
++                action,
++                status=RunStatus.FAILED_FATAL,
++                warnings=warnings,
++                event_kind=RuntimeEventKind.FAILED,
++                error_code="recovery_persistence_failed",
++                message=message,
++                outcome_state=current.state,
++            )
++        except Exception as finalize_error:
++            warnings.append(
++                f"fatal persistence failed: {type(finalize_error).__name__}"
++            )
++            active = current.state.active_run
++            return RunResult(
++                status=RunStatus.FAILED_FATAL,
++                state=current.state,
++                run_id=active.run_id if active is not None else None,
++                error_code="recovery_persistence_failed",
++                message=message,
++                delivery_warnings=tuple(warnings),
++                model_calls_used=(
++                    active.model_calls_used if active is not None else 0
++                ),
++            )
++
+     def _resume_background_replay(
+         self,
+         action: Action,
+@@ -1393,15 +1451,6 @@ class AgentRuntime:
+                         native_validation_successes,
+                     ) = self._successful_product_request_inventory(current.state)
+                 if active.invocation_origin is InvocationOrigin.MODEL:
+-                    if tool_result.executed and not tool_result.is_error:
+-                        verified = self._finish_if_durable_evidence_is_complete(
+-                            current,
+-                            action,
+-                            warnings,
+-                            tool_name=call.name,
+-                        )
+-                        if verified is not None:
+-                            return verified
+                     if tool_result.executed and not tool_result.is_error:
+                         tool_batch.has_success = True
+                     else:
+@@ -3581,106 +3630,6 @@ class AgentRuntime:
+             for fact in state.facts
+         )
+ 
+-    def _finish_if_durable_evidence_is_complete(
+-        self,
+-        current: LoadedSnapshot,
+-        action: Action,
+-        warnings: list[str],
+-        *,
+-        tool_name: str,
+-    ) -> RunResult | None:
+-        """最终 read-back 已闭合全部 oracle 时，由 Runtime 确定性收尾。
+-
+-        ``completion_claim`` 的模型字段只是逐字复制 Runtime 已发布的 evidence refs，
+-        不携带新的用户意图或 authority。继续要求模型抄写会在研究任务的双文件
+-        read-back 后造成无意义 churn。这里仍先用同一个 ``ClosedEvidenceRegistry``
+-        完整重算，再按原有 evidence → claim → VERIFIED_DONE checkpoint 顺序持久化；
+-        任一 criterion 尚不可证明时不写入任何状态，继续唯一 model/tool loop。
+-        只读 ``read_file`` 是窄触发 seam；process/Web/effect result 仍需经过后续
+-        模型控制，从而不截断复用、变更重批或拒绝零执行等既有安全路径。
+-        """
+-
+-        if tool_name != "read_file":
+-            return None
+-        goal = current.state.goal
+-        active = current.state.active_run
+-        if (
+-            goal is None
+-            or active is None
+-            or goal.status not in {GoalStatus.GOAL_READY, GoalStatus.EXECUTING}
+-            # 中间 result 已 durable，但 reducer 仍保留 TOOL phase 与剩余 calls；
+-            # 只有批次最终 result 回到 MODEL 后，read-back 才有资格终结 run。
+-            or active.phase is not ContinuationPhase.MODEL
+-            or active.tool_calls
+-        ):
+-            return None
+-        mandatory_refs = tuple(
+-            ClosedEvidenceRegistry.evidence_id(
+-                goal.goal_id,
+-                goal.revision,
+-                criterion.criterion_id,
+-            )
+-            for criterion in goal.admitted_criteria
+-            if criterion.mandatory
+-        )
+-        if not mandatory_refs:
+-            return None
+-        claim = CompletionClaim(
+-            correlation_id=(
+-                "runtime-completion:"
+-                + canonical_json_digest(
+-                    {
+-                        "run_id": active.run_id,
+-                        "goal_id": goal.goal_id,
+-                        "goal_revision": goal.revision,
+-                        "evidence_refs": mandatory_refs,
+-                    }
+-                )[:24]
+-            ),
+-            goal_id=goal.goal_id,
+-            goal_revision=goal.revision,
+-            criterion_evidence_refs=mandatory_refs,
+-        )
+-        try:
+-            records = self._evidence_registry.derive(
+-                current.state,
+-                claim,
+-                observed_at=self._evidence_time_factory(),
+-            )
+-            existing_ids = {
+-                record.evidence_id for record in current.state.evidence_records
+-            }
+-            fresh = tuple(
+-                record for record in records if record.evidence_id not in existing_ids
+-            )
+-            candidate = current.state
+-            if fresh:
+-                candidate = record_evidence(candidate, fresh)
+-            candidate = record_completion_claim(candidate, claim)
+-            verify_goal_completion(candidate)
+-        except (EvidenceVerificationError, ValueError):
+-            return None
+-
+-        if fresh:
+-            current = self._save(current, record_evidence(current.state, fresh))
+-        current = self._save(current, record_completion_claim(current.state, claim))
+-        current = self._save(current, verify_goal_completion(current.state))
+-        run_id = active.run_id
+-        completed = complete_run(
+-            current.state,
+-            message="Goal completion verified by closed evidence oracles.",
+-        )
+-        return self._finish(
+-            current,
+-            action,
+-            status=RunStatus.COMPLETED,
+-            warnings=warnings,
+-            event_kind=RuntimeEventKind.COMPLETED,
+-            run_id=run_id,
+-            message="Goal completion verified by closed evidence oracles.",
+-            outcome_state=completed,
+-        )
+-
+     @staticmethod
+     def _product_request_digest(
+         tool_name: str,
+diff --git a/agent/runtime/state.py b/agent/runtime/state.py
+index b9ad1df..db206e4 100644
+--- a/agent/runtime/state.py
++++ b/agent/runtime/state.py
+@@ -119,8 +119,12 @@ _EXPLICIT_PUBLIC_WEB_PATTERNS = (
+     ),
+ )
+ _EXPLICIT_LOCAL_PROCESS_PATTERNS = (
++    # R3：中文连接词后的运行/执行动词与句首同权（并/并且、然后/接着/随后/继而、
++    # 好后/完后/毕后/以后），明确执行要求不能因连接方式不同而丢义务；
++    # (?<!合) 排除"合并运行"这类词内误匹配。
+     re.compile(
+-        r"(?:^|[\n:：])\s*(?:(?:please\s+)?(?:run|execute)\s+|"
++        r"(?:^|[\n:：]|(?<!合)并(?:且)?|然后|接着|随后|继而|(?:好|完|毕|以)后)\s*"
++        r"(?:(?:please\s+)?(?:run|execute)\s+|"
+         r"(?:请\s*)?(?:运行|执行)\s*)"
+         r"[A-Za-z0-9_.-]+\b",
+         re.IGNORECASE,
+@@ -430,23 +434,37 @@ def _is_runtime_owned_obligation(criterion: ProposedCriterion) -> bool:
+     )
+ 
+ 
++# R3：可由 authoritative correction 撤回的义务仅限 classification 直接铸造的
++# 两类；required-governed-tool 来自单独的用户审批，不随 effect 禁止撤回。
++_WITHDRAWABLE_RUNTIME_OBLIGATION_PREFIXES = {
++    EvidenceOracleKind.WEB_SOURCE_RECEIPT: "criterion:required-public-web:",
++    EvidenceOracleKind.TOOL_RECEIPT: "criterion:required-local-process:",
++}
++
++
+ def _apply_correction_lower_bounds(
+     goal: GoalFrame,
+     correction: ConversationFact,
+ ) -> GoalFrame:
+-    """从 authoritative correction 补铸模型不能省略的 Web/process 义务。"""
++    """按 authoritative correction 补铸或撤回 Web/process 义务。"""
+ 
+     text = correction.content.get("text")
+     source_text = text if isinstance(text, str) else ""
++    classifications = (
++        (EvidenceOracleKind.WEB_SOURCE_RECEIPT, _public_web_requirement(source_text)),
++        (EvidenceOracleKind.TOOL_RECEIPT, _local_process_requirement(source_text)),
++    )
+     required = tuple(
+         oracle_kind
+-        for oracle_kind, classification in (
+-            (EvidenceOracleKind.WEB_SOURCE_RECEIPT, _public_web_requirement(source_text)),
+-            (EvidenceOracleKind.TOOL_RECEIPT, _local_process_requirement(source_text)),
+-        )
++        for oracle_kind, classification in classifications
+         if classification is True
+     )
+-    if not required:
++    prohibited = tuple(
++        oracle_kind
++        for oracle_kind, classification in classifications
++        if classification is False
++    )
++    if not required and not prohibited:
+         return goal
+     identity = canonical_json_digest(
+         {
+@@ -456,6 +474,22 @@ def _apply_correction_lower_bounds(
+         }
+     )
+     criteria = goal.proposed_criteria
++    # R3 撤回：correction 明确禁止该 effect 时，Runtime 早前为此铸的 proposed
++    # 义务必须随现行版本失效；残留会让 verify_goal_completion 的 "process
++    # criterion must be admitted" 检查永久失败，Goal 被 brick。未命中任何
++    # 现存义务时语义未变化，保持 Goal 原样（noop 判定依赖此相等性）。
++    for oracle_kind in prohibited:
++        prefix = _WITHDRAWABLE_RUNTIME_OBLIGATION_PREFIXES[oracle_kind]
++        criteria = tuple(
++            item
++            for item in criteria
++            if not (
++                item.oracle_kind is oracle_kind
++                and item.criterion_id.startswith(prefix)
++            )
++        )
++    if not required and criteria == goal.proposed_criteria:
++        return goal
+     for oracle_kind in required:
+         runtime_owned = tuple(
+             item
+@@ -1195,6 +1229,73 @@ def _stop_safe_active_run(
+     return None, RecordedRunResult(status=status, run_id=active.run_id, message=message)
+ 
+ 
++def _superseded_tool_result_fact(
++    *,
++    fact_id: str,
++    call_id: str,
++    text: str,
++    invocation_origin: str | None,
++) -> ConversationFact:
++    return ConversationFact(
++        fact_id=fact_id,
++        kind=FactKind.TOOL_RESULT,
++        content={
++            "tool_call_id": call_id,
++            "text": text,
++            "is_error": True,
++            "executed": False,
++            "superseded": True,
++            **(
++                {"invocation_origin": invocation_origin}
++                if invocation_origin == InvocationOrigin.OPERATOR.value
++                else {}
++            ),
++        },
++    )
++
++
++def _unstarted_batch_suffix_facts(
++    state: ConversationState,
++    *,
++    text: str,
++    already_accounted: int = 0,
++) -> tuple[ConversationFact, ...]:
++    """为「确定尚未开始」的当前 batch suffix 生成 durable 非执行结果。
++
++    R1：只有转换仍持有当时 active run 的 phase/cursor 时，非执行才可证明——
++    TOOL 相（含 AWAITING_APPROVAL）的 cursor 指向尚未 prepare/执行的首个
++    call；calls[cursor:] 全部未开始。EXECUTING 相可能已发生效果，由
++    unknown-effect 守卫排除在丢 run 入口之外，绝不在此闭合。调用方负责把
++    结果与清空/替换 run 落在同一 CAS，并保持结果位于该批次已有结果之后、
++    后续 user/assistant fact 之前。``already_accounted`` 用于拒绝审批等
++    「cursor call 已有本次转换专属结果」的入口。
++    """
++
++    active = state.active_run
++    if active is None or active.phase is not ContinuationPhase.TOOL:
++        return ()
++    missing = active.tool_calls[active.batch_cursor + already_accounted :]
++    if not missing:
++        return ()
++    reserved = {fact.fact_id for fact in state.facts}
++    origin = active.invocation_origin.value
++    closed: list[ConversationFact] = []
++    for call in missing:
++        fact_id = f"run:{active.run_id}:superseded-tool:{call.tool_call_id}"
++        if fact_id in reserved:
++            fact_id = f"{fact_id}:{state.revision}"
++        reserved.add(fact_id)
++        closed.append(
++            _superseded_tool_result_fact(
++                fact_id=fact_id,
++                call_id=call.tool_call_id,
++                text=text,
++                invocation_origin=origin,
++            )
++        )
++    return tuple(closed)
++
++
+ def pause_goal(
+     state: ConversationState,
+     *,
+@@ -1212,6 +1313,13 @@ def pause_goal(
+         raise ValueError("terminal goal cannot be paused")
+     if goal.status is GoalStatus.PAUSED:
+         raise ValueError("goal is already paused")
++    closed_suffix = _unstarted_batch_suffix_facts(
++        state,
++        text=(
++            "Tool call was not executed because the Goal was paused before this "
++            "call started."
++        ),
++    )
+     active_run, result = _stop_safe_active_run(
+         state,
+         status=RunStatus.COMPLETED,
+@@ -1220,6 +1328,7 @@ def pause_goal(
+     return replace(
+         state,
+         revision=state.revision + 1,
++        facts=(*state.facts, *closed_suffix),
+         goal=replace(goal, status=GoalStatus.PAUSED),
+         active_run=active_run,
+         last_safe_result=result,
+@@ -1270,6 +1379,13 @@ def cancel_goal(
+         raise ValueError("verified goal cannot be cancelled")
+     if goal.status is GoalStatus.CANCELLED:
+         raise ValueError("goal is already cancelled")
++    closed_suffix = _unstarted_batch_suffix_facts(
++        state,
++        text=(
++            "Tool call was not executed because the Goal was cancelled before this "
++            "call started."
++        ),
++    )
+     active_run, result = _stop_safe_active_run(
+         state,
+         status=RunStatus.CANCELLED,
+@@ -1278,6 +1394,7 @@ def cancel_goal(
+     return replace(
+         state,
+         revision=state.revision + 1,
++        facts=(*state.facts, *closed_suffix),
+         goal=replace(goal, status=GoalStatus.CANCELLED, next_step=None),
+         completion_claim=None,
+         active_run=active_run,
+@@ -1332,10 +1449,18 @@ def apply_control_request(
+             kind=FactKind.USER_MESSAGE,
+             content={"text": request.message, "control": "goal_correction"},
+         )
++        # R1：纠正丢弃 run 前，cursor 之后确定未开始的 suffix 与清空落在同一 CAS。
++        closed_suffix = _unstarted_batch_suffix_facts(
++            state,
++            text=(
++                "Tool call was not executed because the Goal was corrected before "
++                "this call started."
++            ),
++        )
+         updated = replace(
+             state,
+             revision=state.revision + 1,
+-            facts=(*state.facts, correction),
++            facts=(*state.facts, *closed_suffix, correction),
+             goal=replace(
+                 goal,
+                 revision=goal.revision + 1,
+@@ -1501,6 +1626,74 @@ def record_evidence(
+     )
+ 
+ 
++def _require_requirement_coverage(
++    state: ConversationState,
++    claim: CompletionClaim,
++    *,
++    goal: GoalFrame,
++    mandatory: tuple[AdmittedCriterion, ...],
++) -> None:
++    """R2 完成门：物理证据齐全是必要条件，不是完整业务完成的充分条件。
++
++    最终结束必须经过针对当前 Goal revision 与当前权威用户输入/最新 correction
++    的逐项覆盖复核（模型提供语义映射，Runtime 校验结构与版本/来源/证据绑定）。
++    缺失时拒绝并给出可修复的下一步；不铸造 evidence/permission，不引入第二
++    模型裁判。引用整条 fact、空列表或首个文件 digest 的组合不能充当逐项复核。
++    """
++
++    coverage = claim.requirement_coverage
++    if not coverage:
++        raise ValueError(
++            "completion claim must include per-requirement coverage of the current "
++            "authoritative user input and corrections before the goal can be verified"
++        )
++    source_ids = set(goal.created_from_fact_ids)
++    authoritative_ids = {
++        fact.fact_id
++        for fact in state.facts
++        if fact.fact_id in source_ids and fact.kind is FactKind.USER_MESSAGE
++    }
++    cited: set[str] = set()
++    for item in coverage:
++        cited.update(item.source_fact_ids)
++        if any(fact_id not in source_ids for fact_id in item.source_fact_ids):
++            raise ValueError(
++                "requirement coverage must cite the authoritative source facts of "
++                "the current goal"
++            )
++    uncited = authoritative_ids - cited
++    if uncited:
++        raise ValueError(
++            "requirement coverage does not cite every authoritative user input or "
++            f"correction: {sorted(uncited)}"
++        )
++    mandatory_ids = {criterion.criterion_id for criterion in mandatory}
++    pending = tuple(item for item in coverage if item.status == "pending")
++    if pending:
++        raise ValueError(
++            "completion claim lists pending requirements that are not yet satisfied: "
++            + ", ".join(item.requirement_id for item in pending)
++        )
++    for item in coverage:
++        unknown = set(item.criterion_ids) - mandatory_ids
++        if unknown:
++            raise ValueError(
++                "requirement coverage binds criterion ids that are not current "
++                f"admitted mandatory criteria: {sorted(unknown)}"
++            )
++    covered = {
++        criterion_id
++        for item in coverage
++        for criterion_id in item.criterion_ids
++    }
++    uncovered = mandatory_ids - covered
++    if uncovered:
++        raise ValueError(
++            "requirement coverage does not bind every mandatory criterion: "
++            f"{sorted(uncovered)}"
++        )
++
++
+ def verify_goal_completion(state: ConversationState) -> ConversationState:
+     goal = state.goal
+     claim = state.completion_claim
+@@ -1558,6 +1751,7 @@ def verify_goal_completion(state: ConversationState) -> ConversationState:
+             raise ValueError(
+                 "process criterion must be admitted before completion verification"
+             )
++    _require_requirement_coverage(state, claim, goal=goal, mandatory=mandatory)
+     evidence_by_criterion = {
+         record.criterion_id: record for record in referenced.values()
+     }
+@@ -2567,10 +2761,19 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
+         # 拒绝是用户的强控制信号：结束当前 run，把控制权交还用户。不能继续
+         # 同一 model batch 的剩余工具，也不能再调用 provider 来游说或换命令。
+         # Goal 与此前已持久化的结果保留；后续新指令会形成新的 run 和新绑定。
++        # R1：cursor 之后的 suffix 确定未开始，与清空 run 落在同一 CAS。
++        closed_suffix = _unstarted_batch_suffix_facts(
++            state,
++            text=(
++                "Tool call was not executed because the run stopped at a declined "
++                "approval before this call started."
++            ),
++            already_accounted=1,
++        )
+         return replace(
+             state,
+             active_run=None,
+-            facts=(*state.facts, rejection),
++            facts=(*state.facts, rejection, *closed_suffix),
+             last_safe_result=RecordedRunResult(
+                 status=RunStatus.CANCELLED,
+                 run_id=active.run_id,
+@@ -2690,8 +2893,19 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
+         )
+ 
+     if isinstance(action, CancelRun):
++        # R1：TOOL 相（含 AWAITING_APPROVAL）的 cursor 之后确定未开始，
++        # 与清空 run 落在同一 CAS；EXECUTING/AWAITING_RECOVERY 由合法性
++        # 守卫拒绝，不会经此路径丢 UNKNOWN。
++        closed_suffix = _unstarted_batch_suffix_facts(
++            state,
++            text=(
++                "Tool call was not executed because the run was cancelled before "
++                "this call started."
++            ),
++        )
+         return replace(
+             state,
++            facts=(*state.facts, *closed_suffix),
+             active_run=None,
+             last_safe_result=RecordedRunResult(
+                 status=RunStatus.CANCELLED,
+@@ -3553,21 +3767,23 @@ def _close_orphaned_tool_batches(
+     *,
+     action_seq: int,
+     live_call_ids: frozenset[str],
+-) -> ConversationState:
+-    """为已失去归属的未完结 tool 批次补记 durable 非执行结果。
++) -> ConversationState | None:
++    """为**可核实**的旧孤儿 tool 批次补记 durable 非执行结果；不可证则拒绝。
+ 
+-    丢 run 的转换（pause/cancel/decline/CancelRun/fail）会让 TOOL_CALLS
+-    批次失去归属：calls 已入账而 results 永不产生。此后 compaction 的 turn
+-    grammar 在批次覆盖校验上必然拒绝整段历史（新 run 在 MODEL 相规划即抛
+-    ``ValueError: tool batch and its results cannot be split``），会话每次
+-    重试同败。与 SubmitMessage-correction 的 superseded 先例同源：为每个
+-    缺失 call 补记 executed=False 的结果，插在该批次已有结果之后（批次之后
+-    可能已存在新的 user 边界，尾部追加不闭合批次），保持 Anthropic/OpenAI
+-    的 tool continuity 闭合。
++    V1 修复轮曾在此处无条件为任何缺结果的批次补 ``executed=False``。R1 审计
++    证明该推断没有依据：缺 active_run、缺 result、``last_safe_result`` 或旧
++    ``superseded`` 文案都不能证明某个 call 未执行（效果可能已发生而结果保存
++    失败）。自愈据此收窄为唯一可核实的旧形状：同批**完整连续 prefix**、
++    最后一个结果为 Runtime 拒绝审批结果，缺失项全部位于其后——该形状下批次
++    在拒绝处停止，suffix 必未开始。其余形状保留原 facts/checkpoint，由
++    accept_action 以动作冲突拒绝，不发 provider/tool、不伪造非执行。
++
++    新代码的安全停机（pause/cancel/decline/end/complete/CancelRun/控制纠正）
++    已在丢 run 的同一 CAS 内闭合各自确定的 suffix，不再依赖本函数。
+ 
+     归属按 call_id 所有权判定（批次是原子单位）：live run 拥有的批次仍会由
+     审批/执行或 correction 分支补齐结果，绝不代答；畸形结构保持 parser 的
+-    fail-closed 判定，不做部分愈合。
++    fail-closed 判定，不做部分愈合。返回 ``None`` 表示存在不可证孤儿。
+     """
+ 
+     facts = state.facts
+@@ -3601,52 +3817,75 @@ def _close_orphaned_tool_batches(
+         if malformed or any(call_id in live_call_ids for call_id in expected):
+             index += 1
+             continue
+-        covered: set[str] = set()
++        covered: list[str] = []
++        covered_ids: set[str] = set()
++        last_result_is_rejection = False
+         cursor = index + 1
+         while cursor < total and facts[cursor].kind is FactKind.TOOL_RESULT:
+             result_call_id = facts[cursor].content.get("tool_call_id")
+             if (
+                 not isinstance(result_call_id, str)
+                 or result_call_id not in expected
+-                or result_call_id in covered
++                or result_call_id in covered_ids
+             ):
+                 break
+-            covered.add(result_call_id)
++            covered_ids.add(result_call_id)
++            covered.append(result_call_id)
++            last_result_is_rejection = (
++                facts[cursor].content.get("rejected") is True
++            )
+             cursor += 1
+-        missing = tuple(call_id for call_id in expected if call_id not in covered)
+-        if missing:
+-            invocation_origin = fact.content.get("invocation_origin")
+-            healed: list[ConversationFact] = []
+-            for call_id in missing:
+-                fact_id = f"action:{action_seq}:superseded-tool:{call_id}"
+-                if fact_id in reserved_ids:
+-                    # 跨批次 call_id 撞名（供应商异常形状）：用批次 revision
+-                    # 后缀确定性去重，不引入随机性，也不静默丢结果。
+-                    suffix = fact.fact_id.rsplit(":", 1)[-1]
+-                    fact_id = f"{fact_id}:{suffix}"
+-                reserved_ids.add(fact_id)
+-                healed.append(
+-                    ConversationFact(
+-                        fact_id=fact_id,
+-                        kind=FactKind.TOOL_RESULT,
+-                        content={
+-                            "tool_call_id": call_id,
+-                            "text": (
+-                                "Tool call was not executed; its run was superseded "
+-                                "before a result was recorded."
+-                            ),
+-                            "is_error": True,
+-                            "executed": False,
+-                            "superseded": True,
+-                            **(
+-                                {"invocation_origin": invocation_origin}
+-                                if invocation_origin == InvocationOrigin.OPERATOR.value
+-                                else {}
+-                            ),
+-                        },
+-                    )
++        missing = tuple(call_id for call_id in expected if call_id not in covered_ids)
++        if not missing:
++            index = cursor
++            continue
++        # 结果段被畸形结果（重复/乱序/异批 call_id）截断时，前缀无法核实：
++        # 保持未确定，不做部分愈合（parser 对畸形结构仍是 fail closed）。
++        if cursor < total and facts[cursor].kind is FactKind.TOOL_RESULT:
++            return None
++        # 唯一可核实的旧形状：covered 恰为 expected 的完整连续前缀（按序、
++        # 无缺位），且最后一个结果为 Runtime 拒绝审批结果。缺 prefix、乱序、
++        # 重复或末结果非拒绝时，调用结果无法证明，保持未确定。
++        prefix_is_exact = (
++            bool(covered)
++            and len(covered) <= len(expected)
++            and covered == expected[: len(covered)]
++            and last_result_is_rejection
++        )
++        if not prefix_is_exact:
++            return None
++        invocation_origin = fact.content.get("invocation_origin")
++        healed: list[ConversationFact] = []
++        for call_id in missing:
++            fact_id = f"action:{action_seq}:superseded-tool:{call_id}"
++            if fact_id in reserved_ids:
++                # 跨批次 call_id 撞名（供应商异常形状）：用批次 revision
++                # 后缀确定性去重，不引入随机性，也不静默丢结果。
++                suffix = fact.fact_id.rsplit(":", 1)[-1]
++                fact_id = f"{fact_id}:{suffix}"
++            reserved_ids.add(fact_id)
++            healed.append(
++                ConversationFact(
++                    fact_id=fact_id,
++                    kind=FactKind.TOOL_RESULT,
++                    content={
++                        "tool_call_id": call_id,
++                        "text": (
++                            "Tool call was not executed; its run was superseded "
++                            "before a result was recorded."
++                        ),
++                        "is_error": True,
++                        "executed": False,
++                        "superseded": True,
++                        **(
++                            {"invocation_origin": invocation_origin}
++                            if invocation_origin == InvocationOrigin.OPERATOR.value
++                            else {}
++                        ),
++                    },
+                 )
+-            insertions[cursor] = tuple(healed)
++            )
++        insertions[cursor] = tuple(healed)
+         index = cursor
+     if not insertions:
+         return state
+@@ -3697,12 +3936,13 @@ def accept_action(
+     if not legal:
+         return _conflict(state, reason or "illegal_action_for_state")
+ 
+-    # 丢 run 的转换把未完结批次变成孤儿；接受任何新动作前先补记非执行结果，
+-    # 否则后续 MODEL 相 compaction 规划在批次覆盖校验上永久 fatal（自愈
+-    # 磁盘上已损坏的 checkpoint）。live run 拥有的批次可能仍由审批/执行或
+-    # correction 分支补齐，绝不代答。
++    # 丢 run 的转换把未完结批次变成孤儿；接受任何新动作前先补记可核实前缀的
++    # 非执行结果，否则后续 MODEL 相 compaction 规划在批次覆盖校验上永久
++    # fatal（自愈磁盘上已损坏的 checkpoint）。live run 拥有的批次可能仍由
++    # 审批/执行或 correction 分支补齐，绝不代答。不可证实的旧孤儿返回 None：
++    # 其调用结果无法证明，不能自动继续或伪造非执行，保持原状态并拒绝动作。
+     live = state.active_run
+-    state = _close_orphaned_tool_batches(
++    healed_state = _close_orphaned_tool_batches(
+         state,
+         action_seq=action.action_seq,
+         live_call_ids=(
+@@ -3711,6 +3951,9 @@ def accept_action(
+             else frozenset()
+         ),
+     )
++    if healed_state is None:
++        return _conflict(state, "unprovable_tool_batch_outcome")
++    state = healed_state
+ 
+     with_replay = _append_replay_record(
+         state,
+@@ -3782,7 +4025,19 @@ def complete_run(
+     active = state.active_run
+     if active is None:
+         raise ValueError("active run required")
+-    facts = state.facts
++    # R1 窄不变量：UNKNOWN 只能经 recovery 分类收尾；正常完成不得抹去它。
++    if _has_unknown_effect(state):
++        raise ValueError(
++            "unknown effect recovery has priority over run completion"
++        )
++    closed_suffix = _unstarted_batch_suffix_facts(
++        state,
++        text=(
++            "Tool call was not executed because the run completed before this "
++            "call started."
++        ),
++    )
++    facts = (*state.facts, *closed_suffix)
+     if message is not None:
+         content = {"text": message}
+         continuation_payload = _provider_continuation_payload(provider_continuation)
+@@ -4159,6 +4414,18 @@ def end_run(
+     active = state.active_run
+     if active is None:
+         raise ValueError("active run required")
++    # R1 窄不变量：未知 effect 只能经 recovery 分类收尾，普通终态不得抹去它。
++    if _has_unknown_effect(state):
++        raise ValueError(
++            "unknown effect recovery has priority over run termination"
++        )
++    closed_suffix = _unstarted_batch_suffix_facts(
++        state,
++        text=(
++            "Tool call was not executed because the run ended before this call "
++            "started."
++        ),
++    )
+     result = RecordedRunResult(
+         status=status,
+         run_id=active.run_id,
+@@ -4168,6 +4435,7 @@ def end_run(
+     return replace(
+         state,
+         revision=state.revision + 1,
++        facts=(*state.facts, *closed_suffix),
+         active_run=None,
+         last_safe_result=result,
+     )
+diff --git a/scripts/run_015_e3.py b/scripts/run_015_e3.py
+index 5d70e0c..54b4bac 100644
+--- a/scripts/run_015_e3.py
++++ b/scripts/run_015_e3.py
+@@ -1648,9 +1648,15 @@ class _J1JourneyProvider:
+             # process-artifact (FILESYSTEM_DIGEST) + process 成功后铸造的 process-receipt
+             # (TOOL_RECEIPT)。criterion_evidence_refs 顺序 = admitted_criteria 顺序
+             # （artifact 先、receipt 后），derive 要求精确匹配。
+-            from agent.runtime.contracts import CompletionClaim
++            # R2：requirement_coverage 按 trusted_goal 投影逐项复核权威用户要求。
++            from agent.runtime.contracts import CompletionClaim, RequirementCoverage
+ 
+             goal = _trusted_goal_block(context)
++            mandatory_ids = tuple(
++                item["criterion_id"]
++                for item in goal["admitted_criteria"]
++                if item.get("mandatory") is True
++            )
+             return ModelResponse(
+                 (),
+                 control=CompletionClaim(
+@@ -1660,6 +1666,15 @@ class _J1JourneyProvider:
+                     criterion_evidence_refs=tuple(
+                         goal["expected_completion_evidence_refs"]
+                     ),
++                    requirement_coverage=(
++                        RequirementCoverage(
++                            requirement_id="requirement:015-j1",
++                            requirement="生成 artifact 并核对过程与产物证据",
++                            source_fact_ids=tuple(goal["source_fact_ids"]),
++                            status="satisfied",
++                            criterion_ids=mandatory_ids,
++                        ),
++                    ),
+                 ),
+             )
+         return ModelResponse(())
+diff --git a/tests/acceptance/test_daily_use_recovery_journey.py b/tests/acceptance/test_daily_use_recovery_journey.py
+index 86399df..126d56c 100644
+--- a/tests/acceptance/test_daily_use_recovery_journey.py
++++ b/tests/acceptance/test_daily_use_recovery_journey.py
+@@ -37,6 +37,7 @@ from agent.runtime.contracts import (
+     ModelTextBlock,
+     ModelToolCall,
+     ProposedCriterion,
++    RequirementCoverage,
+     SubmitMessage,
+ )
+ from agent.runtime.control import ControlInbox
+@@ -106,11 +107,26 @@ def _sandbox_call(call_id: str, executable: str) -> ModelToolCall:
+ 
+ def _claim_for(context, correlation: str) -> CompletionClaim:
+     goal = _context_goal(context)
++    # R2：coverage 引用投影的 source_fact_ids 与全部 mandatory ids。
++    mandatory_ids = tuple(
++        item["criterion_id"]
++        for item in goal["admitted_criteria"]
++        if item.get("mandatory") is True
++    )
+     return CompletionClaim(
+         correlation_id=correlation,
+         goal_id=goal["goal_id"],
+         goal_revision=goal["goal_revision"],
+         criterion_evidence_refs=tuple(goal["expected_completion_evidence_refs"]),
++        requirement_coverage=(
++            RequirementCoverage(
++                requirement_id="requirement:recovery-journey",
++                requirement="完成用户要求的修复并通过验证",
++                source_fact_ids=tuple(goal["source_fact_ids"]),
++                status="satisfied",
++                criterion_ids=mandatory_ids,
++            ),
++        ),
+     )
+ 
+ 
+diff --git a/tests/acceptance/test_f3_runner_roundtrip.py b/tests/acceptance/test_f3_runner_roundtrip.py
+index a83ca94..51a264e 100644
+--- a/tests/acceptance/test_f3_runner_roundtrip.py
++++ b/tests/acceptance/test_f3_runner_roundtrip.py
+@@ -15,6 +15,7 @@ from agent.runtime.contracts import (
+     ModelResponse,
+     ModelToolCall,
+     ProposedCriterion,
++    RequirementCoverage,
+ )
+ from scripts.grade_coding_autonomy import grade
+ from scripts.run_real_coding_scenario import MANIFEST, run
+@@ -128,6 +129,12 @@ def _scripted_steps(*, run_validation: bool):
+             for block in msg.content
+             if block.get("type") == "trusted_goal"
+         )
++        # R2：coverage 引用投影的 source_fact_ids 与全部 mandatory ids。
++        mandatory_ids = tuple(
++            item["criterion_id"]
++            for item in goal_block["admitted_criteria"]
++            if item.get("mandatory") is True
++        )
+         return ModelResponse(
+             (),
+             control=CompletionClaim(
+@@ -137,6 +144,15 @@ def _scripted_steps(*, run_validation: bool):
+                 criterion_evidence_refs=tuple(
+                     goal_block["expected_completion_evidence_refs"]
+                 ),
++                requirement_coverage=(
++                    RequirementCoverage(
++                        requirement_id="requirement:r2d-task",
++                        requirement="完成用户要求的修复并通过验证",
++                        source_fact_ids=tuple(goal_block["source_fact_ids"]),
++                        status="satisfied",
++                        criterion_ids=mandatory_ids,
++                    ),
++                ),
+             ),
+         )
+ 
+diff --git a/tests/continuity/test_browser_takeover_flow.py b/tests/continuity/test_browser_takeover_flow.py
+index 7284b2b..ad5432b 100644
+--- a/tests/continuity/test_browser_takeover_flow.py
++++ b/tests/continuity/test_browser_takeover_flow.py
+@@ -248,7 +248,10 @@ def test_run_turn_consumes_bundle_complete_takeover_with_exact_lease(tmp_path):
+         provider=provider,
+         context_manager=KernelContextManager(
+             system_policy="Be concise.",
+-            limits=ContextLimits(max_input_tokens=2_000, output_reserve=200),
++            # R2 起 trusted_goal 投影含 source_fact_ids 且完成 schema 增加
++            # requirement_coverage 指引，2_000 token 预算会令 core 超限
++            # （context_core_too_large），按同一测试意图提高预算。
++            limits=ContextLimits(max_input_tokens=2_600, output_reserve=200),
+         ),
+         tool_runtime=tool_runtime,
+         checkpoint_store=store,
+diff --git a/tests/continuity/test_contracts.py b/tests/continuity/test_contracts.py
+index fbb3a15..80115b0 100644
+--- a/tests/continuity/test_contracts.py
++++ b/tests/continuity/test_contracts.py
+@@ -45,6 +45,7 @@ from agent.runtime.contracts import (
+     ProviderContinuationV1,
+     ProviderDescriptor,
+     RecoveryRequest,
++    RequirementCoverage,
+     ResumeGoal,
+     SelectGoal,
+     SideEffectClass,
+@@ -817,6 +818,173 @@ def test_goal_draft_lower_bound_covers_explicit_english_directives(
+     }
+ 
+ 
++# R3 冻结输入表：直接发给产品的完整 user text（WORK-PACKAGES R3 节逐字）。
++# 期望三态：True=必须建立 process 义务；False=禁止（不得建立义务）；
++# None=未表态（模型 flag 也不能单独制造义务）。
++_R3_FROZEN_INPUTS = (
++    ("明确执行", "运行 pytest -q", True),
++    ("等义连接", "修复功能，运行 pytest -q", True),
++    ("等义连接", "修复功能并运行 pytest -q", True),
++    ("等义连接", "修好后运行 pytest -q", True),
++    ("分步", "先修复功能，然后执行 pytest -q", True),
++    ("英文对照", "Fix the bug and run pytest -q", True),
++    ("显式脚本", "运行 ./check-result", True),
++    ("禁止", "不要运行测试，只修改 app.py", False),
++    ("后续禁止", "运行测试。不要运行任何程序，只修改 app.py。", False),
++    ("只求解释", "如何运行 pytest -q？", None),
++    (
++        "要求写例句",
++        "只写 README，内容包含这句话：运行 pytest -q。不要执行它。",
++        False,
++    ),
++    ("无运行要求", "只修改 app.py 中的拼写错误", None),
++)
++
++
++@pytest.mark.parametrize(
++    ("label", "user_text", "expected"),
++    _R3_FROZEN_INPUTS,
++    ids=[item[0] + ":" + item[1][:18] for item in _R3_FROZEN_INPUTS],
++)
++@pytest.mark.parametrize("model_flag", (True, False))
++def test_r3_explicit_requirement_survives_connective_variants(
++    label: str,
++    user_text: str,
++    expected: bool | None,
++    model_flag: bool,
++) -> None:
++    """R3：等义中文连接词不能改变明确执行要求的义务判定。
++
++    模型 flag 双向遍历：flag 只在 authoritative 文本未表态时有话语权，
++    不能把 None/False 扩权成义务，也不能掩盖 True。
++    """
++
++    user = ConversationFact(
++        fact_id="fact:user:r3-frozen",
++        kind=FactKind.USER_MESSAGE,
++        content={"text": user_text},
++    )
++    state = ConversationState(
++        conversation_id="conversation:r3-frozen",
++        facts=(user,),
++    )
++    bootstrap = GoalBootstrap(
++        source_fact_id=user.fact_id,
++        workspace_identity_digest="workspace:v1:" + "c" * 64,
++        authority_snapshot="authority:v1:" + "d" * 64,
++    )
++    draft = GoalDraftProposal(
++        correlation_id="proposal:r3-frozen",
++        user_outcome="apply the requested change and record the outcome",
++        beneficiary="owner",
++        targets=("app.py",),
++        scope=("workspace",),
++        non_goals=(),
++        assumptions=(),
++        proposed_criteria=(
++            ProposedCriterion(
++                criterion_id="criterion:app",
++                description="app.py contains the requested change",
++                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
++                artifact_path="app.py",
++            ),
++        ),
++        requires_local_process=model_flag,
++    )
++
++    accepted = accept_goal_draft_proposal(
++        state,
++        draft,
++        bootstrap,
++        admitted_at="2026-08-20T00:00:00Z",
++    )
++
++    assert accepted.goal is not None
++    process_criteria = tuple(
++        item
++        for item in accepted.goal.proposed_criteria
++        if item.criterion_id.startswith("criterion:required-local-process:")
++    )
++    if expected is True:
++        assert len(process_criteria) == 1, (
++            f"{label}: explicit run/execute directive must mint exactly one "
++            "Runtime-owned process obligation regardless of connectives"
++        )
++    else:
++        assert process_criteria == (), (
++            f"{label}: authoritative text does not create a process obligation; "
++            "the model flag must not either"
++        )
++
++
++def test_tool_output_cannot_create_process_authority() -> None:
++    """R3 端到端：工具输出里的执行指令不能成为新的执行权限。
++
++    权威文本只来自 USER_MESSAGE fact。即便历史里已有工具输出恰好包含
++    "运行 pytest -q"（如读取到的文件内容），模型 flag=True 也不能据此铸造
++    Runtime-owned process 义务——工具输出不是用户授权。
++    """
++
++    user = ConversationFact(
++        fact_id="fact:user:tool-output-authority",
++        kind=FactKind.USER_MESSAGE,
++        content={"text": "只修改 app.py 中的拼写错误"},
++    )
++    tool_output = ConversationFact(
++        fact_id="fact:result:tool-output-authority",
++        kind=FactKind.TOOL_RESULT,
++        content={
++            "tool_call_id": "read-readme",
++            "text": "贡献指南：修改后请运行 pytest -q。",
++            "is_error": False,
++            "executed": True,
++            "metadata": {},
++        },
++    )
++    state = ConversationState(
++        conversation_id="conversation:tool-output-authority",
++        facts=(user, tool_output),
++    )
++    bootstrap = GoalBootstrap(
++        source_fact_id=user.fact_id,
++        workspace_identity_digest="workspace:v1:" + "c" * 64,
++        authority_snapshot="authority:v1:" + "d" * 64,
++    )
++    accepted = accept_goal_draft_proposal(
++        state,
++        GoalDraftProposal(
++            correlation_id="proposal:tool-output-authority",
++            user_outcome="修正 app.py 中的拼写错误",
++            beneficiary="owner",
++            targets=("app.py",),
++            scope=("workspace",),
++            non_goals=(),
++            assumptions=(),
++            proposed_criteria=(
++                ProposedCriterion(
++                    criterion_id="criterion:app",
++                    description="app.py contains the requested fix",
++                    oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
++                    artifact_path="app.py",
++                ),
++            ),
++            requires_local_process=True,
++        ),
++        bootstrap,
++        admitted_at="2026-08-20T00:00:00Z",
++    )
++
++    assert accepted.goal is not None
++    assert tuple(
++        item
++        for item in accepted.goal.proposed_criteria
++        if item.criterion_id.startswith("criterion:required-local-process:")
++    ) == (), (
++        "tool output text must not upgrade into execution authority even when "
++        "the model flag requests it; only the authoritative user fact can"
++    )
++
++
+ @pytest.mark.parametrize(
+     ("user_text", "model_criterion_id", "oracle_kind", "required_prefix"),
+     (
+@@ -1289,6 +1457,222 @@ def test_user_correction_adds_runtime_obligation_when_model_omits_it(
+     assert correction.fact_id in updated.goal.created_from_fact_ids
+ 
+ 
++@pytest.mark.parametrize(
++    ("correction_text", "oracle_kind", "criterion_prefix"),
++    (
++        (
++            "不要运行测试，只修改 app.py，其他要求不变。",
++            EvidenceOracleKind.TOOL_RECEIPT,
++            "criterion:required-local-process:",
++        ),
++        (
++            "不要联网搜索公开资料，只修改 app.py，其他要求不变。",
++            EvidenceOracleKind.WEB_SOURCE_RECEIPT,
++            "criterion:required-public-web:",
++        ),
++    ),
++)
++def test_explicit_correction_withdrawal_removes_runtime_owned_obligation(
++    correction_text: str,
++    oracle_kind: EvidenceOracleKind,
++    criterion_prefix: str,
++) -> None:
++    """R3 端到端：correction 明确撤回后，Runtime-owned 义务按现有版本绑定失效。
++
++    WORK-PACKAGES R3："correction 撤回/替换要求后按现有版本绑定失效"。
++    初始明确要求经 admission 铸造 runtime-owned 义务后，用户 correction 明确
++    禁止该 effect；残留的 proposed 义务会让 verify_goal_completion 的
++    "process criterion must be admitted" 检查永久失败，Goal 被 brick。撤回
++    必须使该义务从 proposed_criteria 移除，且不得影响同 Goal 的文件义务。
++    """
++
++    source_text = (
++        "修复功能并运行 pytest -q。"
++        if oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
++        else "修复功能并结合当前公开 Web 资料核对结果。"
++    )
++    user = ConversationFact(
++        fact_id="fact:user:1",
++        kind=FactKind.USER_MESSAGE,
++        content={"text": source_text},
++    )
++    state = ConversationState(
++        conversation_id="conversation:withdrawal",
++        facts=(user,),
++    )
++    bootstrap = GoalBootstrap(
++        source_fact_id=user.fact_id,
++        workspace_identity_digest="workspace:v1:" + "c" * 64,
++        authority_snapshot="authority:v1:" + "d" * 64,
++    )
++    draft = GoalDraftProposal(
++        correlation_id="proposal:withdrawal",
++        user_outcome="修复功能并验证结果",
++        beneficiary="owner",
++        targets=("app.py",),
++        scope=("workspace",),
++        non_goals=(),
++        assumptions=(),
++        proposed_criteria=(
++            ProposedCriterion(
++                criterion_id="criterion:app",
++                description="app.py contains the requested fix",
++                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
++                artifact_path="app.py",
++            ),
++        ),
++        requires_public_web=False,
++        requires_local_process=False,
++    )
++    accepted = accept_goal_draft_proposal(
++        state,
++        draft,
++        bootstrap,
++        admitted_at="2026-08-20T00:00:00Z",
++    )
++    assert accepted.goal is not None
++    minted = tuple(
++        item
++        for item in accepted.goal.proposed_criteria
++        if item.criterion_id.startswith(criterion_prefix)
++    )
++    assert len(minted) == 1, "admission must mint the runtime-owned obligation"
++
++    correction = ConversationFact(
++        fact_id="fact:user:2",
++        kind=FactKind.USER_MESSAGE,
++        content={"text": correction_text, "control": "goal_correction"},
++    )
++    corrected_state = replace(accepted, facts=(*accepted.facts, correction))
++    updated = accept_goal_delta_proposal(
++        corrected_state,
++        GoalDeltaProposal(
++            correlation_id="delta:withdrawal",
++            delta=GoalDelta(
++                goal_id=accepted.goal.goal_id,
++                expected_revision=accepted.goal.revision,
++                reason="apply the user's explicit withdrawal",
++                updates={"assumptions": ["user withdrew the effect requirement"]},
++            ),
++        ),
++    )
++
++    assert updated.goal is not None
++    remaining = tuple(
++        item
++        for item in updated.goal.proposed_criteria
++        if item.criterion_id.startswith(criterion_prefix)
++    )
++    assert remaining == (), (
++        "an explicit correction that prohibits the effect must retire the "
++        "runtime-owned obligation; otherwise verify_goal_completion's "
++        "'must be admitted' check bricks the Goal forever"
++    )
++    assert any(
++        item.criterion_id == "criterion:app"
++        for item in updated.goal.proposed_criteria
++    ), "withdrawal must not touch unrelated artifact criteria"
++    assert correction.fact_id in updated.goal.created_from_fact_ids
++
++
++@pytest.mark.parametrize(
++    ("correction_text", "oracle_kind", "criterion_prefix"),
++    (
++        (
++            "把标题改成新版，其他要求不变。",
++            EvidenceOracleKind.TOOL_RECEIPT,
++            "criterion:required-local-process:",
++        ),
++        (
++            "把标题改成新版，其他要求不变。",
++            EvidenceOracleKind.WEB_SOURCE_RECEIPT,
++            "criterion:required-public-web:",
++        ),
++    ),
++)
++def test_silent_correction_keeps_runtime_owned_obligation(
++    correction_text: str,
++    oracle_kind: EvidenceOracleKind,
++    criterion_prefix: str,
++) -> None:
++    """对照：correction 未表态（None）时不得撤回既有 Runtime 义务。"""
++
++    source_text = (
++        "修复功能并运行 pytest -q。"
++        if oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
++        else "修复功能并结合当前公开 Web 资料核对结果。"
++    )
++    user = ConversationFact(
++        fact_id="fact:user:1",
++        kind=FactKind.USER_MESSAGE,
++        content={"text": source_text},
++    )
++    state = ConversationState(
++        conversation_id="conversation:silent-correction",
++        facts=(user,),
++    )
++    bootstrap = GoalBootstrap(
++        source_fact_id=user.fact_id,
++        workspace_identity_digest="workspace:v1:" + "c" * 64,
++        authority_snapshot="authority:v1:" + "d" * 64,
++    )
++    draft = GoalDraftProposal(
++        correlation_id="proposal:silent-correction",
++        user_outcome="修复功能并验证结果",
++        beneficiary="owner",
++        targets=("app.py",),
++        scope=("workspace",),
++        non_goals=(),
++        assumptions=(),
++        proposed_criteria=(
++            ProposedCriterion(
++                criterion_id="criterion:app",
++                description="app.py contains the requested fix",
++                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
++                artifact_path="app.py",
++            ),
++        ),
++        requires_public_web=False,
++        requires_local_process=False,
++    )
++    accepted = accept_goal_draft_proposal(
++        state,
++        draft,
++        bootstrap,
++        admitted_at="2026-08-20T00:00:00Z",
++    )
++    assert accepted.goal is not None
++    correction = ConversationFact(
++        fact_id="fact:user:2",
++        kind=FactKind.USER_MESSAGE,
++        content={"text": correction_text, "control": "goal_correction"},
++    )
++    corrected_state = replace(accepted, facts=(*accepted.facts, correction))
++    updated = accept_goal_delta_proposal(
++        corrected_state,
++        GoalDeltaProposal(
++            correlation_id="delta:silent-correction",
++            delta=GoalDelta(
++                goal_id=accepted.goal.goal_id,
++                expected_revision=accepted.goal.revision,
++                reason="apply the artifact-only correction",
++                updates={"assumptions": ["title revised"]},
++            ),
++        ),
++    )
++
++    assert updated.goal is not None
++    remaining = tuple(
++        item
++        for item in updated.goal.proposed_criteria
++        if item.criterion_id.startswith(criterion_prefix)
++    )
++    assert len(remaining) == 1, (
++        "a correction that does not mention the effect must not silently drop "
++        "the authoritative runtime-owned obligation"
++    )
++
++
+ @pytest.mark.parametrize(
+     "invented_oracle",
+     (
+@@ -1946,6 +2330,15 @@ def test_goal_completion_requires_current_claimed_evidence_and_no_unknown_effect
+         goal_id="goal:1",
+         goal_revision=1,
+         criterion_evidence_refs=(evidence.evidence_id,),
++        requirement_coverage=(
++            RequirementCoverage(
++                requirement_id="requirement:report",
++                requirement="报告文件存在且内容匹配",
++                source_fact_ids=("fact:user:1",),
++                status="satisfied",
++                criterion_ids=("criterion:report-exists",),
++            ),
++        ),
+     )
+     state = ConversationState(
+         conversation_id="conversation:1",
+@@ -2010,6 +2403,15 @@ def test_goal_completion_requires_browser_and_managed_server_cleanup() -> None:
+         goal_id="goal:1",
+         goal_revision=1,
+         criterion_evidence_refs=(evidence.evidence_id,),
++        requirement_coverage=(
++            RequirementCoverage(
++                requirement_id="requirement:report",
++                requirement="报告文件存在且内容匹配",
++                source_fact_ids=("fact:user:1",),
++                status="satisfied",
++                criterion_ids=("criterion:report-exists",),
++            ),
++        ),
+     )
+ 
+     def result(fact_id: str, text: str, metadata: dict) -> ConversationFact:
+diff --git a/tests/continuity/test_operator_tool_context_privacy.py b/tests/continuity/test_operator_tool_context_privacy.py
+index fd71155..8fbe6b1 100644
+--- a/tests/continuity/test_operator_tool_context_privacy.py
++++ b/tests/continuity/test_operator_tool_context_privacy.py
+@@ -44,6 +44,7 @@ from tests.kernel.fakes import (
+     RecordingCheckpointStore,
+     RecordingEventSink,
+     ScriptedProvider,
++    completion_claim_from_trusted,
+     conversation_with_active_goal,
+     goal_noop_response,
+ )
+@@ -311,7 +312,6 @@ def test_operator_rejection_does_not_block_later_model_completion() -> None:
+         goal=replace(goal, admitted_criteria=(criterion,), status=GoalStatus.GOAL_READY),
+         active_run=ActiveRun(run_id="run-verify"),
+     )
+-    evidence_id = f"evidence:{goal.goal_id}:{goal.revision}:{criterion.criterion_id}"
+     provider = ScriptedProvider(
+         goal_noop_response("continue-after-operator-rejection"),
+         ModelResponse(
+@@ -325,15 +325,7 @@ def test_operator_rejection_does_not_block_later_model_completion() -> None:
+                 resume_condition="approve the private operator request",
+             ),
+         ),
+-        ModelResponse(
+-            (),
+-            control=CompletionClaim(
+-                correlation_id="complete-after-operator-rejection",
+-                goal_id=goal.goal_id,
+-                goal_revision=goal.revision,
+-                criterion_evidence_refs=(evidence_id,),
+-            ),
+-        ),
++        completion_claim_from_trusted("complete-after-operator-rejection"),
+     )
+     runtime, store, calls, _events, _provider = _operator_runtime_fixture(
+         approval=ApprovalPolicy.ALWAYS,
+diff --git a/tests/continuity/test_research_evidence.py b/tests/continuity/test_research_evidence.py
+index c32b991..857f05b 100644
+--- a/tests/continuity/test_research_evidence.py
++++ b/tests/continuity/test_research_evidence.py
+@@ -58,6 +58,7 @@ from tests.kernel.fakes import (
+     CollectingSink,
+     InMemoryCheckpointStore,
+     ScriptedProvider,
++    completion_claim_from_trusted,
+     goal_noop_response,
+ )
+ 
+@@ -1695,12 +1696,12 @@ def test_research_oracle_accepts_repeated_reference_to_same_source() -> None:
+ 
+ 
+ def test_runtime_completion_path_reaches_verified_done_only_after_research_oracle() -> None:
+-    state, claim, _manifest = _fixture()
++    state, _claim, _manifest = _fixture()
+     store = InMemoryCheckpointStore(state)
+     runtime = AgentRuntime(
+         provider=ScriptedProvider(
+             goal_noop_response("research-completion-user-supplement"),
+-            ModelResponse((), control=claim),
++            completion_claim_from_trusted("completion-research"),
+         ),
+         context_manager=KernelContextManager(
+             system_policy="policy",
+diff --git a/tests/continuity/test_resume_effect_no_replay.py b/tests/continuity/test_resume_effect_no_replay.py
+index 69c153a..2c83413 100644
+--- a/tests/continuity/test_resume_effect_no_replay.py
++++ b/tests/continuity/test_resume_effect_no_replay.py
+@@ -38,7 +38,13 @@ def _ledger_count(workspace: Path, tag: str) -> int:
+     )
+ 
+ 
+-def _build_runtime(store, provider, workspace: Path):
++def _build_runtime(
++    store,
++    provider,
++    workspace: Path,
++    *,
++    require_approval: bool = False,
++):
+     from agent.runtime.checkpoint import LocalCheckpointStore  # noqa: F401
+     from agent.runtime.context import ContextLimits, KernelContextManager
+     from agent.runtime.contracts import (
+@@ -85,7 +91,9 @@ def _build_runtime(store, provider, workspace: Path):
+         risk=ToolRisk.HIGH,
+         side_effect=SideEffectClass.WRITE,
+         output_policy=OutputPolicy.BOUNDED_TEXT,
+-        approval_policy=ApprovalPolicy.NEVER,
++        approval_policy=(
++            ApprovalPolicy.ALWAYS if require_approval else ApprovalPolicy.NEVER
++        ),
+         safety_policy={},
+         output_limit_chars=100,
+         execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+@@ -572,12 +580,280 @@ def _run_b_after_crash(workspace: Path, state_root: Path) -> None:
+     )
+ 
+ 
++def _run_approval_pause(workspace: Path, state_root: Path) -> None:
++    """R1-T6 进程 A：审批 pending 时 /pause，同一 CAS 闭合未开始批次。"""
++
++    from agent.runtime.checkpoint import LocalCheckpointStore
++    from agent.runtime.contracts import (
++        ConversationState,
++        GoalDraftProposal,
++        ModelResponse,
++        ModelToolCall,
++        PauseGoal,
++        ProposedCriterion,
++        RunStatus,
++        SubmitMessage,
++    )
++
++    workspace.mkdir(parents=True, exist_ok=True)
++    store = LocalCheckpointStore.initialize(
++        state_root / "checkpoint.json",
++        ConversationState.new("conversation-approval"),
++    )
++    provider = _StageProvider(
++        [
++            ModelResponse(
++                (),
++                control=GoalDraftProposal(
++                    correlation_id="draft-approval",
++                    user_outcome="append the A effect to the ledger",
++                    beneficiary="user",
++                    targets=("workspace",),
++                    scope=("workspace",),
++                    non_goals=(),
++                    assumptions=(),
++                    proposed_criteria=(
++                        ProposedCriterion(
++                            "criterion-a",
++                            "the ledger holds the A effect",
++                        ),
++                    ),
++                    next_step="append A",
++                ),
++            ),
++            ModelResponse(
++                (ModelToolCall("call-approve", "ledger_append", {"tag": "A"}),),
++            ),
++        ]
++    )
++    runtime = _build_runtime(store, provider, workspace, require_approval=True)
++    state = store.load().state
++    submitted = runtime.run_turn(
++        SubmitMessage(
++            conversation_id=state.conversation_id,
++            action_seq=state.next_action_seq,
++            expected_revision=state.revision,
++            run_id="run-approval",
++            message="append the A effect to the ledger",
++        ),
++        store.load(),
++    )
++    assert submitted.status is RunStatus.AWAITING_APPROVAL, submitted.status
++    assert _ledger_count(workspace, "A") == 0
++    durable = store.load().state
++    assert durable.active_run is not None
++    assert durable.active_run.pending_request is not None
++    assert durable.goal is not None
++    paused = runtime.run_turn(
++        PauseGoal(
++            conversation_id=durable.conversation_id,
++            action_seq=durable.next_action_seq,
++            expected_revision=durable.revision,
++            goal_id=durable.goal.goal_id,
++            goal_revision=durable.goal.revision,
++        ),
++        store.load(),
++    )
++    assert paused.status is RunStatus.COMPLETED, paused.error_code
++    durable = store.load().state
++    assert durable.active_run is None
++    assert durable.goal is not None
++    _print_result(
++        {
++            "stage": "run_approval_pause",
++            "goal_status": durable.goal.status.value,
++            "ledger_a": _ledger_count(workspace, "A"),
++        }
++    )
++
++
++def _run_approval_resume_continue(workspace: Path, state_root: Path) -> None:
++    """R1-T6 进程 B：新进程重开审批 pause 现场；无重述继续，零执行。"""
++
++    from agent.runtime.checkpoint import LocalCheckpointStore
++    from agent.runtime.contracts import (
++        BlockedClaim,
++        FactKind,
++        GoalDelta,
++        GoalDeltaProposal,
++        GoalStatus,
++        ModelResponse,
++        ModelToolCall,
++        ResumeGoal,
++        RunStatus,
++        SubmitMessage,
++    )
++    from tests.kernel.fakes import RUNTIME_GOAL_ID
++
++    store = LocalCheckpointStore(state_root / "checkpoint.json")
++    state = store.load().state
++    goal = state.goal
++    assert goal is not None
++    assert goal.status is GoalStatus.PAUSED
++    assert state.active_run is None
++    closed = [
++        fact
++        for fact in state.facts
++        if fact.content.get("tool_call_id") == "call-approve"
++    ]
++    assert len(closed) == 1, "pause must close the unapproved call in the same CAS"
++    assert closed[0].content.get("executed") is False
++    assert closed[0].content.get("superseded") is True
++    assert closed[0].content.get("is_error") is True
++    kinds = [fact.kind for fact in state.facts]
++    assert kinds[kinds.index(FactKind.TOOL_CALLS) + 1] is FactKind.TOOL_RESULT
++
++    provider = _StageProvider(
++        [
++            ModelResponse(
++                (),
++                control=GoalDeltaProposal(
++                    correlation_id="delta-approval",
++                    delta=GoalDelta(
++                        goal_id=RUNTIME_GOAL_ID,
++                        expected_revision=goal.revision,
++                        reason="the user asked to continue the existing Goal",
++                        updates={"targets": list(goal.targets)},
++                    ),
++                ),
++            ),
++            ModelResponse(
++                (ModelToolCall("call-read-approval", "ledger_read", {}),),
++            ),
++            ModelResponse(
++                (),
++                control=BlockedClaim(
++                    correlation_id="blocked-approval",
++                    goal_id=RUNTIME_GOAL_ID,
++                    goal_revision=goal.revision,
++                    blocker="the paused batch is closed; a new instruction is required",
++                    safe_attempts=("read the ledger",),
++                    resume_condition="provide the next instruction",
++                ),
++            ),
++        ]
++    )
++    runtime = _build_runtime(store, provider, workspace)
++    resumed = runtime.run_turn(
++        ResumeGoal(
++            conversation_id=state.conversation_id,
++            action_seq=state.next_action_seq,
++            expected_revision=state.revision,
++            goal_id=goal.goal_id,
++            goal_revision=goal.revision,
++        ),
++        store.load(),
++    )
++    assert resumed.status is RunStatus.COMPLETED, resumed.error_code
++    assert len(provider.calls) == 0
++    state = store.load().state
++    advanced = runtime.run_turn(
++        SubmitMessage(
++            conversation_id=state.conversation_id,
++            action_seq=state.next_action_seq,
++            expected_revision=state.revision,
++            run_id="run-approval-continue",
++            message="继续当前任务",
++        ),
++        store.load(),
++    )
++    assert advanced.status is RunStatus.COMPLETED, advanced.error_code
++    durable = store.load().state
++    assert durable.goal is not None
++    assert durable.goal.status is GoalStatus.BLOCKED
++    assert _ledger_count(workspace, "A") == 0
++    _print_result(
++        {
++            "stage": "run_approval_resume_continue",
++            "resume_provider_calls": 0,
++            "ledger_a": 0,
++            "continue_goal_status": durable.goal.status.value,
++            "closed_executed": False,
++        }
++    )
++
++
++def _run_b_after_crash_resolve(workspace: Path, state_root: Path) -> None:
++    """R1-T6 进程 B：崩溃后的 UNKNOWN 由操作者分类；同一 run 继续，零重放。"""
++
++    from agent.runtime.checkpoint import LocalCheckpointStore
++    from agent.runtime.contracts import (
++        BlockedClaim,
++        ModelResponse,
++        RecoveryResolution,
++        ResolveUnknownToolOutcome,
++        Resume,
++        RunStatus,
++    )
++    from tests.kernel.fakes import RUNTIME_GOAL_ID
++
++    store = LocalCheckpointStore(state_root / "checkpoint.json")
++    assert _ledger_count(workspace, "X") == 1
++    provider = _StageProvider(
++        [
++            ModelResponse(
++                (),
++                control=BlockedClaim(
++                    correlation_id="blocked-after-recovery",
++                    goal_id=RUNTIME_GOAL_ID,
++                    goal_revision=1,
++                    blocker="the classified effect is recorded; no further safe action",
++                    safe_attempts=("classified the unknown X effect as succeeded",),
++                    resume_condition="provide the next instruction",
++                ),
++            ),
++        ]
++    )
++    runtime = _build_runtime(store, provider, workspace)
++    state = store.load().state
++    resumed = runtime.run_turn(
++        Resume(
++            conversation_id=state.conversation_id,
++            action_seq=state.next_action_seq,
++            expected_revision=state.revision,
++        ),
++        store.load(),
++    )
++    assert resumed.status is RunStatus.AWAITING_RECOVERY, resumed.status
++    assert resumed.request is not None
++    assert len(provider.calls) == 0
++    assert _ledger_count(workspace, "X") == 1
++    state = store.load().state
++    resolved = runtime.run_turn(
++        ResolveUnknownToolOutcome(
++            conversation_id=state.conversation_id,
++            action_seq=state.next_action_seq,
++            expected_revision=state.revision,
++            request_id=resumed.request.request_id,
++            binding_digest=resumed.request.binding_digest,
++            resolution=RecoveryResolution.MARK_SUCCEEDED,
++        ),
++        store.load(),
++    )
++    assert resolved.status is RunStatus.COMPLETED, resolved.error_code
++    assert len(provider.calls) == 1
++    assert _ledger_count(workspace, "X") == 1
++    durable = store.load().state
++    assert durable.active_run is None
++    _print_result(
++        {
++            "stage": "run_b_after_crash_resolve",
++            "status": resolved.status.value,
++            "provider_calls": 1,
++            "ledger_x": 1,
++        }
++    )
++
++
+ _STAGES = {
+     "run_a": _run_a_stage,
+     "run_b_resume_only": _run_b_resume_only,
+     "run_b_xy": _run_b_xy,
+     "run_b_duplicate": _run_b_duplicate,
+     "run_b_after_crash": _run_b_after_crash,
++    "run_approval_pause": _run_approval_pause,
++    "run_approval_resume_continue": _run_approval_resume_continue,
++    "run_b_after_crash_resolve": _run_b_after_crash_resolve,
+ }
+ 
+ 
+@@ -658,3 +934,69 @@ def test_v1_executing_crash_windows_surface_unknown_without_replay(tmp_path):
+         assert payload["status"] == "awaiting_recovery"
+         assert payload["provider_calls"] == 0
+         assert payload["ledger_x"] == expected_x
++
++
++def test_r1_t6_approval_pause_closes_batch_and_new_process_continues(tmp_path):
++    """R1-T6：审批边界 pause 关闭 checkpoint，新进程重开不再 bricked。
++
++    形状复刻 V1 真实旅程 state-root7：MODEL 批次已入账、审批 pending 时
++    /pause。R1 前该 checkpoint 含未完结 tool batch，新进程任何推进都在
++    compaction_rules 的 "tool batch and its results cannot be split" 上
++    fatal。修复后 pause 在同一 CAS 闭合未开始 call；新进程 ResumeGoal
++    零 provider 调用，继续推进到 BlockedClaim，全程零执行、无人工重述。
++    """
++
++    workspace = tmp_path / "ws"
++    state_root = tmp_path / "state"
++    workspace.mkdir()
++    state_root.mkdir()
++    code, payload = _run_stage("run_approval_pause", workspace, state_root)
++    assert code == 0
++    assert payload == {
++        "stage": "run_approval_pause",
++        "goal_status": "paused",
++        "ledger_a": 0,
++    }
++    code, payload = _run_stage(
++        "run_approval_resume_continue", workspace, state_root
++    )
++    assert code == 0
++    assert payload == {
++        "stage": "run_approval_resume_continue",
++        "resume_provider_calls": 0,
++        "ledger_a": 0,
++        "continue_goal_status": "blocked",
++        "closed_executed": False,
++    }
++
++
++def test_r1_t6_crashed_unknown_resolves_in_new_process_without_replay(tmp_path):
++    """R1-T6：EXECUTING 崩溃后的 UNKNOWN 在新进程走既有分类流程，零重放。
++
++    效果已发生（ledger X 计数 1）且结果保存失败窗口崩溃；新进程 Resume
++    进入 AWAITING_RECOVERY（零 provider/tool），操作者标记 succeeded 后
++    同一 run 继续。ledger 恒为 1，证明分类不触发任何工具重放。
++    """
++
++    workspace = tmp_path / "ws"
++    state_root = tmp_path / "state"
++    workspace.mkdir()
++    state_root.mkdir()
++    code, payload = _run_stage(
++        "run_a",
++        workspace,
++        state_root,
++        crash_mode="after",
++    )
++    assert code == 9
++    assert payload is None
++    code, payload = _run_stage(
++        "run_b_after_crash_resolve", workspace, state_root
++    )
++    assert code == 0
++    assert payload == {
++        "stage": "run_b_after_crash_resolve",
++        "status": "completed",
++        "provider_calls": 1,
++        "ledger_x": 1,
++    }
+diff --git a/tests/continuity/test_verified_done.py b/tests/continuity/test_verified_done.py
+index c28252b..d921672 100644
+--- a/tests/continuity/test_verified_done.py
++++ b/tests/continuity/test_verified_done.py
+@@ -8,6 +8,7 @@ import pytest
+ from agent.runtime.context import ContextLimits, KernelContextManager
+ from agent.runtime.contracts import (
+     ActiveRun,
++    AdmittedCriterion,
+     BlockedClaim,
+     CompletionClaim,
+     ContinuationPhase,
+@@ -17,20 +18,32 @@ from agent.runtime.contracts import (
+     ExecutingIntentRecord,
+     ExecutionAuthorityClass,
+     FactKind,
++    GoalBootstrap,
++    GoalDelta,
++    GoalDeltaProposal,
++    GoalDraftProposal,
+     GoalStatus,
+     ModelResponse,
+     ModelTextBlock,
+     ModelToolCall,
+     ProposedCriterion,
++    RequirementCoverage,
+     Resume,
+     RunStatus,
+     SubmitMessage,
+     ToolCall,
+     ToolPrepareContext,
++    closed_evidence_id,
+ )
+ from agent.runtime.evidence import ClosedEvidenceRegistry, EvidenceVerificationError
+ from agent.runtime.loop import AgentRuntime, InvocationLimits
+-from agent.runtime.state import record_completion_claim, record_evidence, verify_goal_completion
++from agent.runtime.state import (
++    accept_goal_delta_proposal,
++    accept_goal_draft_proposal,
++    record_completion_claim,
++    record_evidence,
++    verify_goal_completion,
++)
+ from agent.runtime.tools import KernelToolRuntime
+ from agent.tools.file_ops import build_file_tool_runtime
+ from tests.continuity.test_contracts import _goal
+@@ -44,6 +57,9 @@ from tests.kernel.fakes import (
+ CONTENT = "verified report\n"
+ CONTENT_DIGEST = hashlib.sha256(CONTENT.encode()).hexdigest()
+ EVIDENCE_ID = "evidence:goal:1:1:criterion:report-exists"
++# _runtime 的 SubmitMessage 被消费为 goal_correction，落为 action:1:user 权威
++# fact；覆盖率门要求 claim 引用每条权威用户输入，因此两者都必须被覆盖。
++RUNTIME_SOURCE_FACT_IDS = ("fact:user:1", "action:1:user")
+ 
+ 
+ def _facts(*, fake: bool = False) -> tuple[ConversationFact, ...]:
+@@ -98,12 +114,25 @@ def _state(*, fake: bool = False) -> ConversationState:
+     )
+ 
+ 
+-def _claim() -> CompletionClaim:
++def _claim(
++    *,
++    correlation_id: str = "claim-1",
++    source_fact_ids: tuple[str, ...] = ("fact:user:1",),
++) -> CompletionClaim:
+     return CompletionClaim(
+-        correlation_id="claim-1",
++        correlation_id=correlation_id,
+         goal_id="goal:1",
+         goal_revision=1,
+         criterion_evidence_refs=(EVIDENCE_ID,),
++        requirement_coverage=(
++            RequirementCoverage(
++                requirement_id="requirement:report",
++                requirement="the exact verified report is written",
++                source_fact_ids=source_fact_ids,
++                status="satisfied",
++                criterion_ids=("criterion:report-exists",),
++            ),
++        ),
+     )
+ 
+ 
+@@ -155,7 +184,7 @@ def test_deterministic_receipts_bound_to_all_mandatory_criteria_verify_goal() ->
+ 
+     runtime, store, action = _runtime(
+         replace(_state(), browser_leases=(make_lease(),)),
+-        ModelResponse((), control=_claim()),
++        ModelResponse((), control=_claim(source_fact_ids=RUNTIME_SOURCE_FACT_IDS)),
+     )
+ 
+     result = runtime.run_turn(action, store.load())
+@@ -170,10 +199,14 @@ def test_deterministic_receipts_bound_to_all_mandatory_criteria_verify_goal() ->
+     assert store.state.browser_leases == ()
+ 
+ 
+-def test_fresh_successful_read_back_closes_fully_derivable_goal_without_model_churn(
+-    tmp_path,
+-) -> None:
+-    """闭合证据已由最终 read-back 产生时，不再要求模型抄回 Runtime refs。"""
++def test_read_back_alone_does_not_auto_complete_goal(tmp_path) -> None:
++    """R2：read-back 产生闭合证据后，Runtime 不再自行合成复核，回到 model loop。
++
++    修复前：最终 read-back 后 Runtime 自动合成 `runtime-completion:` claim 并
++    直接 VERIFIED_DONE，模型无需逐项复核权威要求。R2 合同要求自动路径不得
++    自行合成"已复核所有业务要求"——证据齐全后仍需模型显式提交带
++    requirement_coverage 的 completion_claim。
++    """
+ 
+     workspace = tmp_path / "workspace"
+     (workspace / "reports").mkdir(parents=True)
+@@ -216,16 +249,74 @@ def test_fresh_successful_read_back_closes_fully_derivable_goal_without_model_ch
+ 
+     result = runtime.run_turn(action, store.load())
+ 
++    assert result.status is not RunStatus.COMPLETED
++    assert store.state.goal is not None
++    assert store.state.goal.status is not GoalStatus.VERIFIED_DONE
++    assert store.state.completion_claim is None
++    # 批次结束后确实回到了 model loop（而不是在批次边界自行收尾）。
++    assert len(provider.calls) == 2
++
++
++def test_read_back_then_explicit_coverage_claim_verifies_goal(tmp_path) -> None:
++    """R2：证据齐全后，模型显式提交带 coverage 的 claim 仍能在有限步内完成。"""
++
++    workspace = tmp_path / "workspace"
++    (workspace / "reports").mkdir(parents=True)
++    (workspace / "reports" / "final.md").write_text(CONTENT, encoding="utf-8")
++    seed = _state()
++    state = replace(
++        seed,
++        facts=(seed.facts[0],),
++        active_run=ActiveRun("run-auto-complete"),
++    )
++    store = InMemoryCheckpointStore(state)
++    provider = ScriptedProvider(
++        ModelResponse(
++            (
++                ModelToolCall(
++                    "read-final",
++                    "read_file",
++                    {"path": "reports/final.md"},
++                ),
++            )
++        ),
++        ModelResponse((), control=_claim()),
++    )
++    runtime = AgentRuntime(
++        provider=provider,
++        context_manager=KernelContextManager(
++            system_policy="policy",
++            limits=ContextLimits(max_input_tokens=10_000, output_reserve=200),
++        ),
++        tool_runtime=build_file_tool_runtime(workspace),
++        checkpoint_store=store,
++        event_sink=CollectingSink(),
++        limits=InvocationLimits(),
++        invocation_id_factory=lambda: "invocation-auto-complete",
++    )
++    action = Resume(
++        conversation_id=state.conversation_id,
++        action_seq=state.next_action_seq,
++        expected_revision=state.revision,
++    )
++
++    result = runtime.run_turn(action, store.load())
++
+     assert result.status is RunStatus.COMPLETED
+     assert store.state.goal is not None
+     assert store.state.goal.status is GoalStatus.VERIFIED_DONE
+     assert store.state.completion_claim is not None
+-    assert store.state.completion_claim.correlation_id.startswith("runtime-completion:")
+-    assert len(provider.calls) == 1
++    assert store.state.completion_claim.correlation_id == "claim-1"
++    assert len(provider.calls) == 2
+ 
+ 
+ def test_readback_completion_waits_for_remaining_read(tmp_path) -> None:
+-    """中间 read-back 即使闭合证据，也必须先完成已接纳批次。"""
++    """R2：闭合证据来自批次中第一个 read，仍必须先完成已接纳批次的其余调用。
++
++    修复前：read-final 结果落盘后自动收尾直接 VERIFIED_DONE，read-notes 永
++    不执行。R2 删除自动收尾后，批次内每个调用都必须先有 durable 结果，模型
++    的显式 claim 才能受理。
++    """
+ 
+     workspace = tmp_path / "workspace"
+     (workspace / "reports").mkdir(parents=True)
+@@ -253,7 +344,8 @@ def test_readback_completion_waits_for_remaining_read(tmp_path) -> None:
+                     {"path": "notes.md"},
+                 ),
+             )
+-        )
++        ),
++        ModelResponse((), control=_claim()),
+     )
+     runtime = AgentRuntime(
+         provider=provider,
+@@ -282,7 +374,7 @@ def test_readback_completion_waits_for_remaining_read(tmp_path) -> None:
+         if fact.kind is FactKind.TOOL_RESULT
+     )
+     assert result_ids == ("read-final", "read-notes")
+-    assert len(provider.calls) == 1
++    assert len(provider.calls) == 2
+     assert store.state.goal is not None
+     assert store.state.goal.status is GoalStatus.VERIFIED_DONE
+     assert tuple(event.kind.value for event in sink.events)[-3:] == (
+@@ -320,6 +412,154 @@ def test_unadmitted_explicit_process_requirement_cannot_verify_done() -> None:
+         verify_goal_completion(state)
+ 
+ 
++def test_withdrawn_process_obligation_cannot_brick_completion_gate() -> None:
++    """R3 端到端：correction 明确禁止后，撤回的义务不得阻塞 completion gate。
++
++    修复前：admission 铸造的 runtime-owned process 义务在 correction 撤回后
++    仍残留在 proposed_criteria，verify_goal_completion 的 "process criterion
++    must be admitted" 检查永久失败 → Goal 无法完成。修复后：义务随现行版本
++    失效，文件证据齐全时正常到 VERIFIED_DONE。
++    """
++
++    content = "fixed app\n"
++    digest = hashlib.sha256(content.encode()).hexdigest()
++    source = ConversationFact(
++        fact_id="fact:user:1",
++        kind=FactKind.USER_MESSAGE,
++        content={"text": "运行 pytest -q，并修复 app.py 的功能。"},
++    )
++    state = ConversationState(
++        conversation_id="conversation:withdrawal-e2e",
++        facts=(source,),
++    )
++    bootstrap = GoalBootstrap(
++        source_fact_id=source.fact_id,
++        workspace_identity_digest="workspace:v1:" + "c" * 64,
++        authority_snapshot="authority:v1:" + "d" * 64,
++    )
++    accepted = accept_goal_draft_proposal(
++        state,
++        GoalDraftProposal(
++            correlation_id="proposal:withdrawal-e2e",
++            user_outcome="修复 app.py 并验证结果",
++            beneficiary="owner",
++            targets=("app.py",),
++            scope=("workspace",),
++            non_goals=(),
++            assumptions=(),
++            proposed_criteria=(
++                ProposedCriterion(
++                    criterion_id="criterion:app",
++                    description="app.py contains the requested fix",
++                    oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
++                    artifact_path="app.py",
++                ),
++            ),
++            requires_local_process=False,
++        ),
++        bootstrap,
++        admitted_at="2026-08-20T00:00:00Z",
++    )
++    assert accepted.goal is not None
++    assert any(
++        item.criterion_id.startswith("criterion:required-local-process:")
++        for item in accepted.goal.proposed_criteria
++    ), "admission must mint the runtime-owned process obligation"
++
++    correction = ConversationFact(
++        fact_id="fact:user:2",
++        kind=FactKind.USER_MESSAGE,
++        content={
++            "text": "不要运行测试，只修改 app.py，其他要求不变。",
++            "control": "goal_correction",
++        },
++    )
++    corrected = accept_goal_delta_proposal(
++        replace(accepted, facts=(*accepted.facts, correction)),
++        GoalDeltaProposal(
++            correlation_id="delta:withdrawal-e2e",
++            delta=GoalDelta(
++                goal_id=accepted.goal.goal_id,
++                expected_revision=accepted.goal.revision,
++                reason="apply the user's explicit prohibition",
++                updates={"assumptions": ["tests must not run"]},
++            ),
++        ),
++    )
++    assert corrected.goal is not None
++    goal = replace(
++        corrected.goal,
++        admitted_criteria=(
++            AdmittedCriterion(
++                criterion_id="criterion:app",
++                description="app.py contains the requested fix",
++                source_fact_id=source.fact_id,
++                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
++                predicate={"path": "app.py", "sha256": digest},
++                required_evidence_class="workspace_file",
++                admission_digest="b" * 64,
++            ),
++        ),
++    )
++    evidence_id = closed_evidence_id(goal.goal_id, goal.revision, "criterion:app")
++    state = replace(
++        corrected,
++        goal=goal,
++        facts=(
++            *corrected.facts,
++            ConversationFact(
++                fact_id="fact:calls:1",
++                kind=FactKind.TOOL_CALLS,
++                content={
++                    "calls": [
++                        {
++                            "tool_call_id": "read-app",
++                            "name": "read_file",
++                            "arguments": {"path": "app.py"},
++                        }
++                    ]
++                },
++            ),
++            ConversationFact(
++                fact_id="fact:read-result:1",
++                kind=FactKind.TOOL_RESULT,
++                content={
++                    "tool_call_id": "read-app",
++                    "text": content,
++                    "is_error": False,
++                    "executed": True,
++                    "metadata": {},
++                },
++            ),
++        ),
++    )
++    claim = CompletionClaim(
++        correlation_id="claim:withdrawal-e2e",
++        goal_id=goal.goal_id,
++        goal_revision=goal.revision,
++        criterion_evidence_refs=(evidence_id,),
++        requirement_coverage=(
++            RequirementCoverage(
++                requirement_id="requirement:fix-app-without-tests",
++                requirement="修复 app.py，且不运行测试",
++                source_fact_ids=(source.fact_id, correction.fact_id),
++                status="satisfied",
++                criterion_ids=("criterion:app",),
++            ),
++        ),
++    )
++    records = ClosedEvidenceRegistry().derive(
++        state, claim, observed_at="2026-08-24T00:00:00Z"
++    )
++    state = record_evidence(state, records)
++    state = record_completion_claim(state, claim)
++
++    verified = verify_goal_completion(state)
++
++    assert verified.goal is not None
++    assert verified.goal.status is GoalStatus.VERIFIED_DONE
++
++
+ def test_blocked_claim_rejected_when_completion_evidence_is_derivable() -> None:
+     """016 真实 E3 第 96 轮 a2 J7 观测的 false-blocked 形状。
+ 
+@@ -343,7 +583,7 @@ def test_blocked_claim_rejected_when_completion_evidence_is_derivable() -> None:
+     runtime, store, action = _runtime(
+         _state(),
+         ModelResponse((), control=blocked),
+-        ModelResponse((), control=_claim()),
++        ModelResponse((), control=_claim(source_fact_ids=RUNTIME_SOURCE_FACT_IDS)),
+     )
+ 
+     result = runtime.run_turn(action, store.load())
+@@ -406,6 +646,7 @@ def test_blocked_claim_cannot_replace_available_final_read_back(tmp_path) -> Non
+         ModelResponse(
+             (ModelToolCall("read-final", "read_file", {"path": "reports/final.md"}),)
+         ),
++        ModelResponse((), control=_claim()),
+     )
+     runtime = AgentRuntime(
+         provider=provider,
+diff --git a/tests/kernel/fakes.py b/tests/kernel/fakes.py
+index 686c40a..64237ee 100644
+--- a/tests/kernel/fakes.py
++++ b/tests/kernel/fakes.py
+@@ -23,6 +23,7 @@ from agent.runtime.contracts import (
+     LoadedSnapshot,
+     ModelResponse,
+     ProposedCriterion,
++    RequirementCoverage,
+     RuntimeEvent,
+     canonical_json_digest,
+ )
+@@ -75,6 +76,36 @@ def bind_runtime_goal(response: ModelResponse, context: ContextPack) -> ModelRes
+             if isinstance(control, CompletionClaim) and trusted is not None
+             else None
+         )
++        # R2：coverage 的 source_fact_ids / mandatory ids 同样是 Runtime 铸造、
++        # 投影下发的闭合值（含动态 action:N:user）；sentinel 占位时一并绑定。
++        coverage = None
++        if (
++            isinstance(control, CompletionClaim)
++            and not control.requirement_coverage
++            and trusted is not None
++        ):
++            source_fact_ids = trusted.get("source_fact_ids")
++            mandatory_ids = tuple(
++                item.get("criterion_id")
++                for item in trusted.get("admitted_criteria", ())
++                if isinstance(item, dict)
++                and item.get("mandatory") is True
++                and isinstance(item.get("criterion_id"), str)
++            )
++            if (
++                isinstance(source_fact_ids, list)
++                and source_fact_ids
++                and mandatory_ids
++            ):
++                coverage = (
++                    RequirementCoverage(
++                        requirement_id="requirement:trusted-goal",
++                        requirement="the current trusted goal is fully satisfied",
++                        source_fact_ids=tuple(source_fact_ids),
++                        status="satisfied",
++                        criterion_ids=mandatory_ids,
++                    ),
++                )
+         return replace(
+             response,
+             control=replace(
+@@ -87,6 +118,11 @@ def bind_runtime_goal(response: ModelResponse, context: ContextPack) -> ModelRes
+                     and all(isinstance(item, str) for item in evidence_refs)
+                     else {}
+                 ),
++                **(
++                    {"requirement_coverage": coverage}
++                    if coverage is not None
++                    else {}
++                ),
+             ),
+         )
+     if (
+@@ -166,6 +202,58 @@ def goal_noop_response(
+     return response
+ 
+ 
++def completion_claim_from_trusted(
++    correlation_id: str,
++    *,
++    requirement_id: str = "requirement:trusted-goal",
++    requirement: str = "the current trusted goal is fully satisfied",
++) -> Callable[[ContextPack], ModelResponse]:
++    """按 trusted_goal 投影抄写 completion_claim（含 R2 requirement_coverage）。
++
++    真实模型只能引用投影下发的闭合 id（source_fact_ids、
++    expected_completion_evidence_refs）与 admitted criterion id；本 helper 与
++    ``bind_runtime_goal`` 同型，让 scripted 测试不硬编码动态铸造的
++    ``action:N:user`` fact id。
++    """
++
++    def response(context: ContextPack) -> ModelResponse:
++        trusted = _trusted_goal_projection(context)
++        if trusted is None:
++            raise AssertionError("trusted_goal is required for a completion claim")
++        source_fact_ids = trusted.get("source_fact_ids")
++        criterion_ids = tuple(
++            item.get("criterion_id")
++            for item in trusted.get("admitted_criteria", ())
++            if isinstance(item, dict)
++            and item.get("mandatory") is True
++            and isinstance(item.get("criterion_id"), str)
++        )
++        if not isinstance(source_fact_ids, list) or not source_fact_ids:
++            raise AssertionError("trusted_goal source_fact_ids are required")
++        if not criterion_ids:
++            raise AssertionError("trusted_goal mandatory criteria are required")
++        return ModelResponse(
++            (),
++            control=CompletionClaim(
++                correlation_id=correlation_id,
++                goal_id=RUNTIME_GOAL_ID,
++                goal_revision=1,
++                criterion_evidence_refs=(),
++                requirement_coverage=(
++                    RequirementCoverage(
++                        requirement_id=requirement_id,
++                        requirement=requirement,
++                        source_fact_ids=tuple(source_fact_ids),
++                        status="satisfied",
++                        criterion_ids=criterion_ids,
++                    ),
++                ),
++            ),
++        )
++
++    return response
++
++
+ def conversation_with_active_goal(conversation_id: str = "conversation-1") -> ConversationState:
+     """U3 之后 effectful 工具必须在 durable Goal 存在后才能到达 prepare。
+ 
+diff --git a/tests/kernel/test_effect_ordering.py b/tests/kernel/test_effect_ordering.py
+index 46138f7..0d8b566 100644
+--- a/tests/kernel/test_effect_ordering.py
++++ b/tests/kernel/test_effect_ordering.py
+@@ -6,8 +6,14 @@ from pathlib import Path
+ from agent.runtime.context import ContextLimits, KernelContextManager
+ from agent.runtime.contracts import (
+     ActiveRun,
++    ActiveRunStatus,
+     ApprovalPolicy,
++    ApprovalRequest,
++    CancelRun,
++    ContinuationPhase,
++    ConversationFact,
+     ConversationState,
++    EgressClass,
+     ExecuteOperatorTool,
+     ExecutionAuthorityClass,
+     FactKind,
+@@ -21,11 +27,20 @@ from agent.runtime.contracts import (
+     RunStatus,
+     SideEffectClass,
+     SubmitMessage,
++    ToolCall,
+     ToolExposure,
+     ToolRisk,
+     ToolSpec,
+ )
+ from agent.runtime.loop import AgentRuntime, InvocationLimits
++from agent.runtime.state import (
++    complete_run,
++    end_run,
++    mark_executing,
++    pause_for_approval,
++    record_tool_result,
++    start_tool_batch,
++)
+ from agent.runtime.tools import KernelToolRuntime, RegisteredTool
+ from agent.tools.file_ops import build_file_tool_runtime
+ from tests.kernel.fakes import (
+@@ -358,6 +373,345 @@ def test_operator_tool_uses_same_approval_executing_result_order() -> None:
+     assert "private result" not in repr(events.events)
+ 
+ 
++class _SemanticWriteFailure(InMemoryCheckpointStore):
++    """按保存状态语义注入写失败，不绑定固定调用序号。
++
++    R1 合同：效果已执行后 result 保存失败、且随后 recovery 保存也失败时，
++    不能把 run 清成"确定未执行"。注入点按 attempted state 的语义判定
++    （EXECUTING 相 + 携带 tool_result fact / AWAITING_RECOVERY 相），
++    与真实 LocalCheckpointStore 在 replace 前失败、旧快照仍有效的语义一致。
++    ``recovery_failures`` 控制 result 保存失败后再失败几次 recovery 保存；
++    ``permanent=True`` 表示之后所有保存持续失败。
++    """
++
++    def __init__(self, state, *, recovery_failures: int = 2, permanent: bool = False):
++        super().__init__(state)
++        self.recovery_failures = recovery_failures
++        self.permanent = permanent
++        self.result_save_failed = False
++        self.recovery_failures_done = 0
++        self.attempted_clears = 0
++        self.failures: list[str] = []
++
++    def compare_and_swap(self, snapshot, new_state):
++        prior = len(self.state.facts)
++        new_kinds = [fact.kind for fact in new_state.facts[prior:]]
++        old_active = snapshot.state.active_run
++        new_active = new_state.active_run
++        if (
++            old_active is not None
++            and new_active is None
++            and old_active.phase is ContinuationPhase.EXECUTING
++        ):
++            self.attempted_clears += 1
++        is_result_save = (
++            old_active is not None
++            and old_active.phase is ContinuationPhase.EXECUTING
++            and FactKind.TOOL_RESULT in new_kinds
++        )
++        is_recovery_save = (
++            new_active is not None
++            and new_active.status is ActiveRunStatus.AWAITING_RECOVERY
++        )
++        should_fail = False
++        if is_result_save and not self.result_save_failed:
++            self.result_save_failed = True
++            self.failures.append("result")
++            should_fail = True
++        elif self.result_save_failed:
++            if self.permanent:
++                self.failures.append("permanent")
++                should_fail = True
++            elif is_recovery_save and (
++                self.recovery_failures_done < self.recovery_failures
++            ):
++                self.recovery_failures_done += 1
++                self.failures.append("recovery")
++                should_fail = True
++        if should_fail:
++            raise RuntimeError("injected pre-commit write failure")
++        return super().compare_and_swap(snapshot, new_state)
++
++
++def test_unknown_effect_survives_result_and_recovery_save_failures() -> None:
++    """R1-T1：效果执行后 result/recovery 连续保存失败，UNKNOWN 必须留存。
++
++    存储恢复（后续保存重新成功）后：durable intent 仍在；Resume 进入既有
++    recovery 分类流程；不生成"未执行"事实；不再调用 provider/tool。
++    """
++
++    calls: list[str] = []
++
++    def effect(intent) -> str:
++        calls.append("effect")
++        return "done"
++
++    store = _SemanticWriteFailure(
++        conversation_with_active_goal(), recovery_failures=2
++    )
++    provider = ScriptedProvider(
++        goal_noop_response("r1-t1-supplement"),
++        ModelResponse((ModelToolCall("call-1", "write_fixture", {}),)),
++        ModelResponse((ModelTextBlock("must not run without classification"),)),
++    )
++    runtime = _runtime(store, provider, effect)
++
++    result = runtime.run_turn(_action(store.state), store.load())
++
++    assert calls == ["effect"], "the effect must have run exactly once"
++    durable = store.load().state
++    active = durable.active_run
++    assert active is not None, (
++        "UNKNOWN must stay durable: the active run cannot be cleared after a "
++        "tool effect whose result and recovery checkpoints both failed to save"
++    )
++    assert store.attempted_clears == 0, (
++        "no CAS may even attempt to clear the EXECUTING run while the effect "
++        "outcome is unclassified"
++    )
++    intent = active.executing_intent
++    assert intent is not None
++    assert intent.tool_call_id == "call-1"
++    assert active.phase is ContinuationPhase.EXECUTING
++    assert active.batch_cursor == 0
++    assert active.tool_calls[0].tool_call_id == "call-1"
++    assert result.status is not RunStatus.FAILED_FATAL or active is not None
++    assert not any(
++        fact.kind is FactKind.TOOL_RESULT
++        and fact.content.get("tool_call_id") == "call-1"
++        for fact in durable.facts
++    ), "no fabricated executed/not-executed result may be recorded"
++
++    # 存储恢复后 Resume 进入既有 recovery 分类流程，不重放效果。
++    resumed = runtime.run_turn(
++        Resume(
++            conversation_id=durable.conversation_id,
++            action_seq=durable.next_action_seq,
++            expected_revision=durable.revision,
++        ),
++        store.load(),
++    )
++    assert resumed.status is RunStatus.AWAITING_RECOVERY
++    assert calls == ["effect"]
++    assert len(provider.calls) == 2, "no extra provider call may happen on resume"
++    recovered = store.load().state
++    assert recovered.active_run is not None
++    assert recovered.active_run.status is ActiveRunStatus.AWAITING_RECOVERY
++    assert recovered.active_run.pending_request is not None
++
++
++def test_all_followup_saves_failing_reports_persistence_failure_honestly() -> None:
++    """R1-T2：所有后续保存继续失败时，durable EXECUTING 保留且如实报错。"""
++
++    calls: list[str] = []
++
++    def effect(intent) -> str:
++        calls.append("effect")
++        return "done"
++
++    store = _SemanticWriteFailure(
++        conversation_with_active_goal(), permanent=True
++    )
++    provider = ScriptedProvider(
++        goal_noop_response("r1-t2-supplement"),
++        ModelResponse((ModelToolCall("call-1", "write_fixture", {}),)),
++    )
++    runtime = _runtime(store, provider, effect)
++
++    result = runtime.run_turn(_action(store.state), store.load())
++
++    assert calls == ["effect"]
++    durable = store.load().state
++    active = durable.active_run
++    assert active is not None
++    assert active.phase is ContinuationPhase.EXECUTING
++    assert active.executing_intent is not None
++    assert active.executing_intent.tool_call_id == "call-1"
++    assert result.status is RunStatus.FAILED_FATAL
++    assert result.error_code == "recovery_persistence_failed"
++    assert store.attempted_clears == 0, (
++        "no attempt to clear the EXECUTING run may happen while every "
++        "follow-up save keeps failing"
++    )
++    assert any(
++        "persistence" in warning or "failed" in warning
++        for warning in result.delivery_warnings
++    ), "persistence failure must be reported, not silently swallowed"
++    assert not any(
++        fact.kind is FactKind.TOOL_RESULT for fact in durable.facts
++    )
++
++
++def test_cancel_run_closes_unstarted_suffix_in_same_transition() -> None:
++    """R1-T4：多调用批次第一项成功、第二项待批准时 CancelRun 分流。
++
++    已执行 prefix 结果保持原值；cursor 之后（含待批准项）确定未开始，
++    与清空 run 落在同一 CAS，不产生重复调用/结果。
++    """
++
++    seed = conversation_with_active_goal()
++    state = replace(seed, active_run=ActiveRun(run_id="run-batch"))
++    state = start_tool_batch(
++        state,
++        (
++            ToolCall("call-1", "write_fixture", {}),
++            ToolCall("call-2", "write_fixture", {}),
++        ),
++    )
++    state = mark_executing(
++        state,
++        tool_call_id="call-1",
++        intent_digest="digest-1",
++        idempotency_key="key-1",
++        side_effect=SideEffectClass.WRITE,
++        egress=EgressClass.NONE,
++        operation="write_fixture",
++        request_identity="identity-1",
++        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
++    )
++    state = record_tool_result(
++        state,
++        ConversationFact(
++            fact_id="run:run-batch:tool-result:call-1:0",
++            kind=FactKind.TOOL_RESULT,
++            content={
++                "tool_call_id": "call-1",
++                "text": "ok",
++                "is_error": False,
++                "executed": True,
++            },
++        ),
++        intent_digest="digest-1",
++    )
++    state = pause_for_approval(
++        state,
++        ApprovalRequest(
++            request_id="approval-2",
++            run_id="run-batch",
++            tool_call_id="call-2",
++            binding_digest="binding-2",
++            preview="write fixture",
++            tool_name="write_fixture",
++        ),
++    )
++    store = InMemoryCheckpointStore(state)
++    runtime = AgentRuntime(
++        provider=ScriptedProvider(),
++        context_manager=KernelContextManager(
++            system_policy="policy",
++            limits=ContextLimits(max_input_tokens=8_000, output_reserve=100),
++        ),
++        tool_runtime=KernelToolRuntime(()),
++        checkpoint_store=store,
++        event_sink=CollectingSink(),
++        limits=InvocationLimits(),
++        invocation_id_factory=lambda: "invocation-1",
++    )
++
++    cancelled = runtime.run_turn(
++        CancelRun(
++            conversation_id="conversation-1",
++            action_seq=state.next_action_seq,
++            expected_revision=state.revision,
++        ),
++        store.load(),
++    )
++
++    assert cancelled.status is RunStatus.CANCELLED
++    durable = store.load().state
++    assert durable.active_run is None
++    results = {
++        fact.content["tool_call_id"]: fact.content
++        for fact in durable.facts
++        if fact.kind is FactKind.TOOL_RESULT
++    }
++    assert results["call-1"]["executed"] is True
++    assert results["call-2"]["executed"] is False
++    assert results["call-2"]["superseded"] is True
++
++
++def test_capacity_end_run_closes_unstarted_tail_in_same_cas() -> None:
++    """R1-T5：end_run/complete_run 在仍有未执行 tail 时结束，同一 CAS 先闭合。
++
++    TOOL 相（含 AWAITING_APPROVAL）的 cursor 指向尚未 prepare/执行的首个
++    call；终态转换必须把 calls[cursor:] 补记为确定非执行，并与清空 run 落在
++    同一转换里。complete_run 追加的 assistant fact 位于闭合结果之后。
++    """
++
++    seed = conversation_with_active_goal()
++    state = replace(seed, active_run=ActiveRun(run_id="run-batch"))
++    state = start_tool_batch(
++        state,
++        (
++            ToolCall("call-1", "write_fixture", {}),
++            ToolCall("call-2", "write_fixture", {}),
++        ),
++    )
++    state = mark_executing(
++        state,
++        tool_call_id="call-1",
++        intent_digest="digest-1",
++        idempotency_key="key-1",
++        side_effect=SideEffectClass.WRITE,
++        egress=EgressClass.NONE,
++        operation="write_fixture",
++        request_identity="identity-1",
++        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
++    )
++    state = record_tool_result(
++        state,
++        ConversationFact(
++            fact_id="run:run-batch:tool-result:call-1:0",
++            kind=FactKind.TOOL_RESULT,
++            content={
++                "tool_call_id": "call-1",
++                "text": "ok",
++                "is_error": False,
++                "executed": True,
++            },
++        ),
++        intent_digest="digest-1",
++    )
++
++    ended = end_run(
++        state,
++        status=RunStatus.CONVERSATION_LIMIT_REACHED,
++        code="conversation_capacity",
++        message="Conversation state has no safe capacity for another effect.",
++    )
++
++    assert ended.active_run is None
++    results = {
++        fact.content["tool_call_id"]: fact.content
++        for fact in ended.facts
++        if fact.kind is FactKind.TOOL_RESULT
++    }
++    assert results["call-1"]["executed"] is True
++    assert results["call-2"]["executed"] is False
++    assert results["call-2"]["superseded"] is True
++
++    completed = complete_run(state, message="run completed")
++
++    assert completed.active_run is None
++    results = {
++        fact.content["tool_call_id"]: fact.content
++        for fact in completed.facts
++        if fact.kind is FactKind.TOOL_RESULT
++    }
++    assert results["call-1"]["executed"] is True
++    assert results["call-2"]["executed"] is False
++    assert results["call-2"]["superseded"] is True
++    kinds = [fact.kind for fact in completed.facts]
++    assert kinds[-1] is FactKind.ASSISTANT_MESSAGE
++    closed_position = next(
++        index
++        for index, fact in enumerate(completed.facts)
++        if fact.kind is FactKind.TOOL_RESULT
++        and fact.content["tool_call_id"] == "call-2"
++    )
++    assert closed_position == len(completed.facts) - 2
++
++
+ def test_terminal_and_replay_result_commit_atomically() -> None:
+     store = InMemoryCheckpointStore(ConversationState.new("conversation-1"))
+     # durable model-attempt checkpoint 使 terminal commit 后移一次保存。
+diff --git a/tests/kernel/test_runtime_approval.py b/tests/kernel/test_runtime_approval.py
+index 5943d0b..f4e95be 100644
+--- a/tests/kernel/test_runtime_approval.py
++++ b/tests/kernel/test_runtime_approval.py
+@@ -549,9 +549,20 @@ def test_declining_one_item_stops_the_rest_of_its_batch_and_keeps_prior_results(
+         and fact.content.get("rejected") is True
+         for fact in declined.state.facts
+     )
++    # R1-T4：拒绝是丢 run 的安全转换，cursor 之后确定未开始的 suffix
++    # （call-3）与清空 run 落在同一 CAS 补记为非执行，不再是留待后续
++    # 动作自愈的孤儿；已执行 prefix（call-1）保持原值。
++    assert any(
++        fact.kind.value == "tool_result"
++        and fact.content.get("tool_call_id") == "call-3"
++        and fact.content.get("executed") is False
++        and fact.content.get("superseded") is True
++        for fact in declined.state.facts
++    )
+     assert not any(
+         fact.kind.value == "tool_result"
+         and fact.content.get("tool_call_id") == "call-3"
++        and fact.content.get("executed") is True
+         for fact in declined.state.facts
+     )
+ 
+diff --git a/tests/kernel/test_runtime_compaction.py b/tests/kernel/test_runtime_compaction.py
+index 1e7bdce..809d5a6 100644
+--- a/tests/kernel/test_runtime_compaction.py
++++ b/tests/kernel/test_runtime_compaction.py
+@@ -24,6 +24,7 @@ from pathlib import Path
+ import pytest
+ 
+ from agent.continuity.archive import ArchiveError
++from agent.runtime.compaction_rules import parse_compaction_turns
+ from agent.runtime.context import ContextLimitError, ContextLimits, KernelContextManager
+ from agent.runtime.contracts import (
+     Action,
+@@ -50,6 +51,7 @@ from agent.runtime.contracts import (
+     ModelTextBlock,
+     PauseGoal,
+     ProviderDescriptor,
++    RecordedRunResult,
+     ResumeGoal,
+     RunStatus,
+     RuntimeEventKind,
+@@ -65,7 +67,12 @@ from agent.runtime.ports import (
+     CheckpointUsage,
+     RetryableProviderError,
+ )
+-from agent.runtime.state import accept_action, pause_for_approval, start_tool_batch
++from agent.runtime.state import (
++    accept_action,
++    finalize_action,
++    pause_for_approval,
++    start_tool_batch,
++)
+ from agent.runtime.tools import KernelToolRuntime
+ from tests.kernel.fakes import (
+     CollectingSink,
+@@ -821,15 +828,13 @@ def test_plan_compaction_maps_ineligible_history_to_no_candidate() -> None:
+ 
+ 
+ def test_pause_at_approval_boundary_keeps_next_run_usable() -> None:
+-    """审批边界 /pause 丢弃 run 后，下一轮必须闭合遗留批次并正常运行。
++    """审批边界 /pause 丢弃 run 时，R1 在丢 run 的同一 CAS 闭合未开始 suffix。
+ 
+     形状复刻真实旅程 state-root7：MODEL 批次已入账、审批 pending 时被
+-    /pause 丢弃 active_run（批次只剩 calls 没有 results）→ /resume →
+-    推进输入。修复前新 run 在 MODEL 相 plan_compaction 解析时抛
+-    ``ValueError: tool batch and its results cannot be split`` →
+-    runtime_failure，会话每次重试同败。修复：接受新动作前为不属于当前
+-    live run 的未完结批次补记 durable 非执行结果；历史退化为合法
+-    ineligible → NO_CANDIDATE 降级，run 照常推进且零压缩副作用。
++    /pause 丢弃 active_run。V1 修复轮曾把闭合推迟到下一个动作；R1 收紧为
++    "确定尚未开始的当前 batch suffix 在仍持有 active phase/cursor 的安全
++    转换中闭合"：pause 自身补记 durable 非执行结果（cursor 指向未批准的
++    call，必未开始），/resume 不再需要代答，推进照常且零压缩副作用。
+     """
+ 
+     calls: list[str] = []
+@@ -886,7 +891,7 @@ def test_pause_at_approval_boundary_keeps_next_run_usable() -> None:
+         conversation_archive=archive,
+     )
+ 
+-    # /pause：丢弃 active run 的安全边界；live 批次不由 pause 闭合。
++    # /pause：丢 run 的同一转换闭合未开始 suffix（R1：不再留孤儿）。
+     paused = runtime.run_turn(
+         PauseGoal(
+             conversation_id="conversation-1",
+@@ -902,11 +907,16 @@ def test_pause_at_approval_boundary_keeps_next_run_usable() -> None:
+     assert paused.state.active_run is None
+     assert paused.state.goal is not None
+     assert paused.state.goal.status is GoalStatus.PAUSED
+-    assert not any(
+-        fact.content.get("superseded") is True for fact in paused.state.facts
+-    )
++    closed_at_pause = [
++        fact
++        for fact in paused.state.facts
++        if fact.content.get("superseded") is True
++    ]
++    assert len(closed_at_pause) == 1
++    assert closed_at_pause[0].content["tool_call_id"] == "call-orphan"
++    assert closed_at_pause[0].content["executed"] is False
+ 
+-    # /resume：接受新动作前闭合孤儿批次（插入在批次之后）。
++    # /resume：批次已在 pause 处闭合，不再产生新的代答结果。
+     resumed = runtime.run_turn(
+         ResumeGoal(
+             conversation_id="conversation-1",
+@@ -953,7 +963,7 @@ def test_pause_at_approval_boundary_keeps_next_run_usable() -> None:
+     assert "archive" not in calls
+     assert store.reduction_cas_calls == 0
+     assert context_manager.build_compaction_calls == 0
+-    # 孤儿批次已就地闭合，新 user fact 与后续收尾照常追加。
++    # 批次已在 pause 处就地闭合，新 user fact 与后续收尾照常追加。
+     assert tuple(fact.kind for fact in store.state.facts) == (
+         FactKind.USER_MESSAGE,
+         FactKind.TOOL_CALLS,
+@@ -964,54 +974,59 @@ def test_pause_at_approval_boundary_keeps_next_run_usable() -> None:
+     )
+ 
+ 
+-def test_accept_action_closes_orphaned_batch_in_place_before_trailing_user_fact() -> None:
+-    """孤儿批次缺失结果插入在批次已有结果之后，而不是 facts 尾部。
++def test_accept_action_closes_rejection_prefix_orphan_in_place() -> None:
++    """可核实的旧孤儿（拒绝前缀）就地补尾部；不可证形状严格拒绝。
+ 
+-    ws7 真实形状：批次之后已存在新的 user fact；尾部追加不闭合批次，
+-    解析仍抛 split ValueError。修复必须就地插入。
++    R1 收窄历史自愈：唯一可核实的旧形状是"同批完整连续 prefix、最后一个为
++    Runtime 拒绝审批结果、缺失项全在其后"。ws7 真实形状里批次之后已存在新的
++    user fact，尾部追加不闭合批次，必须就地插入。已执行 prefix（无拒绝标记）
++    不能证明 suffix 未执行，保持未确定并以冲突拒绝。
+     """
+ 
+-    state = ConversationState(
+-        conversation_id="conversation-1",
+-        revision=10,
+-        next_action_seq=8,
+-        replay_floor=1,
+-        facts=(
+-            ConversationFact(
+-                fact_id="action:1:user",
+-                kind=FactKind.USER_MESSAGE,
+-                content={"text": "first"},
+-            ),
+-            ConversationFact(
+-                fact_id="run:run-orphan:tool-batch:10",
+-                kind=FactKind.TOOL_CALLS,
+-                content={
+-                    "calls": [
+-                        {"tool_call_id": "call-1", "name": "write_file", "arguments": {}},
+-                        {"tool_call_id": "call-2", "name": "write_file", "arguments": {}},
+-                    ]
+-                },
+-            ),
+-            ConversationFact(
+-                fact_id="run:run-orphan:tool-result:call-1:12",
+-                kind=FactKind.TOOL_RESULT,
+-                content={
+-                    "tool_call_id": "call-1",
+-                    "text": "ok",
+-                    "is_error": False,
+-                    "executed": True,
+-                },
+-            ),
+-            ConversationFact(
+-                fact_id="action:7:user",
+-                kind=FactKind.USER_MESSAGE,
+-                content={"text": "继续当前任务", "control": "goal_correction"},
++    def _orphan_state(prefix_result: ConversationFact) -> ConversationState:
++        return ConversationState(
++            conversation_id="conversation-1",
++            revision=10,
++            next_action_seq=8,
++            replay_floor=1,
++            facts=(
++                ConversationFact(
++                    fact_id="action:1:user",
++                    kind=FactKind.USER_MESSAGE,
++                    content={"text": "first"},
++                ),
++                ConversationFact(
++                    fact_id="run:run-orphan:tool-batch:10",
++                    kind=FactKind.TOOL_CALLS,
++                    content={
++                        "calls": [
++                            {"tool_call_id": "call-1", "name": "write_file", "arguments": {}},
++                            {"tool_call_id": "call-2", "name": "write_file", "arguments": {}},
++                        ]
++                    },
++                ),
++                prefix_result,
++                ConversationFact(
++                    fact_id="action:7:user",
++                    kind=FactKind.USER_MESSAGE,
++                    content={"text": "继续当前任务", "control": "goal_correction"},
++                ),
+             ),
+-        ),
+-    )
++        )
+ 
++    rejected_prefix = ConversationFact(
++        fact_id="run:run-orphan:tool-result:call-1:12",
++        kind=FactKind.TOOL_RESULT,
++        content={
++            "tool_call_id": "call-1",
++            "text": "User rejected the requested tool action.",
++            "is_error": True,
++            "executed": False,
++            "rejected": True,
++        },
++    )
+     transition = accept_action(
+-        state,
++        _orphan_state(rejected_prefix),
+         SubmitMessage(
+             conversation_id="conversation-1",
+             action_seq=8,
+@@ -1036,6 +1051,303 @@ def test_accept_action_closes_orphaned_batch_in_place_before_trailing_user_fact(
+     )
+     assert fact_ids.index("action:7:user") == fact_ids.index(healed[0].fact_id) + 1
+ 
++    # 已执行 prefix（无拒绝标记）不能证明 call-2 未执行：严格拒绝，零伪造。
++    executed_prefix = ConversationFact(
++        fact_id="run:run-orphan:tool-result:call-1:12",
++        kind=FactKind.TOOL_RESULT,
++        content={
++            "tool_call_id": "call-1",
++            "text": "ok",
++            "is_error": False,
++            "executed": True,
++        },
++    )
++    orphan = _orphan_state(executed_prefix)
++    refused = accept_action(
++        orphan,
++        SubmitMessage(
++            conversation_id="conversation-1",
++            action_seq=8,
++            expected_revision=10,
++            run_id="run-resumed",
++            message="继续当前任务",
++        ),
++    )
++
++    assert refused.disposition is ActionDisposition.CONFLICT
++    assert refused.reason == "unprovable_tool_batch_outcome"
++    assert refused.state.facts == orphan.facts
++    assert not any(
++        fact.content.get("superseded") is True for fact in refused.state.facts
++    )
++
++
++def test_legacy_orphan_matrix_rejects_unprovable_and_heals_only_evidenced() -> None:
++    """R1-T7：旧孤儿矩阵——fatal/完成文字/复用 run_id/旧 superseded 都不证明非执行。
++
++    前组形状（`last_safe_result` 存在、fatal 文字、复用 run_id、上一批
++    superseded 文案、缺 prefix、已执行 prefix）一律不得伪造成"未执行"且零
++    继续（CONFLICT、facts 原样、无 provider/tool）。对照组：同批完整连续
++    prefix + 末结果为 Runtime 拒绝审批结果，才允许补尾部。
++    """
++
++    def _base_facts() -> tuple[ConversationFact, ...]:
++        return (
++            ConversationFact(
++                fact_id="action:1:user",
++                kind=FactKind.USER_MESSAGE,
++                content={"text": "first"},
++            ),
++            ConversationFact(
++                fact_id="run:run-legacy:tool-batch:10",
++                kind=FactKind.TOOL_CALLS,
++                content={
++                    "calls": [
++                        {"tool_call_id": "call-1", "name": "write_file", "arguments": {}},
++                        {"tool_call_id": "call-2", "name": "write_file", "arguments": {}},
++                    ]
++                },
++            ),
++        )
++
++    def _orphan_state(
++        *,
++        extra_facts: tuple[ConversationFact, ...] = (),
++        last_safe_result: RecordedRunResult | None = None,
++    ) -> ConversationState:
++        return ConversationState(
++            conversation_id="conversation-1",
++            revision=10,
++            next_action_seq=8,
++            replay_floor=1,
++            facts=(*_base_facts(), *extra_facts),
++            last_safe_result=last_safe_result,
++        )
++
++    action = SubmitMessage(
++        conversation_id="conversation-1",
++        action_seq=8,
++        expected_revision=10,
++        run_id="run-legacy",
++        message="继续当前任务",
++    )
++
++    # 前组 1：last_safe_result 声称 run-orphan 在安全边界完成——旧缺陷据此
++    # 把缺结果调用补成 executed=False；R1 后不构成 per-call 证据。
++    claimed_safe = _orphan_state(
++        last_safe_result=RecordedRunResult(
++            status=RunStatus.COMPLETED,
++            run_id="run-legacy",
++            message="goal paused at a safe boundary",
++        )
++    )
++    refused = accept_action(claimed_safe, action)
++    assert refused.disposition is ActionDisposition.CONFLICT
++    assert refused.reason == "unprovable_tool_batch_outcome"
++    assert refused.state.facts == claimed_safe.facts
++
++    # 前组 2：fatal/完成文字出现在批次后（旧实现把文字当作线索）。
++    fatal_tail = ConversationFact(
++        fact_id="action:7:policy",
++        kind=FactKind.POLICY_RESULT,
++        content={"code": "runtime_failure", "message": "fatal: run cleared"},
++    )
++    refused = accept_action(_orphan_state(extra_facts=(fatal_tail,)), action)
++    assert refused.disposition is ActionDisposition.CONFLICT
++    assert refused.reason == "unprovable_tool_batch_outcome"
++
++    # 前组 3：上一批 superseded 文案存在（跨批借证明被拒）。
++    prior_superseded = ConversationFact(
++        fact_id="action:6:prior",
++        kind=FactKind.TOOL_RESULT,
++        content={
++            "tool_call_id": "call-prior",
++            "text": "not executed; superseded",
++            "is_error": True,
++            "executed": False,
++            "superseded": True,
++        },
++    )
++    refused = accept_action(_orphan_state(extra_facts=(prior_superseded,)), action)
++    assert refused.disposition is ActionDisposition.CONFLICT
++    assert refused.reason == "unprovable_tool_batch_outcome"
++
++    # 前组 4：缺 prefix（直接缺 call-1、只有 call-2 结果）——prefix 不完整。
++    partial = ConversationFact(
++        fact_id="run:run-legacy:tool-result:call-2:11",
++        kind=FactKind.TOOL_RESULT,
++        content={
++            "tool_call_id": "call-2",
++            "text": "User rejected the requested tool action.",
++            "is_error": True,
++            "executed": False,
++            "rejected": True,
++        },
++    )
++    refused = accept_action(_orphan_state(extra_facts=(partial,)), action)
++    assert refused.disposition is ActionDisposition.CONFLICT
++    assert refused.reason == "unprovable_tool_batch_outcome"
++
++    # 对照组：完整连续 prefix（call-1 拒绝结果）→ 允许补 call-2 尾部。
++    rejection = ConversationFact(
++        fact_id="run:run-legacy:tool-result:call-1:11",
++        kind=FactKind.TOOL_RESULT,
++        content={
++            "tool_call_id": "call-1",
++            "text": "User rejected the requested tool action.",
++            "is_error": True,
++            "executed": False,
++            "rejected": True,
++        },
++    )
++    healed = accept_action(_orphan_state(extra_facts=(rejection,)), action)
++    assert healed.disposition is ActionDisposition.ACCEPTED
++    closed = [
++        fact for fact in healed.state.facts if fact.content.get("superseded") is True
++    ]
++    assert len(closed) == 1
++    assert closed[0].content["tool_call_id"] == "call-2"
++    assert closed[0].content["executed"] is False
++
++
++def test_legacy_orphan_matrix_multi_batch_and_malformed_fail_closed() -> None:
++    """R1-T8：多批次、跨批同 call_id、重复/畸形结果——不跨批借证明，fail closed。"""
++
++    def _batch(run: str, calls: tuple[str, ...]) -> ConversationFact:
++        return ConversationFact(
++            fact_id=f"run:{run}:tool-batch:10",
++            kind=FactKind.TOOL_CALLS,
++            content={
++                "calls": [
++                    {"tool_call_id": call_id, "name": "write_file", "arguments": {}}
++                    for call_id in calls
++                ]
++            },
++        )
++
++    def _result(
++        fact_id: str, call_id: str, *, rejected: bool = False
++    ) -> ConversationFact:
++        return ConversationFact(
++            fact_id=fact_id,
++            kind=FactKind.TOOL_RESULT,
++            content={
++                "tool_call_id": call_id,
++                "text": "rejected" if rejected else "ok",
++                "is_error": rejected,
++                "executed": False if rejected else True,
++                **({"rejected": True} if rejected else {}),
++            },
++        )
++
++    def _state(facts: tuple[ConversationFact, ...]) -> ConversationState:
++        return ConversationState(
++            conversation_id="conversation-1",
++            revision=10,
++            next_action_seq=8,
++            replay_floor=1,
++            facts=facts,
++        )
++
++    action = SubmitMessage(
++        conversation_id="conversation-1",
++        action_seq=8,
++        expected_revision=10,
++        run_id="run-legacy",
++        message="继续当前任务",
++    )
++
++    # 多批次：batch-A 有可核实拒绝 prefix（可补），batch-B 只有已执行
++    # prefix（不可证）→ 整体拒绝，且 batch-A 也不得被部分愈合。
++    multi = _state(
++        (
++            _batch("run-a", ("call-a1", "call-a2")),
++            _result("run:run-a:tool-result:call-a1:11", "call-a1", rejected=True),
++            _batch("run-b", ("call-b1", "call-b2")),
++            _result("run:run-b:tool-result:call-b1:12", "call-b1"),
++        )
++    )
++    refused = accept_action(multi, action)
++    assert refused.disposition is ActionDisposition.CONFLICT
++    assert refused.reason == "unprovable_tool_batch_outcome"
++    assert refused.state.facts == multi.facts
++    assert not any(
++        fact.content.get("superseded") is True for fact in refused.state.facts
++    )
++
++    # 跨批同 call_id：batch-B 的结果引用了 batch-A 的 call-a1（不属于本批）
++    # → 结果段被截断，prefix 无法核实，拒绝且零伪造。
++    cross = _state(
++        (
++            _batch("run-a", ("call-a1",)),
++            _result("run:run-a:tool-result:call-a1:11", "call-a1", rejected=True),
++            _batch("run-b", ("call-b1", "call-b2")),
++            _result("run:run-b:tool-result:call-a1:12", "call-a1"),
++        )
++    )
++    refused = accept_action(cross, action)
++    assert refused.disposition is ActionDisposition.CONFLICT
++    assert refused.reason == "unprovable_tool_batch_outcome"
++    assert refused.state.facts == cross.facts
++
++    # 重复结果：同一 call 结果出现两次 → 结果段在第二个处截断，拒绝。
++    duplicate = _state(
++        (
++            _batch("run-a", ("call-a1", "call-a2")),
++            _result("run:run-a:tool-result:call-a1:11", "call-a1", rejected=True),
++            _result("run:run-a:tool-result:call-a1:12", "call-a1", rejected=True),
++        )
++    )
++    refused = accept_action(duplicate, action)
++    assert refused.disposition is ActionDisposition.CONFLICT
++    assert refused.reason == "unprovable_tool_batch_outcome"
++
++    # 畸形批次（call 项非 dict）→ 不部分愈合、不代答；fail-closed 由 parser
++    # 在消费该历史时保持（compaction 规划直接拒绝），accept 不伪造非执行。
++    malformed_batch = ConversationFact(
++        fact_id="run:run-bad:tool-batch:10",
++        kind=FactKind.TOOL_CALLS,
++        content={"calls": ["call-a1"]},
++    )
++    malformed = _state((malformed_batch,))
++    transition = accept_action(malformed, action)
++    assert transition.disposition is ActionDisposition.ACCEPTED
++    assert not any(
++        fact.content.get("superseded") is True for fact in transition.state.facts
++    )
++    with pytest.raises(ValueError):
++        parse_compaction_turns(transition.state.facts)
++
++    # 重复 action/revision 冲突：可核实形状 heal 后仍走既有 replay/revision
++    # 保护——重复提交同一 action_seq 不再二次补记。
++    rejection = _result(
++        "run:run-a:tool-result:call-a1:11", "call-a1", rejected=True
++    )
++    healable = _state((_batch("run-a", ("call-a1", "call-a2")), rejection))
++    accepted = accept_action(healable, action)
++    assert accepted.disposition is ActionDisposition.ACCEPTED
++    first_closed = [
++        fact
++        for fact in accepted.state.facts
++        if fact.content.get("superseded") is True
++    ]
++    assert len(first_closed) == 1
++    in_progress = accept_action(accepted.state, action)
++    assert in_progress.disposition is ActionDisposition.CONFLICT
++    assert in_progress.reason == "action_in_progress"
++    assert in_progress.state.facts == accepted.state.facts
++    finalized = finalize_action(
++        accepted.state,
++        action_seq=action.action_seq,
++        result=RecordedRunResult(
++            status=RunStatus.COMPLETED,
++            run_id="run-legacy",
++        ),
++    )
++    replayed = accept_action(finalized, action)
++    assert replayed.disposition is ActionDisposition.REPLAYED
++    assert replayed.state.facts == finalized.facts
++
+ 
+ # --------------------------------------------------------------------------- #
+ # 提交顺序与 CAS/crash：archive 已 durable 后 CAS 才由 Runtime 执行
+diff --git a/tests/kernel/test_runtime_errors.py b/tests/kernel/test_runtime_errors.py
+index 2412653..df2301f 100644
+--- a/tests/kernel/test_runtime_errors.py
++++ b/tests/kernel/test_runtime_errors.py
+@@ -1516,8 +1516,26 @@ def test_resumed_batch_rebuilds_prefix_and_excludes_operator_results() -> None:
+         else:
+             assert completed.status is RunStatus.CANCELLED
+             assert completed.error_code == "approval_declined"
+-            assert expected_results == ["prefix-result", "approval-result"]
+-            assert store.state.facts[-1].content["rejected"] is True
++            # R1：拒绝是丢 run 的安全转换，cursor 之后确定未开始的 suffix
++            # 与清空 run 落在同一 CAS（既有 prefix 结果保持原值）。
++            assert expected_results == [
++                "prefix-result",
++                "approval-result",
++                "suffix-failure",
++            ]
++            rejected = next(
++                fact
++                for fact in store.state.facts
++                if fact.content.get("rejected") is True
++            )
++            assert rejected.content["tool_call_id"] == "approval-result"
++            suffix = next(
++                fact
++                for fact in store.state.facts
++                if fact.content.get("superseded") is True
++            )
++            assert suffix.content["tool_call_id"] == "suffix-failure"
++            assert suffix.content["executed"] is False
+         assert not any(
+             fact.content.get("code") == "no_progress_replan_required"
+             for fact in store.state.facts
+diff --git a/tests/kernel/test_tool_outcomes.py b/tests/kernel/test_tool_outcomes.py
+index 003d081..9a09492 100644
+--- a/tests/kernel/test_tool_outcomes.py
++++ b/tests/kernel/test_tool_outcomes.py
+@@ -38,6 +38,7 @@ from tests.kernel.fakes import (
+     CollectingSink,
+     InMemoryCheckpointStore,
+     ScriptedProvider,
++    completion_claim_from_trusted,
+     conversation_with_active_goal,
+     goal_noop_response,
+ )
+@@ -180,17 +181,7 @@ def test_approved_governed_tool_receipt_can_close_its_exact_goal_criterion() ->
+     provider = ScriptedProvider(
+         goal_noop_response("governed-receipt-user-supplement"),
+         ModelResponse((ModelToolCall("call-receipt", "mcp__fixture__remote", {}),)),
+-        ModelResponse(
+-            (),
+-            control=CompletionClaim(
+-                correlation_id="governed-receipt-completion",
+-                goal_id="goal-1",
+-                goal_revision=1,
+-                criterion_evidence_refs=(
+-                    closed_evidence_id("goal-1", 1, criterion_id),
+-                ),
+-            ),
+-        ),
++        completion_claim_from_trusted("governed-receipt-completion"),
+     )
+     store = InMemoryCheckpointStore(state)
+     spec = replace(
+@@ -202,7 +193,9 @@ def test_approved_governed_tool_receipt_can_close_its_exact_goal_criterion() ->
+         provider=provider,
+         context_manager=KernelContextManager(
+             system_policy="policy",
+-            limits=ContextLimits(max_input_tokens=2_000, output_reserve=200),
++            # R2 起 trusted_goal 投影含 source_fact_ids 且完成 schema 增加
++            # requirement_coverage 指引，2_000 token 预算会令 core 超限。
++            limits=ContextLimits(max_input_tokens=2_600, output_reserve=200),
+         ),
+         tool_runtime=KernelToolRuntime((RegisteredTool(spec, lambda intent: "HELIX-13"),)),
+         checkpoint_store=store,
+diff --git a/tests/kernel/test_validation_request_freshness.py b/tests/kernel/test_validation_request_freshness.py
+index 80c1817..c5de631 100644
+--- a/tests/kernel/test_validation_request_freshness.py
++++ b/tests/kernel/test_validation_request_freshness.py
+@@ -687,11 +687,27 @@ def test_unknown_outcome_recovery_invalidates_old_validation() -> None:
+     assert validate_digest in native_rejection
+ 
+     # 只读工具的 UNKNOWN 恢复不失效旧验证（不无端清掉合法只读组合）。
++    # R1：durable 批次必须自洽——validate-a 已有结果，批次只含它。旧夹具的
++    # [validate-a, mutate] 缺 mutate 结果属于"结果无法证明的孤儿"，R1 起
++    # accept_action 拒绝自动继续，不能再用它构造历史。
++    read_only_base = replace(
++        _state(
++            _calls_fact(("validate-a", "sandbox_exec", {"executable": "./check-a"})),
++            _sandbox_fact(_receipt()),
++        ),
++        goal=replace(
++            build().goal,
++            admitted_criteria=(_closure_criterion(),),
++        ),
++    )
+     read_only_recovered = replace(
+-        recovering(build()),
++        read_only_base,
+         active_run=replace(
+-            recovering(build()).active_run,
++            read_only_base.active_run,
++            status=ActiveRunStatus.AWAITING_RECOVERY,
++            phase=ContinuationPhase.EXECUTING,
+             tool_calls=(ToolCall("peek", "read_only_probe", {"path": "artifact.txt"}),),
++            batch_cursor=0,
+             pending_request=RecoveryRequest(
+                 request_id="recovery-ro",
+                 run_id="run-fresh",
+diff --git a/tests/process/test_artifact_approval_contract.py b/tests/process/test_artifact_approval_contract.py
+index 50ecbee..b42f2b1 100644
+--- a/tests/process/test_artifact_approval_contract.py
++++ b/tests/process/test_artifact_approval_contract.py
+@@ -28,6 +28,7 @@ from agent.runtime.contracts import (
+     GoalFrame,
+     GoalStatus,
+     ProposedCriterion,
++    RequirementCoverage,
+     ResolveApproval,
+     ToolCall,
+     ToolPrepareContext,
+@@ -794,6 +795,21 @@ def test_015_artifact_requirement_rejects_plain_approval_in_reducer(
+             goal_id=accepted.goal.goal_id,
+             goal_revision=accepted.goal.revision,
+             criterion_evidence_refs=(artifact_record.evidence_id,),
++            # R2：coverage 先于证据完整性检查；引用全部 mandatory 让本测试仍
++            # 到达 "every mandatory criterion" 的证据层断言。
++            requirement_coverage=(
++                RequirementCoverage(
++                    requirement_id="requirement:artifact-and-process",
++                    requirement="produce and verify artifact.out",
++                    source_fact_ids=("fact-user",),
++                    status="satisfied",
++                    criterion_ids=tuple(
++                        item.criterion_id
++                        for item in accepted.goal.admitted_criteria
++                        if item.mandatory
++                    ),
++                ),
++            ),
+         ),
+     )
+     with pytest.raises(ValueError, match="every mandatory criterion"):
+@@ -973,6 +989,15 @@ def test_015_artifact_goal_cannot_complete_with_process_receipt_only() -> None:
+             goal_id=goal.goal_id,
+             goal_revision=goal.revision,
+             criterion_evidence_refs=(record.evidence_id,),
++            requirement_coverage=(
++                RequirementCoverage(
++                    requirement_id="requirement:artifact",
++                    requirement="produce and verify artifact.out",
++                    source_fact_ids=("fact-user",),
++                    status="satisfied",
++                    criterion_ids=(receipt_criterion.criterion_id,),
++                ),
++            ),
+         ),
+     )
+     with pytest.raises(ValueError, match="artifact criterion"):
+@@ -1032,6 +1057,15 @@ def test_015_legacy_tool_receipt_goal_remains_compatible() -> None:
+             goal_id=goal.goal_id,
+             goal_revision=goal.revision,
+             criterion_evidence_refs=(record.evidence_id,),
++            requirement_coverage=(
++                RequirementCoverage(
++                    requirement_id="requirement:legacy-receipt",
++                    requirement="the governed tool returned its legacy receipt",
++                    source_fact_ids=("fact-user",),
++                    status="satisfied",
++                    criterion_ids=(legacy_criterion.criterion_id,),
++                ),
++            ),
+         ),
+     )
+ 
+diff --git a/tests/process/test_j1_production_verified_done.py b/tests/process/test_j1_production_verified_done.py
+index e48dd1d..4654285 100644
+--- a/tests/process/test_j1_production_verified_done.py
++++ b/tests/process/test_j1_production_verified_done.py
+@@ -28,6 +28,7 @@ from agent.runtime.contracts import (
+     ModelTextBlock,
+     ModelToolCall,
+     ProposedCriterion,
++    RequirementCoverage,
+     RunStatus,
+     SubmitMessage,
+ )
+@@ -110,6 +111,12 @@ class _J1ProductionProvider:
+                 block for msg in reversed(context.messages)
+                 for block in msg.content if block.get("type") == "trusted_goal"
+             )
++            # R2：coverage 必须引用投影的 source_fact_ids 与全部 mandatory ids。
++            mandatory_ids = tuple(
++                item["criterion_id"]
++                for item in goal_block["admitted_criteria"]
++                if item.get("mandatory") is True
++            )
+             return ModelResponse((), control=CompletionClaim(
+                 correlation_id="completion-j1",
+                 goal_id=goal_block["goal_id"],
+@@ -117,6 +124,15 @@ class _J1ProductionProvider:
+                 criterion_evidence_refs=tuple(
+                     goal_block["expected_completion_evidence_refs"]
+                 ),
++                requirement_coverage=(
++                    RequirementCoverage(
++                        requirement_id="requirement:j1-task",
++                        requirement="生成并核对用户要求的产物",
++                        source_fact_ids=tuple(goal_block["source_fact_ids"]),
++                        status="satisfied",
++                        criterion_ids=mandatory_ids,
++                    ),
++                ),
+             ))
+         return ModelResponse((ModelTextBlock("done"),))
+ 
+diff --git a/tests/process/test_r1_two_validation_completion.py b/tests/process/test_r1_two_validation_completion.py
+index b3d5451..6bac032 100644
+--- a/tests/process/test_r1_two_validation_completion.py
++++ b/tests/process/test_r1_two_validation_completion.py
+@@ -33,6 +33,7 @@ from agent.runtime.contracts import (
+     ModelTextBlock,
+     ModelToolCall,
+     ProposedCriterion,
++    RequirementCoverage,
+     RunStatus,
+     SubmitMessage,
+ )
+@@ -135,6 +136,13 @@ class _TwoValidationProvider:
+                 for block in msg.content
+                 if block.get("type") == "trusted_goal"
+             )
++            # R2：模型按 trusted_goal 投影逐项复核权威用户要求，coverage 必须
++            # 引用投影的 source_fact_ids 与全部 mandatory criterion ids。
++            mandatory_ids = tuple(
++                item["criterion_id"]
++                for item in goal_block["admitted_criteria"]
++                if item.get("mandatory") is True
++            )
+             return ModelResponse(
+                 (),
+                 control=CompletionClaim(
+@@ -144,6 +152,17 @@ class _TwoValidationProvider:
+                     criterion_evidence_refs=tuple(
+                         goal_block["expected_completion_evidence_refs"]
+                     ),
++                    requirement_coverage=(
++                        RequirementCoverage(
++                            requirement_id="requirement:two-validations",
++                            requirement=(
++                                "运行 ./check-a 并 运行 ./check-b 均成功退出"
++                            ),
++                            source_fact_ids=tuple(goal_block["source_fact_ids"]),
++                            status="satisfied",
++                            criterion_ids=mandatory_ids,
++                        ),
++                    ),
+                 ),
+             )
+         return ModelResponse((ModelTextBlock("no further claims"),))
+@@ -509,6 +528,11 @@ def test_r1_midchain_write_allows_fresh_revalidation_then_completes(
+                     for block in msg.content
+                     if block.get("type") == "trusted_goal"
+                 )
++                mandatory_ids = tuple(
++                    item["criterion_id"]
++                    for item in goal_block["admitted_criteria"]
++                    if item.get("mandatory") is True
++                )
+                 return ModelResponse(
+                     (),
+                     control=CompletionClaim(
+@@ -518,6 +542,19 @@ def test_r1_midchain_write_allows_fresh_revalidation_then_completes(
+                         criterion_evidence_refs=tuple(
+                             goal_block["expected_completion_evidence_refs"]
+                         ),
++                        requirement_coverage=(
++                            RequirementCoverage(
++                                requirement_id="requirement:two-validations",
++                                requirement=(
++                                    "运行 ./check-a 并 运行 ./check-b 均成功退出"
++                                ),
++                                source_fact_ids=tuple(
++                                    goal_block["source_fact_ids"]
++                                ),
++                                status="satisfied",
++                                criterion_ids=mandatory_ids,
++                            ),
++                        ),
+                     ),
+                 )
+             if idx == 4:
+diff --git a/tests/provider/test_continuity_control.py b/tests/provider/test_continuity_control.py
+index 348d26b..dcd91c4 100644
+--- a/tests/provider/test_continuity_control.py
++++ b/tests/provider/test_continuity_control.py
+@@ -50,6 +50,7 @@ from agent.runtime.contracts import (
+     ModelTextBlock,
+     ModelToolCall,
+     ProposedCriterion,
++    RequirementCoverage,
+     SubmitMessage,
+     ToolDefinition,
+     canonical_json_digest,
+@@ -874,6 +875,7 @@ def test_installed_goal_control_schema_no_longer_advertises_goal_proposal() -> N
+         "goal_id",
+         "goal_revision",
+         "criterion_evidence_refs",
++        "requirement_coverage",
+         "blocker",
+         "safe_attempts",
+         "resume_condition",
+@@ -960,6 +962,7 @@ def test_portable_schema_gives_exact_goal_progress_payload_when_available() -> N
+         "summary",
+         "next_step",
+         "criterion_evidence_refs",
++        "requirement_coverage",
+         "blocker",
+         "safe_attempts",
+         "resume_condition",
+@@ -1463,6 +1466,15 @@ _COMPLETION_ARGUMENTS: dict[str, object] = {
+     "goal_id": "goal-1",
+     "goal_revision": 2,
+     "criterion_evidence_refs": ["evid-1", "evid-2"],
++    "requirement_coverage": [
++        {
++            "requirement_id": "requirement:report",
++            "requirement": "the report exists with exact content",
++            "source_fact_ids": ["fact:user:1"],
++            "status": "satisfied",
++            "criterion_ids": ["criterion:report-exists"],
++        }
++    ],
+ }
+ 
+ _EXPECTED_COMPLETION = CompletionClaim(
+@@ -1470,6 +1482,15 @@ _EXPECTED_COMPLETION = CompletionClaim(
+     goal_id="goal-1",
+     goal_revision=2,
+     criterion_evidence_refs=("evid-1", "evid-2"),
++    requirement_coverage=(
++        RequirementCoverage(
++            requirement_id="requirement:report",
++            requirement="the report exists with exact content",
++            source_fact_ids=("fact:user:1",),
++            status="satisfied",
++            criterion_ids=("criterion:report-exists",),
++        ),
++    ),
+ )
+ 
+ _BLOCKED_ARGUMENTS: dict[str, object] = {
+@@ -2008,3 +2029,160 @@ def test_ordinary_tool_call_before_reserved_control_fails_closed(
+         provider = provider_cls(config=_config(provider_type), http_client=client)
+         with pytest.raises(ProviderProtocolError):
+             provider.generate(_context())
++
++
++# --------------------------------------------------------------------------- #
++# R1-T9 / C2：安全闭合的 tool facts 经真实 context/provider wire 投影配对
++# --------------------------------------------------------------------------- #
++
++
++def test_r1_closed_suffix_facts_project_into_paired_wire_messages() -> None:
++    """R1-T9：丢 run 时闭合的 suffix facts 必须经真实投影成对出现。
++
++    从真实 Runtime 走一遍 pause-at-approval（R1 在同一 CAS 闭合未开始
++    suffix），再把 durable state 经真实 KernelContextManager 构建上下文，
++    分别用 OpenAI/Anthropic 投影序列化：批次 calls/results exact 配对，
++    已执行 prefix 与既有 continuation 不被改写。离线合成数据即可证明。
++    """
++
++    from agent.runtime.contracts import (
++        ActiveRun,
++        ApprovalPolicy,
++        ApprovalRequest,
++        ExecutionAuthorityClass,
++        OutputPolicy,
++        PauseGoal,
++        RunStatus,
++        SideEffectClass,
++        ToolCall,
++        ToolRisk,
++        ToolSpec,
++    )
++    from agent.runtime.loop import AgentRuntime, InvocationLimits
++    from agent.runtime.state import pause_for_approval, start_tool_batch
++    from agent.runtime.tools import RegisteredTool
++    from agent.provider.normalize import context_to_anthropic_messages
++    from tests.kernel.fakes import (
++        CollectingSink,
++        InMemoryCheckpointStore,
++        ScriptedProvider,
++        conversation_with_active_goal,
++    )
++
++    seed = conversation_with_active_goal()
++    state = replace(seed, active_run=ActiveRun(run_id="run-wire"))
++    state = start_tool_batch(
++        state,
++        (
++            ToolCall("wire-call-1", "write_fixture", {"content": "one"}),
++            ToolCall("wire-call-2", "write_fixture", {"content": "two"}),
++        ),
++    )
++    state = pause_for_approval(
++        state,
++        ApprovalRequest(
++            request_id="approval-wire",
++            run_id="run-wire",
++            tool_call_id="wire-call-1",
++            binding_digest="binding-wire",
++            preview="write fixture",
++            tool_name="write_fixture",
++        ),
++    )
++    spec = ToolSpec(
++        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
++        name="write_fixture",
++        version="1",
++        description="Write fixture",
++        input_schema={
++            "type": "object",
++            "properties": {"content": {"type": "string"}},
++            "additionalProperties": False,
++        },
++        risk=ToolRisk.HIGH,
++        side_effect=SideEffectClass.WRITE,
++        output_policy=OutputPolicy.BOUNDED_TEXT,
++        approval_policy=ApprovalPolicy.ALWAYS,
++        safety_policy={},
++        output_limit_chars=50,
++    )
++    store = InMemoryCheckpointStore(state)
++    runtime = AgentRuntime(
++        provider=ScriptedProvider(),
++        context_manager=KernelContextManager(
++            system_policy="policy",
++            limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
++        ),
++        tool_runtime=KernelToolRuntime(
++            (RegisteredTool(spec, lambda intent: "written"),)
++        ),
++        checkpoint_store=store,
++        event_sink=CollectingSink(),
++        limits=InvocationLimits(),
++        invocation_id_factory=lambda: "invocation-wire",
++    )
++    paused = runtime.run_turn(
++        PauseGoal(
++            conversation_id="conversation-1",
++            action_seq=state.next_action_seq,
++            expected_revision=state.revision,
++            goal_id="goal-1",
++            goal_revision=1,
++        ),
++        store.load(),
++    )
++    assert paused.status is RunStatus.COMPLETED
++    durable = store.load().state
++    closed = [
++        fact
++        for fact in durable.facts
++        if fact.content.get("superseded") is True
++    ]
++    assert [fact.content["tool_call_id"] for fact in closed] == [
++        "wire-call-1",
++        "wire-call-2",
++    ]
++
++    context = KernelContextManager(
++        system_policy="policy",
++        limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
++    ).build(
++        durable,
++        SubmitMessage(
++            conversation_id=durable.conversation_id,
++            action_seq=durable.next_action_seq,
++            expected_revision=durable.revision,
++            run_id="run-after-pause",
++            message="继续",
++        ),
++        (),
++    )
++
++    openai_messages = context_to_openai_messages(context)
++    pending: set[str] = set()
++    for message in openai_messages:
++        raw_calls = message.get("tool_calls")
++        if raw_calls is not None:
++            pending.update(call["id"] for call in raw_calls)
++            continue
++        if message.get("role") == "tool":
++            assert message["tool_call_id"] in pending
++            pending.discard(message["tool_call_id"])
++    assert pending == set(), "every projected tool call must be paired"
++
++    anthropic_messages = context_to_anthropic_messages(context)
++    use_ids = [
++        block["id"]
++        for message in anthropic_messages
++        for block in message["content"]
++        if block.get("type") == "tool_use"
++    ]
++    result_ids = [
++        block["tool_use_id"]
++        for message in anthropic_messages
++        for block in message["content"]
++        if block.get("type") == "tool_result"
++    ]
++    assert sorted(use_ids) == sorted(result_ids)
++    assert "wire-call-1" in result_ids
++    assert "wire-call-2" in result_ids
+diff --git a/tests/reference/test_014_grounded_personal_knowledge.py b/tests/reference/test_014_grounded_personal_knowledge.py
+index 9792953..02e3c3e 100644
+--- a/tests/reference/test_014_grounded_personal_knowledge.py
++++ b/tests/reference/test_014_grounded_personal_knowledge.py
+@@ -781,6 +781,7 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
+         ModelResponse,
+         ModelToolCall,
+         ProposedCriterion,
++        RequirementCoverage,
+         ResolveApproval,
+         SubmitMessage,
+     )
+@@ -1021,6 +1022,12 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
+                     for block in self._blocks(context)
+                     if block.get("type") == "trusted_goal"
+                 )
++                # R2：coverage 引用投影的 source_fact_ids 与全部 mandatory ids。
++                mandatory_ids = tuple(
++                    item["criterion_id"]
++                    for item in goal_block["admitted_criteria"]
++                    if item.get("mandatory") is True
++                )
+                 return ModelResponse(
+                     (),
+                     control=CompletionClaim(
+@@ -1030,6 +1037,19 @@ def test_restarted_three_source_artifact_reaches_verified_done_in_one_runtime_lo
+                         criterion_evidence_refs=tuple(
+                             goal_block["expected_completion_evidence_refs"]
+                         ),
++                        requirement_coverage=(
++                            RequirementCoverage(
++                                requirement_id="requirement:grounded-artifact",
++                                requirement=(
++                                    "生成带引用的 grounded 报告并交付"
++                                ),
++                                source_fact_ids=tuple(
++                                    goal_block["source_fact_ids"]
++                                ),
++                                status="satisfied",
++                                criterion_ids=mandatory_ids,
++                            ),
++                        ),
+                     ),
+                 )
+             raise AssertionError("unexpected extra model call")
+diff --git a/tests/subagent/test_integration.py b/tests/subagent/test_integration.py
+index 553d8ad..aebe55b 100644
+--- a/tests/subagent/test_integration.py
++++ b/tests/subagent/test_integration.py
+@@ -26,6 +26,7 @@ from agent.subagent.contracts import ChildProfile
+ from agent.subagent.runner import ChildAgentRunner
+ from agent.subagent.tools import build_subagent_tool_registrations
+ from tests.kernel.fakes import (
++    RUNTIME_GOAL_ID,
+     CollectingSink,
+     InMemoryCheckpointStore,
+     ScriptedProvider,
+@@ -67,7 +68,7 @@ def test_parent_delegates_and_uses_child_finding() -> None:
+             (ModelTextBlock("Risk: SECRET-OMEGA confirmed"),),
+             control=CompletionClaim(
+                 correlation_id="subagent-finding-complete",
+-                goal_id="goal-1",
++                goal_id=RUNTIME_GOAL_ID,
+                 goal_revision=1,
+                 criterion_evidence_refs=(
+                     closed_evidence_id(
+

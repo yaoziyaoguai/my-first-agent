@@ -10,7 +10,6 @@ from agent.runtime.contracts import (
     ApprovalPolicy,
     ApprovalRequest,
     BlockedClaim,
-    CompletionClaim,
     ContinuationPhase,
     ConversationFact,
     ConversationState,
@@ -44,6 +43,7 @@ from tests.kernel.fakes import (
     RecordingCheckpointStore,
     RecordingEventSink,
     ScriptedProvider,
+    completion_claim_from_trusted,
     conversation_with_active_goal,
     goal_noop_response,
 )
@@ -311,7 +311,6 @@ def test_operator_rejection_does_not_block_later_model_completion() -> None:
         goal=replace(goal, admitted_criteria=(criterion,), status=GoalStatus.GOAL_READY),
         active_run=ActiveRun(run_id="run-verify"),
     )
-    evidence_id = f"evidence:{goal.goal_id}:{goal.revision}:{criterion.criterion_id}"
     provider = ScriptedProvider(
         goal_noop_response("continue-after-operator-rejection"),
         ModelResponse(
@@ -325,15 +324,7 @@ def test_operator_rejection_does_not_block_later_model_completion() -> None:
                 resume_condition="approve the private operator request",
             ),
         ),
-        ModelResponse(
-            (),
-            control=CompletionClaim(
-                correlation_id="complete-after-operator-rejection",
-                goal_id=goal.goal_id,
-                goal_revision=goal.revision,
-                criterion_evidence_refs=(evidence_id,),
-            ),
-        ),
+        completion_claim_from_trusted("complete-after-operator-rejection"),
     )
     runtime, store, calls, _events, _provider = _operator_runtime_fixture(
         approval=ApprovalPolicy.ALWAYS,

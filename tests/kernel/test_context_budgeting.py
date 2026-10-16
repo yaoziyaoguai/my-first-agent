@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import replace
 
 import pytest
 
+from agent.runtime.checkpoint import LocalCheckpointStore
 from agent.runtime.context import ContextLimitError, ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ActiveRun,
@@ -23,6 +25,7 @@ from agent.runtime.contracts import (
     ToolCall,
     canonical_json_digest,
 )
+from tests.continuity.test_contracts import _goal
 
 
 def _fact(fact_id: str, kind: FactKind, **content):
@@ -47,6 +50,96 @@ def _full_context_cost(state: ConversationState, action) -> int:
         limits=ContextLimits(max_input_tokens=100_000, output_reserve=1),
     ).build(state, action, ())
     return probe.budget.estimated_input_tokens
+
+
+def test_goal_authoritative_source_text_stays_visible_under_pressure(
+    tmp_path,
+) -> None:
+    """R2-B：预算压力下 Goal 权威原文必须真实存在于 ContextPack。
+
+    只引用来源 ID 不能称为"读过全部当前要求"。原始输入与已消费 correction
+    的原文在有界压力下必须可见；预算连这些 pinned 原文都放不下时必须以
+    ContextLimitError 可读失败，而不是静默裁掉后假称材料齐全。durable
+    checkpoint 重开后同一合同成立。
+    """
+    original = _fact(
+        "fact:user:original",
+        FactKind.USER_MESSAGE,
+        text=(
+            "ORIGINAL_REQUIREMENT_UNIQUE: fix the service AND the cli adapter. "
+            + "supporting detail " * 400
+        ),
+    )
+    correction = _fact(
+        "action:5:user",
+        FactKind.USER_MESSAGE,
+        text="CORRECTION_UNIQUE: keep both components and the shared limit.",
+    )
+    filler = tuple(
+        _fact(
+            f"filler-{index}",
+            FactKind.USER_MESSAGE,
+            text=f"filler {index} " + "x" * 400,
+        )
+        for index in range(8)
+    )
+    action = SubmitMessage(
+        conversation_id="conversation-review",
+        action_seq=1,
+        expected_revision=0,
+        run_id="run-review",
+        message="continue",
+    )
+
+    def _review_state(facts) -> ConversationState:
+        return replace(
+            ConversationState.new("conversation-review"),
+            facts=facts,
+            goal=replace(
+                _goal(),
+                created_from_fact_ids=(original.fact_id, correction.fact_id),
+            ),
+            active_run=ActiveRun("run-review"),
+        )
+
+    state = _review_state((original, *filler, correction))
+    full = _full_context_cost(state, action)
+    core = _full_context_cost(_review_state((original, correction)), action)
+    # 预算容纳"权威原文 + 约一半 filler"：历史确实被裁剪，但来源原文可见。
+    squeezed = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(
+            max_input_tokens=core + (full - core) // 2,
+            output_reserve=20,
+        ),
+    )
+    pack = squeezed.build(state, action, ())
+    assert pack.budget.excluded_ids, "filler history must actually be evicted"
+
+    serialized = json.dumps(
+        [list(message.content) for message in pack.messages]
+    )
+    assert "ORIGINAL_REQUIREMENT_UNIQUE" in serialized, (
+        "authoritative original text must survive context pressure"
+    )
+    assert "CORRECTION_UNIQUE" in serialized, (
+        "consumed correction text must survive context pressure"
+    )
+
+    # durable reopen：checkpoint 落盘重载后同一可见性合同成立。
+    path = tmp_path / "review.json"
+    store = LocalCheckpointStore.initialize(path, state)
+    reopened = squeezed.build(store.load().state, action, ())
+    assert "ORIGINAL_REQUIREMENT_UNIQUE" in json.dumps(
+        [list(message.content) for message in reopened.messages]
+    )
+
+    # 预算放不下权威原文本身：可读失败，不静默截断成"只有 ID"。
+    with pytest.raises(ContextLimitError):
+        KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=300, output_reserve=200),
+        ).build(state, action, ())
 
 
 def test_oldest_non_pinned_groups_are_evicted_deterministically() -> None:

@@ -33,6 +33,7 @@ from agent.runtime.contracts import (
     ModelTextBlock,
     ModelToolCall,
     ProposedCriterion,
+    RequirementCoverage,
     RunStatus,
     SubmitMessage,
 )
@@ -135,6 +136,13 @@ class _TwoValidationProvider:
                 for block in msg.content
                 if block.get("type") == "trusted_goal"
             )
+            # R2：模型按 trusted_goal 投影逐项复核权威用户要求，coverage 必须
+            # 引用投影的 source_fact_ids 与全部 mandatory criterion ids。
+            mandatory_ids = tuple(
+                item["criterion_id"]
+                for item in goal_block["admitted_criteria"]
+                if item.get("mandatory") is True
+            )
             return ModelResponse(
                 (),
                 control=CompletionClaim(
@@ -143,6 +151,17 @@ class _TwoValidationProvider:
                     goal_revision=goal_block["goal_revision"],
                     criterion_evidence_refs=tuple(
                         goal_block["expected_completion_evidence_refs"]
+                    ),
+                    requirement_coverage=(
+                        RequirementCoverage(
+                            requirement_id="requirement:two-validations",
+                            requirement=(
+                                "运行 ./check-a 并 运行 ./check-b 均成功退出"
+                            ),
+                            source_fact_ids=tuple(goal_block["source_fact_ids"]),
+                            status="satisfied",
+                            criterion_ids=mandatory_ids,
+                        ),
                     ),
                 ),
             )
@@ -509,6 +528,11 @@ def test_r1_midchain_write_allows_fresh_revalidation_then_completes(
                     for block in msg.content
                     if block.get("type") == "trusted_goal"
                 )
+                mandatory_ids = tuple(
+                    item["criterion_id"]
+                    for item in goal_block["admitted_criteria"]
+                    if item.get("mandatory") is True
+                )
                 return ModelResponse(
                     (),
                     control=CompletionClaim(
@@ -517,6 +541,19 @@ def test_r1_midchain_write_allows_fresh_revalidation_then_completes(
                         goal_revision=goal_block["goal_revision"],
                         criterion_evidence_refs=tuple(
                             goal_block["expected_completion_evidence_refs"]
+                        ),
+                        requirement_coverage=(
+                            RequirementCoverage(
+                                requirement_id="requirement:two-validations",
+                                requirement=(
+                                    "运行 ./check-a 并 运行 ./check-b 均成功退出"
+                                ),
+                                source_fact_ids=tuple(
+                                    goal_block["source_fact_ids"]
+                                ),
+                                status="satisfied",
+                                criterion_ids=mandatory_ids,
+                            ),
                         ),
                     ),
                 )

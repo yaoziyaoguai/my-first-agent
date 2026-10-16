@@ -18,8 +18,11 @@ from tests.automation_hosts.test_posix_supervisor import _callbacks, _prepared, 
 def test_child_exit_before_ready_is_known_prestart_and_zero_callback() -> None:
     events: list[str] = []
 
+    # 语义是"子进程退出先于 READY"，触发条件是 EOF 而非超时；
+    # ready 预算须覆盖子进程解释器启动（批跑负载下可超默认 0.35s），
+    # 否则竞态退化为 ready_timeout。
     try:
-        _supervisor("exit-before-ready").run(
+        _supervisor("exit-before-ready", ready_timeout_seconds=5.0).run(
             SupervisedOccurrenceSpecV1.from_prepared(_prepared()),
             _callbacks(events),
         )
@@ -50,7 +53,12 @@ def test_ready_timeout_is_known_prestart_and_zero_callback() -> None:
 def test_missing_start_ack_is_unknown_and_never_marks_running() -> None:
     events: list[str] = []
 
-    outcome = _supervisor("no-start-ack").run(
+    # 被测语义是 start-ack 超时（保持 0.35s 小预算）；
+    # ready 预算放宽以覆盖子进程启动，避免竞态退化为 ready_timeout。
+    outcome = _supervisor(
+        "no-start-ack",
+        ready_timeout_seconds=5.0,
+    ).run(
         SupervisedOccurrenceSpecV1.from_prepared(_prepared()),
         _callbacks(events),
     )
@@ -90,7 +98,13 @@ def test_invalid_result_after_execution_permit_is_effect_outcome_unknown(
 ) -> None:
     events: list[str] = []
 
-    outcome = _supervisor(mode).run(
+    # 被测语义是 execute 后的结果帧缺陷；ready/start-ack 只是前置协议点，
+    # 预算放宽以覆盖子进程启动，避免竞态退化为 pre-start 失败。
+    outcome = _supervisor(
+        mode,
+        ready_timeout_seconds=5.0,
+        start_ack_timeout_seconds=5.0,
+    ).run(
         SupervisedOccurrenceSpecV1.from_prepared(_prepared()),
         _callbacks(events),
     )

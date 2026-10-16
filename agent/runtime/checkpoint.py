@@ -57,6 +57,7 @@ from agent.runtime.contracts import (
     RecordedRunResult,
     RecoveryRequest,
     ReplayRecord,
+    RequirementCoverage,
     RunStatus,
     SandboxAuthorityCandidateV1,
     SandboxAuthorityLeaseV1,
@@ -1340,6 +1341,16 @@ def _completion_claim_to_dict(value: CompletionClaim | None) -> dict | None:
         "goal_id": value.goal_id,
         "goal_revision": value.goal_revision,
         "criterion_evidence_refs": list(value.criterion_evidence_refs),
+        "requirement_coverage": [
+            {
+                "requirement_id": item.requirement_id,
+                "requirement": item.requirement,
+                "source_fact_ids": list(item.source_fact_ids),
+                "status": item.status,
+                "criterion_ids": list(item.criterion_ids),
+            }
+            for item in value.requirement_coverage
+        ],
     }
 
 
@@ -1347,11 +1358,48 @@ def _completion_claim_from_dict(value) -> CompletionClaim | None:
     if value is None:
         return None
     value = _object(value, "completion_claim")
-    _expect_keys(
-        value,
-        {"correlation_id", "goal_id", "goal_revision", "criterion_evidence_refs"},
-        "completion_claim",
-    )
+    # R2：旧活动 checkpoint 缺 requirement_coverage 时按空迁移——旧记录不被
+    # 默认视为复核已满足，模型在主 loop 正常补复核。显式存在时必须是严格
+    # 数组：None/False/0/空串/空对象不得被静默当作空 coverage 吞掉。
+    keys = {
+        "correlation_id",
+        "goal_id",
+        "goal_revision",
+        "criterion_evidence_refs",
+    }
+    if "requirement_coverage" in value:
+        keys.add("requirement_coverage")
+    _expect_keys(value, keys, "completion_claim")
+    raw_coverage = value.get("requirement_coverage", [])
+    coverage: list[RequirementCoverage] = []
+    for item in _array(raw_coverage, "requirement_coverage"):
+        entry = _object(item, "requirement_coverage entry")
+        _expect_keys(
+            entry,
+            {
+                "requirement_id",
+                "requirement",
+                "source_fact_ids",
+                "status",
+                "criterion_ids",
+            },
+            "requirement_coverage entry",
+        )
+        coverage.append(
+            RequirementCoverage(
+                requirement_id=_string(entry["requirement_id"], "requirement_id"),
+                requirement=_string(entry["requirement"], "requirement"),
+                source_fact_ids=tuple(
+                    _string(item, "source_fact_id")
+                    for item in _array(entry["source_fact_ids"], "source_fact_ids")
+                ),
+                status=_string(entry["status"], "status"),
+                criterion_ids=tuple(
+                    _string(item, "criterion_id")
+                    for item in _array(entry["criterion_ids"], "criterion_ids")
+                ),
+            )
+        )
     return CompletionClaim(
         correlation_id=_string(value["correlation_id"], "correlation_id"),
         goal_id=_string(value["goal_id"], "completion_claim.goal_id"),
@@ -1363,6 +1411,7 @@ def _completion_claim_from_dict(value) -> CompletionClaim | None:
                 "criterion_evidence_refs",
             )
         ),
+        requirement_coverage=tuple(coverage),
     )
 
 

@@ -28,6 +28,7 @@ from agent.runtime.contracts import (
     GoalFrame,
     GoalStatus,
     ProposedCriterion,
+    RequirementCoverage,
     ResolveApproval,
     ToolCall,
     ToolPrepareContext,
@@ -794,6 +795,21 @@ def test_015_artifact_requirement_rejects_plain_approval_in_reducer(
             goal_id=accepted.goal.goal_id,
             goal_revision=accepted.goal.revision,
             criterion_evidence_refs=(artifact_record.evidence_id,),
+            # R2：coverage 先于证据完整性检查；引用全部 mandatory 让本测试仍
+            # 到达 "every mandatory criterion" 的证据层断言。
+            requirement_coverage=(
+                RequirementCoverage(
+                    requirement_id="requirement:artifact-and-process",
+                    requirement="produce and verify artifact.out",
+                    source_fact_ids=("fact-user",),
+                    status="satisfied",
+                    criterion_ids=tuple(
+                        item.criterion_id
+                        for item in accepted.goal.admitted_criteria
+                        if item.mandatory
+                    ),
+                ),
+            ),
         ),
     )
     with pytest.raises(ValueError, match="every mandatory criterion"):
@@ -973,6 +989,15 @@ def test_015_artifact_goal_cannot_complete_with_process_receipt_only() -> None:
             goal_id=goal.goal_id,
             goal_revision=goal.revision,
             criterion_evidence_refs=(record.evidence_id,),
+            requirement_coverage=(
+                RequirementCoverage(
+                    requirement_id="requirement:artifact",
+                    requirement="produce and verify artifact.out",
+                    source_fact_ids=("fact-user",),
+                    status="satisfied",
+                    criterion_ids=(receipt_criterion.criterion_id,),
+                ),
+            ),
         ),
     )
     with pytest.raises(ValueError, match="artifact criterion"):
@@ -1032,6 +1057,15 @@ def test_015_legacy_tool_receipt_goal_remains_compatible() -> None:
             goal_id=goal.goal_id,
             goal_revision=goal.revision,
             criterion_evidence_refs=(record.evidence_id,),
+            requirement_coverage=(
+                RequirementCoverage(
+                    requirement_id="requirement:legacy-receipt",
+                    requirement="the governed tool returned its legacy receipt",
+                    source_fact_ids=("fact-user",),
+                    status="satisfied",
+                    criterion_ids=(legacy_criterion.criterion_id,),
+                ),
+            ),
         ),
     )
 

@@ -1,0 +1,123 @@
+{
+  "base_head": "ff686bd14642e8ec5041cced6a21daf7c03f8d17",
+  "kind": "unfinished-working-tree-audit-input",
+  "date": "2026-10-14",
+  "files": [
+    {
+      "path": "agent/provider/normalize.py",
+      "sha256": "a6c30fd1005cd1bc2427cdc151df56b41a271fff0039e4f0e92f07c2502552b2"
+    },
+    {
+      "path": "agent/runtime/checkpoint.py",
+      "sha256": "2e76e0377acbe4a63aa395ca05da65adf7b5fc6af16bcfff415034b8976b2b4a"
+    },
+    {
+      "path": "agent/runtime/context.py",
+      "sha256": "a8624913f9e0ef7fdfde7e4ae77209577fffb1a0f01e8ff4c75359ad75bac370"
+    },
+    {
+      "path": "agent/runtime/context_control.py",
+      "sha256": "7408562aa69ae32d04fbb647f6c2f373788fbd69756dbbf15c4534386067f8d6"
+    },
+    {
+      "path": "agent/runtime/contracts.py",
+      "sha256": "dc51e899e70d89e199baed755f2e120381a5d2feacfbc9714114ff556987b26f"
+    },
+    {
+      "path": "agent/runtime/loop.py",
+      "sha256": "4bcf36afd6841d7488ee551eba284d0e03cc603d0f53e3d276fb36130bc49e4d"
+    },
+    {
+      "path": "agent/runtime/state.py",
+      "sha256": "7d378f44f8da7a5846f30897b9179686ed1e1d277e4e0d9941d8cd5a88e57560"
+    },
+    {
+      "path": "scripts/run_015_e3.py",
+      "sha256": "8d4d9feb97e6cff6e9cfe1e9c416bc6159f610d03e2cb12ca074a73621316370"
+    },
+    {
+      "path": "tests/acceptance/test_daily_use_recovery_journey.py",
+      "sha256": "e96e39f50514bf0664ea9dba25d12082becb62bd550287996a4e1353a579ec60"
+    },
+    {
+      "path": "tests/acceptance/test_f3_runner_roundtrip.py",
+      "sha256": "65e415961315bc504887026bab9cd202849f71e4d8f90951736f1bb36649856c"
+    },
+    {
+      "path": "tests/continuity/test_browser_takeover_flow.py",
+      "sha256": "246b9341e204b71d3a78c38c9b4c80f9e4dc6b95aa9af1e3e3b8c54fd24dc610"
+    },
+    {
+      "path": "tests/continuity/test_contracts.py",
+      "sha256": "3f364d862ef8c142a2d07552086f44ebdfe2ef6316d48ff6091b7be4618f72e5"
+    },
+    {
+      "path": "tests/continuity/test_operator_tool_context_privacy.py",
+      "sha256": "8d2940a1c66a4984850da7f19f9a7454a49e73ad183b5ded9c3efad079278a10"
+    },
+    {
+      "path": "tests/continuity/test_research_evidence.py",
+      "sha256": "6306876050612c2b7283874d6614a38f10cd0671ded235464f8153b8181dee13"
+    },
+    {
+      "path": "tests/continuity/test_resume_effect_no_replay.py",
+      "sha256": "08355fa8304741aff4a7e417cf80bb246b49db4558c4bdf640ec3077bc2ff5a5"
+    },
+    {
+      "path": "tests/continuity/test_verified_done.py",
+      "sha256": "e10cc10661a6b13bb3607abd39098ae2c2d59ed0987ad76d3dffa634eee43870"
+    },
+    {
+      "path": "tests/kernel/fakes.py",
+      "sha256": "82e526870290aa6c8b9e05b584813ade5d68bd977f8c9fe8cdcae9e81676781b"
+    },
+    {
+      "path": "tests/kernel/test_effect_ordering.py",
+      "sha256": "44259ec3b6e22c0ae673f754c7288d91c4611d1a9d9ba79bcdd52bb221cbc81f"
+    },
+    {
+      "path": "tests/kernel/test_runtime_approval.py",
+      "sha256": "d6777a68db68ec9522ef06f78d12dc31fde1538737230aadb14a0d3cfe605753"
+    },
+    {
+      "path": "tests/kernel/test_runtime_compaction.py",
+      "sha256": "0d37c0a10f6bf842e8ee41f2fea52547e12ca796d8d284fa43bf764260a94e81"
+    },
+    {
+      "path": "tests/kernel/test_runtime_errors.py",
+      "sha256": "f03f3ddd08c7e5cb087baa8df66ed8a75da37bb5c7d95c85cceabb8db6d83cfc"
+    },
+    {
+      "path": "tests/kernel/test_tool_outcomes.py",
+      "sha256": "db53ea9c6ef26214d9844c8826e6e81154790afcd38fc80a09a3b6010ea5af4a"
+    },
+    {
+      "path": "tests/kernel/test_validation_request_freshness.py",
+      "sha256": "8e43394b38ea0057264873027e67c9bbac4fd93db1afc9b10861c51ac3fe24f0"
+    },
+    {
+      "path": "tests/process/test_artifact_approval_contract.py",
+      "sha256": "46dcde357d0cde1d738f50b5409da8076ca39d79e31f3e70111b3907c10233d4"
+    },
+    {
+      "path": "tests/process/test_j1_production_verified_done.py",
+      "sha256": "69afd35d3e969d52df2443632708486bbc8508aadc5d928e8d796971a5f47052"
+    },
+    {
+      "path": "tests/process/test_r1_two_validation_completion.py",
+      "sha256": "3a44bf73c840197e83a5096dcb2e53e31d54dbd95eafeabcbd735ce852cb5f12"
+    },
+    {
+      "path": "tests/provider/test_continuity_control.py",
+      "sha256": "4b813fd714d7a31c7f34e198966adfad94d6527a8c1ca5bab300676152ad1d99"
+    },
+    {
+      "path": "tests/reference/test_014_grounded_personal_knowledge.py",
+      "sha256": "d0c2223cfba9803b2393b287656262cad56486c3eb915ebb4339c2fd23bcea92"
+    },
+    {
+      "path": "tests/subagent/test_integration.py",
+      "sha256": "f184739c9d61124eee41843bc816e4dcff2bac9bedba47cf765d8f61e040a9f6"
+    }
+  ]
+}

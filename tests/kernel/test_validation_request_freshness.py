@@ -34,6 +34,7 @@ from agent.runtime.contracts import (
     ResolveUnknownToolOutcome,
     SandboxReceiptV1,
     SideEffectClass,
+    SubmitMessage,
     ToolCall,
     ToolRisk,
     ToolSpec,
@@ -687,11 +688,27 @@ def test_unknown_outcome_recovery_invalidates_old_validation() -> None:
     assert validate_digest in native_rejection
 
     # 只读工具的 UNKNOWN 恢复不失效旧验证（不无端清掉合法只读组合）。
+    # R1：durable 批次必须自洽——validate-a 已有结果，批次只含它。旧夹具的
+    # [validate-a, mutate] 缺 mutate 结果属于"结果无法证明的孤儿"，R1 起
+    # accept_action 拒绝自动继续，不能再用它构造历史。
+    read_only_base = replace(
+        _state(
+            _calls_fact(("validate-a", "sandbox_exec", {"executable": "./check-a"})),
+            _sandbox_fact(_receipt()),
+        ),
+        goal=replace(
+            build().goal,
+            admitted_criteria=(_closure_criterion(),),
+        ),
+    )
     read_only_recovered = replace(
-        recovering(build()),
+        read_only_base,
         active_run=replace(
-            recovering(build()).active_run,
+            read_only_base.active_run,
+            status=ActiveRunStatus.AWAITING_RECOVERY,
+            phase=ContinuationPhase.EXECUTING,
             tool_calls=(ToolCall("peek", "read_only_probe", {"path": "artifact.txt"}),),
+            batch_cursor=0,
             pending_request=RecoveryRequest(
                 request_id="recovery-ro",
                 run_id="run-fresh",
@@ -1421,6 +1438,8 @@ def test_w1_writer_active_state_survives_compaction_summary_boundary() -> None:
     assert validate_digest not in (ordinary | native)  # w1-p2-1
 
     # 关闭 writer 后的显式同参重验重新合格（恢复路径不被永久阻断）。
+    # P2-2：stop 结果附带其真实批次（生产 TOOL_RESULT 恒有所属 TOOL_CALLS），
+    # 使该状态同时可经 wire 投影闭合；对 inventory 语义零影响。
     stop = _w1_managed_fact(
         fact_id="run:run-fresh:tool-result:stop:9",
         tool_call_id="stop",
@@ -1431,6 +1450,10 @@ def test_w1_writer_active_state_survives_compaction_summary_boundary() -> None:
         compacted,
         facts=(
             *compacted.facts,
+            _w1_calls_fact(
+                "run:run-fresh:tool-batch:stop",
+                ("stop", "managed_web_stop", {"resource_ref": "writer-x"}),
+            ),
             stop,
             _w1_calls_fact(
                 "run:run-fresh:tool-batch:val-b",
@@ -1443,6 +1466,40 @@ def test_w1_writer_active_state_survives_compaction_summary_boundary() -> None:
         revalidated
     )
     assert validate_digest in native_after
+
+    # P2-2（2026-10-16 交叉审计补证）：压缩边界 + writer 关闭 + 同参重验的组合
+    # 必须经真实 build→context_to_openai_messages 投影出逐批闭合的 wire 消息：
+    # assistant tool_calls 与 tool 结果一一配对，不存在悬空调用或多余结果。
+    from agent.provider.normalize import context_to_openai_messages
+    from agent.runtime.context import ContextLimits, KernelContextManager
+
+    pack = KernelContextManager(
+        system_policy="Be concise.",
+        limits=ContextLimits(max_input_tokens=100_000, output_reserve=500),
+    ).build(
+        revalidated,
+        SubmitMessage(
+            conversation_id=revalidated.conversation_id,
+            action_seq=revalidated.next_action_seq,
+            expected_revision=revalidated.revision,
+            run_id="run-wire-p2-2",
+            message="继续当前任务",
+        ),
+        (),
+    )
+    wire = context_to_openai_messages(pack)
+    pending: list[str] = []
+    for message in wire:
+        if message["role"] == "assistant" and message.get("tool_calls"):
+            assert not pending, "wire 上相邻两个 tool_calls 批次之间没有结果批次"
+            pending = [call["id"] for call in message["tool_calls"]]
+        elif message["role"] == "tool":
+            assert pending, f"wire 结果 {message['tool_call_id']} 没有前置 tool_calls 批次"
+            assert message["tool_call_id"] in pending, (
+                f"wire 结果 {message['tool_call_id']} 不属于当前批次 {pending}"
+            )
+            pending.remove(message["tool_call_id"])
+    assert not pending, f"wire 上存在未闭合的 tool_call: {pending}"
 
 
 def test_w1_real_service_writer_alive_at_validation_then_stop_disqualifies(
@@ -1633,3 +1690,317 @@ def test_w1_real_service_writer_alive_at_validation_then_stop_disqualifies(
         assert validate_digest in native3
     finally:
         bundle.close()
+
+
+def test_c1_writer_close_same_param_revalidation_reaches_next_provider_wire(
+    tmp_path,
+) -> None:
+    """C1 组合断言：writer 关闭 → 同参真实重验 → 下一轮 provider wire 有效。
+
+    不同于仅调用 inventory 折叠：本旅程用真实 composition（AgentRuntime +
+    KernelToolRuntime + 审批链 + seatbelt sandbox）驱动——
+    1) writer 存活期取得的旧 A 在 stop(confirmed) 后失格，模型同参
+       sandbox_exec 请求不被抑制，正常走到真实审批与执行；
+    2) 新 receipt 经运行时从真实审批 candidate 铸成 admitted criterion，
+       completion claim（含逐项 coverage）经真实完成门 VERIFIED_DONE；
+    3) 下一次同参请求在 wire 上被抑制（duplicate_product_request），其
+       指引文本进入再下一轮 provider context。
+    """
+
+    import os
+    from pathlib import Path
+
+    from agent.cli.app import _parse_action as _parse
+    from agent.composition import (
+        build_composition,
+        build_sandbox_resources,
+        build_tool_registrations,
+    )
+    from agent.continuity.sessions import open_workspace_session
+    from agent.runtime.checkpoint import LocalCheckpointStore
+    from agent.runtime.context import ContextLimits
+    from agent.runtime.contracts import (
+        GoalDelta,
+        GoalDeltaProposal,
+        ModelResponse,
+        ModelToolCall,
+        RequirementCoverage,
+        RunStatus,
+        SubmitMessage,
+    )
+    from agent.runtime.control import ControlInbox
+    from agent.runtime.loop import InvocationLimits
+    from tests.kernel.fakes import CollectingSink
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    check = workspace / "check-a"
+    check.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    os.chmod(check, 0o700)
+
+    opened = open_workspace_session(
+        workspace,
+        state_root=tmp_path / "state",
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-0000000000c1",
+    )
+    binding = opened.workspace_binding
+    assert binding is not None
+
+    same_arguments = {
+        "executable": "./check-a",
+        "argv": [],
+        "cwd": ".",
+        "mode": "read-only",
+        "network": "off",
+    }
+
+    user = ConversationFact(
+        fact_id="fact-user-c1",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "运行 ./check-a 验证通过"},
+    )
+    seed_calls = _w1_calls_fact(
+        "run:seed-c1:tool-batch:1",
+        ("start", "managed_web_start", {"executable": "./server"}),
+        ("validate-a", "sandbox_exec", same_arguments),
+    )
+    seed_start = _w1_managed_fact(
+        fact_id="run:seed-c1:tool-result:start:2",
+        tool_call_id="start",
+        tool_name="managed_web_start",
+        payload={"resource_ref": "writer-c1", "active": True, "status": "ready"},
+    )
+    seed_a = _sandbox_fact(_receipt(), tool_call_id="validate-a")
+    seed_stop = _w1_managed_fact(
+        fact_id="run:seed-c1:tool-result:stop:4",
+        tool_call_id="stop",
+        tool_name="managed_web_stop",
+        payload={"resource_ref": "writer-c1", "cleanup": "confirmed"},
+    )
+    goal = GoalFrame(
+        goal_id="goal-c1",
+        revision=1,
+        created_from_fact_ids=(user.fact_id,),
+        workspace_identity_digest=binding.workspace_identity_digest,
+        user_outcome="./check-a 运行验证通过",
+        beneficiary="user",
+        targets=("check-a",),
+        scope=("workspace",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(
+            ProposedCriterion(
+                "criterion:required-local-process:c1",
+                "the explicitly requested local validation process exits successfully",
+                oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+            ),
+        ),
+        admitted_criteria=(),
+        authority_snapshot="authority-c1",
+        status=GoalStatus.GOAL_READY,
+        created_at="2026-10-14T00:00:00Z",
+        updated_at="2026-10-14T00:00:00Z",
+    )
+    # SubmitMessage 是合法入口：不带 active_run，由本轮消息驱动模型阶段。
+    seeded = ConversationState(
+        conversation_id="conversation-c1",
+        facts=(user, seed_calls, seed_start, seed_a, seed_stop),
+        goal=goal,
+        workspace_binding=binding,
+    )
+
+    # 旁证（非唯一证据）：writer 关闭后旧 A 已失格，同参请求不在抑制集合。
+    inventory_runtime = _runtime()
+    validate_digest = inventory_runtime._product_request_digest(
+        "sandbox_exec", same_arguments
+    )
+    _o, _m, native_before = inventory_runtime._successful_product_request_inventory(
+        seeded
+    )
+    assert validate_digest not in (_o | _m | native_before)
+
+    class _C1Provider:
+        """阶段机：消费 no-op correction → 同参重验 → 原样重复（应被抑制）→ claim。"""
+
+        def __init__(self) -> None:
+            self.contexts = []
+            self.stage = "delta"
+
+        def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN202
+            self.contexts.append(context)
+            if self.stage == "delta":
+                # 活跃 Goal 下的自然语言输入先成为 pending correction；内容不
+                # 改变 outcome/target/scope，用 no-op delta 消费后恢复工具面。
+                self.stage = "revalidate"
+                return ModelResponse(
+                    (),
+                    control=GoalDeltaProposal(
+                        correlation_id="delta-c1",
+                        delta=GoalDelta(
+                            goal_id=goal.goal_id,
+                            expected_revision=goal.revision,
+                            reason="the Goal already matches the revalidation request",
+                            updates={"targets": list(goal.targets)},
+                        ),
+                    ),
+                )
+            if self.stage == "revalidate":
+                self.stage = "repeat"
+                return ModelResponse(
+                    (ModelToolCall("validate-b", "sandbox_exec", same_arguments),)
+                )
+            if self.stage == "repeat":
+                self.stage = "claim"
+                return ModelResponse(
+                    (ModelToolCall("validate-c", "sandbox_exec", same_arguments),)
+                )
+            goal_block = next(
+                (
+                    block
+                    for msg in reversed(context.messages)
+                    for block in msg.content
+                    if isinstance(block, dict)
+                    and block.get("type") == "trusted_goal"
+                ),
+                None,
+            )
+            assert goal_block is not None, "claim 轮必须看到 trusted_goal 投影"
+            mandatory = tuple(
+                item["criterion_id"]
+                for item in goal_block["admitted_criteria"]
+                if item.get("mandatory") is True
+            )
+            assert mandatory, "真实审批必须已把 local-process 义务铸成 mandatory criterion"
+            return ModelResponse(
+                (),
+                control=CompletionClaim(
+                    correlation_id="claim-c1",
+                    goal_id=goal_block["goal_id"],
+                    goal_revision=goal_block["goal_revision"],
+                    criterion_evidence_refs=tuple(
+                        goal_block["expected_completion_evidence_refs"]
+                    ),
+                    requirement_coverage=(
+                        RequirementCoverage(
+                            requirement_id="requirement:task",
+                            requirement="运行 ./check-a 验证通过",
+                            source_fact_ids=tuple(goal_block["source_fact_ids"]),
+                            status="satisfied",
+                            criterion_ids=mandatory,
+                        ),
+                    ),
+                ),
+            )
+
+    provider = _C1Provider()
+    seed_root = tmp_path / "seed-state"
+    seed_root.mkdir()
+    os.chmod(seed_root, 0o700)
+    seed_ckpt = seed_root / "checkpoint.json"
+    store = LocalCheckpointStore.initialize(seed_ckpt, seeded)
+    registrations = tuple(
+        build_tool_registrations(
+            workspace=workspace,
+            protected_paths=(seed_ckpt,),
+            max_tool_result_chars=50_000,
+        )
+    ) + tuple(
+        build_sandbox_resources(
+            workspace,
+            tmp_path / "state",
+            "/usr/bin:/bin",
+            host_home=Path.home(),
+        ).registrations
+    )
+    composition = build_composition(
+        provider=provider,
+        checkpoint_store=store,
+        tool_registrations=registrations,
+        event_sink=CollectingSink(),
+        control_inbox=ControlInbox(),
+        system_policy="Complete the task with exact evidence.",
+        context_limits=ContextLimits(max_input_tokens=100_000, output_reserve=5_000),
+        invocation_limits=InvocationLimits(),
+        workspace_identity_digest=binding.workspace_identity_digest,
+        context_scope_digest=binding.workspace_scope_digest,
+        workspace_binding=binding,
+    )
+
+    def _now() -> str:
+        from datetime import UTC, datetime
+
+        return (
+            datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        )
+
+    loaded = store.load().state
+    paused = composition.runtime.run_turn(
+        SubmitMessage(
+            conversation_id=loaded.conversation_id,
+            action_seq=loaded.next_action_seq,
+            expected_revision=loaded.revision,
+            run_id="run-c1",
+            message="writer 已关闭，请重新验证 ./check-a 并完成。",
+        ),
+        store.load(),
+    )
+    # 旧 A 失格 ⇒ 同参请求不被抑制：真实走到 sandbox 审批边界。
+    assert paused.status is RunStatus.AWAITING_APPROVAL
+
+    for _ in range(16):
+        state = store.load().state
+        active = state.active_run
+        if active is None or active.pending_request is None:
+            break
+        action, error = _parse(
+            f"/approve {active.pending_request.request_id}",
+            state,
+            lambda: "run-c1",
+            approval_time_factory=_now,
+        )
+        assert error is None and action is not None
+        composition.runtime.run_turn(action, store.load())
+
+    final_state = store.load().state
+    # 新 A 真实执行（receipt fact 落盘）且经审批铸成 admitted criterion。
+    tool_results = {
+        fact.content.get("tool_call_id"): fact
+        for fact in final_state.facts
+        if fact.kind is FactKind.TOOL_RESULT
+    }
+    new_a = tool_results["validate-b"]
+    assert new_a.content.get("executed") is True
+    assert trusted_readonly_native_sandbox_success(new_a)
+    # 重复的同参请求在 wire 上被抑制（不执行、带指引）。
+    duplicate = tool_results["validate-c"]
+    assert duplicate.content.get("executed") is False
+    assert (
+        duplicate.content.get("metadata", {}).get("code")
+        == "duplicate_product_request"
+    )
+    assert "Duplicate request suppressed" in duplicate.content.get("text", "")
+    # 完成门：claim 经真实 coverage/evidence 校验，goal 终态 VERIFIED_DONE。
+    assert final_state.goal is not None
+    assert final_state.goal.status is GoalStatus.VERIFIED_DONE
+    admitted_ids = {
+        item.criterion_id for item in final_state.goal.admitted_criteria
+    }
+    assert "criterion:required-local-process:c1" in admitted_ids
+    assert final_state.completion_claim is not None
+    criterion_record = next(
+        record
+        for record in final_state.evidence_records
+        if record.criterion_id == "criterion:required-local-process:c1"
+    )
+    assert new_a.fact_id in criterion_record.source_fact_ids
+    assert seed_a.fact_id not in criterion_record.source_fact_ids
+    # 下一轮 provider wire 有效：claim 轮 context 同时携带抑制指引与已准入 goal。
+    claim_context_text = []
+    for msg in provider.contexts[-1].messages:
+        for block in msg.content:
+            claim_context_text.append(
+                str(block.get("text", ""))
+                if isinstance(block, dict)
+                else str(getattr(block, "text", ""))
+            )
+    assert any("Duplicate request suppressed" in text for text in claim_context_text)

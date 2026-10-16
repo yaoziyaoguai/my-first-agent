@@ -449,3 +449,13 @@ def test_new_command_with_active_goal_is_refused() -> None:
     assert exit_code == 0
     assert exit_code != NEW_SESSION_REQUESTED
     assert any("goal" in item.lower() for item in output)
+
+
+def test_help_lists_artifact_confirmation_arguments_in_parser_order() -> None:
+    """R4：/approve-artifact 帮助参数顺序与实际解析一致（<sha256> 在前）。"""
+
+    runtime, output, _ = _run_once(ConversationState.new("conversation-1"), "/help")
+
+    rendered = "\n".join(output)
+    line = next(item for item in rendered.splitlines() if "/approve-artifact" in item)
+    assert line.index("<sha256>") < line.index("<workspace-relative-path>")

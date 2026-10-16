@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from agent.runtime.contracts import (
     ActiveRunStatus,
     AdmittedCriterion,
+    ApprovalRequest,
     ContinuationPhase,
     ConversationFact,
     ConversationState,
@@ -170,6 +171,56 @@ def project_process_leases(
 
 def _lease_readable(lease) -> str:  # noqa: ANN001
     return lease.readable_command
+
+
+def project_goal_authorization_scopes(
+    state: ConversationState,
+) -> tuple[str | None, str | None]:
+    """R4：当前 pending 文件审批的 (精确文件 scope, 目录 scope) 纯投影。
+
+    与 Runtime 铸授权共用 agent.runtime.state 的同一 scope 判定，None 表示
+    对应无参数短命令不适用；不得触发 Runtime、Provider、Tool 或持久化。
+    """
+
+    from agent.runtime.state import _goal_target_authorization_scope
+
+    active = state.active_run
+    if (
+        active is None
+        or active.status is not ActiveRunStatus.AWAITING_APPROVAL
+        or not isinstance(active.pending_request, ApprovalRequest)
+        or not active.tool_calls
+        or active.batch_cursor >= len(active.tool_calls)
+    ):
+        return (None, None)
+    pending = active.pending_request
+    return (
+        _goal_target_authorization_scope(state, pending, active, directory=False),
+        _goal_target_authorization_scope(state, pending, active, directory=True),
+    )
+
+
+def project_goal_target_reuse_unavailable(state: ConversationState) -> bool:
+    """目标写入审批的复用透明度纯投影（与 R4 共用同一 scope 判定）。
+
+    spec 驱动 Goal 的 targets 常为散文，write_file/edit_file 不在其中时
+    复用授权静默不适用（E1-A 实测 0/17）；True 表示"Goal 存在、本次是
+    目标写入、但没有任何可复用 scope"，审批提示据此如实说明，不改语义。
+    """
+
+    if state.goal is None:
+        return False
+    file_scope, directory_scope = project_goal_authorization_scopes(state)
+    if file_scope is not None or directory_scope is not None:
+        return False
+    active = state.active_run
+    if (
+        active is None
+        or active.status is not ActiveRunStatus.AWAITING_APPROVAL
+        or not isinstance(active.pending_request, ApprovalRequest)
+    ):
+        return False
+    return active.pending_request.tool_name in {"write_file", "edit_file"}
 
 
 def project_goal_view(state: ConversationState) -> GoalView:

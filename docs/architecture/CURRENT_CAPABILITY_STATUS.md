@@ -23,16 +23,20 @@ G8 之前 SubAgent 属于这种限制（HTTP adapter 无 honest hard-deadline）
 `locally-verified`，随后 2026-07-25 完成真实 HTTP provider in child 的 E3 并经独立 review 晋级
 `accepted`。当前工作树的唯一有效 claim 见下方 Current snapshot。
 
-## Current snapshot (2026-09-09)
+## Current snapshot (2026-10-16)
 
 本节是唯一权威 current matrix；下方 Historical matrix 与时间线只作历史证据保留。所有 current claim
 均相对当前工作树这一 identity：当前工作树相对 016/017/018/019 的旧 seal/check 全部 drift（016
 manifest 期望 225、实际 508 entries；018 期望 309、实际 495；019 entry_count/root drift），
 fail-closed 校验正常工作，因此没有任何 `locally-verified` / `accepted` / `delivered` 相对当前
-identity 成立。2026-09-09 r18 收尾轮对 consolidated 候选（commit `684f368` / tree `10d36564`）
-完成 source full gate：3372 passed, 3 skipped（ruff 与 `git diff --check` PASS）；这是 source 报告
-事实，不是 delivery promotion，也不证明任何安装 matrix。本仓库自 r18 起冻结为学习里程碑：不再自动
-开启新的优化轮次、promotion 重绑、host port 或能力扩展；历史晋级结论保持原样，仅绑定当时 identity。
+identity 成立——各能力保持 `implemented-candidate`。2026-09-09 r18 曾冻结为学习里程碑；r19 产品化
+审计（2026-09-09）解除该冻结后，2026-10 可靠性收口在当前 identity 上补齐三层证据：完整测试门 G1
+（3873 passed / 1 skipped / 0 failed，exit 0，确认性重跑；唯一 skip 为设计内 launchd host gate）、
+安装层 I1（wheel→install→installed 41 节点 exit 0、origin 153/153 安装态、两条污染负对照通过；仅覆盖
+本机 macOS 单一组合，未声明跨平台安装 matrix）、真实模型层 E1（deepseek-v4-flash，thinking
+disabled，授权预算 61/80 请求：E1-B 运行中追加纠正→暂停→新进程恢复旅程 typed VERIFIED_DONE 全链
+PASS；E1-A 业务判据全过但 40 请求窗口耗尽于终态前，产品停在安全暂停未谎报完成）。这些是当前
+identity 上的验证事实，不是 promotion，也不改变任何历史 seal 的绑定范围。
 
 ## r18 closure record (2026-09-09, 普通实施记录，非 acceptance control)
 

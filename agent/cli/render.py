@@ -20,6 +20,8 @@ from agent.runtime.contracts import (
 from agent.runtime.views import (
     SourceView,
     delivery_summary_message,
+    project_goal_authorization_scopes,
+    project_goal_target_reuse_unavailable,
     project_goal_view,
     project_process_leases,
     project_visible_source_views,
@@ -40,9 +42,11 @@ class TerminalRenderer:
         write_fn: Callable[[str], None] = print,
         *,
         delta_write_fn: Callable[[str], None] | None = None,
+        credential_env: str | None = None,
     ) -> None:
         self._write = write_fn
         self._delta_write = delta_write_fn
+        self._credential_env = credential_env
         self._seen_event_ids: set[str] = set()
         # r19 小步 3:已流式呈现的回答文本;与最终权威 message 完全一致时
         # 不再重复打印(显示可由权威结果校正,而不是双份输出)。
@@ -168,6 +172,8 @@ class TerminalRenderer:
                     artifact_path=(
                         requirement.artifact_path if requirement is not None else None
                     ),
+                    authorization_scopes=project_goal_authorization_scopes(state),
+                    goal_scope_unavailable=project_goal_target_reuse_unavailable(state),
                 )
             )
             return
@@ -284,13 +290,19 @@ class TerminalRenderer:
                 )
                 lines.append("Run /resume to try a new approach or /cancel.")
                 return "\n".join(lines)
-            return TerminalRenderer._result_message_for_limit()
+            return TerminalRenderer._result_message_for_limit(result.error_code)
         if result.status is RunStatus.CONVERSATION_LIMIT_REACHED:
             return "Conversation capacity reached. Start a new conversation."
         if result.status is RunStatus.FAILED_RETRYABLE:
             return TerminalRenderer._result_message_for_retryable(result.error_code)
         if result.status is RunStatus.FAILED_FATAL:
             if result.error_code == "provider_auth_error":
+                if self._credential_env:
+                    return (
+                        "Provider authentication failed. Check the credential "
+                        f"environment variable {terminal_text(self._credential_env)} "
+                        "in this shell, then run first-agent again."
+                    )
                 return (
                     "Provider authentication failed. Check the configured credential "
                     "and run first-agent again."
@@ -321,6 +333,8 @@ class TerminalRenderer:
         side_effect: object,
         preview: object,
         artifact_path: str | None = None,
+        authorization_scopes: tuple[str | None, str | None] = (None, None),
+        goal_scope_unavailable: bool = False,
     ) -> str:
         lines = [
             "Approval required",
@@ -335,6 +349,38 @@ class TerminalRenderer:
                 f"This command may generate {terminal_text(artifact_path)}. "
                 "Approve generation now? [y/N] The generated file is not confirmed yet; "
                 "First Agent must show its current content for a separate confirmation."
+            )
+        # R4：适用范围内展示无参数范围授权短命令与准确边界（16 次执行/60 分钟
+        # 是 Runtime 铸授权的固定 bound）；不适用时完全不出现。
+        file_scope, directory_scope = authorization_scopes
+        if file_scope is not None or directory_scope is not None:
+            lines.append(
+                "Scope authorization for the current task only (reusable; "
+                "revoke anytime with /revoke-goal-target):"
+            )
+            if file_scope is not None:
+                lines.append(
+                    f"/approve-goal-target — approve {terminal_text(tool_name)} for the "
+                    f"exact file {terminal_text(file_scope)} in this task "
+                    "(at most 16 executions, expires after 60 minutes, "
+                    "any goal change ends it)"
+                )
+            if directory_scope is not None:
+                lines.append(
+                    f"/approve-goal-directory — approve {terminal_text(tool_name)} for "
+                    f"regular files under the Goal directory "
+                    f"{terminal_text(directory_scope)} in this task "
+                    "(at most 16 executions, expires after 60 minutes, "
+                    "any goal change ends it)"
+                )
+            lines.append("yes approves only this one operation.")
+        elif goal_scope_unavailable:
+            # E1-A（2026-10-16）：spec 驱动 Goal 的 targets 是散文时，写入复用
+            # 授权静默不适用（实测 0/17）；如实说明，避免"已授权"误读。
+            lines.append(
+                "No reusable Goal scope for this write: its path is not covered by "
+                "the current task targets. Approving here covers only this one "
+                "operation; later writes will each require approval again."
             )
         return "\n".join(lines)
 
@@ -371,7 +417,17 @@ class TerminalRenderer:
         )
 
     @staticmethod
-    def _result_message_for_limit() -> str:
+    def _result_message_for_limit(error_code: str | None = None) -> str:
+        # E1-A 真实旅程（2026-10-16）：累计 model-attempt 预算耗尽后的 /resume
+        # 会在派发前再次被拒，通用 "Run /resume to continue" 会形成误导循环。
+        # 只有该原因需要指明真正的继续路径（同 ledger 提高 --max-model-attempts）。
+        if error_code == "model_attempt_budget_exhausted":
+            return (
+                "Task paused: the model request budget on this ledger is exhausted. "
+                "/resume cannot send new model requests under the current limit; "
+                "restart with a higher --max-model-attempts on the same "
+                "--transport-audit-ledger to continue this task, or /cancel."
+            )
         return "Task paused at a safe execution limit. Run /resume to continue or /cancel."
 
     @staticmethod

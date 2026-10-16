@@ -22,7 +22,9 @@ from agent.runtime.contracts import (
     GoalStatus,
     LoadedSnapshot,
     ModelResponse,
+    ModelTextBlock,
     ProposedCriterion,
+    RequirementCoverage,
     RuntimeEvent,
     canonical_json_digest,
 )
@@ -70,6 +72,10 @@ def bind_runtime_goal(response: ModelResponse, context: ContextPack) -> ModelRes
         isinstance(control, (BlockedClaim, CompletionClaim, GoalProgress))
         and control.goal_id == RUNTIME_GOAL_ID
     ):
+        # 只绑定 Runtime 铸造的动态身份/引用（goal_id/revision/evidence refs）。
+        # R2-B：不为缺失 requirement_coverage 自动创造"已满足"语义——缺复核的
+        # claim 经本 helper 后仍为空，由真实完成门拒绝；确需正例 coverage 的
+        # scripted fixture 显式用 completion_claim_from_trusted 声明其语义。
         evidence_refs = (
             trusted.get("expected_completion_evidence_refs")
             if isinstance(control, CompletionClaim) and trusted is not None
@@ -159,6 +165,60 @@ def goal_noop_response(
                     expected_revision=1,
                     reason="the user supplement does not change the trusted goal",
                     updates={"targets": targets},
+                ),
+            ),
+        )
+
+    return response
+
+
+def completion_claim_from_trusted(
+    correlation_id: str,
+    *,
+    requirement_id: str = "requirement:trusted-goal",
+    requirement: str = "the current trusted goal is fully satisfied",
+    text: str | None = None,
+) -> Callable[[ContextPack], ModelResponse]:
+    """按 trusted_goal 投影抄写 completion_claim（含 R2 requirement_coverage）。
+
+    真实模型只能引用投影下发的闭合 id（source_fact_ids、
+    expected_completion_evidence_refs）与 admitted criterion id；本 helper 与
+    ``bind_runtime_goal`` 同型，让 scripted 测试不硬编码动态铸造的
+    ``action:N:user`` fact id 或随 delta 变化的 criterion revision。可选
+    ``text`` 附带最终回答文本；coverage 语义由调用方以参数显式声明。
+    """
+
+    def response(context: ContextPack) -> ModelResponse:
+        trusted = _trusted_goal_projection(context)
+        if trusted is None:
+            raise AssertionError("trusted_goal is required for a completion claim")
+        source_fact_ids = trusted.get("source_fact_ids")
+        criterion_ids = tuple(
+            item.get("criterion_id")
+            for item in trusted.get("admitted_criteria", ())
+            if isinstance(item, dict)
+            and item.get("mandatory") is True
+            and isinstance(item.get("criterion_id"), str)
+        )
+        if not isinstance(source_fact_ids, list) or not source_fact_ids:
+            raise AssertionError("trusted_goal source_fact_ids are required")
+        if not criterion_ids:
+            raise AssertionError("trusted_goal mandatory criteria are required")
+        return ModelResponse(
+            (ModelTextBlock(text),) if text is not None else (),
+            control=CompletionClaim(
+                correlation_id=correlation_id,
+                goal_id=RUNTIME_GOAL_ID,
+                goal_revision=1,
+                criterion_evidence_refs=(),
+                requirement_coverage=(
+                    RequirementCoverage(
+                        requirement_id=requirement_id,
+                        requirement=requirement,
+                        source_fact_ids=tuple(source_fact_ids),
+                        status="satisfied",
+                        criterion_ids=criterion_ids,
+                    ),
                 ),
             ),
         )

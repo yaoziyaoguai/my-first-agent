@@ -37,6 +37,7 @@ from agent.runtime.contracts import (
     ModelTextBlock,
     ModelToolCall,
     ProposedCriterion,
+    RequirementCoverage,
     SubmitMessage,
 )
 from agent.runtime.control import ControlInbox
@@ -106,11 +107,26 @@ def _sandbox_call(call_id: str, executable: str) -> ModelToolCall:
 
 def _claim_for(context, correlation: str) -> CompletionClaim:
     goal = _context_goal(context)
+    # R2：coverage 引用投影的 source_fact_ids 与全部 mandatory ids。
+    mandatory_ids = tuple(
+        item["criterion_id"]
+        for item in goal["admitted_criteria"]
+        if item.get("mandatory") is True
+    )
     return CompletionClaim(
         correlation_id=correlation,
         goal_id=goal["goal_id"],
         goal_revision=goal["goal_revision"],
         criterion_evidence_refs=tuple(goal["expected_completion_evidence_refs"]),
+        requirement_coverage=(
+            RequirementCoverage(
+                requirement_id="requirement:recovery-journey",
+                requirement="完成用户要求的修复并通过验证",
+                source_fact_ids=tuple(goal["source_fact_ids"]),
+                status="satisfied",
+                criterion_ids=mandatory_ids,
+            ),
+        ),
     )
 
 

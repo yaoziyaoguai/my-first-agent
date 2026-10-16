@@ -8,6 +8,7 @@ import pytest
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     ActiveRun,
+    AdmittedCriterion,
     BlockedClaim,
     CompletionClaim,
     ContinuationPhase,
@@ -17,24 +18,37 @@ from agent.runtime.contracts import (
     ExecutingIntentRecord,
     ExecutionAuthorityClass,
     FactKind,
+    GoalBootstrap,
+    GoalDelta,
+    GoalDeltaProposal,
+    GoalDraftProposal,
     GoalStatus,
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
     ProposedCriterion,
+    RequirementCoverage,
     Resume,
     RunStatus,
     SubmitMessage,
     ToolCall,
     ToolPrepareContext,
+    closed_evidence_id,
 )
 from agent.runtime.evidence import ClosedEvidenceRegistry, EvidenceVerificationError
 from agent.runtime.loop import AgentRuntime, InvocationLimits
-from agent.runtime.state import record_completion_claim, record_evidence, verify_goal_completion
+from agent.runtime.state import (
+    accept_goal_delta_proposal,
+    accept_goal_draft_proposal,
+    record_completion_claim,
+    record_evidence,
+    verify_goal_completion,
+)
 from agent.runtime.tools import KernelToolRuntime
 from agent.tools.file_ops import build_file_tool_runtime
 from tests.continuity.test_contracts import _goal
 from tests.kernel.fakes import (
+    RUNTIME_GOAL_ID,
     CollectingSink,
     InMemoryCheckpointStore,
     ScriptedProvider,
@@ -44,6 +58,9 @@ from tests.kernel.fakes import (
 CONTENT = "verified report\n"
 CONTENT_DIGEST = hashlib.sha256(CONTENT.encode()).hexdigest()
 EVIDENCE_ID = "evidence:goal:1:1:criterion:report-exists"
+# _runtime 的 SubmitMessage 被消费为 goal_correction，落为 action:1:user 权威
+# fact；覆盖率门要求 claim 引用每条权威用户输入，因此两者都必须被覆盖。
+RUNTIME_SOURCE_FACT_IDS = ("fact:user:1", "action:1:user")
 
 
 def _facts(*, fake: bool = False) -> tuple[ConversationFact, ...]:
@@ -98,12 +115,25 @@ def _state(*, fake: bool = False) -> ConversationState:
     )
 
 
-def _claim() -> CompletionClaim:
+def _claim(
+    *,
+    correlation_id: str = "claim-1",
+    source_fact_ids: tuple[str, ...] = ("fact:user:1",),
+) -> CompletionClaim:
     return CompletionClaim(
-        correlation_id="claim-1",
+        correlation_id=correlation_id,
         goal_id="goal:1",
         goal_revision=1,
         criterion_evidence_refs=(EVIDENCE_ID,),
+        requirement_coverage=(
+            RequirementCoverage(
+                requirement_id="requirement:report",
+                requirement="the exact verified report is written",
+                source_fact_ids=source_fact_ids,
+                status="satisfied",
+                criterion_ids=("criterion:report-exists",),
+            ),
+        ),
     )
 
 
@@ -155,7 +185,7 @@ def test_deterministic_receipts_bound_to_all_mandatory_criteria_verify_goal() ->
 
     runtime, store, action = _runtime(
         replace(_state(), browser_leases=(make_lease(),)),
-        ModelResponse((), control=_claim()),
+        ModelResponse((), control=_claim(source_fact_ids=RUNTIME_SOURCE_FACT_IDS)),
     )
 
     result = runtime.run_turn(action, store.load())
@@ -170,10 +200,83 @@ def test_deterministic_receipts_bound_to_all_mandatory_criteria_verify_goal() ->
     assert store.state.browser_leases == ()
 
 
-def test_fresh_successful_read_back_closes_fully_derivable_goal_without_model_churn(
-    tmp_path,
-) -> None:
-    """闭合证据已由最终 read-back 产生时，不再要求模型抄回 Runtime refs。"""
+def test_completion_claim_receipt_digest_binds_requirement_coverage() -> None:
+    """R2-A：claim receipt 的 payload_digest 必须绑定全部语义相关 coverage 字段。
+
+    相同其他字段、不同 coverage 的两个 claim 不得共享同一 digest；coverage
+    完全相同时 digest 与 correlation_id 无关（response 自身身份与 receipt
+    payload 身份分别验证）。
+    """
+
+    base = _state()
+    records = ClosedEvidenceRegistry().derive(
+        base, _claim(), observed_at="2026-10-14T00:00:00Z"
+    )
+    with_evidence = record_evidence(base, records)
+
+    first = record_completion_claim(with_evidence, _claim(correlation_id="claim-a"))
+    control = record_completion_claim(with_evidence, _claim(correlation_id="claim-c"))
+    rewritten = replace(
+        _claim(correlation_id="claim-b"),
+        requirement_coverage=(
+            replace(
+                _claim().requirement_coverage[0],
+                requirement="every user requirement is satisfied",
+            ),
+        ),
+    )
+    second = record_completion_claim(with_evidence, rewritten)
+
+    assert (
+        first.control_receipts[-1].payload_digest
+        == control.control_receipts[-1].payload_digest
+    )
+    assert (
+        first.control_receipts[-1].payload_digest
+        != second.control_receipts[-1].payload_digest
+    )
+
+
+def test_sentinel_claim_without_coverage_stays_empty_and_gate_rejects() -> None:
+    """R2-B：bind_runtime_goal 不为缺失 coverage 代填"已满足"语义。
+
+    RUNTIME_GOAL_ID 占位但 requirement_coverage 为空时，经 helper 后仍为空
+    （只绑定动态身份/引用）；真实完成门必须拒绝，Goal 不得进入
+    VERIFIED_DONE。
+    """
+    runtime, store, action = _runtime(
+        _state(),
+        ModelResponse(
+            (),
+            control=CompletionClaim(
+                correlation_id="claim-empty-coverage",
+                goal_id=RUNTIME_GOAL_ID,
+                goal_revision=1,
+                criterion_evidence_refs=(),
+            ),
+        ),
+        ModelResponse((ModelTextBlock("cannot verify yet"),)),
+    )
+
+    runtime.run_turn(action, store.load())
+
+    goal = store.state.goal
+    assert goal is not None
+    assert goal.status is not GoalStatus.VERIFIED_DONE
+    claim = store.state.completion_claim
+    assert claim is not None
+    assert claim.goal_id == goal.goal_id, "identity binding still applies"
+    assert claim.requirement_coverage == (), "helper must not fabricate coverage"
+
+
+def test_read_back_alone_does_not_auto_complete_goal(tmp_path) -> None:
+    """R2：read-back 产生闭合证据后，Runtime 不再自行合成复核，回到 model loop。
+
+    修复前：最终 read-back 后 Runtime 自动合成 `runtime-completion:` claim 并
+    直接 VERIFIED_DONE，模型无需逐项复核权威要求。R2 合同要求自动路径不得
+    自行合成"已复核所有业务要求"——证据齐全后仍需模型显式提交带
+    requirement_coverage 的 completion_claim。
+    """
 
     workspace = tmp_path / "workspace"
     (workspace / "reports").mkdir(parents=True)
@@ -216,16 +319,76 @@ def test_fresh_successful_read_back_closes_fully_derivable_goal_without_model_ch
 
     result = runtime.run_turn(action, store.load())
 
+    assert result.status is not RunStatus.COMPLETED
+    assert store.state.goal is not None
+    assert store.state.goal.status is not GoalStatus.VERIFIED_DONE
+    assert store.state.completion_claim is None
+    # 批次结束后确实回到了 model loop（而不是在批次边界自行收尾）。
+    assert len(provider.calls) == 2
+
+
+def test_read_back_then_explicit_coverage_claim_verifies_goal(tmp_path) -> None:
+    """R2：证据齐全后，模型显式提交带 coverage 的 claim 仍能在有限步内完成。"""
+
+    workspace = tmp_path / "workspace"
+    (workspace / "reports").mkdir(parents=True)
+    (workspace / "reports" / "final.md").write_text(CONTENT, encoding="utf-8")
+    seed = _state()
+    state = replace(
+        seed,
+        facts=(seed.facts[0],),
+        active_run=ActiveRun("run-auto-complete"),
+    )
+    store = InMemoryCheckpointStore(state)
+    provider = ScriptedProvider(
+        ModelResponse(
+            (
+                ModelToolCall(
+                    "read-final",
+                    "read_file",
+                    {"path": "reports/final.md"},
+                ),
+            )
+        ),
+        ModelResponse((), control=_claim()),
+    )
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=10_000, output_reserve=200),
+        ),
+        tool_runtime=build_file_tool_runtime(workspace),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-auto-complete",
+    )
+    action = Resume(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+    )
+
+    result = runtime.run_turn(action, store.load())
+
     assert result.status is RunStatus.COMPLETED
     assert store.state.goal is not None
     assert store.state.goal.status is GoalStatus.VERIFIED_DONE
     assert store.state.completion_claim is not None
-    assert store.state.completion_claim.correlation_id.startswith("runtime-completion:")
-    assert len(provider.calls) == 1
+    assert store.state.completion_claim.correlation_id == "claim-1"
+    assert len(provider.calls) == 2
 
 
 def test_readback_completion_waits_for_remaining_read(tmp_path) -> None:
-    """中间 read-back 即使闭合证据，也必须先完成已接纳批次。"""
+    """R2：闭合证据来自批次中第一个 read 时，整批仍需完整落盘后再显式收尾。
+
+    旧自动收尾的触发条件本就要求 MODEL 阶段且无剩余 tool_calls，不会因批次
+    第一项是 read 就跳过第二项；它截断的是**整批结束之后**的主模型业务工作
+    ——read 证据一闭合就直接 VERIFIED_DONE，模型不再有机会继续。R2 删除自动
+    收尾后，批内每个调用都先有 durable 结果，模型的显式 claim（带逐项
+    coverage）才是唯一收尾路径。
+    """
 
     workspace = tmp_path / "workspace"
     (workspace / "reports").mkdir(parents=True)
@@ -253,7 +416,8 @@ def test_readback_completion_waits_for_remaining_read(tmp_path) -> None:
                     {"path": "notes.md"},
                 ),
             )
-        )
+        ),
+        ModelResponse((), control=_claim()),
     )
     runtime = AgentRuntime(
         provider=provider,
@@ -282,7 +446,7 @@ def test_readback_completion_waits_for_remaining_read(tmp_path) -> None:
         if fact.kind is FactKind.TOOL_RESULT
     )
     assert result_ids == ("read-final", "read-notes")
-    assert len(provider.calls) == 1
+    assert len(provider.calls) == 2
     assert store.state.goal is not None
     assert store.state.goal.status is GoalStatus.VERIFIED_DONE
     assert tuple(event.kind.value for event in sink.events)[-3:] == (
@@ -320,6 +484,154 @@ def test_unadmitted_explicit_process_requirement_cannot_verify_done() -> None:
         verify_goal_completion(state)
 
 
+def test_withdrawn_process_obligation_cannot_brick_completion_gate() -> None:
+    """R3 端到端：correction 明确禁止后，撤回的义务不得阻塞 completion gate。
+
+    修复前：admission 铸造的 runtime-owned process 义务在 correction 撤回后
+    仍残留在 proposed_criteria，verify_goal_completion 的 "process criterion
+    must be admitted" 检查永久失败 → Goal 无法完成。修复后：义务随现行版本
+    失效，文件证据齐全时正常到 VERIFIED_DONE。
+    """
+
+    content = "fixed app\n"
+    digest = hashlib.sha256(content.encode()).hexdigest()
+    source = ConversationFact(
+        fact_id="fact:user:1",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "运行 pytest -q，并修复 app.py 的功能。"},
+    )
+    state = ConversationState(
+        conversation_id="conversation:withdrawal-e2e",
+        facts=(source,),
+    )
+    bootstrap = GoalBootstrap(
+        source_fact_id=source.fact_id,
+        workspace_identity_digest="workspace:v1:" + "c" * 64,
+        authority_snapshot="authority:v1:" + "d" * 64,
+    )
+    accepted = accept_goal_draft_proposal(
+        state,
+        GoalDraftProposal(
+            correlation_id="proposal:withdrawal-e2e",
+            user_outcome="修复 app.py 并验证结果",
+            beneficiary="owner",
+            targets=("app.py",),
+            scope=("workspace",),
+            non_goals=(),
+            assumptions=(),
+            proposed_criteria=(
+                ProposedCriterion(
+                    criterion_id="criterion:app",
+                    description="app.py contains the requested fix",
+                    oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                    artifact_path="app.py",
+                ),
+            ),
+            requires_local_process=False,
+        ),
+        bootstrap,
+        admitted_at="2026-08-20T00:00:00Z",
+    )
+    assert accepted.goal is not None
+    assert any(
+        item.criterion_id.startswith("criterion:required-local-process:")
+        for item in accepted.goal.proposed_criteria
+    ), "admission must mint the runtime-owned process obligation"
+
+    correction = ConversationFact(
+        fact_id="fact:user:2",
+        kind=FactKind.USER_MESSAGE,
+        content={
+            "text": "不要运行测试，只修改 app.py，其他要求不变。",
+            "control": "goal_correction",
+        },
+    )
+    corrected = accept_goal_delta_proposal(
+        replace(accepted, facts=(*accepted.facts, correction)),
+        GoalDeltaProposal(
+            correlation_id="delta:withdrawal-e2e",
+            delta=GoalDelta(
+                goal_id=accepted.goal.goal_id,
+                expected_revision=accepted.goal.revision,
+                reason="apply the user's explicit prohibition",
+                updates={"assumptions": ["tests must not run"]},
+            ),
+        ),
+    )
+    assert corrected.goal is not None
+    goal = replace(
+        corrected.goal,
+        admitted_criteria=(
+            AdmittedCriterion(
+                criterion_id="criterion:app",
+                description="app.py contains the requested fix",
+                source_fact_id=source.fact_id,
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                predicate={"path": "app.py", "sha256": digest},
+                required_evidence_class="workspace_file",
+                admission_digest="b" * 64,
+            ),
+        ),
+    )
+    evidence_id = closed_evidence_id(goal.goal_id, goal.revision, "criterion:app")
+    state = replace(
+        corrected,
+        goal=goal,
+        facts=(
+            *corrected.facts,
+            ConversationFact(
+                fact_id="fact:calls:1",
+                kind=FactKind.TOOL_CALLS,
+                content={
+                    "calls": [
+                        {
+                            "tool_call_id": "read-app",
+                            "name": "read_file",
+                            "arguments": {"path": "app.py"},
+                        }
+                    ]
+                },
+            ),
+            ConversationFact(
+                fact_id="fact:read-result:1",
+                kind=FactKind.TOOL_RESULT,
+                content={
+                    "tool_call_id": "read-app",
+                    "text": content,
+                    "is_error": False,
+                    "executed": True,
+                    "metadata": {},
+                },
+            ),
+        ),
+    )
+    claim = CompletionClaim(
+        correlation_id="claim:withdrawal-e2e",
+        goal_id=goal.goal_id,
+        goal_revision=goal.revision,
+        criterion_evidence_refs=(evidence_id,),
+        requirement_coverage=(
+            RequirementCoverage(
+                requirement_id="requirement:fix-app-without-tests",
+                requirement="修复 app.py，且不运行测试",
+                source_fact_ids=(source.fact_id, correction.fact_id),
+                status="satisfied",
+                criterion_ids=("criterion:app",),
+            ),
+        ),
+    )
+    records = ClosedEvidenceRegistry().derive(
+        state, claim, observed_at="2026-08-24T00:00:00Z"
+    )
+    state = record_evidence(state, records)
+    state = record_completion_claim(state, claim)
+
+    verified = verify_goal_completion(state)
+
+    assert verified.goal is not None
+    assert verified.goal.status is GoalStatus.VERIFIED_DONE
+
+
 def test_blocked_claim_rejected_when_completion_evidence_is_derivable() -> None:
     """016 真实 E3 第 96 轮 a2 J7 观测的 false-blocked 形状。
 
@@ -343,18 +655,24 @@ def test_blocked_claim_rejected_when_completion_evidence_is_derivable() -> None:
     runtime, store, action = _runtime(
         _state(),
         ModelResponse((), control=blocked),
-        ModelResponse((), control=_claim()),
+        ModelResponse((), control=_claim(source_fact_ids=RUNTIME_SOURCE_FACT_IDS)),
     )
 
     result = runtime.run_turn(action, store.load())
 
     assert result.status is RunStatus.COMPLETED
     assert store.state.goal.status is GoalStatus.VERIFIED_DONE
-    assert any(
-        fact.kind is FactKind.POLICY_RESULT
-        and fact.content.get("code") == "completion_evidence_available"
+    guidance = next(
+        str(fact.content.get("text", ""))
         for fact in store.state.facts
-    ), "false-blocked must be rejected with a completion repair"
+        if fact.kind is FactKind.POLICY_RESULT
+        and fact.content.get("code") == "completion_evidence_available"
+    )
+    # R2-C：blocked 修复指引与当前完成门共享——物理证据可推导不等于业务复核
+    # 完成，指引必须同时要求逐项 requirement_coverage 复核，而不是只教模型抄
+    # evidence refs。
+    assert "requirement_coverage" in guidance
+    assert "blocked" in guidance
 
 
 def test_blocked_claim_cannot_replace_available_final_read_back(tmp_path) -> None:
@@ -406,6 +724,7 @@ def test_blocked_claim_cannot_replace_available_final_read_back(tmp_path) -> Non
         ModelResponse(
             (ModelToolCall("read-final", "read_file", {"path": "reports/final.md"}),)
         ),
+        ModelResponse((), control=_claim()),
     )
     runtime = AgentRuntime(
         provider=provider,

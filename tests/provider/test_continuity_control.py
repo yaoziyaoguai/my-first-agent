@@ -50,6 +50,7 @@ from agent.runtime.contracts import (
     ModelTextBlock,
     ModelToolCall,
     ProposedCriterion,
+    RequirementCoverage,
     SubmitMessage,
     ToolDefinition,
     canonical_json_digest,
@@ -874,6 +875,7 @@ def test_installed_goal_control_schema_no_longer_advertises_goal_proposal() -> N
         "goal_id",
         "goal_revision",
         "criterion_evidence_refs",
+        "requirement_coverage",
         "blocker",
         "safe_attempts",
         "resume_condition",
@@ -960,6 +962,7 @@ def test_portable_schema_gives_exact_goal_progress_payload_when_available() -> N
         "summary",
         "next_step",
         "criterion_evidence_refs",
+        "requirement_coverage",
         "blocker",
         "safe_attempts",
         "resume_condition",
@@ -1463,6 +1466,15 @@ _COMPLETION_ARGUMENTS: dict[str, object] = {
     "goal_id": "goal-1",
     "goal_revision": 2,
     "criterion_evidence_refs": ["evid-1", "evid-2"],
+    "requirement_coverage": [
+        {
+            "requirement_id": "requirement:report",
+            "requirement": "the report exists with exact content",
+            "source_fact_ids": ["fact:user:1"],
+            "status": "satisfied",
+            "criterion_ids": ["criterion:report-exists"],
+        }
+    ],
 }
 
 _EXPECTED_COMPLETION = CompletionClaim(
@@ -1470,6 +1482,15 @@ _EXPECTED_COMPLETION = CompletionClaim(
     goal_id="goal-1",
     goal_revision=2,
     criterion_evidence_refs=("evid-1", "evid-2"),
+    requirement_coverage=(
+        RequirementCoverage(
+            requirement_id="requirement:report",
+            requirement="the report exists with exact content",
+            source_fact_ids=("fact:user:1",),
+            status="satisfied",
+            criterion_ids=("criterion:report-exists",),
+        ),
+    ),
 )
 
 _BLOCKED_ARGUMENTS: dict[str, object] = {
@@ -1617,6 +1638,42 @@ def test_portable_completion_restoration_keeps_other_fields_fail_closed(
         if key not in {"goal_id", "goal_revision"}
     }
     mutation(arguments)
+    payload = payload_builder(RESERVED_CONTROL_NAME, arguments)
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+
+    with httpx.Client(transport=transport) as client:
+        provider = provider_cls(config=_config(provider_type), http_client=client)
+        with pytest.raises(ProviderProtocolError):
+            provider.generate(_portable_goal_bound_context())
+
+
+@pytest.mark.parametrize(("provider_cls", "provider_type", "payload_builder"), PROVIDER_CASES)
+@pytest.mark.parametrize(
+    "entry_mutation",
+    (
+        lambda entry: entry.__setitem__("unrecognized_extra", "audit"),
+        lambda entry: entry.__setitem__("source_fact_ids", [123]),
+        lambda entry: entry.__setitem__("criterion_ids", [123]),
+    ),
+    ids=("nested-unknown-key", "non-string-source-fact-id", "non-string-criterion-id"),
+)
+def test_completion_coverage_entries_decode_fail_closed_in_both_adapters(
+    provider_cls, provider_type, payload_builder, entry_mutation
+) -> None:
+    """R2-A：coverage 条目与 strict schema 精确键集对齐，ID 逐元素为字符串。
+
+    OpenAI/Anthropic 两条真实 adapter 的离线 wire 上，嵌套未知字段或非字符串
+    ID 元素都必须 ProviderProtocolError，不得构造出语义畸形的 claim。
+    """
+    import copy
+
+    arguments = {
+        key: value
+        for key, value in _COMPLETION_ARGUMENTS.items()
+        if key not in {"goal_id", "goal_revision"}
+    }
+    arguments["requirement_coverage"] = copy.deepcopy(arguments["requirement_coverage"])
+    entry_mutation(arguments["requirement_coverage"][0])
     payload = payload_builder(RESERVED_CONTROL_NAME, arguments)
     transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
 
@@ -2008,3 +2065,524 @@ def test_ordinary_tool_call_before_reserved_control_fails_closed(
         provider = provider_cls(config=_config(provider_type), http_client=client)
         with pytest.raises(ProviderProtocolError):
             provider.generate(_context())
+
+
+# --------------------------------------------------------------------------- #
+# R1-T9 / C2：安全闭合的 tool facts 经真实 context/provider wire 投影配对
+# --------------------------------------------------------------------------- #
+
+
+def test_r1_closed_suffix_facts_project_into_paired_wire_messages() -> None:
+    """R1-T9：丢 run 时闭合的 suffix facts 必须经真实投影成对出现。
+
+    从真实 Runtime 走一遍 pause-at-approval（R1 在同一 CAS 闭合未开始
+    suffix），再把 durable state 经真实 KernelContextManager 构建上下文，
+    分别用 OpenAI/Anthropic 投影序列化：批次 calls/results exact 配对，
+    已执行 prefix 与既有 continuation 不被改写。离线合成数据即可证明。
+    """
+
+    from agent.provider.normalize import context_to_anthropic_messages
+    from agent.runtime.contracts import (
+        ActiveRun,
+        ApprovalPolicy,
+        ApprovalRequest,
+        ExecutionAuthorityClass,
+        OutputPolicy,
+        PauseGoal,
+        RunStatus,
+        SideEffectClass,
+        ToolCall,
+        ToolRisk,
+        ToolSpec,
+    )
+    from agent.runtime.loop import AgentRuntime, InvocationLimits
+    from agent.runtime.state import pause_for_approval, start_tool_batch
+    from agent.runtime.tools import RegisteredTool
+    from tests.kernel.fakes import (
+        CollectingSink,
+        InMemoryCheckpointStore,
+        ScriptedProvider,
+        conversation_with_active_goal,
+    )
+
+    seed = conversation_with_active_goal()
+    state = replace(seed, active_run=ActiveRun(run_id="run-wire"))
+    state = start_tool_batch(
+        state,
+        (
+            ToolCall("wire-call-1", "write_fixture", {"content": "one"}),
+            ToolCall("wire-call-2", "write_fixture", {"content": "two"}),
+        ),
+    )
+    state = pause_for_approval(
+        state,
+        ApprovalRequest(
+            request_id="approval-wire",
+            run_id="run-wire",
+            tool_call_id="wire-call-1",
+            binding_digest="binding-wire",
+            preview="write fixture",
+            tool_name="write_fixture",
+        ),
+    )
+    spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name="write_fixture",
+        version="1",
+        description="Write fixture",
+        input_schema={
+            "type": "object",
+            "properties": {"content": {"type": "string"}},
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.HIGH,
+        side_effect=SideEffectClass.WRITE,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        safety_policy={},
+        output_limit_chars=50,
+    )
+    store = InMemoryCheckpointStore(state)
+    runtime = AgentRuntime(
+        provider=ScriptedProvider(),
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+        ),
+        tool_runtime=KernelToolRuntime(
+            (RegisteredTool(spec, lambda intent: "written"),)
+        ),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-wire",
+    )
+    paused = runtime.run_turn(
+        PauseGoal(
+            conversation_id="conversation-1",
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            goal_id="goal-1",
+            goal_revision=1,
+        ),
+        store.load(),
+    )
+    assert paused.status is RunStatus.COMPLETED
+    durable = store.load().state
+    closed = [
+        fact
+        for fact in durable.facts
+        if fact.content.get("superseded") is True
+    ]
+    assert [fact.content["tool_call_id"] for fact in closed] == [
+        "wire-call-1",
+        "wire-call-2",
+    ]
+
+    context = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+    ).build(
+        durable,
+        SubmitMessage(
+            conversation_id=durable.conversation_id,
+            action_seq=durable.next_action_seq,
+            expected_revision=durable.revision,
+            run_id="run-after-pause",
+            message="继续",
+        ),
+        (),
+    )
+
+    openai_messages = context_to_openai_messages(context)
+    pending: set[str] = set()
+    for message in openai_messages:
+        raw_calls = message.get("tool_calls")
+        if raw_calls is not None:
+            pending.update(call["id"] for call in raw_calls)
+            continue
+        if message.get("role") == "tool":
+            assert message["tool_call_id"] in pending
+            pending.discard(message["tool_call_id"])
+    assert pending == set(), "every projected tool call must be paired"
+
+    anthropic_messages = context_to_anthropic_messages(context)
+    use_ids = [
+        block["id"]
+        for message in anthropic_messages
+        for block in message["content"]
+        if block.get("type") == "tool_use"
+    ]
+    result_ids = [
+        block["tool_use_id"]
+        for message in anthropic_messages
+        for block in message["content"]
+        if block.get("type") == "tool_result"
+    ]
+    assert sorted(use_ids) == sorted(result_ids)
+    assert "wire-call-1" in result_ids
+    assert "wire-call-2" in result_ids
+
+
+# --------------------------------------------------------------------------- #
+# C2（2026-10-14 接续包）：成功 prefix + 安全闭合 suffix 与历史自愈的完整 wire 组合
+# --------------------------------------------------------------------------- #
+
+
+_C2_IDENTITY = "a" * 64
+_C2_CONTINUATION_PAYLOAD = "opaque-reasoning-A"
+
+
+def _c2_declined_batch_journey(*, continuation: bool):
+    """真实 Runtime 旅程：批准执行 call-1，拒绝 call-2 并在同一 CAS 闭合 call-3。
+
+    返回 durable state 与真实执行过的内容序列。``continuation=True`` 时模型
+    响应携带真实 opaque continuation（provider 身份绑定），落在 tool batch
+    fact 上；``False`` 时模拟无 reasoning 连续性的 provider 会话。
+    """
+
+    from agent.runtime.contracts import (
+        ApprovalPolicy,
+        OutputPolicy,
+        ProviderContinuationV1,
+        ResolveApproval,
+        RunStatus,
+        SideEffectClass,
+        ToolRisk,
+        ToolSpec,
+    )
+    from agent.runtime.loop import AgentRuntime, InvocationLimits
+    from agent.runtime.tools import RegisteredTool
+    from tests.kernel.fakes import (
+        CollectingSink,
+        InMemoryCheckpointStore,
+        ScriptedProvider,
+        conversation_with_active_goal,
+        goal_noop_response,
+    )
+
+    executed: list[str] = []
+    spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name="write_fixture",
+        version="1",
+        description="Write fixture",
+        input_schema={
+            "type": "object",
+            "properties": {"content": {"type": "string"}},
+            "required": ["content"],
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.HIGH,
+        side_effect=SideEffectClass.WRITE,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        safety_policy={},
+        output_limit_chars=50,
+    )
+    provider = ScriptedProvider(
+        goal_noop_response("c2-user-supplement"),
+        ModelResponse(
+            tuple(
+                ModelToolCall(
+                    f"wire-call-{index}",
+                    "write_fixture",
+                    {"content": content},
+                )
+                for index, content in enumerate(("one", "two", "three"), start=1)
+            ),
+            provider_continuation=(
+                ProviderContinuationV1.create(
+                    provider_identity_digest=_C2_IDENTITY,
+                    opaque_payload=_C2_CONTINUATION_PAYLOAD,
+                )
+                if continuation
+                else None
+            ),
+        ),
+    )
+    state = conversation_with_active_goal()
+    store = InMemoryCheckpointStore(state)
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+        ),
+        tool_runtime=KernelToolRuntime(
+            (
+                RegisteredTool(
+                    spec,
+                    lambda intent: executed.append(intent.arguments["content"])
+                    or "written",
+                ),
+            )
+        ),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-c2",
+    )
+
+    def _resolve(pending, *, approved: bool):  # noqa: ANN001
+        return runtime.run_turn(
+            ResolveApproval(
+                conversation_id=state.conversation_id,
+                action_seq=store.state.next_action_seq,
+                expected_revision=store.state.revision,
+                request_id=pending.request.request_id,
+                binding_digest=pending.request.binding_digest,
+                approved=approved,
+            ),
+            store.load(),
+        )
+
+    first = runtime.run_turn(
+        SubmitMessage(
+            conversation_id=state.conversation_id,
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            run_id="run-c2",
+            message="write three fixtures",
+        ),
+        store.load(),
+    )
+    assert first.status is RunStatus.AWAITING_APPROVAL
+    assert first.request is not None
+    second = _resolve(first, approved=True)
+    assert second.status is RunStatus.AWAITING_APPROVAL
+    assert second.request is not None
+    declined = _resolve(second, approved=False)
+    assert declined.status is RunStatus.CANCELLED
+    return store.load().state, executed
+
+
+def _c2_wire_context(durable):  # noqa: ANN001
+    return KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+    ).build(
+        durable,
+        SubmitMessage(
+            conversation_id=durable.conversation_id,
+            action_seq=durable.next_action_seq,
+            expected_revision=durable.revision,
+            run_id="run-c2-after",
+            message="继续",
+        ),
+        (),
+    )
+
+
+def test_c2_success_prefix_and_safely_closed_suffix_project_into_paired_wire() -> None:
+    """C2：真实拒绝旅程的已执行 prefix 与安全闭合 suffix 精确配对到 wire。
+
+    断言预期 call 确实出现在 wire（不是空集合相等）、结果一一对应且按序、
+    原成功结果文本与真实存在的 opaque continuation 原样保持；continuation
+    对其它 provider 投影 fail closed。
+    """
+
+    from agent.provider.normalize import context_to_anthropic_messages
+
+    durable, executed = _c2_declined_batch_journey(continuation=True)
+    assert executed == ["one"]
+
+    context = _c2_wire_context(durable)
+    messages = context_to_openai_messages(
+        context,
+        provider_identity_digest=_C2_IDENTITY,
+        require_reasoning_continuity=True,
+    )
+    assistant = next(message for message in messages if message.get("tool_calls"))
+    assert [call["id"] for call in assistant["tool_calls"]] == [
+        "wire-call-1",
+        "wire-call-2",
+        "wire-call-3",
+    ]
+    # 真实存在的 opaque continuation 原样保持。
+    assert assistant["reasoning_content"] == _C2_CONTINUATION_PAYLOAD
+    tool_messages = [message for message in messages if message.get("role") == "tool"]
+    assert [message["tool_call_id"] for message in tool_messages] == [
+        "wire-call-1",
+        "wire-call-2",
+        "wire-call-3",
+    ]
+    # 原成功结果文本不变；拒绝与同 CAS 闭合的 suffix 各自成对。
+    assert tool_messages[0]["content"] == "written"
+    assert "rejected" in tool_messages[1]["content"]
+    assert "not executed" in tool_messages[2]["content"]
+
+    # continuation 绑定 provider 身份：其它投影 fail closed，不回放也不丢弃。
+    with pytest.raises(ProviderProtocolError, match="provider_continuity_mismatch"):
+        context_to_anthropic_messages(context)
+
+    # 无 continuation 会话（如 Anthropic 侧）：两种真实投影都精确成对。
+    durable_plain, executed_plain = _c2_declined_batch_journey(continuation=False)
+    assert executed_plain == ["one"]
+    plain_context = _c2_wire_context(durable_plain)
+    openai_messages = context_to_openai_messages(plain_context)
+    openai_assistant = next(
+        message for message in openai_messages if message.get("tool_calls")
+    )
+    assert "reasoning_content" not in openai_assistant
+    assert [
+        message["tool_call_id"]
+        for message in openai_messages
+        if message.get("role") == "tool"
+    ] == ["wire-call-1", "wire-call-2", "wire-call-3"]
+
+    anthropic_messages = context_to_anthropic_messages(plain_context)
+    use_ids = [
+        block["id"]
+        for message in anthropic_messages
+        for block in message["content"]
+        if block.get("type") == "tool_use"
+    ]
+    result_blocks = [
+        block
+        for message in anthropic_messages
+        for block in message["content"]
+        if block.get("type") == "tool_result"
+    ]
+    assert use_ids == ["wire-call-1", "wire-call-2", "wire-call-3"]
+    assert [block["tool_use_id"] for block in result_blocks] == use_ids
+    assert result_blocks[0]["content"] == "written"
+    assert "rejected" in result_blocks[1]["content"]
+    assert "not executed" in result_blocks[2]["content"]
+
+
+def test_c2_strict_rejection_prefix_healed_history_projects_paired() -> None:
+    """C2：严格拒绝 prefix 的历史自愈（R1 窄守卫）经真实投影精确成对。"""
+
+    from agent.runtime.contracts import ActionDisposition
+    from agent.runtime.state import accept_action
+    from tests.kernel.fakes import conversation_with_active_goal
+
+    seed = conversation_with_active_goal()
+    batch = ConversationFact(
+        fact_id="run:run-healed:tool-batch:10",
+        kind=FactKind.TOOL_CALLS,
+        content={
+            "calls": [
+                {"tool_call_id": "wire-call-1", "name": "write_fixture", "arguments": {}},
+                {"tool_call_id": "wire-call-2", "name": "write_fixture", "arguments": {}},
+            ]
+        },
+    )
+    strict_rejection = ConversationFact(
+        fact_id="run:run-healed:tool-result:wire-call-1:11",
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": "wire-call-1",
+            "text": "User rejected the requested tool action.",
+            "is_error": True,
+            "executed": False,
+            "rejected": True,
+        },
+    )
+    orphan = replace(seed, facts=(*seed.facts, batch, strict_rejection))
+    healed = accept_action(
+        orphan,
+        SubmitMessage(
+            conversation_id=orphan.conversation_id,
+            action_seq=orphan.next_action_seq,
+            expected_revision=orphan.revision,
+            run_id="run-healed-next",
+            message="继续",
+        ),
+    )
+    assert healed.disposition is ActionDisposition.ACCEPTED
+    healed_suffix = [
+        fact.content["tool_call_id"]
+        for fact in healed.state.facts
+        if fact.content.get("superseded") is True
+    ]
+    assert healed_suffix == ["wire-call-2"]
+
+    context = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+    ).build(
+        healed.state,
+        SubmitMessage(
+            conversation_id=healed.state.conversation_id,
+            action_seq=healed.state.next_action_seq,
+            expected_revision=healed.state.revision,
+            run_id="run-healed-after",
+            message="继续",
+        ),
+        (),
+    )
+    messages = context_to_openai_messages(context)
+    assistant = next(message for message in messages if message.get("tool_calls"))
+    assert [call["id"] for call in assistant["tool_calls"]] == [
+        "wire-call-1",
+        "wire-call-2",
+    ]
+    tool_messages = [message for message in messages if message.get("role") == "tool"]
+    assert [message["tool_call_id"] for message in tool_messages] == [
+        "wire-call-1",
+        "wire-call-2",
+    ]
+    assert tool_messages[0]["content"] == "User rejected the requested tool action."
+    assert "superseded" in tool_messages[1]["content"]
+
+
+def test_c2_missing_or_duplicate_results_are_rejected_by_the_real_projection() -> None:
+    """C2 负例：缺失或重复结果被真实 OpenAI 投影 fail closed，绝不发上游。"""
+
+    from tests.kernel.fakes import conversation_with_active_goal
+
+    seed = conversation_with_active_goal()
+    batch = ConversationFact(
+        fact_id="run:run-neg:tool-batch:10",
+        kind=FactKind.TOOL_CALLS,
+        content={
+            "calls": [
+                {"tool_call_id": "wire-call-1", "name": "write_fixture", "arguments": {}},
+                {"tool_call_id": "wire-call-2", "name": "write_fixture", "arguments": {}},
+            ]
+        },
+    )
+
+    def _result(fact_id: str, tool_call_id: str) -> ConversationFact:
+        return ConversationFact(
+            fact_id=fact_id,
+            kind=FactKind.TOOL_RESULT,
+            content={
+                "tool_call_id": tool_call_id,
+                "text": "ok",
+                "is_error": False,
+                "executed": True,
+            },
+        )
+
+    cases = {
+        "missing": (
+            _result("run:run-neg:tool-result:wire-call-1:11", "wire-call-1"),
+        ),
+        "duplicate": (
+            _result("run:run-neg:tool-result:wire-call-1:11", "wire-call-1"),
+            _result("run:run-neg:tool-result:wire-call-1:12", "wire-call-1"),
+        ),
+    }
+    for label, results in cases.items():
+        state = replace(seed, facts=(*seed.facts, batch, *results))
+        context = KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+        ).build(
+            state,
+            SubmitMessage(
+                conversation_id=state.conversation_id,
+                action_seq=state.next_action_seq,
+                expected_revision=state.revision,
+                run_id=f"run-neg-{label}",
+                message="继续",
+            ),
+            (),
+        )
+        with pytest.raises(
+            ProviderProtocolError, match="invalid_tool_message_continuity"
+        ):
+            context_to_openai_messages(context)

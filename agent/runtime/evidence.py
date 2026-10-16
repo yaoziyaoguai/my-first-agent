@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from agent.runtime.contracts import (
@@ -440,7 +440,17 @@ class ClosedEvidenceRegistry:
             else:
                 raise EvidenceVerificationError("criterion uses an unsupported oracle")
             if existing_record is not None and existing_record != derived:
-                raise EvidenceVerificationError("stored evidence does not match raw durable facts")
+                if existing_record.source_fact_ids == derived.source_fact_ids:
+                    raise EvidenceVerificationError(
+                        "stored evidence does not match raw durable facts"
+                    )
+                # R2-C 刷新：facts 只追加不改写，derive 的"首个有效证明"扫描
+                # 是确定性的——同一组证明 fact 只能导出同一记录；证明 fact 集
+                # 不同只能来自"后续写入/执行使旧证明失效，更新的读回或收据成为
+                # 当前证明"。derive 永远从原始 durable facts 重算，因此把缓存记
+                # 录刷新为当前证明（以本次时间为新观测时间），由调用方按 id 原位
+                # upsert；同 fact 集下的其他字段失配仍是篡改信号，硬失败。
+                derived = replace(derived, observed_at=observed_at)
             records.append(derived)
         return tuple(records)
 

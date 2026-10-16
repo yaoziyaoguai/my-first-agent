@@ -48,6 +48,7 @@ from agent.runtime.tools import KernelToolRuntime
 from agent.tools.file_ops import build_file_tool_runtime
 from tests.continuity.test_contracts import _goal
 from tests.kernel.fakes import (
+    RUNTIME_GOAL_ID,
     CollectingSink,
     InMemoryCheckpointStore,
     ScriptedProvider,
@@ -199,6 +200,75 @@ def test_deterministic_receipts_bound_to_all_mandatory_criteria_verify_goal() ->
     assert store.state.browser_leases == ()
 
 
+def test_completion_claim_receipt_digest_binds_requirement_coverage() -> None:
+    """R2-A：claim receipt 的 payload_digest 必须绑定全部语义相关 coverage 字段。
+
+    相同其他字段、不同 coverage 的两个 claim 不得共享同一 digest；coverage
+    完全相同时 digest 与 correlation_id 无关（response 自身身份与 receipt
+    payload 身份分别验证）。
+    """
+
+    base = _state()
+    records = ClosedEvidenceRegistry().derive(
+        base, _claim(), observed_at="2026-10-14T00:00:00Z"
+    )
+    with_evidence = record_evidence(base, records)
+
+    first = record_completion_claim(with_evidence, _claim(correlation_id="claim-a"))
+    control = record_completion_claim(with_evidence, _claim(correlation_id="claim-c"))
+    rewritten = replace(
+        _claim(correlation_id="claim-b"),
+        requirement_coverage=(
+            replace(
+                _claim().requirement_coverage[0],
+                requirement="every user requirement is satisfied",
+            ),
+        ),
+    )
+    second = record_completion_claim(with_evidence, rewritten)
+
+    assert (
+        first.control_receipts[-1].payload_digest
+        == control.control_receipts[-1].payload_digest
+    )
+    assert (
+        first.control_receipts[-1].payload_digest
+        != second.control_receipts[-1].payload_digest
+    )
+
+
+def test_sentinel_claim_without_coverage_stays_empty_and_gate_rejects() -> None:
+    """R2-B：bind_runtime_goal 不为缺失 coverage 代填"已满足"语义。
+
+    RUNTIME_GOAL_ID 占位但 requirement_coverage 为空时，经 helper 后仍为空
+    （只绑定动态身份/引用）；真实完成门必须拒绝，Goal 不得进入
+    VERIFIED_DONE。
+    """
+    runtime, store, action = _runtime(
+        _state(),
+        ModelResponse(
+            (),
+            control=CompletionClaim(
+                correlation_id="claim-empty-coverage",
+                goal_id=RUNTIME_GOAL_ID,
+                goal_revision=1,
+                criterion_evidence_refs=(),
+            ),
+        ),
+        ModelResponse((ModelTextBlock("cannot verify yet"),)),
+    )
+
+    runtime.run_turn(action, store.load())
+
+    goal = store.state.goal
+    assert goal is not None
+    assert goal.status is not GoalStatus.VERIFIED_DONE
+    claim = store.state.completion_claim
+    assert claim is not None
+    assert claim.goal_id == goal.goal_id, "identity binding still applies"
+    assert claim.requirement_coverage == (), "helper must not fabricate coverage"
+
+
 def test_read_back_alone_does_not_auto_complete_goal(tmp_path) -> None:
     """R2：read-back 产生闭合证据后，Runtime 不再自行合成复核，回到 model loop。
 
@@ -311,11 +381,13 @@ def test_read_back_then_explicit_coverage_claim_verifies_goal(tmp_path) -> None:
 
 
 def test_readback_completion_waits_for_remaining_read(tmp_path) -> None:
-    """R2：闭合证据来自批次中第一个 read，仍必须先完成已接纳批次的其余调用。
+    """R2：闭合证据来自批次中第一个 read 时，整批仍需完整落盘后再显式收尾。
 
-    修复前：read-final 结果落盘后自动收尾直接 VERIFIED_DONE，read-notes 永
-    不执行。R2 删除自动收尾后，批次内每个调用都必须先有 durable 结果，模型
-    的显式 claim 才能受理。
+    旧自动收尾的触发条件本就要求 MODEL 阶段且无剩余 tool_calls，不会因批次
+    第一项是 read 就跳过第二项；它截断的是**整批结束之后**的主模型业务工作
+    ——read 证据一闭合就直接 VERIFIED_DONE，模型不再有机会继续。R2 删除自动
+    收尾后，批内每个调用都先有 durable 结果，模型的显式 claim（带逐项
+    coverage）才是唯一收尾路径。
     """
 
     workspace = tmp_path / "workspace"
@@ -590,11 +662,17 @@ def test_blocked_claim_rejected_when_completion_evidence_is_derivable() -> None:
 
     assert result.status is RunStatus.COMPLETED
     assert store.state.goal.status is GoalStatus.VERIFIED_DONE
-    assert any(
-        fact.kind is FactKind.POLICY_RESULT
-        and fact.content.get("code") == "completion_evidence_available"
+    guidance = next(
+        str(fact.content.get("text", ""))
         for fact in store.state.facts
-    ), "false-blocked must be rejected with a completion repair"
+        if fact.kind is FactKind.POLICY_RESULT
+        and fact.content.get("code") == "completion_evidence_available"
+    )
+    # R2-C：blocked 修复指引与当前完成门共享——物理证据可推导不等于业务复核
+    # 完成，指引必须同时要求逐项 requirement_coverage 复核，而不是只教模型抄
+    # evidence refs。
+    assert "requirement_coverage" in guidance
+    assert "blocked" in guidance
 
 
 def test_blocked_claim_cannot_replace_available_final_read_back(tmp_path) -> None:

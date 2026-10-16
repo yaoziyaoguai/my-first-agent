@@ -1641,6 +1641,12 @@ class KernelContextManager:
         user_fact_ids = [fact.fact_id for fact in state.facts if fact.kind is FactKind.USER_MESSAGE]
         if user_fact_ids:
             pinned_fact_ids.add(user_fact_ids[-1])
+        # R2：Goal 的权威用户原文（初始输入 + 已消费 correction）是完成复核的
+        # 必要材料。只固定 Goal 当前 created_from_fact_ids 命中的组——有界于
+        # Goal 自身的来源链，不固定无限历史；预算连它们都放不下时保持既有
+        # ContextLimitError 的可读失败，不静默裁成"只剩来源 ID"。
+        if state.goal is not None:
+            pinned_fact_ids.update(state.goal.created_from_fact_ids)
 
         tool_groups = [group for group in groups if group.has_tool_result]
         if tool_groups:

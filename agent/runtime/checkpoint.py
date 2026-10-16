@@ -1359,7 +1359,8 @@ def _completion_claim_from_dict(value) -> CompletionClaim | None:
         return None
     value = _object(value, "completion_claim")
     # R2：旧活动 checkpoint 缺 requirement_coverage 时按空迁移——旧记录不被
-    # 默认视为复核已满足，模型在主 loop 正常补复核。
+    # 默认视为复核已满足，模型在主 loop 正常补复核。显式存在时必须是严格
+    # 数组：None/False/0/空串/空对象不得被静默当作空 coverage 吞掉。
     keys = {
         "correlation_id",
         "goal_id",
@@ -1369,7 +1370,7 @@ def _completion_claim_from_dict(value) -> CompletionClaim | None:
     if "requirement_coverage" in value:
         keys.add("requirement_coverage")
     _expect_keys(value, keys, "completion_claim")
-    raw_coverage = value.get("requirement_coverage") or []
+    raw_coverage = value.get("requirement_coverage", [])
     coverage: list[RequirementCoverage] = []
     for item in _array(raw_coverage, "requirement_coverage"):
         entry = _object(item, "requirement_coverage entry")

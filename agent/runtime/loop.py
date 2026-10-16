@@ -2875,9 +2875,14 @@ class AgentRuntime:
                                     "mandatory criterion already has derivable "
                                     "evidence from durable facts, so a safe action "
                                     "can advance this Goal. Resend completion_claim "
-                                    "with criterion_evidence_refs copied exactly, "
-                                    "element for element and in order, from the "
-                                    "CURRENT trusted_goal block's "
+                                    "after reviewing the current authoritative user "
+                                    "input and consumed corrections item by item: "
+                                    "each requirement_coverage entry must state its "
+                                    "requirement, cite its source facts, and bind "
+                                    "the current admitted mandatory criteria, and "
+                                    "criterion_evidence_refs must be copied "
+                                    "exactly, element for element and in order, "
+                                    "from the CURRENT trusted_goal block's "
                                     "expected_completion_evidence_refs; do not "
                                     "report this Goal as blocked."
                                 ),
@@ -2940,14 +2945,22 @@ class AgentRuntime:
                         control,
                         observed_at=self._evidence_time_factory(),
                     )
-                    existing_ids = {record.evidence_id for record in current.state.evidence_records}
-                    fresh = tuple(
-                        record for record in records if record.evidence_id not in existing_ids
+                    stored = {
+                        record.evidence_id: record
+                        for record in current.state.evidence_records
+                    }
+                    # 新证据入库，被后续写入失效后重新导出的旧证据按 id 原位
+                    # 刷新（R2-C：claim 被拒后继续写入并重新读回是可修复路径，
+                    # 不能因陈旧缓存硬失败）。
+                    pending_records = tuple(
+                        record
+                        for record in records
+                        if stored.get(record.evidence_id) != record
                     )
-                    if fresh:
+                    if pending_records:
                         current = self._save(
                             current,
-                            record_evidence(current.state, fresh),
+                            record_evidence(current.state, pending_records),
                         )
                         no_progress.reset()
                     current = self._save(

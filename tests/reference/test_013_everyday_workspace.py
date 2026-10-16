@@ -12,7 +12,6 @@ from agent.composition import build_composition
 from agent.runtime.checkpoint import LocalCheckpointStore
 from agent.runtime.context import ContextLimits
 from agent.runtime.contracts import (
-    CompletionClaim,
     ConversationState,
     EvidenceOracleKind,
     GoalStatus,
@@ -27,7 +26,11 @@ from agent.runtime.tools import KernelToolRuntime
 from agent.tools.file_ops import build_file_tool_registrations
 from main import EVERYDAY_SYSTEM_POLICY
 from tests.continuity.test_contracts import _goal
-from tests.kernel.fakes import RUNTIME_GOAL_ID, ScriptedProvider, goal_draft_from_frame
+from tests.kernel.fakes import (
+    ScriptedProvider,
+    completion_claim_from_trusted,
+    goal_draft_from_frame,
+)
 
 
 def _composition(provider, store, workspace: Path, output: list[str]):
@@ -118,8 +121,6 @@ def test_discussion_stays_goal_free_until_explicit_artifact_then_verifies(
     )
     content = "# Idea\n\nKeep the first version small.\n"
     goal_id = "goal-013-idea"
-    criterion_id = f"criterion:{goal_id}:content"
-    evidence_id = f"evidence:{goal_id}:1:{criterion_id}"
     provider = ScriptedProvider(
         ModelResponse(
             (ModelTextBlock("A small local-first scope is the strongest starting point."),)
@@ -149,26 +150,11 @@ def test_discussion_stays_goal_free_until_explicit_artifact_then_verifies(
         ModelResponse(
             (ModelToolCall("read-013-idea", "read_file", {"path": "notes/idea.md"}),)
         ),
-        ModelResponse(
-            (),
-            control=CompletionClaim(
-                # 真实 DeepSeek 曾复用 GoalProposal 的 correlation_id；Runtime 必须
-                # 在同一 run 内要求一次有界修复，不能把用户的任务打成 fatal。
-                correlation_id="proposal-013-idea",
-                goal_id=RUNTIME_GOAL_ID,
-                goal_revision=1,
-                criterion_evidence_refs=(evidence_id,),
-            ),
-        ),
-        ModelResponse(
-            (),
-            control=CompletionClaim(
-                correlation_id="completion-013-idea",
-                goal_id=RUNTIME_GOAL_ID,
-                goal_revision=1,
-                criterion_evidence_refs=(evidence_id,),
-            ),
-        ),
+        # R2-B：正例 coverage 显式声明；动态身份/证据引用由 helper 从 trusted
+        # 投影抄写。真实 DeepSeek 曾复用 GoalProposal 的 correlation_id；Runtime
+        # 必须在同一 run 内要求一次有界修复，不能把用户的任务打成 fatal。
+        completion_claim_from_trusted("proposal-013-idea"),
+        completion_claim_from_trusted("completion-013-idea"),
     )
     output: list[str] = []
     runtime, renderer = _composition(provider, store, workspace, output)
@@ -215,7 +201,6 @@ def test_empty_workspace_can_discover_root_and_create_verified_artifact(
     )
     content = "A bounded first artifact.\n"
     goal_id = "goal-013-empty"
-    criterion_id = f"criterion:{goal_id}:content"
     provider = ScriptedProvider(
         ModelResponse(
             (),
@@ -243,17 +228,9 @@ def test_empty_workspace_can_discover_root_and_create_verified_artifact(
         ModelResponse(
             (ModelToolCall("read-013-empty", "read_file", {"path": "idea.md"}),)
         ),
-        ModelResponse(
-            (),
-            control=CompletionClaim(
-                correlation_id="completion-013-empty",
-                goal_id=RUNTIME_GOAL_ID,
-                goal_revision=1,
-                criterion_evidence_refs=(
-                    f"evidence:{goal_id}:1:{criterion_id}",
-                ),
-            ),
-        ),
+        # R2-B：正例 coverage 显式声明；动态身份/证据引用由 helper 从 trusted
+        # 投影抄写（不硬编码 action:N:user / criterion revision）。
+        completion_claim_from_trusted("completion-013-empty"),
     )
     output: list[str] = []
     runtime, renderer = _composition(provider, store, workspace, output)
@@ -298,8 +275,6 @@ def test_existing_workspace_restart_changes_only_target_and_preserves_sentinels(
         ConversationState.new("conversation-013-existing"),
     )
     goal_id = "goal-013-readme"
-    criterion_id = f"criterion:{goal_id}:content"
-    evidence_id = f"evidence:{goal_id}:1:{criterion_id}"
     provider = ScriptedProvider(
         ModelResponse(
             (),
@@ -330,15 +305,9 @@ def test_existing_workspace_restart_changes_only_target_and_preserves_sentinels(
         ModelResponse(
             (ModelToolCall("read-013-readme", "read_file", {"path": "README.md"}),)
         ),
-        ModelResponse(
-            (),
-            control=CompletionClaim(
-                correlation_id="completion-013-readme",
-                goal_id=RUNTIME_GOAL_ID,
-                goal_revision=1,
-                criterion_evidence_refs=(evidence_id,),
-            ),
-        ),
+        # R2-B：正例 coverage 显式声明；动态身份/证据引用由 helper 从 trusted
+        # 投影抄写（不硬编码 action:N:user / criterion revision）。
+        completion_claim_from_trusted("completion-013-readme"),
     )
 
     first_output: list[str] = []

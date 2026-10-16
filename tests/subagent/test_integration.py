@@ -10,7 +10,6 @@ from dataclasses import replace
 
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
-    CompletionClaim,
     EvidenceOracleKind,
     ModelResponse,
     ModelTextBlock,
@@ -18,7 +17,6 @@ from agent.runtime.contracts import (
     ResolveApproval,
     RunStatus,
     SubmitMessage,
-    closed_evidence_id,
 )
 from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.tools import KernelToolRuntime
@@ -26,10 +24,10 @@ from agent.subagent.contracts import ChildProfile
 from agent.subagent.runner import ChildAgentRunner
 from agent.subagent.tools import build_subagent_tool_registrations
 from tests.kernel.fakes import (
-    RUNTIME_GOAL_ID,
     CollectingSink,
     InMemoryCheckpointStore,
     ScriptedProvider,
+    completion_claim_from_trusted,
     conversation_with_active_goal,
     goal_noop_response,
 )
@@ -64,20 +62,13 @@ def test_parent_delegates_and_uses_child_finding() -> None:
                 ),
             )
         ),
-        ModelResponse(
-            (ModelTextBlock("Risk: SECRET-OMEGA confirmed"),),
-            control=CompletionClaim(
-                correlation_id="subagent-finding-complete",
-                goal_id=RUNTIME_GOAL_ID,
-                goal_revision=1,
-                criterion_evidence_refs=(
-                    closed_evidence_id(
-                        "goal-1",
-                        1,
-                        "criterion:required-governed-tool:goal-1:1:delegate-1",
-                    ),
-                ),
-            ),
+        # R2-B：正例 coverage 由调用点显式声明其具体语义，从 trusted 投影抄写
+        # 闭合 id（criterion revision 随 noop delta 变化，不硬编码）。
+        completion_claim_from_trusted(
+            "subagent-finding-complete",
+            requirement_id="requirement:delegate-review",
+            requirement="the delegated review finding is returned and confirmed",
+            text="Risk: SECRET-OMEGA confirmed",
         ),
     )
     # subagent__delegate 是 EXTERNAL effectful 工具：合法路径是 Goal 准入之后执行，

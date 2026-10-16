@@ -22,12 +22,15 @@ from agent.runtime.checkpoint import (
     CheckpointInvariantError,
     CheckpointVersionError,
     LocalCheckpointStore,
+    _completion_claim_from_dict,
+    _completion_claim_to_dict,
     _encode_state,
 )
 from agent.runtime.contracts import (
     ActiveRun,
     ActiveRunStatus,
     AuthoritySourceKind,
+    CompletionClaim,
     ContinuationPhase,
     ConversationState,
     ConversationWorkspaceBindingV1,
@@ -39,6 +42,7 @@ from agent.runtime.contracts import (
     ProcessAuthorityLeaseV1,
     ProposedCriterion,
     RecoveryRequest,
+    RequirementCoverage,
     SideEffectClass,
     ToolCall,
     canonical_json_digest,
@@ -187,6 +191,81 @@ def test_current_state_encodes_as_v10_and_round_trips(tmp_path) -> None:
         restored.active_run.executing_intent.execution_authority
         is ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS
     )
+
+
+def test_completion_claim_coverage_decodes_strictly_and_round_trips() -> None:
+    """R2-A：checkpoint 的 requirement_coverage 解码合同。
+
+    旧活动 checkpoint **缺字段**按空迁移（不默认已复核）；显式存在时必须是
+    严格数组——``None``/``False``/``0``/空串/空对象都不得被当作空数组吞掉。
+    合法空数组可加载（但不因此满足完成门）；完整 roundtrip 保真。
+    """
+
+    claim = CompletionClaim(
+        correlation_id="claim:v4",
+        goal_id="goal:1",
+        goal_revision=3,
+        criterion_evidence_refs=("evidence:goal:1:3:criterion:a",),
+        requirement_coverage=(
+            RequirementCoverage(
+                requirement_id="requirement:report",
+                requirement="the exact report is written",
+                source_fact_ids=("fact:user:1",),
+                status="satisfied",
+                criterion_ids=("criterion:a",),
+            ),
+        ),
+    )
+    raw = _completion_claim_to_dict(claim)
+    assert _completion_claim_from_dict(raw) == claim
+
+    # 旧记录缺字段 → 空迁移，不默认已复核。
+    legacy = {key: value for key, value in raw.items() if key != "requirement_coverage"}
+    restored_legacy = _completion_claim_from_dict(legacy)
+    assert restored_legacy is not None
+    assert restored_legacy.requirement_coverage == ()
+
+    # 合法空数组可加载。
+    assert _completion_claim_from_dict({**raw, "requirement_coverage": []}) == replace(
+        claim, requirement_coverage=()
+    )
+
+    # 显式假值/空对象不是数组：严格拒绝，不静默当作空。
+    for bad in (None, False, 0, "", {}):
+        with pytest.raises((ValueError, TypeError)):
+            _completion_claim_from_dict({**raw, "requirement_coverage": bad})
+
+    # 条目内类型必须严格：非字符串状态、非数组 ID 列表、未知嵌套键都拒绝。
+    with pytest.raises((ValueError, TypeError, CheckpointVersionError)):
+        _completion_claim_from_dict(
+            {
+                **raw,
+                "requirement_coverage": [
+                    {**raw["requirement_coverage"][0], "status": 1}
+                ],
+            }
+        )
+    with pytest.raises((ValueError, TypeError, CheckpointVersionError)):
+        _completion_claim_from_dict(
+            {
+                **raw,
+                "requirement_coverage": [
+                    {**raw["requirement_coverage"][0], "source_fact_ids": "fact:user:1"}
+                ],
+            }
+        )
+    with pytest.raises((ValueError, TypeError, CheckpointVersionError)):
+        _completion_claim_from_dict(
+            {
+                **raw,
+                "requirement_coverage": [
+                    {
+                        **raw["requirement_coverage"][0],
+                        "unrecognized_extra": "audit",
+                    }
+                ],
+            }
+        )
 
 
 def test_v10_persists_durable_run_start_time(tmp_path) -> None:

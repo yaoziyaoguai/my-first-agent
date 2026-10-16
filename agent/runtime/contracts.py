@@ -5259,9 +5259,16 @@ def _requirement_coverage_from_payload(value: object) -> tuple[RequirementCovera
             RequirementCoverage(
                 requirement_id=_payload_string(entry["requirement_id"], "requirement_id"),
                 requirement=_payload_string(entry["requirement"], "requirement"),
-                source_fact_ids=tuple(entry["source_fact_ids"]),
+                # ID 列表逐元素必须是字符串：非字符串元素不得进入 tuple。
+                source_fact_ids=tuple(
+                    _payload_string(item, "source_fact_id")
+                    for item in entry["source_fact_ids"]
+                ),
                 status=_payload_string(entry["status"], "status"),
-                criterion_ids=tuple(entry["criterion_ids"]),
+                criterion_ids=tuple(
+                    _payload_string(item, "criterion_id")
+                    for item in entry["criterion_ids"]
+                ),
             )
         )
     return tuple(items)

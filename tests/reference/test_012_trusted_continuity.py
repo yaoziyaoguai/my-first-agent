@@ -57,6 +57,7 @@ from tests.kernel.fakes import (
     CollectingSink,
     InMemoryCheckpointStore,
     ScriptedProvider,
+    completion_claim_from_trusted,
     goal_draft_from_frame,
 )
 
@@ -185,15 +186,9 @@ def test_j2_task_restart_approval_effect_readback_and_verified_done(tmp_path) ->
                 ),
             )
         ),
-        ModelResponse(
-            (),
-            control=CompletionClaim(
-                correlation_id="completion-reference",
-                goal_id=RUNTIME_GOAL_ID,
-                goal_revision=1,
-                criterion_evidence_refs=(),
-            ),
-        ),
+        # R2-B：正例 coverage 由调用点显式声明；动态身份与证据引用由 helper
+        # 从 trusted 投影抄写（不硬编码 action:N:user / criterion revision）。
+        completion_claim_from_trusted("completion-reference"),
     )
     first_runtime = _runtime(
         provider,

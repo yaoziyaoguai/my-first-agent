@@ -1576,11 +1576,23 @@ def record_completion_claim(
     if not set(claim.criterion_evidence_refs).issubset(evidence_ids):
         raise ValueError("completion claim references unknown evidence")
     accepted_revision = state.revision + 1
+    # receipt payload 身份绑定全部语义相关字段：R2 的 requirement_coverage 改写
+    # （相同其他字段、不同 coverage）不得复用同一 digest。历史 receipt 不重算。
     payload_digest = canonical_json_digest(
         {
             "goal_id": claim.goal_id,
             "goal_revision": claim.goal_revision,
             "criterion_evidence_refs": claim.criterion_evidence_refs,
+            "requirement_coverage": [
+                {
+                    "requirement_id": item.requirement_id,
+                    "requirement": item.requirement,
+                    "source_fact_ids": item.source_fact_ids,
+                    "status": item.status,
+                    "criterion_ids": item.criterion_ids,
+                }
+                for item in claim.requirement_coverage
+            ],
         }
     )
     receipt = ControlReceipt.create(
@@ -1606,24 +1618,33 @@ def record_evidence(
     goal = state.goal
     if goal is None or not records:
         raise ValueError("evidence requires a current goal and at least one record")
-    known = {record.evidence_id for record in state.evidence_records}
     criteria = {criterion.criterion_id: criterion for criterion in goal.admitted_criteria}
     for record in records:
         criterion = criteria.get(record.criterion_id)
         if (
-            record.evidence_id in known
-            or record.goal_id != goal.goal_id
+            record.goal_id != goal.goal_id
             or record.goal_revision != goal.revision
             or criterion is None
             or record.oracle_kind is not criterion.oracle_kind
             or record.predicate_digest != canonical_json_digest(criterion.predicate)
         ):
             raise ValueError("evidence does not bind the current admitted criterion")
-        known.add(record.evidence_id)
+    # R2-C：同 id 记录按位刷新（derive 对 append-only facts 的当前重导出），
+    # 绑定校验不放宽；新记录按提交顺序追加。被后续写入失效的旧证据由此获得
+    # 可修复的刷新路径，而不是把 Goal 永久卡在陈旧缓存上。
+    merged = {record.evidence_id: record for record in state.evidence_records}
+    known_order = [record.evidence_id for record in state.evidence_records]
+    for record in records:
+        if record.evidence_id not in merged:
+            known_order.append(record.evidence_id)
+        merged[record.evidence_id] = record
+    refreshed = tuple(merged[evidence_id] for evidence_id in known_order)
+    if refreshed == state.evidence_records:
+        return state
     return replace(
         state,
         revision=state.revision + 1,
-        evidence_records=(*state.evidence_records, *records),
+        evidence_records=refreshed,
     )
 
 
@@ -3775,9 +3796,11 @@ def _close_orphaned_tool_batches(
     证明该推断没有依据：缺 active_run、缺 result、``last_safe_result`` 或旧
     ``superseded`` 文案都不能证明某个 call 未执行（效果可能已发生而结果保存
     失败）。自愈据此收窄为唯一可核实的旧形状：同批**完整连续 prefix**、
-    最后一个结果为 Runtime 拒绝审批结果，缺失项全部位于其后——该形状下批次
-    在拒绝处停止，suffix 必未开始。其余形状保留原 facts/checkpoint，由
-    accept_action 以动作冲突拒绝，不发 provider/tool、不伪造非执行。
+    最后一个结果具有严格审批拒绝语义（``rejected is True``、``executed is
+    False``、``is_error is True`` 且无 UNKNOWN 矛盾），缺失项全部位于其后——
+    该形状下批次在拒绝处停止，suffix 必未开始。其余形状（含矛盾标记、UNKNOWN、
+    缺字段或伪 bool 的损坏历史）保留原 facts/checkpoint，由 accept_action 以
+    动作冲突拒绝，不发 provider/tool、不伪造非执行。
 
     新代码的安全停机（pause/cancel/decline/end/complete/CancelRun/控制纠正）
     已在丢 run 的同一 CAS 内闭合各自确定的 suffix，不再依赖本函数。
@@ -3820,7 +3843,7 @@ def _close_orphaned_tool_batches(
             continue
         covered: list[str] = []
         covered_ids: set[str] = set()
-        last_result_is_rejection = False
+        last_result: ConversationFact | None = None
         cursor = index + 1
         while cursor < total and facts[cursor].kind is FactKind.TOOL_RESULT:
             result_call_id = facts[cursor].content.get("tool_call_id")
@@ -3832,9 +3855,7 @@ def _close_orphaned_tool_batches(
                 break
             covered_ids.add(result_call_id)
             covered.append(result_call_id)
-            last_result_is_rejection = (
-                facts[cursor].content.get("rejected") is True
-            )
+            last_result = facts[cursor]
             cursor += 1
         missing = tuple(call_id for call_id in expected if call_id not in covered_ids)
         if not missing:
@@ -3845,13 +3866,23 @@ def _close_orphaned_tool_batches(
         if cursor < total and facts[cursor].kind is FactKind.TOOL_RESULT:
             return None
         # 唯一可核实的旧形状：covered 恰为 expected 的完整连续前缀（按序、
-        # 无缺位），且最后一个结果为 Runtime 拒绝审批结果。缺 prefix、乱序、
-        # 重复或末结果非拒绝时，调用结果无法证明，保持未确定。
+        # 无缺位），且最后一个结果具有严格审批拒绝语义——``rejected is True``、
+        # ``executed is False``、``is_error is True`` 三个身份级标记同时成立且
+        # 无 UNKNOWN 矛盾。仅 ``rejected is True`` 不够：矛盾标记、UNKNOWN、
+        # 缺字段或 0/1 伪 bool 都是合成损坏历史，不能证明 suffix 未开始执行。
+        # 缺 prefix、乱序、重复或末结果非严格拒绝时同样保持未确定。
+        strict_rejection = (
+            last_result is not None
+            and last_result.content.get("rejected") is True
+            and last_result.content.get("executed") is False
+            and last_result.content.get("is_error") is True
+            and not last_result.content.get("unknown_outcome")
+        )
         prefix_is_exact = (
             bool(covered)
             and len(covered) <= len(expected)
             and covered == expected[: len(covered)]
-            and last_result_is_rejection
+            and strict_rejection
         )
         if not prefix_is_exact:
             return None

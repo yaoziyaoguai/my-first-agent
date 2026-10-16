@@ -114,6 +114,41 @@ def test_goal_draft_model_response_round_trips_typed_evidence_oracles() -> None:
     assert restored == response
 
 
+def test_completion_claim_coverage_round_trips_and_rejects_non_string_ids() -> None:
+    """R2-A：持久化 ModelResponse 的 coverage 逐元素校验。
+
+    合法 coverage roundtrip 保真；``source_fact_ids``/``criterion_ids`` 混入
+    非字符串元素时必须拒绝，不能构造出携带畸形 ID 的 claim。
+    """
+    import copy
+
+    claim = CompletionClaim(
+        correlation_id="claim:rt",
+        goal_id="goal:1",
+        goal_revision=1,
+        criterion_evidence_refs=("evid-1",),
+        requirement_coverage=(
+            RequirementCoverage(
+                requirement_id="requirement:report",
+                requirement="the exact report is written",
+                source_fact_ids=("fact:user:1",),
+                status="satisfied",
+                criterion_ids=("criterion:report-exists",),
+            ),
+        ),
+    )
+    payload = model_response_payload(ModelResponse((), control=claim))
+    restored = model_response_from_payload(payload)
+    assert isinstance(restored.control, CompletionClaim)
+    assert restored.control == claim
+
+    for key in ("source_fact_ids", "criterion_ids"):
+        bad = copy.deepcopy(payload)
+        bad["control"]["payload"]["requirement_coverage"][0][key] = [123]
+        with pytest.raises(ValueError):
+            model_response_from_payload(bad)
+
+
 def test_provider_continuation_round_trips_without_entering_visible_blocks() -> None:
     continuation = ProviderContinuationV1.create(
         provider_identity_digest="a" * 64,

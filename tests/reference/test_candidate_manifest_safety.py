@@ -601,7 +601,7 @@ def test_happy_path_copies_whole_tree_with_matching_hashes(owned_parent: Path) -
     listed = {entry["path"] for entry in manifest["files"]}
     # 本轮新增回归必须进入候选清单，否则安装物只跑旧测试。
     assert "tests/reference/test_candidate_manifest_safety.py" in listed
-    assert manifest["round"] == "2026-10-12 reliability closeout"
+    assert manifest["round"] == "2026-10-14 task-trust resume"
 
 
 def test_successful_build_does_not_modify_the_source_tree(owned_parent: Path) -> None:

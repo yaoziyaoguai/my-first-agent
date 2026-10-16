@@ -5,20 +5,31 @@
 `1.0.0` 的定位不是增加更多能力，而是让第一次安装、guided setup、无参数启动、可选 Web、暂停与恢复
 形成一条普通用户可理解的默认路径。该交付曾按 fail-closed 机制验收（detached
 `docs/acceptance/016_FIRST_AGENT_1_0_INDEPENDENT_REVIEW.md` 只对当时 delivery identity 记录 U3 PASS）。
-本仓库已于 2026-09-09 冻结为学习里程碑（tag `study-freeze-2026-09-09-candidate`，指向 `901bc55`）：
-不再自动开启新的优化轮次或 promotion 重绑，全部能力对当前 identity 保持 `implemented-candidate`。
+2026-09-09 曾冻结为学习里程碑（tag `study-freeze-2026-09-09-candidate`，指向 `901bc55`）；同日
+r19 产品化审计解除冻结后，项目转入日常可用性修复（见下方状态快照）。各能力对当前工作树 identity
+保持 `implemented-candidate`，历史晋级结论只绑定当时 delivery identity。
 
 它使用同一个自然语言入口回答问题、讨论想法或完成有界的当前目录文件任务。底层仍刻意保持为一个模型循环、一个上下文管理器、一个受治理的工具执行路径和一个可恢复状态机。它可以在逐次批准后通过固定 Tavily 入口查询公开 Web；015 Governed Local Action 已通过真实 E3、独立评审与 Codex 终裁，曾作为已交付能力提供受治理的结构化本机执行（`local_process`：exact 同意批准、Goal 限定租约、closed 环境与资源档案；历史晋级只绑定当时 delivery identity，见下方状态快照）。018 另提供可选的受治理专属隔离 Chromium 能力（candidate）。个人浏览器、任意网站兼容、桌面控制与任意 shell 仍不在交付范围内，也不存在第二套 Agent loop。
 
-## 当前状态快照（2026-09-09）
+## 当前状态快照（2026-10-16）
 
-当前工作树相对任何历史 delivery identity 均已变更：所有曾晋级的能力（七项 v1 capability、015、016、
-017、018、019）对当前 identity 一律是 `implemented-candidate`。历史 PASS——包括 2026-07-25 七项 v1
-reference task 晋级与 016/017/018/019 各 detached independent review 的记录——只对当时绑定的 identity
-有效；旧 seal/check 相对当前工作树全部 drift，fail-closed 校验正常工作。当前 delivery 未 promotion；
-2026-09-09 收尾轮（r18）对 consolidated 候选（commit `684f368` / tree `10d36564`）完成 source full
-gate：3372 passed, 3 skipped、ruff 与 `git diff --check` PASS；这只是 source 报告事实，不是交付证明。
-本仓库冻结于本地 annotated tag `study-freeze-2026-09-09-candidate`（指向 `901bc55`）。权威明细见
+2026-09-09 r18 冻结（consolidated 候选 commit `684f368` / tree `10d36564`，source full gate
+3372 passed / 3 skipped）后，r19 审计解除冻结并转向产品化；2026-10 可靠性收口在当前工作树
+identity 上完成：
+
+- **完整测试门 G1**：`3873 passed / 1 skipped / 0 failed`（exit 0，确认性重跑；唯一 skip 为设计内
+  launchd host gate）。
+- **安装层 I1**：wheel 构建→安装→installed 41 节点 exit 0、origin 153/153 安装态、两条污染负对照
+  通过（覆盖本机 macOS 单一组合，未声明跨平台安装 matrix）。
+- **真实模型层 E1**（deepseek-v4-flash，thinking disabled，授权预算 61/80 请求）：E1-B 分阶段旅程
+  （运行中追加纠正→暂停→退出→新进程恢复且不重述任务）typed `VERIFIED_DONE` 全链 PASS；E1-A 业务
+  判据全过但 40 请求窗口耗尽于终态前——产品停在安全暂停态，未谎报完成。
+
+**开箱即用边界**：Scheduler 安装入口返回 `needs_019_config`（无可用的 host composition，见下文
+Durable automations 节）；受治理浏览器（018）为 implemented-candidate 且未完成 D06 真实模型验收；
+`--strict-tools` 与含开放 object 的工具 schema 组合会在请求发送前 fail closed（见 HTTP Provider 节）。
+历史 PASS（包括 2026-07-25 七项 v1 reference 晋级与 016–019 各独立评审）只对当时绑定的 identity
+有效；旧 seal/check 相对当前工作树全部 drift，fail-closed 校验正常工作。权威明细见
 [Current Capability Status](docs/architecture/CURRENT_CAPABILITY_STATUS.md)。
 
 ## 当前能力
@@ -111,7 +122,9 @@ first-agent --project-path config/app.yaml --project-path pytest.ini
 `--without-owner-preferences`。这不会删除或迁移旧偏好，也不会关闭另行配置的 workspace Memory。
 需要为诊断或付费 dogfood 设置跨重启硬预算时，`--max-model-attempts N` 必须与同一个 owner-only
 `--transport-audit-ledger PATH` 配套使用；额度在 HTTP 发出前累计占位，失败请求也不会退还。开启
-HTTP SubAgent 时，隔离子进程也使用这一本 ledger 和同一上限，不会另起一份额度。
+HTTP SubAgent 时，隔离子进程也使用这一本 ledger 和同一上限，不会另起一份额度。额度耗尽后任务在
+安全边界暂停并明确说明 `/resume` 已无法再发送模型请求；以同一 ledger 与更高的
+`--max-model-attempts` 重启即可继续原任务（历史消耗与授权边界保留）。
 
 每个 workspace 最多保留 256 个 active-history 会话。到达上限时新会话会被拒绝，既有会话仍可
 恢复和选择；产品不会自动删除历史。`--status` 会显示可复制的完整 conversation ID。只允许把已经
@@ -156,11 +169,13 @@ digest/request ID。以下 slash command 只保留为高级精确接口：
 
 - `/ack-provider DIGEST`
 - `/approve ID`、`/reject ID`
-- `/approve-goal-target ID`（仅对当前 Goal/revision、当前 workspace、同一文件工具与同一精确
+- `/approve-goal-target [ID]`（仅对当前 Goal/revision、当前 workspace、同一文件工具与同一精确
   Goal target 复用；最多 16 次实际执行、60 分钟后到期，任务修订/终态也立即失效；普通
-  `yes`、`a`、`/approve` 仍是逐笔批准）
-- `/approve-goal-directory ID`（仅在 Goal 已明确列出父目录时，授权同一文件工具访问该目录下
-  的普通项目文件；不会从当前文件自动猜父目录，敏感路径仍拒绝；TUI 使用 `Shift+D`）
+  `yes`、`a`、`/approve` 仍是逐笔批准。文件审批提示在适用范围内直接展示无参数
+  `/approve-goal-target`，绑定刚显示的待审批请求；范围不适用时拒绝执行，不静默降级）
+- `/approve-goal-directory [ID]`（仅在 Goal 已明确列出父目录时，授权同一文件工具访问该目录下
+  的普通项目文件；不会从当前文件自动猜父目录，敏感路径仍拒绝；无参数形式同样绑定刚显示的
+  待审批请求；TUI 使用 `Shift+D`）
 - `/revoke-goal-target`（撤销当前任务的全部文件授权；TUI 可用 `Shift+A` 授予精确文件）
 - `/resolve-success ID`、`/resolve-failed ID`
 - `/pause`、`/resume`、`/cancel`、`/exit`

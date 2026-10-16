@@ -1049,6 +1049,44 @@ def test_accept_action_closes_rejection_prefix_orphan_in_place() -> None:
     assert fact_ids.index(healed[0].fact_id) == (
         fact_ids.index("run:run-orphan:tool-result:call-1:12") + 1
     )
+
+    # P2-3（2026-10-16 交叉审计补证）：愈合后的状态必须经真实
+    # build→context_to_openai_messages 投影出闭合的 wire——孤儿 call-2 由
+    # superseded 结果配对，批次不再悬空（投影层端到端，不只检查中间对象）。
+    # 无 Goal 态是 intent gate（批次设计性不投影），真实孤儿恢复发生在
+    # 任务 Goal 存活时，因此投影用带 Goal 的同一 facts。
+    from agent.provider.normalize import context_to_openai_messages
+    from tests.continuity.test_contracts import _goal
+
+    goal_state = replace(transition.state, goal=_goal())
+    pack = KernelContextManager(
+        system_policy="Be concise.",
+        limits=ContextLimits(max_input_tokens=100_000, output_reserve=500),
+    ).build(
+        goal_state,
+        SubmitMessage(
+            conversation_id=goal_state.conversation_id,
+            action_seq=goal_state.next_action_seq,
+            expected_revision=goal_state.revision,
+            run_id="run-wire-p2-3",
+            message="继续当前任务",
+        ),
+        (),
+    )
+    wire = context_to_openai_messages(pack)
+    tool_call_ids = {
+        call["id"]
+        for message in wire
+        if message["role"] == "assistant"
+        for call in message.get("tool_calls", [])
+    }
+    result_ids = [
+        message["tool_call_id"] for message in wire if message["role"] == "tool"
+    ]
+    assert {"call-1", "call-2"} <= tool_call_ids
+    assert sorted(result_ids) == sorted(tool_call_ids), (
+        "wire 上 tool_calls 与结果批次不闭合"
+    )
     assert fact_ids.index("action:7:user") == fact_ids.index(healed[0].fact_id) + 1
 
     # 已执行 prefix（无拒绝标记）不能证明 call-2 未执行：严格拒绝，零伪造。
@@ -1080,6 +1118,114 @@ def test_accept_action_closes_rejection_prefix_orphan_in_place() -> None:
     assert not any(
         fact.content.get("superseded") is True for fact in refused.state.facts
     )
+
+
+def test_rejection_prefix_healing_requires_strict_rejection_semantics() -> None:
+    """R1 窄守卫：末结果必须同时具有严格审批拒绝语义才可补未开始 suffix。
+
+    仅 ``rejected is True`` 不足以证明批次在拒绝处停止：末结果同时声称
+    ``executed=True, is_error=False``（矛盾）、带 UNKNOWN 标记、缺字段或使用
+    0/1 伪 bool 时，历史是合成损坏形状，不能据此伪造"未执行"尾部。这些形状
+    保持原 facts 并以冲突拒绝（零 provider/tool、不补确定未执行）；只有
+    ``rejected=True, executed=False, is_error=True`` 且无 UNKNOWN 矛盾的
+    正常 Runtime 拒绝结果仍可自愈。
+    """
+
+    def _orphan_state(last_result: ConversationFact) -> ConversationState:
+        return ConversationState(
+            conversation_id="conversation-1",
+            revision=10,
+            next_action_seq=8,
+            replay_floor=1,
+            facts=(
+                ConversationFact(
+                    fact_id="run:run-strict:tool-batch:10",
+                    kind=FactKind.TOOL_CALLS,
+                    content={
+                        "calls": [
+                            {"tool_call_id": "call-1", "name": "write_file", "arguments": {}},
+                            {"tool_call_id": "call-2", "name": "write_file", "arguments": {}},
+                        ]
+                    },
+                ),
+                last_result,
+            ),
+        )
+
+    def _result(content: dict) -> ConversationFact:
+        merged = {
+            "tool_call_id": "call-1",
+            "text": "stale historical result",
+            **content,
+        }
+        return ConversationFact(
+            fact_id="run:run-strict:tool-result:call-1:11",
+            kind=FactKind.TOOL_RESULT,
+            content=merged,
+        )
+
+    def _submit(state: ConversationState) -> Action:
+        return SubmitMessage(
+            conversation_id="conversation-1",
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            run_id="run-strict-next",
+            message="继续当前任务",
+        )
+
+    # 对照组：正常 Runtime 拒绝审批结果的严格三字段组合仍可自愈。
+    strict_rejection = _result(
+        {"rejected": True, "executed": False, "is_error": True}
+    )
+    orphan = _orphan_state(strict_rejection)
+    healed = accept_action(orphan, _submit(orphan))
+    assert healed.disposition is ActionDisposition.ACCEPTED
+    assert [
+        fact.content.get("tool_call_id")
+        for fact in healed.state.facts
+        if fact.content.get("superseded") is True
+    ] == ["call-2"]
+
+    # 前组：末结果 rejected=True 但语义矛盾/UNKNOWN/缺字段/伪 bool——一律拒绝。
+    unprovable = {
+        "矛盾（同时声称已执行且成功）": {
+            "rejected": True,
+            "executed": True,
+            "is_error": False,
+        },
+        "UNKNOWN 标记": {
+            "rejected": True,
+            "executed": False,
+            "is_error": True,
+            "unknown_outcome": True,
+        },
+        "缺 executed/is_error 字段": {"rejected": True},
+        "executed 伪 bool 0": {
+            "rejected": True,
+            "executed": 0,
+            "is_error": True,
+        },
+        "is_error 伪 bool 1": {
+            "rejected": True,
+            "executed": False,
+            "is_error": 1,
+        },
+        "rejected 伪 bool 1": {
+            "rejected": 1,
+            "executed": False,
+            "is_error": True,
+        },
+    }
+    for label, content in unprovable.items():
+        state = _orphan_state(_result(content))
+        refused = accept_action(state, _submit(state))
+        assert refused.disposition is ActionDisposition.CONFLICT, label
+        assert refused.reason == "unprovable_tool_batch_outcome", label
+        assert refused.state.facts == state.facts, label
+        assert not any(
+            fact.content.get("superseded") is True
+            for fact in refused.state.facts
+        ), label
 
 
 def test_legacy_orphan_matrix_rejects_unprovable_and_heals_only_evidenced() -> None:

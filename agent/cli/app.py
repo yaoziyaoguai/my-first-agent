@@ -43,6 +43,7 @@ from agent.runtime.ports import CheckpointStore
 from agent.runtime.views import (
     GoalView,
     SourceView,
+    project_goal_authorization_scopes,
     project_goal_view,
     project_process_leases,
     project_visible_source_views,
@@ -61,9 +62,11 @@ _HELP_TEXT = """Commands:
 /browser-profiles [list|create|revoke|clear] — manage browser profiles
 /pause, /resume, /cancel — control the current task or run
 /approve <request-id>, /reject <request-id> — resolve an exact approval
-/approve-goal-target <request-id> — approve this exact file target for the current task
-/approve-goal-directory <request-id> — approve files under an explicit Goal directory
-/approve-artifact <path> <sha256> — approve an exact artifact
+/approve-goal-target [request-id] — approve the exact file target for the current
+  task (without an ID it binds the prompt just shown)
+/approve-goal-directory [request-id] — approve files under an explicit Goal
+  directory (without an ID it binds the prompt just shown)
+/approve-artifact <sha256> <workspace-relative-path> — approve an exact artifact
 /ack-provider <digest> — acknowledge an exact provider disclosure
 /resolve-success <request-id>, /resolve-failed <request-id> — resolve an unknown effect
 /record-observation-unknown — continue after an unknown public observation
@@ -345,7 +348,26 @@ def _parse_action(
         request = _approval_request(state)
         if request is None:
             return None, "No approval request is pending."
-        if not separator or argument != request.request_id:
+        if command in {"/approve-goal-target", "/approve-goal-directory"} and (
+            not separator
+        ):
+            # R4：文件审批提示不展示内部 request identity；无参数短命令绑定
+            # REPL 刚显示的同一 authoritative pending request（显示与解析共用
+            # 循环内同一 snapshot；输入期间漂移由 expected_revision CAS
+            # fail closed，不重绑新请求）。适用范围与 Runtime 铸授权共用
+            # 同一 scope 判定，不适用即拒绝，绝不静默降级为逐笔批准。
+            file_scope, directory_scope = project_goal_authorization_scopes(state)
+            applicable = (
+                file_scope
+                if command == "/approve-goal-target"
+                else directory_scope
+            )
+            if applicable is None:
+                return None, (
+                    "The pending approval has no matching Goal scope "
+                    "for this command."
+                )
+        elif not separator or argument != request.request_id:
             return None, "Use the exact pending request ID."
         return (
             build_resolve_approval(

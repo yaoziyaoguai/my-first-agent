@@ -13,14 +13,17 @@ from agent.runtime.contracts import (
     ConversationState,
     ExecutingIntentRecord,
     ExecutionAuthorityClass,
+    GoalFrame,
     GoalStatus,
     ProcessAuthorityCandidateV1,
+    ProposedCriterion,
     ProviderDisclosureRequest,
     RecoveryRequest,
     RunResult,
     RunStatus,
     RuntimeEvent,
     RuntimeEventKind,
+    SideEffectClass,
     ToolCall,
 )
 from tests.kernel.fakes import conversation_with_terminal_goal
@@ -179,6 +182,55 @@ def test_limit_result_names_the_exact_recovery_action() -> None:
     assert output == [
         "Task paused at a safe execution limit. Run /resume to continue or /cancel."
     ]
+
+
+def test_budget_exhausted_limit_names_the_real_continuation_path() -> None:
+    """E1-A 真实旅程回归：预算耗尽后的 /resume 不可能再派发，提示必须指明
+    同 ledger 提高 --max-model-attempts 的真实继续路径，而不是误导性 /resume。"""
+
+    output: list[str] = []
+    renderer = TerminalRenderer(output.append)
+
+    renderer.render_result(
+        RunResult(
+            RunStatus.LIMIT_REACHED,
+            ConversationState.new("conversation-1"),
+            error_code="model_attempt_budget_exhausted",
+        )
+    )
+
+    assert "/resume cannot send new model requests" in output[0]
+    assert "--max-model-attempts" in output[0]
+    assert "--transport-audit-ledger" in output[0]
+
+
+def test_auth_failure_names_configured_credential_env() -> None:
+    """B2 回归：401 恢复提示点名 profile 配置的环境变量名（不含 value）；
+    未提供（fake/测试）时保持通用文案。"""
+
+    with_env: list[str] = []
+    TerminalRenderer(with_env.append, credential_env="DEEPSEEK_API_KEY").render_result(
+        RunResult(
+            RunStatus.FAILED_FATAL,
+            ConversationState.new("conversation-1"),
+            error_code="provider_auth_error",
+        )
+    )
+    assert "DEEPSEEK_API_KEY" in with_env[0]
+    assert "in this shell" in with_env[0]
+
+    without_env: list[str] = []
+    TerminalRenderer(without_env.append).render_result(
+        RunResult(
+            RunStatus.FAILED_FATAL,
+            ConversationState.new("conversation-1"),
+            error_code="provider_auth_error",
+        )
+    )
+    assert without_env[0] == (
+        "Provider authentication failed. Check the configured credential "
+        "and run first-agent again."
+    )
 
 
 def test_renderer_escapes_terminal_control_characters_in_event_fields() -> None:
@@ -550,3 +602,88 @@ def test_model_text_delta_deduplication_tracks_the_latest_provider_response() ->
 
     assert deltas == ["I will inspect the file.", "The file is valid."]
     assert output == []
+
+
+def _goal_scoped_approval_state(
+    *,
+    path: str = "notes/idea.md",
+    targets: tuple[str, ...] = ("notes", "notes/idea.md"),
+) -> ConversationState:
+    """R4 现场构造：活跃 Goal 声明目录与精确文件 target 的待审批 write。"""
+
+    goal = GoalFrame(
+        goal_id="goal-1",
+        revision=1,
+        created_from_fact_ids=("user-1",),
+        workspace_identity_digest="workspace-1",
+        user_outcome="write the requested note under notes",
+        beneficiary="user",
+        targets=targets,
+        scope=("workspace",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(ProposedCriterion("criterion-1", "note exists"),),
+        admitted_criteria=(),
+        authority_snapshot="authority-1",
+        status=GoalStatus.GOAL_READY,
+        created_at="2026-08-02T00:00:00Z",
+        updated_at="2026-08-02T00:00:00Z",
+    )
+    request = ApprovalRequest(
+        request_id="approval-scoped-internal-id",
+        run_id="run-1",
+        tool_call_id="call-1",
+        binding_digest="approval-binding",
+        preview=f"write {path} (12 bytes)",
+        tool_name="write_file",
+        side_effect=SideEffectClass.WRITE.value,
+    )
+    return replace(
+        ConversationState.new("conversation-1"),
+        goal=goal,
+        active_run=ActiveRun(
+            "run-1",
+            status=ActiveRunStatus.AWAITING_APPROVAL,
+            phase=ContinuationPhase.TOOL,
+            pending_request=request,
+            tool_calls=(ToolCall("call-1", "write_file", {"path": path}),),
+        ),
+    )
+
+
+def test_render_pending_shows_scoped_short_commands_with_accurate_bounds() -> None:
+    """R4：文件审批默认提示展示无参数范围授权短命令与准确边界，不暴露内部 ID。"""
+
+    output: list[str] = []
+    renderer = TerminalRenderer(output.append)
+
+    renderer.render_pending(_goal_scoped_approval_state())
+
+    prompt = output[0]
+    assert "[y/N]" in prompt
+    assert "/approve-goal-target" in prompt
+    assert "/approve-goal-directory" in prompt
+    # 精确范围：target 命令只提该文件；directory 命令只提 Goal 已声明的目录。
+    assert "notes/idea.md" in prompt
+    assert "notes" in prompt
+    # 有限次数/时效与可撤销；yes 仍只批准一次。
+    assert "16" in prompt and "60 minutes" in prompt
+    assert "/revoke-goal-target" in prompt
+    assert "yes approves only this one operation" in prompt
+    # 不暴露内部 request identity 或 digest。
+    assert "approval-scoped-internal-id" not in prompt
+    assert re.search(r"[0-9a-f]{64}", prompt) is None
+
+
+def test_render_pending_hides_short_commands_without_matching_goal_scope() -> None:
+    """范围不适用（写入路径不在 Goal targets 之下）时默认提示不展示短命令。"""
+
+    output: list[str] = []
+    renderer = TerminalRenderer(output.append)
+
+    renderer.render_pending(_goal_scoped_approval_state(path="outside/other.md"))
+
+    prompt = output[0]
+    assert "[y/N]" in prompt
+    assert "/approve-goal-target" not in prompt
+    assert "/approve-goal-directory" not in prompt

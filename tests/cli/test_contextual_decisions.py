@@ -21,7 +21,10 @@ from agent.runtime.contracts import (
     EgressClass,
     ExecutingIntentRecord,
     ExecutionAuthorityClass,
+    GoalFrame,
+    GoalStatus,
     LoadedSnapshot,
+    ProposedCriterion,
     ProviderDisclosureRequest,
     RecoverUnknownObservation,
     RecoveryRequest,
@@ -579,3 +582,320 @@ def test_pending_decision_is_displayed_from_state_before_each_input(
         # 启动时无 pending 不显示；完成 hello 这个 action 后、下一次输入前显示。
         assert expected not in seen_before_input[0]
         assert expected in seen_before_input[1]
+
+
+def _goal_scoped_approval_state(
+    *,
+    path: str = "notes/idea.md",
+    targets: tuple[str, ...] = ("notes/idea.md", "reports"),
+    request_id: str = "approval-internal-id",
+    preview: str | None = None,
+) -> ConversationState:
+    """R4 现场构造：活跃 Goal 的文件写入待审批；path 决定短命令适用范围。"""
+
+    goal = GoalFrame(
+        goal_id="goal-1",
+        revision=1,
+        created_from_fact_ids=("user-1",),
+        workspace_identity_digest="workspace-1",
+        user_outcome="write the requested note and report",
+        beneficiary="user",
+        targets=targets,
+        scope=("workspace",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(ProposedCriterion("criterion-1", "files exist"),),
+        admitted_criteria=(),
+        authority_snapshot="authority-1",
+        status=GoalStatus.GOAL_READY,
+        created_at="2026-08-02T00:00:00Z",
+        updated_at="2026-08-02T00:00:00Z",
+    )
+    request = ApprovalRequest(
+        request_id=request_id,
+        run_id="run-1",
+        tool_call_id="call-1",
+        binding_digest="approval-binding",
+        preview=preview or f"write {path} (12 bytes)",
+        tool_name="write_file",
+        side_effect=SideEffectClass.WRITE.value,
+    )
+    return replace(
+        ConversationState.new("conversation-1"),
+        goal=goal,
+        active_run=ActiveRun(
+            "run-1",
+            status=ActiveRunStatus.AWAITING_APPROVAL,
+            phase=ContinuationPhase.TOOL,
+            pending_request=request,
+            tool_calls=(ToolCall("call-1", "write_file", {"path": path}),),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("command", "authorize_target", "authorize_directory"),
+    [
+        ("/approve-goal-target", True, False),
+        ("/approve-goal-directory", False, True),
+    ],
+)
+def test_goal_scope_short_command_without_id_binds_the_displayed_prompt(
+    command: str,
+    authorize_target: bool,
+    authorize_directory: bool,
+) -> None:
+    """R4：默认提示不暴露内部 ID；无参数短命令绑定刚显示的同一 pending request。"""
+
+    states = {
+        "/approve-goal-target": _goal_scoped_approval_state(),
+        # directory 短命令要求写入路径严格位于 Goal 已声明的目录 target 之下。
+        "/approve-goal-directory": _goal_scoped_approval_state(
+            path="reports/daily/final.md"
+        ),
+    }
+    state = states[command]
+    runtime, output, _ = _run(state, command, "/exit")
+
+    assert output[0].startswith("Approval required")
+    assert command in output[0]
+    action = runtime.actions[0]
+    assert isinstance(action, ResolveApproval)
+    pending = state.active_run.pending_request
+    assert action.request_id == pending.request_id
+    assert action.binding_digest == pending.binding_digest
+    assert action.approved is True
+    assert action.authorize_goal_target is authorize_target
+    assert action.authorize_goal_directory is authorize_directory
+
+
+def test_goal_scope_short_command_rejects_stale_id_without_fallback() -> None:
+    """带参数时仍是 exact-ID 合同：错误 ID 拒绝，不回落到无参数绑定。"""
+
+    state = _goal_scoped_approval_state()
+    runtime, output, _ = _run(state, "/approve-goal-target approval-wrong", "/exit")
+
+    assert runtime.actions == []
+    assert any("exact pending request ID" in item for item in output)
+
+
+def test_goal_scope_short_command_refuses_non_matching_scope() -> None:
+    """范围不适用时无参数短命令拒绝执行，不静默降级为逐笔批准。"""
+
+    state = _goal_scoped_approval_state(path="outside/other.md")
+    runtime, output, _ = _run(state, "/approve-goal-target", "/exit")
+
+    assert runtime.actions == []
+    assert any("Goal" in item for item in output)
+    # 不适用范围的默认提示也不展示该短命令。
+    assert "/approve-goal-target" not in output[0]
+
+
+def test_write_outside_goal_targets_states_no_reusable_scope() -> None:
+    """E1-A 透明度：写入不在 Goal targets 内时提示如实说明无复用 scope。"""
+
+    state = _goal_scoped_approval_state(path="outside/other.md")
+    _runtime, output, _ = _run(state, "/exit")
+
+    assert "No reusable Goal scope for this write" in output[0]
+    assert "covers only this one operation" in output[0]
+
+
+def test_write_inside_goal_targets_keeps_r4_prompt_without_transparency_note() -> None:
+    """scope 适用时保持 R4 原提示；不追加复用不可用说明。"""
+
+    state = _goal_scoped_approval_state()
+    _runtime, output, _ = _run(state, "/exit")
+
+    assert "/approve-goal-target" in output[0]
+    assert "No reusable Goal scope" not in output[0]
+
+
+def test_plain_yes_stays_single_shot_at_goal_scoped_prompt() -> None:
+    """短命令在场时 `yes` 语义不变：两 flag 均为 False，只批准这一次操作。"""
+
+    state = _goal_scoped_approval_state()
+    runtime, output, _ = _run(state, "yes", "/exit")
+
+    assert "yes approves only this one operation" in output[0]
+    action = runtime.actions[0]
+    assert isinstance(action, ResolveApproval)
+    assert action.approved is True
+    assert action.authorize_goal_target is False
+    assert action.authorize_goal_directory is False
+
+
+def test_scope_short_command_binds_displayed_snapshot_under_drift(
+    tmp_path: Path,
+) -> None:
+    """显示 A 之后、输入返回前 store 漂移到 B：无参数短命令仍只绑 A，不重绑 B。"""
+
+    state_a = _goal_scoped_approval_state(
+        request_id="approval-a", preview="write notes/idea.md (12 bytes)"
+    )
+    store = _local_store(tmp_path, state_a)
+    state_b = _goal_scoped_approval_state(
+        request_id="approval-b", preview="write notes/other.md (3 bytes)"
+    )
+    state_b = replace(state_b, revision=state_a.revision + 1)
+    runtime = RecordingRuntime()
+    output: list[str] = []
+    seen_before_input: list[str] = []
+
+    def racing_input(_prompt: str) -> str:
+        seen_before_input.append("\n".join(output))
+        if len(seen_before_input) == 1:
+            lease = store.try_acquire(state_a.conversation_id)
+            assert lease is not None
+            try:
+                store.compare_and_swap(store.load(), state_b)
+            finally:
+                lease.release()
+            return "/approve-goal-target"
+        return "/exit"
+
+    exit_code = run_repl(
+        runtime,
+        store,
+        input_fn=racing_input,
+        write_fn=output.append,
+        run_id_factory=lambda: "run-new",
+    )
+
+    assert exit_code == 0
+    # 所见：输入前终端显示的是 A 的短命令提示，不是漂移后 B 的。
+    assert "write notes/idea.md" in seen_before_input[0]
+    assert "write notes/other.md" not in seen_before_input[0]
+    # 所批：action 与 snapshot 都绑定显示时的 A，绝不重绑到 B。
+    action = runtime.actions[0]
+    assert isinstance(action, ResolveApproval)
+    assert action.request_id == "approval-a"
+    assert action.authorize_goal_target is True
+    assert runtime.snapshots[0].state.revision == state_a.revision
+
+
+def test_no_argument_scope_command_reaches_real_runtime_and_reuses_scope() -> None:
+    """R4 验收链：默认提示 → 无参数命令 → 真实 Runtime 铸授权并同目标复用。"""
+
+    from agent.runtime.context import ContextLimits, KernelContextManager
+    from agent.runtime.contracts import (
+        ApprovalPolicy,
+        ExecutionAuthorityClass,
+        ModelResponse,
+        ModelToolCall,
+        OutputPolicy,
+        ToolRisk,
+        ToolSpec,
+    )
+    from agent.runtime.loop import AgentRuntime, InvocationLimits, RetryableProviderError
+    from agent.runtime.tools import KernelToolRuntime, RegisteredTool
+    from tests.kernel.fakes import (
+        CollectingSink,
+        InMemoryCheckpointStore,
+        ScriptedProvider,
+        conversation_with_active_goal,
+        goal_noop_response,
+    )
+
+    calls: list[str] = []
+    spec = ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name="write_file",
+        version="1",
+        description="Write an exact workspace fixture",
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+            "required": ["path", "content"],
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.HIGH,
+        side_effect=SideEffectClass.WRITE,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        safety_policy={"workspace_scoped": True},
+        output_limit_chars=50,
+    )
+    provider = ScriptedProvider(
+        goal_noop_response("r4-cli-consent-user-supplement"),
+        ModelResponse(
+            (
+                ModelToolCall(
+                    "write-1", "write_file", {"path": "note.txt", "content": "one"}
+                ),
+            )
+        ),
+        ModelResponse(
+            (
+                ModelToolCall(
+                    "write-2", "write_file", {"path": "note.txt", "content": "two"}
+                ),
+            )
+        ),
+        RetryableProviderError("stop after both writes"),
+    )
+    initial = conversation_with_active_goal()
+    assert initial.goal is not None
+    initial = replace(initial, goal=replace(initial.goal, targets=("note.txt",)))
+    store = InMemoryCheckpointStore(initial)
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=8_000, output_reserve=200),
+        ),
+        tool_runtime=KernelToolRuntime(
+            (
+                RegisteredTool(
+                    spec,
+                    lambda intent: calls.append(intent.arguments["content"])
+                    or "written",
+                    prepare_binding=lambda arguments: {
+                        "effect_preview": f"write {arguments['path']}",
+                    },
+                ),
+            ),
+            clock=lambda: "2026-09-04T00:30:00Z",
+        ),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-r4-cli-consent",
+    )
+    paused = runtime.run_turn(
+        SubmitMessage(
+            conversation_id=initial.conversation_id,
+            action_seq=initial.next_action_seq,
+            expected_revision=initial.revision,
+            run_id="run-r4-cli-consent",
+            message="write the requested target",
+        ),
+        store.load(),
+    )
+    assert paused.status is RunStatus.AWAITING_APPROVAL
+    assert paused.request is not None
+
+    output: list[str] = []
+    values = iter(("/approve-goal-target", "/exit"))
+    exit_code = run_repl(
+        runtime,
+        store,
+        input_fn=lambda _: next(values),
+        write_fn=output.append,
+        run_id_factory=lambda: "run-r4-cli-consent",
+        approval_time_factory=lambda: "2026-09-04T00:00:00Z",
+    )
+
+    assert exit_code == 0
+    prompt = next(item for item in output if "Approval required" in item)
+    assert "/approve-goal-target" in prompt
+    assert paused.request.request_id not in prompt
+    # 真实 Runtime：无参数命令精确绑定刚显示的 request（授权 source_id 即其
+    # request_id），第二次同目标写入复用授权，无第二次审批暂停。
+    assert calls == ["one", "two"]
+    assert len(store.state.goal_authorizations) == 1
+    binding = store.state.goal_authorizations[0]
+    assert binding.source_id == paused.request.request_id
+    assert binding.normalized_target == "note.txt"
+    assert binding.uses_consumed == 2
+    assert binding.remaining_uses == 14

@@ -1497,6 +1497,11 @@ def main(
                 renderer = TerminalRenderer(
                     write_fn,
                     delta_write_fn=partial(print, end="", flush=True),
+                    # B2：401 恢复提示点名 profile 配置的凭据环境变量（只有名字，
+                    # 不含 value；fake provider 下为 None 时回落到通用文案）。
+                    credential_env=(
+                        args.credential_env if args.provider != "fake" else None
+                    ),
                 )
                 context_limits = _context_limits_for_provider(args)
                 registrations = list(

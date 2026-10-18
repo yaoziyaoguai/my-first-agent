@@ -26,11 +26,10 @@ incomplete（VALIDATION §3 最小真实旅程 / §4 冻结过程）。
 
 判定口径（按 VALIDATION §3 冻结）：
 
-- E1-A（normal）：D04 场景本身含「运行中追加旧参数名」，故 normal 模式同样在
-  首个安全边界交付冻结 correction；须观测注入与 durable 落盘，消费/版本推进
-  作为过程证据如实报告（不满足不判失败），不要求 pause→resume。业务门 =
-  grader 的两个有界键（latest_correction / final_validation）为 true 且补充
-  探针全部通过。
+- E1-A（normal）：完整原 SPEC 一次初始输入 + 必要治理决定；不注入 correction、
+  不要求 correction 证据。到需要「继续」的 idle 或 limit 时直接如实 incomplete，
+  不替产品催促或救场。业务门 = grader 的两个有界键（latest_correction /
+  final_validation）为 true 且补充探针全部通过。
 - E1-B（staged）：在首个安全边界注入冻结 correction，须观测 durable/消费/版本
   推进，随后 pause→退出→新 PID resume→继续，并记录注入前别名行为尚未满足的
   前置检查。额外要求过程证据（见 ``REQUIRED_EVIDENCE``）。
@@ -87,13 +86,22 @@ VARIANT_NOTICE = (
 
 TERMINAL_GOAL_STATUSES = frozenset({"verified_done", "cancelled"})
 FILE_EFFECT_TOOLS = frozenset({"write_file", "edit_file", "make_directory"})
-CONTINUABLE_IDLE_STATUSES = frozenset({"needs_authority", "blocked", "goal_ready"})
-CONTINUE_MESSAGE = "继续当前任务"
 MAX_REQUESTS_PER_SAMPLE = 40
 BOUND_BUSINESS_KEYS = ("latest_correction", "final_validation")
 PROCESS_DECLARED_KEYS = ("resume_without_restatement", "no_effect_replay")
+# W3 冻结七项补充检查：evaluator 锁定完整预期集合，缺键/未知键/非 bool 都失败。
+SUPPLEMENTAL_KEYS = (
+    "transient_new_name",
+    "legacy_alias",
+    "default_single_attempt",
+    "bounded_attempts",
+    "conflict_rejected",
+    "negative_invalid",
+    "cli_both_names",
+)
 REQUIRED_EVIDENCE = {
-    "normal": ("correction_injected",),
+    # W3：normal 不注入也不要求 correction 证据；如实记录但不作为判据。
+    "normal": (),
     "staged": (
         "correction_injected",
         "correction_durable",
@@ -103,6 +111,14 @@ REQUIRED_EVIDENCE = {
         "resumed_in_new_process",
         "resume_advanced",
         "precondition_alias_checks_pending",
+        # C（2026-10-18）：同一条 fact 既 durable 又被消费；绑定计划 CORRECTION；
+        # composite 身份贯穿全程；消费后来源持续；消费后才 pause；不信任自报 flags。
+        "injected_equals_consumed_fact",
+        "correction_binds_planned_input",
+        "composite_identity_consistent",
+        "correction_persists_after_consumption",
+        "pause_after_consumption",
+        "recorded_flags_consistent",
     ),
 }
 
@@ -113,12 +129,46 @@ ProbeFn = Callable[[Path], "dict[str, bool]"]
 # durable 只读观察
 # ---------------------------------------------------------------------------
 
+_PENDING_BY_ACTIVE_STATUS = {
+    "awaiting_approval": "approval",
+    "awaiting_disclosure": "disclosure",
+    "awaiting_recovery": "recovery",
+    "paused_limit": "limit",
+    "paused_retryable": "retryable",
+}
+
+
+def _pending_projection(
+    active: object,
+    goal: object,
+    *,
+    disclosure_request: object,
+    disclosure_receipt: object,
+) -> str | None:
+    """active 状态优先；/pause 停在 pending disclosure 上、/resume 完成后的
+    孤儿披露（2026-10-17 E1-B 修复）与审批同等可见，操作器才能应答治理
+    提示（计入 consent 预算，不是「继续」催促）。Goal 仍 PAUSED 或已有
+    receipt 时不投影。"""
+
+    status = getattr(active, "status", None)
+    value = getattr(status, "value", None) if status is not None else None
+    pending = _PENDING_BY_ACTIVE_STATUS.get(value or "")
+    if pending is None and active is None:
+        goal_status = getattr(goal, "status", None)
+        if (
+            disclosure_request is not None
+            and disclosure_receipt is None
+            and getattr(goal_status, "value", None) == "goal_ready"
+        ):
+            pending = "disclosure"
+    return pending
+
 
 def observe(candidate: Path, state_root: Path) -> dict | None:
     """只读加载本次合成会话的 durable 投影；零创建、零 mutation。"""
 
     from agent.continuity.sessions import inspect_workspace_sessions
-    from agent.runtime.contracts import FactKind
+    from agent.runtime.contracts import EvidenceOracleKind, FactKind
 
     inspection = inspect_workspace_sessions(candidate, state_root=state_root, home=None)
     snapshots = tuple(inspection.snapshots)
@@ -131,21 +181,32 @@ def observe(candidate: Path, state_root: Path) -> dict | None:
     state = snapshots[0].state
     active = state.active_run
     status = active.status.value if active is not None else None
-    pending = {
-        "awaiting_approval": "approval",
-        "awaiting_disclosure": "disclosure",
-        "awaiting_recovery": "recovery",
-        "paused_limit": "limit",
-        "paused_retryable": "retryable",
-    }.get(status or "")
+    goal = state.goal
+    pending = _pending_projection(
+        active,
+        goal,
+        disclosure_request=state.provider_disclosure_request,
+        disclosure_receipt=state.provider_disclosure_receipt,
+    )
     effects: dict[str, int] = {}
     correction_ids: list[str] = []
+    correction_facts: list[dict] = []
     for fact in state.facts:
         if (
             fact.kind is FactKind.USER_MESSAGE
             and fact.content.get("control") == "goal_correction"
         ):
             correction_ids.append(fact.fact_id)
+            # C（2026-10-18）：验收绑定需要本次合成输入的最小投影
+            # （id/kind/control/text）；不暴露其它 fact 内容。
+            correction_facts.append(
+                {
+                    "fact_id": fact.fact_id,
+                    "kind": "user_message",
+                    "control": "goal_correction",
+                    "text": fact.content.get("text"),
+                }
+            )
             continue
         if (
             fact.kind is FactKind.TOOL_RESULT
@@ -157,10 +218,43 @@ def observe(candidate: Path, state_root: Path) -> dict | None:
             if tool_name in FILE_EFFECT_TOOLS:
                 effects[str(tool_name)] = effects.get(str(tool_name), 0) + 1
     goal = state.goal
+    # W3：当前 pending 写请求的精确路径与当前准入的精确文件集合，供 _consent
+    # 判断是否展示显式精确复用（与产品 _goal_target_authorization_scope 同一规则形状）。
+    pending_request = None
+    if active is not None and active.pending_request is not None:
+        call = None
+        try:
+            call = active.tool_calls[active.batch_cursor]
+        except IndexError:
+            call = None
+        arguments = (
+            call.arguments
+            if call is not None and call.tool_call_id == getattr(
+                active.pending_request, "tool_call_id", None
+            )
+            else {}
+        )
+        path = arguments.get("path") if isinstance(arguments, dict) else None
+        pending_request = {
+            "tool": getattr(active.pending_request, "tool_name", None),
+            "path": path if isinstance(path, str) else None,
+        }
+    admitted_file_paths = sorted(
+        {
+            criterion.predicate.get("path")
+            for criterion in (goal.admitted_criteria if goal is not None else ())
+            if criterion.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
+            and isinstance(criterion.predicate.get("path"), str)
+        }
+    )
     return {
         "goal_status": goal.status.value if goal is not None else None,
         "goal_id": goal.goal_id if goal is not None else None,
         "goal_revision": goal.revision if goal is not None else None,
+        "conversation_id": state.conversation_id,
+        "workspace_identity_digest": (
+            goal.workspace_identity_digest if goal is not None else None
+        ),
         "user_outcome": goal.user_outcome if goal is not None else None,
         "created_from_fact_ids": (
             list(goal.created_from_fact_ids) if goal is not None else []
@@ -177,9 +271,12 @@ def observe(candidate: Path, state_root: Path) -> dict | None:
         ),
         "active_run_status": status,
         "pending": pending,
+        "pending_request": pending_request,
+        "admitted_file_paths": admitted_file_paths,
         "executed_file_effects": sum(effects.values()),
         "effect_tools": effects,
         "correction_fact_ids": correction_ids,
+        "correction_facts": correction_facts,
         "state_revision": state.revision,
     }
 
@@ -228,12 +325,12 @@ class JourneyOperator:
     candidate: Path | None = None
     probe: ProbeFn | None = None
     max_consents: int = 40
-    max_resumes: int = 2
-    max_continues: int = 3
     task: str = INITIAL_PROMPT
     correction: str = CORRECTION
     task_sent: bool = False
     consent_decisions: int = 0
+    scope_authorizations: int = 0
+    # W3：不再发送「继续」或救场 /resume；两个计数器恒 0，作为过程证据保留。
     resumes: int = 0
     continue_decisions: int = 0
     injected: bool = False
@@ -291,7 +388,8 @@ class JourneyOperator:
             if pending in {"disclosure", "approval"}:
                 return self._consent(obs)
             if pending in {"limit", "retryable"}:
-                return self._resume(obs)
+                # W3：注入后同样不救场，预算暂停如实停等操作者。
+                return self._stop(obs, f"{pending}_pause_requires_user")
             if active is None:
                 # 未消费 correction 前不再追加消息（避免叠出第二条 correction）；
                 # 模型整轮未消费即如实停。
@@ -312,13 +410,18 @@ class JourneyOperator:
         if pending == "recovery":
             return self._stop(obs, "unknown_effect_requires_operator_classification")
         if pending in {"limit", "retryable"}:
-            return self._resume(obs)
+            # W3：不自动 /resume 救场；继续推进必须来自用户。
+            return self._stop(obs, f"{pending}_pause_requires_user")
         if self._should_inject(obs):
             return self._inject(obs, "idle")
-        if active is None and status in {"paused", "blocked"}:
-            return self._resume(obs)
-        if active is None and status in CONTINUABLE_IDLE_STATUSES:
-            return self._continue(obs)
+        if active is None:
+            # W3：空闲/暂停一律不发「继续」、不自动恢复，如实停等用户。
+            reason = (
+                "paused_requires_user"
+                if status in {"paused", "blocked"}
+                else "idle_needs_user_continuation"
+            )
+            return self._stop(obs, reason)
         return self._stop(obs, "unexpected_idle_before_verified_done")
 
     # -- resume 阶段（新进程）：只恢复与继续，绝不重述业务 -------------------
@@ -349,18 +452,24 @@ class JourneyOperator:
         if pending == "recovery":
             return self._stop(obs, "unknown_effect_requires_operator_classification")
         if pending in {"limit", "retryable"}:
-            return self._resume(obs)
-        if active is None and status in {"paused", "blocked"}:
-            return self._resume(obs)
-        if active is None and status in CONTINUABLE_IDLE_STATUSES:
-            return self._continue(obs)
+            # W3：计划内 /resume 只发一次；再次 limit/retryable 不再救场。
+            return self._stop(obs, f"{pending}_pause_requires_user")
+        if active is None:
+            # W3：恢复后空闲不发「继续」，如实停等用户。
+            reason = (
+                "paused_requires_user"
+                if status in {"paused", "blocked"}
+                else "idle_needs_user_continuation"
+            )
+            return self._stop(obs, reason)
         return self._stop(obs, "unexpected_idle_before_verified_done")
 
     # -- 内部决策 ----------------------------------------------------------
 
     def _should_inject(self, obs: dict) -> bool:
+        # W3：注入只属于 inject 模式（staged E1-B）；normal 不注入。
         return (
-            self.mode in {"normal", "inject"}
+            self.mode == "inject"
             and not self.injected
             and obs["goal_status"] is not None
             and obs["goal_status"] not in TERMINAL_GOAL_STATUSES
@@ -381,55 +490,72 @@ class JourneyOperator:
 
     def _consumed(self, obs: dict) -> bool:
         fact_id = self.injected_fact_id
-        if fact_id is None or fact_id not in obs["created_from_fact_ids"]:
+        if (
+            fact_id is None
+            or not isinstance(fact_id, str)
+            or not fact_id
+            or fact_id not in obs["created_from_fact_ids"]
+        ):
             return False
         if self.consumption is None:
             before = self.pre_injection or {}
             goal_before = before.get("goal_revision")
             state_before = before.get("state_revision")
+            goal_id_before = before.get("goal_id")
             goal_after = obs["goal_revision"]
             state_after = obs["state_revision"]
+            goal_id_after = obs["goal_id"]
+            # C（2026-10-18）：版本推进只认同一 Goal 的数值 revision 严格增加；
+            # bool 不是 int（type 检查），缺失/字符串/None 一律 fail closed。
+            goal_progress = (
+                isinstance(goal_id_before, str)
+                and bool(goal_id_before)
+                and goal_id_before == goal_id_after
+                and _strict_nonneg_int(goal_before)
+                and _strict_nonneg_int(goal_after)
+                and goal_after > goal_before
+            )
+            state_progress = (
+                _strict_nonneg_int(state_before)
+                and _strict_nonneg_int(state_after)
+                and state_after > state_before
+            )
             self.consumption = {
                 "fact_id": fact_id,
+                "goal_id_before": goal_id_before,
+                "goal_id_after": goal_id_after,
+                "conversation_id": obs.get("conversation_id"),
+                "workspace_identity_digest": obs.get("workspace_identity_digest"),
                 "goal_revision_before": goal_before,
                 "goal_revision_after": goal_after,
                 "state_revision_before": state_before,
                 "state_revision_after": state_after,
-                "goal_version_changed": bool(
-                    goal_after is not None
-                    and goal_before is not None
-                    and goal_after > goal_before
-                ),
-                "state_version_changed": bool(
-                    state_after is not None
-                    and state_before is not None
-                    and state_after > state_before
-                ),
+                "goal_version_changed": goal_progress,
+                "state_version_changed": state_progress,
                 "created_from_fact_ids": list(obs["created_from_fact_ids"]),
                 "user_outcome": obs["user_outcome"],
             }
         return True
 
     def _consent(self, obs: dict) -> str:
-        if self.consent_decisions >= self.max_consents:
+        # W3：治理审批可按当前准入候选选择显式精确复用（/approve-goal-target），
+        # 仅限 pending 写请求与 admitted 精确文件完全一致；其余一律普通治理 y，
+        # 绝不审批父目录或其它工具。两类决定分别计数，共同受治理预算约束。
+        pending_request = obs.get("pending_request") or {}
+        exact_candidate = (
+            pending_request.get("tool") in {"write_file", "edit_file"}
+            and isinstance(pending_request.get("path"), str)
+            and pending_request["path"] in set(obs.get("admitted_file_paths") or ())
+        )
+        if self.consent_decisions + self.scope_authorizations >= self.max_consents:
             return self._stop(obs, "consent_budget_exhausted")
+        if exact_candidate:
+            self.scope_authorizations += 1
+            self._event("goal_target_reuse", obs)
+            return "/approve-goal-target"
         self.consent_decisions += 1
         self._event("consent", obs)
         return "y"
-
-    def _resume(self, obs: dict) -> str:
-        if self.resumes >= self.max_resumes:
-            return self._stop(obs, "resume_budget_exhausted")
-        self.resumes += 1
-        self._event("resume", obs)
-        return "/resume"
-
-    def _continue(self, obs: dict) -> str:
-        if self.continue_decisions >= self.max_continues:
-            return self._stop(obs, "continue_budget_exhausted")
-        self.continue_decisions += 1
-        self._event("continue", obs)
-        return CONTINUE_MESSAGE
 
     def _stop(self, obs: dict | None, reason: str) -> str:
         self.stop_reason = reason
@@ -473,11 +599,16 @@ def evaluate_final(
     if not typed_terminal:
         failures.append("product did not reach typed VERIFIED_DONE in durable state")
     for name in BOUND_BUSINESS_KEYS:
-        if not business.get(name, False):
+        if business.get(name) is not True:
             failures.append(f"business check false: {name}")
-    for name, passed in sorted(supplemental.items()):
-        if not passed:
-            failures.append(f"supplemental check false: {name}")
+    # W3：锁定冻结七项集合——缺键/未知键/非 bool 都失败，七项语义不变。
+    for name in SUPPLEMENTAL_KEYS:
+        if name not in supplemental:
+            failures.append(f"supplemental check missing: {name}")
+        elif supplemental[name] is not True:
+            failures.append(f"supplemental check false: {name}={supplemental[name]!r}")
+    for name in sorted(set(supplemental) - set(SUPPLEMENTAL_KEYS)):
+        failures.append(f"supplemental check unknown: {name}")
     if stop_reason != "verified_done":
         failures.append(f"stop reason is not verified_done: {stop_reason!r}")
     for code in exit_codes:
@@ -490,9 +621,35 @@ def evaluate_final(
     for key in REQUIRED_EVIDENCE.get(mode, ()):
         if not evidence.get(key):
             failures.append(f"correction journey evidence missing: {key}")
+    # 只增加报告分类，不变造产品终态或放宽冻结验收条件。缺失/畸形探针不能
+    # 冒称业务错误；可靠业务 false 与 typed done 同时存在则必须明确记为误完成。
+    checks_complete = (
+        all(type(business.get(key)) is bool for key in BOUND_BUSINESS_KEYS)
+        and set(supplemental) == set(SUPPLEMENTAL_KEYS)
+        and all(type(value) is bool for value in supplemental.values())
+    )
+    evidence_complete = (
+        checks_complete
+        and not extra_failures
+        and all(code == 0 for code in exit_codes)
+        and physical_requests <= max_requests
+        and all(evidence.get(key) is True for key in REQUIRED_EVIDENCE.get(mode, ()))
+    )
+    business_failed = any(business.get(key) is False for key in BOUND_BUSINESS_KEYS) or any(
+        supplemental.get(key) is False for key in SUPPLEMENTAL_KEYS
+    )
+    if not failures:
+        verification_outcome = "PASS"
+    elif evidence_complete and typed_terminal and business_failed:
+        verification_outcome = "FAIL_FALSE_COMPLETION"
+    elif checks_complete and not business_failed and not typed_terminal and not extra_failures:
+        verification_outcome = "INCOMPLETE_CLOSURE"
+    else:
+        verification_outcome = "INCOMPLETE_EVIDENCE"
     return {
         "mode": mode,
         "product_status": "completed" if not failures else "incomplete",
+        "verification_outcome": verification_outcome,
         "failures": failures,
         "typed_terminal": typed_terminal,
         "business_checks": {
@@ -510,41 +667,178 @@ def evaluate_final(
     }
 
 
+def _strict_nonneg_int(value) -> bool:
+    """C（2026-10-18）：bool 不是 int；缺失/字符串/None/负数一律不合法。"""
+
+    return type(value) is int and value >= 0
+
+
 def _consumption_view(phase: dict) -> dict:
+    """evaluator 只信原始数值：从 revision/goal_id 原值重算推进，不沿用
+    producer 记录的布尔摘要；摘要与重算矛盾必须显式失败。"""
+
     consumption = phase.get("consumption") or {}
     fact_id = consumption.get("fact_id")
     created = consumption.get("created_from_fact_ids") or []
+    fact_id_valid = isinstance(fact_id, str) and bool(fact_id)
+    goal_id_before = consumption.get("goal_id_before")
+    goal_id_after = consumption.get("goal_id_after")
+    goal_before = consumption.get("goal_revision_before")
+    goal_after = consumption.get("goal_revision_after")
+    state_before = consumption.get("state_revision_before")
+    state_after = consumption.get("state_revision_after")
+    goal_progress = bool(
+        isinstance(goal_id_before, str)
+        and goal_id_before
+        and goal_id_before == goal_id_after
+        and _strict_nonneg_int(goal_before)
+        and _strict_nonneg_int(goal_after)
+        and goal_after > goal_before
+    )
+    state_progress = bool(
+        _strict_nonneg_int(state_before)
+        and _strict_nonneg_int(state_after)
+        and state_after > state_before
+    )
     return {
         "fact_id": fact_id,
-        "consumed": bool(fact_id and fact_id in created),
-        "version_changed": bool(
-            consumption.get("goal_version_changed")
-            or consumption.get("state_version_changed")
+        "consumed": bool(fact_id_valid and fact_id in created),
+        # C：只认同一 Goal 的数值 revision 严格增加；state-only 增长不算。
+        "version_changed": goal_progress,
+        "goal_version_changed": goal_progress,
+        "state_version_changed": state_progress,
+        "revisions_valid": bool(
+            _strict_nonneg_int(goal_before) and _strict_nonneg_int(goal_after)
         ),
-        "goal_version_changed": bool(consumption.get("goal_version_changed")),
-        "state_version_changed": bool(consumption.get("state_version_changed")),
+        "goal_id_stable": bool(
+            isinstance(goal_id_before, str)
+            and goal_id_before
+            and goal_id_before == goal_id_after
+        ),
+        "recorded_flags_consistent": bool(
+            consumption.get("goal_version_changed") == goal_progress
+            and consumption.get("state_version_changed") == state_progress
+        ),
+        "goal_id": goal_id_after,
         "user_outcome": consumption.get("user_outcome"),
     }
 
 
+_IDENTITY_FIELDS = ("conversation_id", "workspace_identity_digest", "goal_id")
+
+
+def _identity_of(obs: dict | None) -> tuple | None:
+    if not isinstance(obs, dict):
+        return None
+    return tuple(obs.get(field) for field in _IDENTITY_FIELDS)
+
+
+def _identity_valid(identity: tuple | None) -> bool:
+    return bool(
+        identity is not None
+        and all(isinstance(part, str) and part for part in identity)
+    )
+
+
 def _staged_evidence(phase_a: dict, phase_b: dict, final_obs: dict | None) -> dict:
     a_final = phase_a.get("final_observation") or {}
-    checks = (phase_a.get("pre_injection") or {}).get("alias_checks") or {}
+    pre = phase_a.get("pre_injection") or {}
+    checks = pre.get("alias_checks") or {}
     consumption = _consumption_view(phase_a)
+    consumption_raw = phase_a.get("consumption") or {}
     b_start = phase_b.get("start_observation") or {}
-    effects_after = (final_obs or {}).get("executed_file_effects", 0)
+    effects_after = (final_obs or {}).get("executed_file_effects")
     revision_after = (final_obs or {}).get("goal_revision")
+    b_effects = b_start.get("executed_file_effects")
+    b_revision = b_start.get("goal_revision")
     typed_terminal = bool(final_obs and final_obs.get("goal_status") == "verified_done")
+    injected_id = phase_a.get("injected_fact_id")
+    injected_valid = isinstance(injected_id, str) and bool(injected_id)
+
+    # C（2026-10-18）：同一条非空 fact ID 既 durable 又被消费——两个不同 ID
+    # 各自存在不能通过。
+    injected_equals_consumed = bool(
+        injected_valid
+        and isinstance(consumption["fact_id"], str)
+        and consumption["fact_id"] == injected_id
+    )
+    # 绑定计划 CORRECTION：C 对应本次实际新增 USER_MESSAGE、control=
+    # goal_correction、text 等于计划纠正，且不是注入前已有的旧 correction。
+    correction_facts = a_final.get("correction_facts") or []
+    binds_planned = bool(
+        injected_valid
+        and injected_id not in (pre.get("correction_fact_ids") or [])
+        and any(
+            isinstance(item, dict)
+            and item.get("fact_id") == injected_id
+            and item.get("kind") == "user_message"
+            and item.get("control") == "goal_correction"
+            and item.get("text") == CORRECTION
+            for item in correction_facts
+        )
+    )
+    # composite identity：同一 conversation/workspace/Goal 贯穿注入前、消费、
+    # A 暂停、B 启动与最终观察。
+    pre_identity = _identity_of(pre)
+    identity_points = (
+        pre_identity,
+        _identity_of(a_final),
+        _identity_of(b_start),
+        _identity_of(final_obs),
+    )
+    identity_consistent = bool(
+        _identity_valid(pre_identity)
+        and all(_identity_valid(point) and point == pre_identity for point in identity_points)
+        and consumption_raw.get("conversation_id") == pre.get("conversation_id")
+        and consumption_raw.get("workspace_identity_digest")
+        == pre.get("workspace_identity_digest")
+        and consumption_raw.get("goal_id_after") == pre.get("goal_id")
+    )
+    # C 在消费后的 paused/reopen/final 来源中持续存在。
+    persists = bool(
+        injected_valid
+        and injected_id in (a_final.get("correction_fact_ids") or [])
+        and injected_id in (b_start.get("correction_fact_ids") or [])
+        and injected_id in ((final_obs or {}).get("correction_fact_ids") or [])
+        and injected_id in ((final_obs or {}).get("created_from_fact_ids") or [])
+    )
+    # 消费后才发 Pause：事件序列中 pause 晚于注入，且 pause 时的 Goal
+    # revision 不低于消费后 revision。
+    events = phase_a.get("events") or []
+    kinds = [item.get("kind") if isinstance(item, dict) else None for item in events]
+    pause_events = [
+        (index, item)
+        for index, item in enumerate(events)
+        if isinstance(item, dict) and item.get("kind") == "pause"
+    ]
+    goal_after_consumption = consumption_raw.get("goal_revision_after")
+    pause_ok = bool(
+        "inject_correction" in kinds
+        and pause_events
+        and all(index > kinds.index("inject_correction") for index, _ in pause_events)
+        and _strict_nonneg_int(goal_after_consumption)
+        and all(
+            _strict_nonneg_int(item.get("goal_revision"))
+            and item["goal_revision"] >= goal_after_consumption
+            for _, item in pause_events
+        )
+    )
+
     return {
         "correction_injected": bool(
             phase_a.get("injected") and phase_a.get("injection_point")
         ),
         "correction_durable": bool(
-            phase_a.get("injected_fact_id")
-            and phase_a.get("injected_fact_id") in a_final.get("correction_fact_ids", [])
+            injected_valid and injected_id in a_final.get("correction_fact_ids", [])
         ),
         "correction_consumed": consumption["consumed"],
         "version_changed": consumption["version_changed"],
+        "injected_equals_consumed_fact": injected_equals_consumed,
+        "correction_binds_planned_input": binds_planned,
+        "composite_identity_consistent": identity_consistent,
+        "correction_persists_after_consumption": persists,
+        "pause_after_consumption": pause_ok,
+        "recorded_flags_consistent": consumption["recorded_flags_consistent"],
         "paused_after_consumption": bool(
             phase_a.get("pause_sent")
             and phase_a.get("stop_reason") == "paused_for_resume"
@@ -559,10 +853,15 @@ def _staged_evidence(phase_a: dict, phase_b: dict, final_obs: dict | None) -> di
         "resume_advanced": bool(
             typed_terminal
             and (
-                effects_after > (b_start.get("executed_file_effects") or 0)
+                (
+                    _strict_nonneg_int(effects_after)
+                    and _strict_nonneg_int(b_effects)
+                    and effects_after > b_effects
+                )
                 or (
-                    revision_after is not None
-                    and revision_after > (b_start.get("goal_revision") or 0)
+                    _strict_nonneg_int(revision_after)
+                    and _strict_nonneg_int(b_revision)
+                    and revision_after > b_revision
                 )
             )
         ),
@@ -671,7 +970,6 @@ def _run_journey(args) -> dict:
         candidate=candidate,
         probe=None if offline else _frozen_probe,
         max_consents=args.max_consents,
-        max_resumes=args.max_resumes,
     )
 
     def input_fn(prompt: str) -> str:
@@ -748,6 +1046,7 @@ def _run_journey(args) -> dict:
         "start_observation": operator.start_observation,
         "task_sent": operator.task_sent,
         "consent_decisions": operator.consent_decisions,
+        "scope_authorizations": operator.scope_authorizations,
         "resumes": operator.resumes,
         "continue_decisions": operator.continue_decisions,
         "injected": operator.injected,
@@ -814,26 +1113,49 @@ def _child(
         args.provider,
         *extra,
     ]
-    return subprocess.run(command, cwd=str(_ROOT), timeout=timeout, check=False)
+    # C.2（2026-10-18）：安装模式显式透传装配参数；子进程与父进程共用源码树
+    # 外的同一中立 cwd（父进程 bootstrap 已 chdir），绝不回落 cwd=_ROOT。
+    installed_site = getattr(args, "installed_site", None)
+    if installed_site is not None:
+        command.extend(
+            ("--installed-site", str(installed_site), "--origin-log", str(args.origin_log))
+        )
+        # bootstrap 已把父进程 chdir 到中立 cwd；显式传给子进程，绝不回落 _ROOT。
+        cwd = str(getattr(args, "neutral_cwd", None) or Path.cwd())
+    else:
+        cwd = str(_ROOT)
+    return subprocess.run(command, cwd=cwd, timeout=timeout, check=False)
 
 
 def _provider_extra(args) -> list[str]:
-    if args.provider == "fake":
-        return []
-    return [
-        "--model",
-        args.model,
-        "--base-url",
-        args.base_url,
-        "--credential-env",
-        args.credential_env,
-        "--thinking-mode",
-        args.thinking_mode,
-        "--timeout",
-        str(args.timeout),
-        "--max-model-attempts",
-        str(args.max_model_attempts),
-    ]
+    extra: list[str] = []
+    if args.provider != "fake":
+        extra.extend(
+            (
+                "--model",
+                args.model,
+                "--base-url",
+                args.base_url,
+                "--credential-env",
+                args.credential_env,
+                "--thinking-mode",
+                args.thinking_mode,
+                "--timeout",
+                str(args.timeout),
+                "--max-model-attempts",
+                str(args.max_model_attempts),
+            )
+        )
+    # W3：干预上限必须按相同值传入 run 子进程，独立于 provider 是否 fake。
+    extra.extend(
+        (
+            "--max-consents",
+            str(args.max_consents),
+            "--max-resumes",
+            str(args.max_resumes),
+        )
+    )
+    return extra
 
 
 def _finalize(args, phase_results: list[dict], *, mode: str, wall_seconds: float) -> dict:
@@ -890,6 +1212,7 @@ def _finalize(args, phase_results: list[dict], *, mode: str, wall_seconds: float
             "pid": phase.get("pid"),
             "stop_reason": phase.get("stop_reason"),
             "consent_decisions": phase.get("consent_decisions"),
+            "scope_authorizations": phase.get("scope_authorizations"),
             "continue_decisions": phase.get("continue_decisions"),
             "resumes": phase.get("resumes"),
             "correction_injected": bool(
@@ -917,6 +1240,27 @@ def _finalize(args, phase_results: list[dict], *, mode: str, wall_seconds: float
             "candidate": str(candidate),
             "state_root": str(state_root),
             "ledger": str(args.ledger.resolve()),
+            # C.2（2026-10-18）：安装身份单列；source 模式不可签 installed-real。
+            "install": {
+                "identity": (
+                    "installed"
+                    if getattr(args, "installed_site", None) is not None
+                    else "source"
+                ),
+                "installed_site": (
+                    str(args.installed_site)
+                    if getattr(args, "installed_site", None) is not None
+                    else None
+                ),
+                "origin_log": (
+                    str(args.origin_log)
+                    if getattr(args, "origin_log", None) is not None
+                    else None
+                ),
+                "neutral_cwd": getattr(args, "neutral_cwd", None),
+                "parent_pid": os.getpid(),
+                "parent_executable": sys.executable,
+            },
             "wall_seconds": round(wall_seconds, 3),
             "final_observation": final_obs,
             "frozen_inputs": {
@@ -925,6 +1269,15 @@ def _finalize(args, phase_results: list[dict], *, mode: str, wall_seconds: float
             },
         }
     )
+    if record["install"]["identity"] == "installed":
+        # 安装模式绝不悄悄回退：任何 origin guard 错误都进判据。
+        origin_errors = [
+            f"installed origin guard error: {item}"
+            for item in _origin_log_errors(Path(args.origin_log))
+        ]
+        if origin_errors:
+            record["failures"] = [*record["failures"], *origin_errors]
+            record["product_status"] = "incomplete"
     args.result.parent.mkdir(parents=True, exist_ok=True)
     args.result.write_text(
         json.dumps(record, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
@@ -1021,6 +1374,80 @@ def _journey(args) -> int:
     return 0 if record["product_status"] == "completed" else 1
 
 
+def _maybe_bootstrap_install_guard(args) -> None:
+    """C.2（2026-10-18）：固定用途安装装配——在任何产品模块导入前装 guard。
+
+    fail closed：参数必须成对；site 必须真实存在；产品模块已被源码预加载即
+    拒绝（不清 sys.modules 假装干净）。ROOT 只供定位测试资料，产品导入由
+    guard 强制从 installed-site 解析。父进程离开源码树到中立 cwd；子进程由
+    _child 以同一 cwd 启动。
+    """
+
+    site_arg = getattr(args, "installed_site", None)
+    log_arg = getattr(args, "origin_log", None)
+    if site_arg is None and log_arg is None:
+        return
+    if site_arg is None or log_arg is None:
+        raise SystemExit(
+            "refusing: --installed-site and --origin-log must be provided together"
+        )
+    from scripts._019_installed_pytest import FIXED_PRODUCT_ROOTS, install_guard
+
+    polluted = sorted(
+        name
+        for name in sys.modules
+        if name.partition(".")[0] in FIXED_PRODUCT_ROOTS
+    )
+    if polluted:
+        raise SystemExit(
+            "refusing: product modules already imported before install guard: "
+            f"{polluted}"
+        )
+    try:
+        site = Path(site_arg).resolve(strict=True)
+    except OSError as error:
+        raise SystemExit(f"refusing: installed site unusable: {error}") from error
+    if not site.is_dir():
+        raise SystemExit(f"refusing: installed site is not a directory: {site}")
+    # chdir 前先把工作路径绝对化，避免中立 cwd 破坏相对路径。
+    for name in ("candidate", "state_root", "ledger", "result"):
+        value = getattr(args, name, None)
+        if value is not None:
+            setattr(args, name, Path(value).resolve())
+    log = Path(log_arg).resolve()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    install_guard(str(site), str(_ROOT), str(log))
+    args.installed_site = site
+    args.origin_log = log
+    cwd = Path.cwd().resolve()
+    if cwd == _ROOT or _ROOT in cwd.parents:
+        neutral = Path(args.result).parent / "installed-cwd"
+        neutral.mkdir(parents=True, exist_ok=True)
+        os.chdir(neutral)
+    args.neutral_cwd = str(Path.cwd().resolve())
+
+
+def _origin_log_errors(path: Path) -> list[str]:
+    """安装模式 origin 追溯：任何 error 事件都让判据失败，绝不悄悄回退。"""
+
+    if not path.exists():
+        return [f"origin log missing: {path}"]
+    errors: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            errors.append("origin log has a broken line")
+            continue
+        if event.get("error") is not None:
+            errors.append(
+                f"{event.get('module')}: {event.get('error')} ({event.get('origin')})"
+            )
+    return errors
+
+
 def _add_provider_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--provider",
@@ -1039,7 +1466,7 @@ def _add_provider_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--timeout", type=float, default=240.0)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -1054,6 +1481,18 @@ def main() -> int:
     run.add_argument("--state-root", type=Path, required=True)
     run.add_argument("--ledger", type=Path, required=True)
     run.add_argument("--result", type=Path, required=True)
+    run.add_argument(
+        "--installed-site",
+        type=Path,
+        default=None,
+        help="installed site-packages 目录；产品模块只允许从这里解析（与 --origin-log 成对）",
+    )
+    run.add_argument(
+        "--origin-log",
+        type=Path,
+        default=None,
+        help="安装导入 origin 追溯日志（与 --installed-site 成对）",
+    )
     _add_provider_options(run)
 
     journey = subparsers.add_parser("journey")
@@ -1063,9 +1502,23 @@ def main() -> int:
     journey.add_argument("--ledger", type=Path, required=True)
     journey.add_argument("--result", type=Path, required=True)
     journey.add_argument("--wall-seconds", type=float, default=1800.0)
+    journey.add_argument(
+        "--installed-site",
+        type=Path,
+        default=None,
+        help="installed site-packages 目录；产品模块只允许从这里解析（与 --origin-log 成对）",
+    )
+    journey.add_argument(
+        "--origin-log",
+        type=Path,
+        default=None,
+        help="安装导入 origin 追溯日志（与 --installed-site 成对）",
+    )
     _add_provider_options(journey)
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.command in {"run", "journey"}:
+        _maybe_bootstrap_install_guard(args)
     if args.command == "prepare":
         _prepare(args)
         return 0

@@ -38,7 +38,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 
-ROUND = "2026-10-14 task-trust resume"
+ROUND = "2026-10-18 cli-personal-trial-closeout"
 
 # 必须取工作树内容的产品文件：launch/运行时闭包（16 文件，含 file_ops 的
 # project_paths 运行时缺口）+ 被产品代码引用的未跟踪模块。
@@ -72,47 +72,50 @@ WORKTREE_CLOSURE: dict[str, str] = {
     "agent/tools/directory.py": "untracked module imported by file_ops.py:18",
 }
 
-# 本轮（2026-10-14 任务结果可信接续包）修改的产品/指南文件：必须出现在候选中，
-# 且 manifest 标注。仅身份标签，不改安全算法。
+# 本轮（2026-10-18 CLI release blockers A→B→C：完成门文件下界 F1+F2、pending
+# 外发确认 y/n/空回车 F3、staged 验收器严格绑定+安装装配 F4；同日发现 1 修复：
+# 兜底指引不再引导 blocked_claim + process receipt 失效型缺口挂 local_process
+# 修复知识；同日发现 3/E3 修复：失败义务亲和重绑定 + already-satisfied policy
+# 指引）修改的产品/指南/driver 文件：必须出现在候选中，且 manifest 标注。
+# 仅身份标签，不改安全算法。
 THIS_ROUND = {
     "README.md",
+    "agent/cli/actions.py",
     "agent/cli/app.py",
     "agent/cli/render.py",
-    "agent/provider/normalize.py",
-    "agent/runtime/checkpoint.py",
-    "agent/runtime/context.py",
     "agent/runtime/contracts.py",
     "agent/runtime/evidence.py",
     "agent/runtime/loop.py",
     "agent/runtime/state.py",
     "agent/runtime/views.py",
+    "main.py",
+    "docs/architecture/CURRENT_CAPABILITY_STATUS.md",
+    "docs/guides/daily-use.md",
+    "docs/guides/capabilities.md",
     "docs/handoffs/2026-10-11-product-reliability-closure/RESULTS.md",
     "scripts/build_candidate_manifest.py",
+    "scripts/run_task_trust_d04.py",
 }
 
 # 本轮修复依赖、必须随候选一起取工作树内容的文件（非闭包但被本轮改动引用）。
-THIS_ROUND_SUPPORT: set[str] = {
-    "tests/kernel/fakes.py",
-}
+THIS_ROUND_SUPPORT: set[str] = set()
 
 # 本轮新增/更新的回归测试与验收脚本：候选必须自带，否则安装物验证只跑旧测试。
 # 未跟踪的公开新测试必须显式列入（脚本只自动收集 tracked）。
 THIS_ROUND_TESTS = {
+    "tests/acceptance/test_coding_autonomy_grader.py",
     "tests/acceptance/test_task_trust_completion.py",
-    "tests/cli/test_commands.py",
+    "tests/acceptance/test_task_trust_d04_driver.py",
     "tests/cli/test_contextual_decisions.py",
     "tests/cli/test_render.py",
-    "tests/continuity/test_checkpoint_v4.py",
     "tests/continuity/test_contracts.py",
-    "tests/continuity/test_verified_done.py",
-    "tests/kernel/test_context_budgeting.py",
-    "tests/kernel/test_runtime_compaction.py",
-    "tests/kernel/test_validation_request_freshness.py",
-    "tests/provider/test_continuity_control.py",
-    "tests/reference/test_012_trusted_continuity.py",
-    "tests/reference/test_013_everyday_workspace.py",
+    "tests/kernel/test_evidence_registry.py",
+    "tests/process/test_f1_input_mutation_invalidation.py",
+    "tests/process/test_j1_verified_done.py",
+    "tests/process/test_obligation_rebind.py",
+    "tests/provider/test_remote_disclosure.py",
+    "tests/reference/test_016_first_agent_1_0.py",
     "tests/reference/test_candidate_manifest_safety.py",
-    "tests/subagent/test_integration.py",
 }
 
 # 构建残留绝不能进候选：``build/lib`` 会让 setuptools 复用旧源码，负例

@@ -1,0 +1,38 @@
+{
+  "audited_head": "0cc0db1ddbf6d2e9c9526e9588d66e80831b6640",
+  "mode": "read-only product audit; only new audit artifacts written",
+  "focused": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 PIP_NO_INDEX=1 .venv/bin/python -m pytest -q -rx tests/acceptance/test_task_trust_completion.py tests/acceptance/test_task_trust_d04_driver.py tests/continuity/test_contracts.py tests/cli/test_contextual_decisions.py tests/cli/test_render.py tests/provider/test_remote_disclosure.py tests/reference/test_candidate_manifest_safety.py",
+    "passed": 285,
+    "seconds": 30.84,
+    "exit_code": 0
+  },
+  "full": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 PIP_NO_INDEX=1 PYTEST_ADDOPTS='' .venv/bin/python -m pytest -q -rx --color=no",
+    "passed": 3947,
+    "skipped": 1,
+    "seconds": 672.22,
+    "exit_code": 0
+  },
+  "explicit_host_gate_check": {
+    "command": "FIRST_AGENT_RUN_REAL_LAUNCHD=0 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q -rs --color=no tests/automation_hosts/test_launchd_real.py",
+    "skipped": 1,
+    "reason": "real launchd probe requires explicit host gate",
+    "exit_code": 0
+  },
+  "lint": "ruff check . passed",
+  "whitespace": "git diff --check passed",
+  "diagnostic_probes": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B docs/audits/2026-10-17-post-closeout-product-audit/probes.py",
+    "exit_code": 0,
+    "classification": "confirmed defects, not a green release gate",
+    "results": "PROBE-RESULTS.json"
+  },
+  "not_executed": [
+    "new paid real-provider calls",
+    "installed wheel replay in this audit",
+    "private real session/log inspection",
+    "commit/push/tag/publish",
+    "system login item mutations"
+  ]
+}

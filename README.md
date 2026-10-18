@@ -11,19 +11,18 @@ r19 产品化审计解除冻结后，项目转入日常可用性修复（见下�
 
 它使用同一个自然语言入口回答问题、讨论想法或完成有界的当前目录文件任务。底层仍刻意保持为一个模型循环、一个上下文管理器、一个受治理的工具执行路径和一个可恢复状态机。它可以在逐次批准后通过固定 Tavily 入口查询公开 Web；015 Governed Local Action 已通过真实 E3、独立评审与 Codex 终裁，曾作为已交付能力提供受治理的结构化本机执行（`local_process`：exact 同意批准、Goal 限定租约、closed 环境与资源档案；历史晋级只绑定当时 delivery identity，见下方状态快照）。018 另提供可选的受治理专属隔离 Chromium 能力（candidate）。个人浏览器、任意网站兼容、桌面控制与任意 shell 仍不在交付范围内，也不存在第二套 Agent loop。
 
-## 当前状态快照（2026-10-16）
+## 当前状态快照（2026-10-18）
 
 2026-09-09 r18 冻结（consolidated 候选 commit `684f368` / tree `10d36564`，source full gate
-3372 passed / 3 skipped）后，r19 审计解除冻结并转向产品化；2026-10 可靠性收口在当前工作树
-identity 上完成：
-
-- **完整测试门 G1**：`3873 passed / 1 skipped / 0 failed`（exit 0，确认性重跑；唯一 skip 为设计内
-  launchd host gate）。
-- **安装层 I1**：wheel 构建→安装→installed 41 节点 exit 0、origin 153/153 安装态、两条污染负对照
-  通过（覆盖本机 macOS 单一组合，未声明跨平台安装 matrix）。
-- **真实模型层 E1**（deepseek-v4-flash，thinking disabled，授权预算 61/80 请求）：E1-B 分阶段旅程
-  （运行中追加纠正→暂停→退出→新进程恢复且不重述任务）typed `VERIFIED_DONE` 全链 PASS；E1-A 业务
-  判据全过但 40 请求窗口耗尽于终态前——产品停在安全暂停态，未谎报完成。
+3372 passed / 3 skipped）后，r19 审计解除冻结并转向产品化。2026-10-16 可靠性收口（完整门
+3873 passed、installed 41 节点、真实层 61/80 请求）只绑定当时工作树 identity；该 identity 已被
+2026-10-17 日用收口修改（W1 明确文件交付对象完成下界、W2 散文 targets 精确文件复用授权、
+W3 验收 driver 不催促不救场），旧身份数字不再描述当前工作树。当前 identity 的交付门、安装与
+真实层证据逐项记录在唯一
+[RESULTS](docs/handoffs/2026-10-11-product-reliability-closure/RESULTS.md)。2026-10-18 CLI 个人试用
+收尾补齐验证目录绑定、两种明确审批的语义一致性与业务失败分类。新安装物已完成真实普通编码
+样本（业务检查与产品终态均通过）；纠正/恢复样本在累计预算边界暂停、零改写样本未运行，
+因此完整真实验收仍未闭合。试用须准备项目依赖并独立检查结果，不能冒用旧身份的真实通过记录。
 
 **开箱即用边界**：Scheduler 安装入口返回 `needs_019_config`（无可用的 host composition，见下文
 Durable automations 节）；受治理浏览器（018）为 implemented-candidate 且未完成 D06 真实模型验收；
@@ -56,7 +55,14 @@ Durable automations 节）；受治理浏览器（018）为 implemented-candidat
 - 同一自然语言入口中的直接回答、最小澄清与 durable Goal
 - Goal pause/resume/cancel/correction、确定性重启与 unknown-effect recovery
 - remote Provider 外发前的精确 disclosure acknowledgement
-- Runtime-owned evidence gate：只有满足 admitted criteria 才显示 `VERIFIED_DONE`
+- Runtime-owned evidence gate：只有满足 admitted criteria 才显示 `VERIFIED_DONE`；用户原文中
+  点名要求创建/修改的明确文件是完成下界——草稿遗漏该文件时，非空泛化声明不能通过完成门。
+  这是有限下界（2026-10-18 A 包）：支持汉字直接邻接的 ASCII 相对路径、跨分句引文与围栏
+  代码块的排除、日志报告输入的有限语法，不承诺任意隐含要求、日志/引号、Unicode 文件名、
+  Windows 路径或 URL 的语义识别；支持汉字邻接 ASCII 路径不等于支持所有 Unicode 路径
+- 散文描述的任务（未列精确 targets）同样可用精确文件复用授权：首次批准某文件写入后，后续同
+  工具写同一文件时提示无参数 `/approve-goal-target`，显式 opt-in 后铸造同一 Goal/revision 绑定
+  的限次租约
 - 有来源、可纠正、可停止未来召回的 owner preference
 
 history、workspace 文件和 Web 内容都作为 untrusted data 进入模型上下文。来源回执证明的是“观察来自哪里、
@@ -69,6 +75,10 @@ Memory、Skill、MCP、SubAgent、Scheduler 和 TUI 不属于 Kernel v1 核心�
 Graphify 和 Understand Anything 是 Coding Agent 理解本仓库时可使用的辅助工具，不是 `my-first-agent` 的运行时能力或依赖。
 
 ## 快速开始
+
+本机已经准备的固定试用入口见 [日用指南](docs/guides/daily-use.md)；
+[能力与边界清单](docs/guides/capabilities.md) 区分默认能力、可选候选能力与尚不可用入口。
+当前定位是 macOS 单用户 CLI 个人试用，不是无需验收的全自动交付产品。
 
 安装后运行 guided setup。它只询问 provider、model、base URL 和 credential 环境变量名，不读取或保存
 credential value，也不会发送模型请求：
@@ -97,9 +107,11 @@ export FIRST_AGENT_WEB_API_KEY='set-in-your-shell'
 处理告知的摘要。未运行 `setup-web` 时，普通对话、历史和 workspace 文件能力照常工作，不会自动联网。
 
 当前本地开发与候选验证不假设 PyPI 已有发布物；可选能力（Skill 的严格 YAML 解析、MCP SDK、Textual
-TUI、018 governed browser）不属于 base 安装闭包，需要时用同一个本地 wheel 的 non-editable extra 语法
-安装，例如 `python -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[tui]"`（各能力的 extra 名见
-对应章节；本仓库尚未声明任何安装 matrix 验证结论）。
+TUI、018 governed browser）不属于 base 安装闭包。日用默认安装就是 base（CLI/headless），不推荐
+安装 `[tui]` extra——TUI 是实验性适配（见下文 TUI 章节的已知限制），需要实验时用同一个本地 wheel
+的 non-editable extra 语法安装，例如
+`python -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[tui]"`
+（各能力的 extra 名见对应章节；本仓库尚未声明任何安装 matrix 验证结论）。
 
 setup 只保存 provider、model、base URL、credential 环境变量名、thinking mode、request path、
 strict tools 开关和 timeout；不会读取或保存 key。此后 `first-agent` 默认使用当前目录，不需要再重复
@@ -190,7 +202,9 @@ Runtime；它会使旧 next step、completion claim 和 evidence binding 失效�
 
 `RunStatus.COMPLETED` 只表示本次调用安全停止，不表示任务完成。只有状态投影明确显示
 `VERIFIED_DONE`，且每个 mandatory criterion 都有 Runtime 从 durable raw facts 重新推导的
-evidence，才表示 Goal 已验收。模型说“done”不会改变 Goal 状态。
+evidence，才表示登记的证据项已通过，不表示业务语义已获独立验收或用户已接受结果。
+完成摘要会同时提示 `User acceptance: not established by these evidence checks.`；
+模型说“done”不会改变 Goal 状态。
 
 `/exit`、EOF 和空闲时的 Ctrl-C 只退出当前 CLI，不会伪造一次运行取消。
 
@@ -390,9 +404,13 @@ host composition；因此直接执行 `list`、`create` 或 `reconcile` 都会�
 `needs_019_config`/`host_profile_unavailable`（exit 2），不是一个空的可用 Scheduler。
 开发用注入测试证明的是控制接口，不代表安装入口可调度。该命令不会自行创建登录项或后台任务。
 
-## TUI（optional Textual adapter）
+## TUI（optional Textual adapter，实验性）
 
 `--tui` 启动可选的 Textual 界面（与 CLI/headless 共享同一 typed action、reducer、checkpoint 与 recovery 语义）。它通过 single-flight thread worker 调用同一个 Runtime；`RunResult`/checkpoint 始终权威，events 只作 advisory 显示。慢模型调用会显示真实等待时长；运行中按 `Ctrl-C` 会立即确认取消请求，但只有当前 provider/tool 返回并到达安全边界后才写入取消终态，界面不会把“请求已收到”假报成“已经停止”。
+
+TUI 当前是实验性适配，不与 CLI 宣称功能对等（parity）。已知限制：`/pause` 后经 `/resume` 恢复的
+pending provider 外发确认（active run 已停、Goal 已 ready 的形状）TUI 不会重新显示该决定；日用
+首选 CLI。pending 外发确认的 y/n/空回车语义（含安全拒绝退出）以 CLI 为准（2026-10-18 B 包）。
 
 ```bash
 python -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[tui]"

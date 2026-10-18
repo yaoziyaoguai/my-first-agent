@@ -1,0 +1,853 @@
+diff --git a/agent/cli/app.py b/agent/cli/app.py
+index 11351bc..597628b 100644
+--- a/agent/cli/app.py
++++ b/agent/cli/app.py
+@@ -230,12 +230,26 @@ def _parse_action(
+     normalized = raw.strip().casefold()
+ 
+     disclosure = state.provider_disclosure_request
+-    if (
++    goal = state.goal
++    disclosure_answerable = (
+         disclosure is not None
+-        and state.active_run is not None
+-        and state.active_run.status is ActiveRunStatus.AWAITING_DISCLOSURE
++        and state.provider_disclosure_receipt is None
+         and normalized in _AFFIRMATIVE
+-    ):
++        and (
++            (
++                state.active_run is not None
++                and state.active_run.status is ActiveRunStatus.AWAITING_DISCLOSURE
++            )
++            or (
++                # /pause 停在 pending disclosure 上后，/resume 完成的 Goal 必须
++                # 仍可应答该 durable 决定（2026-10-17 E1-B 缺口）；仍 PAUSED 时
++                # 不可——先 /resume。
++                goal is not None
++                and goal.status is GoalStatus.GOAL_READY
++            )
++        )
++    )
++    if disclosure_answerable:
+         return (
+             AcknowledgeProviderDisclosure(
+                 **common,
+diff --git a/agent/cli/render.py b/agent/cli/render.py
+index 2d59e34..f606a6c 100644
+--- a/agent/cli/render.py
++++ b/agent/cli/render.py
+@@ -143,6 +143,26 @@ class TerminalRenderer:
+         """
+ 
+         active = state.active_run
++        request = state.provider_disclosure_request
++        goal = state.goal
++        if (
++            active is None
++            and request is not None
++            and state.provider_disclosure_receipt is None
++            and goal is not None
++            and goal.status is GoalStatus.GOAL_READY
++        ):
++            # /pause 可以停在 pending disclosure 上（2026-10-17 E1-B 真实缺口）：
++            # active run 已安全停止，但该 durable 决定在 /resume 完成后必须与
++            # 审批同等重升，等待 y/拒绝；Goal 仍 PAUSED 时不升。
++            self._write(
++                self._disclosure_message(
++                    destination=request.canonical_destination,
++                    model=request.model,
++                    data_classes=request.data_classes,
++                )
++            )
++            return
+         if active is None:
+             return
+         if (
+diff --git a/agent/runtime/loop.py b/agent/runtime/loop.py
+index 8e79563..75e9325 100644
+--- a/agent/runtime/loop.py
++++ b/agent/runtime/loop.py
+@@ -133,6 +133,7 @@ from agent.runtime.state import (
+     append_policy_result,
+     apply_compaction_summary,
+     apply_control_request,
++    authoritative_deliverable_file_paths,
+     authoritative_process_entrypoints,
+     begin_browser_takeover,
+     begin_provider_call,
+@@ -2844,6 +2845,61 @@ class AgentRuntime:
+                             )
+                             continue
+                     else:
++                        # W1.5：与完成门复用同一交付缺口判断。admitted 证据全部
++                        # 可推导不等于权威原文的明确交付对象已覆盖；缺口未闭合
++                        # 时不得断言"证据已完整"并指示重发 completion_claim——
++                        # 那会让服从指引的 claim 立即被完成门以同一缺口拒绝。
++                        deliverable_gap = sorted(
++                            authoritative_deliverable_file_paths(current.state)
++                            - {
++                                criterion.predicate.get("path")
++                                for criterion in goal_frame.admitted_criteria
++                                if criterion.mandatory
++                                and criterion.oracle_kind
++                                is EvidenceOracleKind.FILESYSTEM_DIGEST
++                                and isinstance(
++                                    criterion.predicate.get("path"), str
++                                )
++                            }
++                        )
++                        if deliverable_gap:
++                            if no_progress.repair_exhausted(
++                                (
++                                    "blocked_claim_with_deliverable_gap",
++                                    *deliverable_gap,
++                                ),
++                                allowance=self._limits.max_no_progress_replans,
++                                observation_id=model_calls,
++                            ):
++                                return self._finish_no_progress(
++                                    current,
++                                    action,
++                                    warnings,
++                                    message=(
++                                        "Provider repeated blocked claims while "
++                                        "explicit deliverable files were still "
++                                        "missing from admitted criteria."
++                                    ),
++                                )
++                            no_progress_since_product_action = True
++                            current = self._save(
++                                current,
++                                append_policy_result(
++                                    current.state,
++                                    code="blocked_claim_not_verified",
++                                    message=(
++                                        "The blocked_claim was not accepted: explicit "
++                                        "user deliverable files are still outside the "
++                                        "current admitted criteria: "
++                                        + ", ".join(deliverable_gap)
++                                        + ". Advance them through the normal approval "
++                                        "and final read-back path, or produce a "
++                                        "durable blocker for them, before reporting "
++                                        "this Goal as blocked."
++                                    ),
++                                ),
++                            )
++                            continue
+                         # 016 第 96 轮 a2 J7:edit+process 均成功(exit 0、durable
+                         # receipts)后模型以 blocked 收尾。守卫合同要求 attempt
+                         # "produces a durable blocker";完成证据已可推导时
+diff --git a/agent/runtime/state.py b/agent/runtime/state.py
+index 844b7f3..c664ff7 100644
+--- a/agent/runtime/state.py
++++ b/agent/runtime/state.py
+@@ -255,6 +255,48 @@ _PROCESS_ENTRYPOINT_CLAUSE_BOUNDARY = re.compile(
+     r"(?:[，。；;,!?！？]+|\.(?=\s|$)|但是|但|而是|\bbut\b|\bhowever\b)",
+     re.IGNORECASE,
+ )
++# W1：明确文件交付对象的有限识别（与显式 process 要求同型，只认直接正向
++# 精确 workspace-relative 路径；阅读/参照/引文/疑问/禁止语境不进下界）。
++_DELIVERABLE_PATH_TOKEN = re.compile(
++    r"(?<![/\w.])("
++    r"[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?"
++    r"(?:/[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?)+"
++    r"|[A-Za-z0-9_][A-Za-z0-9_-]*\.[A-Za-z0-9]{1,12}"
++    r")"
++)
++_DELIVERABLE_VERB_PATTERN = re.compile(
++    r"(?:创建|新建|生成|写入|修改|更新|编辑|添加|新增|实现|重构|"
++    r"\b(?:create|generate|write|update|modify|edit|implement|add|refactor)\b)",
++    re.IGNORECASE,
++)
++_DELIVERABLE_READING_VERB_PATTERN = re.compile(
++    r"(?:阅读|读取|查看|参照|参考|打开|"
++    r"\b(?:read|review|refer|consult)\b|\blook\s+at\b|\bsee\b)",
++    re.IGNORECASE,
++)
++_DELIVERABLE_SUBJECT_AFTER_PATTERN = re.compile(
++    r"^[\s\S]{0,20}?(?:必须|也要|要改|改为|改用|实现|写入|\bmust\b|\bshall\b)",
++)
++# "实现 SPEC.md 中要求的…" / "按 SPEC.md 的说明实现…"：紧跟路径的规格指称
++# 说明该文件是参考输入，不是交付对象（W1.3.3 输出/输入区分）。
++_DELIVERABLE_REFERENCE_AFTER_PATTERN = re.compile(
++    r"^[\s\S]{0,6}?(?:中要求|中描述|中规定|中定义|中说明|的说明|的描述|的规定|的定义)"
++)
++_DELIVERABLE_NEGATION_PATTERN = re.compile(
++    r"(?:不要|别|不得|禁止|无需|不用|不需要|不准|"
++    r"\bdo\s+not\b|\bdon't\b|\bmust\s+not\b|\bnever\b)",
++    re.IGNORECASE,
++)
++_DELIVERABLE_QUESTION_CLAUSE = re.compile(
++    r"^\s*(?:如何|怎么|为什么|是否|请问|"
++    r"\b(?:how|what|why|can|could|would)\b|\bdo(?:es)?\b)",
++    re.IGNORECASE,
++)
++_NON_AUTHORITATIVE_DELIVERABLE_SPANS = (
++    re.compile(r"```[\s\S]*?```"),
++    re.compile(r"「[^」]*」"),
++    re.compile(r"“[^”]*”"),
++)
+ 
+ 
+ def _goal_source_text(
+@@ -398,6 +440,100 @@ def process_entrypoint_matches_authority(
+     return not requested or normalize_process_entrypoint(executable) in requested
+ 
+ 
++def _last_match_end(text: str, pattern: re.Pattern[str]) -> int:
++    return max((match.end() for match in pattern.finditer(text)), default=0)
++
++
++def _normalize_deliverable_path_token(value: str) -> str:
++    """交付路径 token 的安全校验：与 artifact_path 同一 workspace 相对语义。
++
++    额外要求"路径形状"（含 ``/`` 或以扩展名结尾），避免把 ``max_retries`` 这类
++    普通标识词当成文件交付对象；绝对路径、父目录逃逸与控制字符一律拒绝。
++    """
++
++    if (
++        not value
++        or len(value) > 1_000
++        or value.startswith("/")
++        or "\\" in value
++        or any(
++            ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F
++            for character in value
++        )
++    ):
++        return ""
++    parts = value.split("/")
++    if any(part in {"", ".", ".."} for part in parts):
++        return ""
++    if "/" not in value and re.search(r"\.[A-Za-z0-9]{1,12}$", value) is None:
++        return ""
++    return value
++
++
++def authoritative_deliverable_file_paths(
++    state: ConversationState,
++) -> frozenset[str]:
++    """提取当前 Goal 权威来源中仍生效的明确文件交付对象下界（W1）。
++
++    只读 ``created_from_fact_ids`` 绑定的真实 USER_MESSAGE 原文（含已消费
++    correction）。每个 clause 内按有限规则判定"直接正向的精确文件交付要求"：
++    路径 token 附近的交付动词（就近原则压过阅读动词）、或路径后紧跟的主体
++    要求词；疑问句、引文/代码块 span 与近距离禁止词不产生义务。跨 fact 按
++    顺序做正/负更新——correction 新增即生效、点名撤回只移除被点名对象、
++    沉默或无关 correction 不清空其它交付对象、未消费 correction 不生效。
++
++    这是完成判断的下界，不是工具权限，也不声称覆盖任意自然语言语义：
++    有限规则未识别的隐含要求仍由模型与独立验收负责。
++    """
++
++    goal = state.goal
++    if goal is None:
++        return frozenset()
++    source_ids = set(goal.created_from_fact_ids)
++    requested: set[str] = set()
++    for fact in state.facts:
++        if fact.fact_id not in source_ids or fact.kind is not FactKind.USER_MESSAGE:
++            continue
++        text = fact.content.get("text")
++        if not isinstance(text, str):
++            continue
++        # 逐 clause 判定；沿用 process 的 path-safe 断句（``app/worker.py``
++        # 中的点号不当句边界）。
++        for raw_clause in _PROCESS_ENTRYPOINT_CLAUSE_BOUNDARY.split(text):
++            clause = _without_non_authoritative_spans(
++                raw_clause,
++                _NON_AUTHORITATIVE_DELIVERABLE_SPANS,
++            )
++            if not clause.strip() or _DELIVERABLE_QUESTION_CLAUSE.match(clause):
++                continue
++            for match in _DELIVERABLE_PATH_TOKEN.finditer(clause):
++                path = _normalize_deliverable_path_token(match.group(1))
++                if not path:
++                    continue
++                start, end = match.span(1)
++                if _DELIVERABLE_NEGATION_PATTERN.search(
++                    clause[max(0, start - 16) : start]
++                    + " "
++                    + clause[end : end + 12]
++                ):
++                    requested.discard(path)
++                    continue
++                if _DELIVERABLE_REFERENCE_AFTER_PATTERN.match(
++                    clause[end : end + 10]
++                ):
++                    continue
++                window = clause[max(0, start - 24) : start]
++                deliverable_verb = _last_match_end(window, _DELIVERABLE_VERB_PATTERN)
++                reading_verb = _last_match_end(
++                    window, _DELIVERABLE_READING_VERB_PATTERN
++                )
++                if deliverable_verb > reading_verb or (
++                    _DELIVERABLE_SUBJECT_AFTER_PATTERN.match(clause[end : end + 24])
++                ):
++                    requested.add(path)
++    return frozenset(requested)
++
++
+ def _looks_like_invented_process_artifact(
+     criterion: ProposedCriterion,
+     *,
+@@ -1534,14 +1670,30 @@ def acknowledge_provider_disclosure(
+ ) -> ConversationState:
+     request = state.provider_disclosure_request
+     active = state.active_run
+-    if (
+-        request is None
+-        or request.request_digest != action.request_digest
+-        or active is None
+-        or active.status is not ActiveRunStatus.AWAITING_DISCLOSURE
+-    ):
++    if request is None or request.request_digest != action.request_digest:
+         raise ValueError("provider disclosure acknowledgement does not match")
+     goal = state.goal
++    if active is None:
++        # /pause 允许落在 pending disclosure 上（2026-10-17 E1-B 真实旅程实测）：
++        # active run 已安全停止，但披露决定仍 durable。/resume 之后 ack 必须点燃
++        # 继续回合——与 SubmitMessage 的点火同型，否则挂起回合被静默丢弃成 idle。
++        if (
++            state.provider_disclosure_receipt is not None
++            or goal is None
++            or goal.status is not GoalStatus.GOAL_READY
++        ):
++            raise ValueError("provider disclosure acknowledgement does not match")
++        return replace(
++            state,
++            provider_disclosure_receipt=request.acknowledge(
++                receipt_id=f"disclosure-receipt:{action.action_seq}",
++                acknowledged_action_seq=action.action_seq,
++                acknowledged_at=action.acknowledged_at,
++            ),
++            active_run=ActiveRun(run_id=f"resume-{action.action_seq}"),
++        )
++    if active.status is not ActiveRunStatus.AWAITING_DISCLOSURE:
++        raise ValueError("provider disclosure acknowledgement does not match")
+     if goal is not None and goal.status is GoalStatus.NEEDS_AUTHORITY:
+         goal = replace(goal, status=GoalStatus.GOAL_READY)
+     return replace(
+@@ -1774,6 +1926,22 @@ def verify_goal_completion(state: ConversationState) -> ConversationState:
+                 "process criterion must be admitted before completion verification"
+             )
+     _require_requirement_coverage(state, claim, goal=goal, mandatory=mandatory)
++    # W1：权威原文的明确文件交付对象是完成下界；模型缩小后的 admitted 集
++    # 合（或一条泛化 coverage）不能替代被草稿遗漏的交付对象。
++    deliverable_paths = authoritative_deliverable_file_paths(state)
++    if deliverable_paths:
++        admitted_paths = {
++            criterion.predicate.get("path")
++            for criterion in mandatory
++            if criterion.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
++            and isinstance(criterion.predicate.get("path"), str)
++        }
++        missing = sorted(deliverable_paths - admitted_paths)
++        if missing:
++            raise ValueError(
++                "explicit user deliverable files are not covered by current "
++                "admitted criteria: " + ", ".join(missing)
++            )
+     evidence_by_criterion = {
+         record.criterion_id: record for record in referenced.values()
+     }
+@@ -1860,11 +2028,19 @@ def _goal_target_authorization_scope(
+     ):
+         return None
+     if not directory:
+-        return (
+-            target
+-            if target in goal.targets and safe_goal_authorization_target(target)
+-            else None
+-        )
++        if target in goal.targets and safe_goal_authorization_target(target):
++            return target
++        # W2：散文 targets 下，当前 Goal 已由 Runtime 准入（真实用户批准来源，
++        # `_admit_approved_file_criterion` 铸造）的精确文件同样可作为复用授权
++        # 候选。只认 durable admitted criterion 的闭合 predicate path，不把
++        # 任意 pending path 或模型自述提升为候选；显示/解析/铸造共用本判断。
++        if safe_goal_authorization_target(target) and any(
++            criterion.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
++            and criterion.predicate.get("path") == target
++            for criterion in goal.admitted_criteria
++        ):
++            return target
++        return None
+     target_parts = target.split("/")
+     candidates = []
+     for goal_target in goal.targets:
+@@ -1884,12 +2060,23 @@ def _action_is_legal(state: ConversationState, action: Action) -> tuple[bool, st
+     active = state.active_run
+     if isinstance(action, AcknowledgeProviderDisclosure):
+         request = state.provider_disclosure_request
+-        if (
+-            request is None
+-            or request.request_digest != action.request_digest
+-            or active is None
+-            or active.status is not ActiveRunStatus.AWAITING_DISCLOSURE
+-        ):
++        goal = state.goal
++        live_match = (
++            request is not None
++            and request.request_digest == action.request_digest
++            and active is not None
++            and active.status is ActiveRunStatus.AWAITING_DISCLOSURE
++        )
++        # 暂停后孤儿披露：run 已停但决定仍 durable；/resume 后必须可应答并点火。
++        resumable_orphan = (
++            request is not None
++            and request.request_digest == action.request_digest
++            and state.provider_disclosure_receipt is None
++            and active is None
++            and goal is not None
++            and goal.status is GoalStatus.GOAL_READY
++        )
++        if not (live_match or resumable_orphan):
+             return False, "provider_disclosure_mismatch"
+         return True, None
+     if isinstance(action, ConfirmCriterion):
+diff --git a/scripts/build_candidate_manifest.py b/scripts/build_candidate_manifest.py
+index a0ec49a..d5d3d3a 100644
+--- a/scripts/build_candidate_manifest.py
++++ b/scripts/build_candidate_manifest.py
+@@ -38,7 +38,7 @@ from pathlib import Path
+ 
+ ROOT = Path(__file__).parents[1]
+ 
+-ROUND = "2026-10-14 task-trust resume"
++ROUND = "2026-10-17 daily-agent closeout"
+ 
+ # 必须取工作树内容的产品文件：launch/运行时闭包（16 文件，含 file_ops 的
+ # project_paths 运行时缺口）+ 被产品代码引用的未跟踪模块。
+@@ -72,47 +72,34 @@ WORKTREE_CLOSURE: dict[str, str] = {
+     "agent/tools/directory.py": "untracked module imported by file_ops.py:18",
+ }
+ 
+-# 本轮（2026-10-14 任务结果可信接续包）修改的产品/指南文件：必须出现在候选中，
+-# 且 manifest 标注。仅身份标签，不改安全算法。
++# 本轮（2026-10-17 日用收口 W1–W3 + E1-B 真实缺口修复）修改的产品/指南/driver
++# 文件：必须出现在候选中，且 manifest 标注。仅身份标签，不改安全算法。
+ THIS_ROUND = {
+     "README.md",
+     "agent/cli/app.py",
+     "agent/cli/render.py",
+-    "agent/provider/normalize.py",
+-    "agent/runtime/checkpoint.py",
+-    "agent/runtime/context.py",
+-    "agent/runtime/contracts.py",
+-    "agent/runtime/evidence.py",
+     "agent/runtime/loop.py",
+     "agent/runtime/state.py",
+-    "agent/runtime/views.py",
++    "docs/architecture/CURRENT_CAPABILITY_STATUS.md",
++    "docs/guides/daily-use.md",
+     "docs/handoffs/2026-10-11-product-reliability-closure/RESULTS.md",
+     "scripts/build_candidate_manifest.py",
++    "scripts/run_task_trust_d04.py",
+ }
+ 
+ # 本轮修复依赖、必须随候选一起取工作树内容的文件（非闭包但被本轮改动引用）。
+-THIS_ROUND_SUPPORT: set[str] = {
+-    "tests/kernel/fakes.py",
+-}
++THIS_ROUND_SUPPORT: set[str] = set()
+ 
+ # 本轮新增/更新的回归测试与验收脚本：候选必须自带，否则安装物验证只跑旧测试。
+ # 未跟踪的公开新测试必须显式列入（脚本只自动收集 tracked）。
+ THIS_ROUND_TESTS = {
++    "tests/acceptance/test_coding_autonomy_grader.py",
+     "tests/acceptance/test_task_trust_completion.py",
+-    "tests/cli/test_commands.py",
++    "tests/acceptance/test_task_trust_d04_driver.py",
+     "tests/cli/test_contextual_decisions.py",
+     "tests/cli/test_render.py",
+-    "tests/continuity/test_checkpoint_v4.py",
+     "tests/continuity/test_contracts.py",
+-    "tests/continuity/test_verified_done.py",
+-    "tests/kernel/test_context_budgeting.py",
+-    "tests/kernel/test_runtime_compaction.py",
+-    "tests/kernel/test_validation_request_freshness.py",
+-    "tests/provider/test_continuity_control.py",
+-    "tests/reference/test_012_trusted_continuity.py",
+-    "tests/reference/test_013_everyday_workspace.py",
+-    "tests/reference/test_candidate_manifest_safety.py",
+-    "tests/subagent/test_integration.py",
++    "tests/provider/test_remote_disclosure.py",
+ }
+ 
+ # 构建残留绝不能进候选：``build/lib`` 会让 setuptools 复用旧源码，负例
+diff --git a/scripts/run_task_trust_d04.py b/scripts/run_task_trust_d04.py
+index 66fcf2c..14bba86 100644
+--- a/scripts/run_task_trust_d04.py
++++ b/scripts/run_task_trust_d04.py
+@@ -26,11 +26,10 @@ incomplete（VALIDATION §3 最小真实旅程 / §4 冻结过程）。
+ 
+ 判定口径（按 VALIDATION §3 冻结）：
+ 
+-- E1-A（normal）：D04 场景本身含「运行中追加旧参数名」，故 normal 模式同样在
+-  首个安全边界交付冻结 correction；须观测注入与 durable 落盘，消费/版本推进
+-  作为过程证据如实报告（不满足不判失败），不要求 pause→resume。业务门 =
+-  grader 的两个有界键（latest_correction / final_validation）为 true 且补充
+-  探针全部通过。
++- E1-A（normal）：完整原 SPEC 一次初始输入 + 必要治理决定；不注入 correction、
++  不要求 correction 证据。到需要「继续」的 idle 或 limit 时直接如实 incomplete，
++  不替产品催促或救场。业务门 = grader 的两个有界键（latest_correction /
++  final_validation）为 true 且补充探针全部通过。
+ - E1-B（staged）：在首个安全边界注入冻结 correction，须观测 durable/消费/版本
+   推进，随后 pause→退出→新 PID resume→继续，并记录注入前别名行为尚未满足的
+   前置检查。额外要求过程证据（见 ``REQUIRED_EVIDENCE``）。
+@@ -87,13 +86,22 @@ VARIANT_NOTICE = (
+ 
+ TERMINAL_GOAL_STATUSES = frozenset({"verified_done", "cancelled"})
+ FILE_EFFECT_TOOLS = frozenset({"write_file", "edit_file", "make_directory"})
+-CONTINUABLE_IDLE_STATUSES = frozenset({"needs_authority", "blocked", "goal_ready"})
+-CONTINUE_MESSAGE = "继续当前任务"
+ MAX_REQUESTS_PER_SAMPLE = 40
+ BOUND_BUSINESS_KEYS = ("latest_correction", "final_validation")
+ PROCESS_DECLARED_KEYS = ("resume_without_restatement", "no_effect_replay")
++# W3 冻结七项补充检查：evaluator 锁定完整预期集合，缺键/未知键/非 bool 都失败。
++SUPPLEMENTAL_KEYS = (
++    "transient_new_name",
++    "legacy_alias",
++    "default_single_attempt",
++    "bounded_attempts",
++    "conflict_rejected",
++    "negative_invalid",
++    "cli_both_names",
++)
+ REQUIRED_EVIDENCE = {
+-    "normal": ("correction_injected",),
++    # W3：normal 不注入也不要求 correction 证据；如实记录但不作为判据。
++    "normal": (),
+     "staged": (
+         "correction_injected",
+         "correction_durable",
+@@ -113,12 +121,46 @@ ProbeFn = Callable[[Path], "dict[str, bool]"]
+ # durable 只读观察
+ # ---------------------------------------------------------------------------
+ 
++_PENDING_BY_ACTIVE_STATUS = {
++    "awaiting_approval": "approval",
++    "awaiting_disclosure": "disclosure",
++    "awaiting_recovery": "recovery",
++    "paused_limit": "limit",
++    "paused_retryable": "retryable",
++}
++
++
++def _pending_projection(
++    active: object,
++    goal: object,
++    *,
++    disclosure_request: object,
++    disclosure_receipt: object,
++) -> str | None:
++    """active 状态优先；/pause 停在 pending disclosure 上、/resume 完成后的
++    孤儿披露（2026-10-17 E1-B 修复）与审批同等可见，操作器才能应答治理
++    提示（计入 consent 预算，不是「继续」催促）。Goal 仍 PAUSED 或已有
++    receipt 时不投影。"""
++
++    status = getattr(active, "status", None)
++    value = getattr(status, "value", None) if status is not None else None
++    pending = _PENDING_BY_ACTIVE_STATUS.get(value or "")
++    if pending is None and active is None:
++        goal_status = getattr(goal, "status", None)
++        if (
++            disclosure_request is not None
++            and disclosure_receipt is None
++            and getattr(goal_status, "value", None) == "goal_ready"
++        ):
++            pending = "disclosure"
++    return pending
++
+ 
+ def observe(candidate: Path, state_root: Path) -> dict | None:
+     """只读加载本次合成会话的 durable 投影；零创建、零 mutation。"""
+ 
+     from agent.continuity.sessions import inspect_workspace_sessions
+-    from agent.runtime.contracts import FactKind
++    from agent.runtime.contracts import EvidenceOracleKind, FactKind
+ 
+     inspection = inspect_workspace_sessions(candidate, state_root=state_root, home=None)
+     snapshots = tuple(inspection.snapshots)
+@@ -131,13 +173,13 @@ def observe(candidate: Path, state_root: Path) -> dict | None:
+     state = snapshots[0].state
+     active = state.active_run
+     status = active.status.value if active is not None else None
+-    pending = {
+-        "awaiting_approval": "approval",
+-        "awaiting_disclosure": "disclosure",
+-        "awaiting_recovery": "recovery",
+-        "paused_limit": "limit",
+-        "paused_retryable": "retryable",
+-    }.get(status or "")
++    goal = state.goal
++    pending = _pending_projection(
++        active,
++        goal,
++        disclosure_request=state.provider_disclosure_request,
++        disclosure_receipt=state.provider_disclosure_receipt,
++    )
+     effects: dict[str, int] = {}
+     correction_ids: list[str] = []
+     for fact in state.facts:
+@@ -157,6 +199,35 @@ def observe(candidate: Path, state_root: Path) -> dict | None:
+             if tool_name in FILE_EFFECT_TOOLS:
+                 effects[str(tool_name)] = effects.get(str(tool_name), 0) + 1
+     goal = state.goal
++    # W3：当前 pending 写请求的精确路径与当前准入的精确文件集合，供 _consent
++    # 判断是否展示显式精确复用（与产品 _goal_target_authorization_scope 同一规则形状）。
++    pending_request = None
++    if active is not None and active.pending_request is not None:
++        call = None
++        try:
++            call = active.tool_calls[active.batch_cursor]
++        except IndexError:
++            call = None
++        arguments = (
++            call.arguments
++            if call is not None and call.tool_call_id == getattr(
++                active.pending_request, "tool_call_id", None
++            )
++            else {}
++        )
++        path = arguments.get("path") if isinstance(arguments, dict) else None
++        pending_request = {
++            "tool": getattr(active.pending_request, "tool_name", None),
++            "path": path if isinstance(path, str) else None,
++        }
++    admitted_file_paths = sorted(
++        {
++            criterion.predicate.get("path")
++            for criterion in (goal.admitted_criteria if goal is not None else ())
++            if criterion.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
++            and isinstance(criterion.predicate.get("path"), str)
++        }
++    )
+     return {
+         "goal_status": goal.status.value if goal is not None else None,
+         "goal_id": goal.goal_id if goal is not None else None,
+@@ -177,6 +248,8 @@ def observe(candidate: Path, state_root: Path) -> dict | None:
+         ),
+         "active_run_status": status,
+         "pending": pending,
++        "pending_request": pending_request,
++        "admitted_file_paths": admitted_file_paths,
+         "executed_file_effects": sum(effects.values()),
+         "effect_tools": effects,
+         "correction_fact_ids": correction_ids,
+@@ -228,12 +301,12 @@ class JourneyOperator:
+     candidate: Path | None = None
+     probe: ProbeFn | None = None
+     max_consents: int = 40
+-    max_resumes: int = 2
+-    max_continues: int = 3
+     task: str = INITIAL_PROMPT
+     correction: str = CORRECTION
+     task_sent: bool = False
+     consent_decisions: int = 0
++    scope_authorizations: int = 0
++    # W3：不再发送「继续」或救场 /resume；两个计数器恒 0，作为过程证据保留。
+     resumes: int = 0
+     continue_decisions: int = 0
+     injected: bool = False
+@@ -291,7 +364,8 @@ class JourneyOperator:
+             if pending in {"disclosure", "approval"}:
+                 return self._consent(obs)
+             if pending in {"limit", "retryable"}:
+-                return self._resume(obs)
++                # W3：注入后同样不救场，预算暂停如实停等操作者。
++                return self._stop(obs, f"{pending}_pause_requires_user")
+             if active is None:
+                 # 未消费 correction 前不再追加消息（避免叠出第二条 correction）；
+                 # 模型整轮未消费即如实停。
+@@ -312,13 +386,18 @@ class JourneyOperator:
+         if pending == "recovery":
+             return self._stop(obs, "unknown_effect_requires_operator_classification")
+         if pending in {"limit", "retryable"}:
+-            return self._resume(obs)
++            # W3：不自动 /resume 救场；继续推进必须来自用户。
++            return self._stop(obs, f"{pending}_pause_requires_user")
+         if self._should_inject(obs):
+             return self._inject(obs, "idle")
+-        if active is None and status in {"paused", "blocked"}:
+-            return self._resume(obs)
+-        if active is None and status in CONTINUABLE_IDLE_STATUSES:
+-            return self._continue(obs)
++        if active is None:
++            # W3：空闲/暂停一律不发「继续」、不自动恢复，如实停等用户。
++            reason = (
++                "paused_requires_user"
++                if status in {"paused", "blocked"}
++                else "idle_needs_user_continuation"
++            )
++            return self._stop(obs, reason)
+         return self._stop(obs, "unexpected_idle_before_verified_done")
+ 
+     # -- resume 阶段（新进程）：只恢复与继续，绝不重述业务 -------------------
+@@ -349,18 +428,24 @@ class JourneyOperator:
+         if pending == "recovery":
+             return self._stop(obs, "unknown_effect_requires_operator_classification")
+         if pending in {"limit", "retryable"}:
+-            return self._resume(obs)
+-        if active is None and status in {"paused", "blocked"}:
+-            return self._resume(obs)
+-        if active is None and status in CONTINUABLE_IDLE_STATUSES:
+-            return self._continue(obs)
++            # W3：计划内 /resume 只发一次；再次 limit/retryable 不再救场。
++            return self._stop(obs, f"{pending}_pause_requires_user")
++        if active is None:
++            # W3：恢复后空闲不发「继续」，如实停等用户。
++            reason = (
++                "paused_requires_user"
++                if status in {"paused", "blocked"}
++                else "idle_needs_user_continuation"
++            )
++            return self._stop(obs, reason)
+         return self._stop(obs, "unexpected_idle_before_verified_done")
+ 
+     # -- 内部决策 ----------------------------------------------------------
+ 
+     def _should_inject(self, obs: dict) -> bool:
++        # W3：注入只属于 inject 模式（staged E1-B）；normal 不注入。
+         return (
+-            self.mode in {"normal", "inject"}
++            self.mode == "inject"
+             and not self.injected
+             and obs["goal_status"] is not None
+             and obs["goal_status"] not in TERMINAL_GOAL_STATUSES
+@@ -411,26 +496,25 @@ class JourneyOperator:
+         return True
+ 
+     def _consent(self, obs: dict) -> str:
+-        if self.consent_decisions >= self.max_consents:
++        # W3：治理审批可按当前准入候选选择显式精确复用（/approve-goal-target），
++        # 仅限 pending 写请求与 admitted 精确文件完全一致；其余一律普通治理 y，
++        # 绝不审批父目录或其它工具。两类决定分别计数，共同受治理预算约束。
++        pending_request = obs.get("pending_request") or {}
++        exact_candidate = (
++            pending_request.get("tool") in {"write_file", "edit_file"}
++            and isinstance(pending_request.get("path"), str)
++            and pending_request["path"] in set(obs.get("admitted_file_paths") or ())
++        )
++        if self.consent_decisions + self.scope_authorizations >= self.max_consents:
+             return self._stop(obs, "consent_budget_exhausted")
++        if exact_candidate:
++            self.scope_authorizations += 1
++            self._event("goal_target_reuse", obs)
++            return "/approve-goal-target"
+         self.consent_decisions += 1
+         self._event("consent", obs)
+         return "y"
+ 
+-    def _resume(self, obs: dict) -> str:
+-        if self.resumes >= self.max_resumes:
+-            return self._stop(obs, "resume_budget_exhausted")
+-        self.resumes += 1
+-        self._event("resume", obs)
+-        return "/resume"
+-
+-    def _continue(self, obs: dict) -> str:
+-        if self.continue_decisions >= self.max_continues:
+-            return self._stop(obs, "continue_budget_exhausted")
+-        self.continue_decisions += 1
+-        self._event("continue", obs)
+-        return CONTINUE_MESSAGE
+-
+     def _stop(self, obs: dict | None, reason: str) -> str:
+         self.stop_reason = reason
+         self._event("exit", obs)
+@@ -475,9 +559,14 @@ def evaluate_final(
+     for name in BOUND_BUSINESS_KEYS:
+         if not business.get(name, False):
+             failures.append(f"business check false: {name}")
+-    for name, passed in sorted(supplemental.items()):
+-        if not passed:
+-            failures.append(f"supplemental check false: {name}")
++    # W3：锁定冻结七项集合——缺键/未知键/非 bool 都失败，七项语义不变。
++    for name in SUPPLEMENTAL_KEYS:
++        if name not in supplemental:
++            failures.append(f"supplemental check missing: {name}")
++        elif supplemental[name] is not True:
++            failures.append(f"supplemental check false: {name}={supplemental[name]!r}")
++    for name in sorted(set(supplemental) - set(SUPPLEMENTAL_KEYS)):
++        failures.append(f"supplemental check unknown: {name}")
+     if stop_reason != "verified_done":
+         failures.append(f"stop reason is not verified_done: {stop_reason!r}")
+     for code in exit_codes:
+@@ -671,7 +760,6 @@ def _run_journey(args) -> dict:
+         candidate=candidate,
+         probe=None if offline else _frozen_probe,
+         max_consents=args.max_consents,
+-        max_resumes=args.max_resumes,
+     )
+ 
+     def input_fn(prompt: str) -> str:
+@@ -748,6 +836,7 @@ def _run_journey(args) -> dict:
+         "start_observation": operator.start_observation,
+         "task_sent": operator.task_sent,
+         "consent_decisions": operator.consent_decisions,
++        "scope_authorizations": operator.scope_authorizations,
+         "resumes": operator.resumes,
+         "continue_decisions": operator.continue_decisions,
+         "injected": operator.injected,
+@@ -818,22 +907,34 @@ def _child(
+ 
+ 
+ def _provider_extra(args) -> list[str]:
+-    if args.provider == "fake":
+-        return []
+-    return [
+-        "--model",
+-        args.model,
+-        "--base-url",
+-        args.base_url,
+-        "--credential-env",
+-        args.credential_env,
+-        "--thinking-mode",
+-        args.thinking_mode,
+-        "--timeout",
+-        str(args.timeout),
+-        "--max-model-attempts",
+-        str(args.max_model_attempts),
+-    ]
++    extra: list[str] = []
++    if args.provider != "fake":
++        extra.extend(
++            (
++                "--model",
++                args.model,
++                "--base-url",
++                args.base_url,
++                "--credential-env",
++                args.credential_env,
++                "--thinking-mode",
++                args.thinking_mode,
++                "--timeout",
++                str(args.timeout),
++                "--max-model-attempts",
++                str(args.max_model_attempts),
++            )
++        )
++    # W3：干预上限必须按相同值传入 run 子进程，独立于 provider 是否 fake。
++    extra.extend(
++        (
++            "--max-consents",
++            str(args.max_consents),
++            "--max-resumes",
++            str(args.max_resumes),
++        )
++    )
++    return extra
+ 
+ 
+ def _finalize(args, phase_results: list[dict], *, mode: str, wall_seconds: float) -> dict:
+@@ -890,6 +991,7 @@ def _finalize(args, phase_results: list[dict], *, mode: str, wall_seconds: float
+             "pid": phase.get("pid"),
+             "stop_reason": phase.get("stop_reason"),
+             "consent_decisions": phase.get("consent_decisions"),
++            "scope_authorizations": phase.get("scope_authorizations"),
+             "continue_decisions": phase.get("continue_decisions"),
+             "resumes": phase.get("resumes"),
+             "correction_injected": bool(

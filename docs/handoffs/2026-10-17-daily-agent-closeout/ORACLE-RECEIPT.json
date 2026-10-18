@@ -1,0 +1,73 @@
+{
+  "schema": "my-first-agent/oracle-cross-audit/v1",
+  "date": "2026-10-17",
+  "source_head": "0cc0db1ddbf6d2e9c9526e9588d66e80831b6640",
+  "session_id": "mfa-daily-audit-20261017-f7d29c",
+  "status": "completed",
+  "started_at": "2026-10-17T07:09:43.315Z",
+  "completed_at": "2026-10-17T07:24:33.569Z",
+  "requested_effort": "max",
+  "selection": {
+    "requestedModel": "GPT-5.6 Sol",
+    "resolvedLabel": "Power, item 5 of 5 (slider ARIA)",
+    "strategy": "current",
+    "status": "already-selected",
+    "verified": true,
+    "source": "thinking-time-control",
+    "capturedAt": "2026-10-17T07:10:25.002Z"
+  },
+  "selection_note": "ARIA position 5/5 verified before send; requested CLI model is not proof of actual web model identity.",
+  "conversation_url": "https://chatgpt.com/c/6ad31f52-1c24-83ea-8033-ca981c654646",
+  "prompt_submitted": true,
+  "committed_turn_evidence": "New session-owned conversation URL, promptSubmitted=true and complete captured answer; no manual send/followup/reuse.",
+  "input_files": [
+    {
+      "path": "docs/handoffs/2026-10-17-daily-agent-closeout/oracle-input/CONSULTATION.md",
+      "sha256": "83bf8eb311b13508d69610043a1c9507444f1ad83a6e329bb487a9aa2c74b9ef"
+    },
+    {
+      "path": "docs/handoffs/2026-10-17-daily-agent-closeout/oracle-input/LOCAL-AUDIT.md",
+      "sha256": "8ff2fc8f63977e2f0260937b224936b788ad58e7946c309ed58e3f00b8449845"
+    },
+    {
+      "path": "docs/handoffs/2026-10-17-daily-agent-closeout/oracle-input/SOURCE-SLICES.md",
+      "sha256": "2ac84662df32aabf9bb4cf626b7f8cc85275af9df0a45c89365a264a331c81e8"
+    },
+    {
+      "path": "docs/handoffs/2026-10-17-daily-agent-closeout/oracle-input/CHANGE.patch",
+      "sha256": "99e6d54b110c279e1087f4498bbd6acf32682bdfab8e6bec77a6631c88b0cb41"
+    },
+    {
+      "path": "README.md",
+      "sha256": "5d9ea584a30f6d7a0c070ad08c3ca8d149b39dc0bf0f39dba71e3a82b3dea80e"
+    },
+    {
+      "path": "docs/handoffs/2026-10-13-task-trust-repair/VALIDATION.md",
+      "sha256": "599223866db080a87e18b1d858bcd0587cc1f82f64baf79a7a3f2891b9462931"
+    }
+  ],
+  "source_identity": {
+    "path": "docs/handoffs/2026-10-17-daily-agent-closeout/oracle-input/SOURCE-IDENTITY.json",
+    "sha256": "0de8b73095bb0bdba0b98c3d4d820c9e38edfdd8010969beece6d3a3b114e74d"
+  },
+  "answer": {
+    "path": "docs/handoffs/2026-10-17-daily-agent-closeout/ORACLE-ANSWER.md",
+    "sha256": "68e6b35d9e9c83d8fc1f641fd2fc7f552dd80da802ceda4fa55dcb6f4e613b7c",
+    "capture": "Complete Answer block from foreground wrapper output; attachment labels preserved."
+  },
+  "cleanup": {
+    "chrome_pid": 68754,
+    "chrome_target_id": "4EBA5BCE280AC68A9AF84632954CA5F3",
+    "chrome_alive": false,
+    "temporary_profile_exists": false,
+    "confirmed_at": "2026-10-17T07:27:49.276Z",
+    "source_profile_touched": false,
+    "manual_process_termination": false
+  },
+  "limitations": [
+    "Oracle did not run the local Runtime repro or full repository suite.",
+    "No product paid API or old private run logs were used by local auditor.",
+    "Oracle performed no external research; no industry-comparison claim.",
+    "No product code, credentials, host settings or remote Git state changed in this audit."
+  ]
+}

@@ -1,0 +1,14 @@
+# 下列文件是带 SHA 身份的历史审计原文/送审附件/冻结执行包；保留原始字节。
+# Markdown 硬换行、嵌入 diff 的空白上下文和原始尾部空行不作为代码格式缺陷。
+# 只豁免这些精确归档路径的两类空白检查，产品代码及其它文档仍使用默认规则。
+docs/audits/2026-10-17-post-closeout-product-audit/ORACLE-ANSWER.md whitespace=-blank-at-eol,-blank-at-eof
+docs/audits/2026-10-17-post-closeout-product-audit/oracle-input/CHANGES.patch whitespace=-blank-at-eol,-blank-at-eof
+docs/audits/2026-10-17-post-closeout-product-audit/oracle-input/SOURCE-SLICES.md whitespace=-blank-at-eol,-blank-at-eof
+docs/handoffs/2026-10-17-cli-release-blockers/ORACLE-ANSWER.md whitespace=-blank-at-eol,-blank-at-eof
+docs/handoffs/2026-10-17-cli-release-blockers/ORACLE-RECEIPT.json whitespace=-blank-at-eol,-blank-at-eof
+docs/handoffs/2026-10-17-cli-release-blockers/PACKAGE-CHECK.json whitespace=-blank-at-eol,-blank-at-eof
+docs/handoffs/2026-10-17-cli-release-blockers/WORK-PACKAGES.md whitespace=-blank-at-eol,-blank-at-eof
+docs/handoffs/2026-10-17-cli-release-blockers/oracle-input/SOURCE-SLICES.md whitespace=-blank-at-eol,-blank-at-eof
+docs/handoffs/2026-10-17-daily-agent-closeout/ORACLE-ANSWER.md whitespace=-blank-at-eol,-blank-at-eof
+docs/handoffs/2026-10-17-daily-agent-closeout/oracle-input/CHANGE.patch whitespace=-blank-at-eol,-blank-at-eof
+docs/handoffs/2026-10-17-daily-agent-closeout/oracle-input/SOURCE-SLICES.md whitespace=-blank-at-eol,-blank-at-eof

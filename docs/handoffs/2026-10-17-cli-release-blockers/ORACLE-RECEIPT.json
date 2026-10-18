@@ -1,0 +1,60 @@
+{
+  "session_id": "mfa-cli-blocker-package-20261017-2351-8e4c2a",
+  "status": "completed",
+  "created_at_utc": "2026-10-17T15:48:55.002Z",
+  "completed_at_utc": "2026-10-17T16:10:54.651Z",
+  "completed_at_china": "2026-10-18 00:10:54 +08:00",
+  "strength": {
+    "requested_position": 5,
+    "actual_aria": "Power, item 5 of 5 (slider ARIA)",
+    "verified": true,
+    "verified_after_attachments": true,
+    "captured_at": "2026-10-17T15:49:38.266Z",
+    "web_model_identity_not_inferred_from_cli_request": true
+  },
+  "submission": {
+    "prompt_submitted": true,
+    "committed_new_conversation_url": "https://chatgpt.com/c/6ad39904-b814-83ea-8f02-500a72b394b8",
+    "conversation_id": "6ad39904-b814-83ea-8f02-500a72b394b8"
+  },
+  "capture": {
+    "complete_answer_saved": "ORACLE-ANSWER.md",
+    "raw_answer_sha256": "505a0519f0e320cbf9c86837c556ad9747f7fdc762113fada283ff363f1e2e19",
+    "transcript_bytes": 41285
+  },
+  "cleanup": {
+    "owned_chrome_pid": 24441,
+    "chrome_alive": false,
+    "temporary_profile": "/var/folders/0y/bqp593v95dqdf62qylfn92ch0000gq/T/oracle-browser-T3jrNB",
+    "temporary_profile_exists": false,
+    "confirmed": true
+  },
+  "inputs": [
+    {
+      "path": "docs/handoffs/2026-10-17-cli-release-blockers/oracle-input/CONSULTATION.md",
+      "sha256": "4a99ae7757bfa8e2e144cd66e0b9838fcb7003cb08cd6f6324d37c4b2a6bfc85"
+    },
+    {
+      "path": "docs/handoffs/2026-10-17-cli-release-blockers/oracle-input/CODEX-DRAFT.md",
+      "sha256": "70452a74b9bbdb8934157bb3d9522b9c148109f216686d1308da0f449cf1a940"
+    },
+    {
+      "path": "docs/handoffs/2026-10-17-cli-release-blockers/oracle-input/SOURCE-SLICES.md",
+      "sha256": "98594ae74452c6cf5f84a155e16e217f78b1f81657683bfa7a144f6ddba8e34c"
+    },
+    {
+      "path": "docs/audits/2026-10-17-post-closeout-product-audit/AUDIT.md",
+      "sha256": "1421bf8b58da7deca4ad8cd2266059f56f7f4d48edc5f71dd80e7f0d25817813"
+    },
+    {
+      "path": "docs/audits/2026-10-17-post-closeout-product-audit/PROBE-RESULTS.json",
+      "sha256": "a775874f154b6091b63bd76a8710ed5dd2485bb9608dc3df60c4d4f24946f757"
+    }
+  ],
+  "limitations": [
+    "Oracle supplied static execution advice; no local tests or product API were run by Oracle.",
+    "Input set is public selected files; no secrets, browser data, private product logs, or full RESULTS were attached.",
+    "Only final synthesized package is executable authority; original draft and answer are reference material."
+  ]
+}
+

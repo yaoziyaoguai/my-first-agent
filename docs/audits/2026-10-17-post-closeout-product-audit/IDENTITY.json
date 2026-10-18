@@ -1,0 +1,92 @@
+{
+  "head": "0cc0db1ddbf6d2e9c9526e9588d66e80831b6640",
+  "branch": "main",
+  "source_files": [
+    {
+      "path": "agent/cli/app.py",
+      "sha256": "c55667c5313720c3aacd9048d0f22bfa6e85911eb354c17e906d22937c3f6fda"
+    },
+    {
+      "path": "agent/cli/render.py",
+      "sha256": "21fdc49278ee91a4d1210998ab72bcc43229e0045edbd153ab6676ca4dbe2bd8"
+    },
+    {
+      "path": "agent/runtime/loop.py",
+      "sha256": "2c647a9dbceade8833f72e5962fa2f8f089b9aec3a5915c603f7ddd8714900a3"
+    },
+    {
+      "path": "agent/runtime/state.py",
+      "sha256": "3a41b360b006066f59a051b4e700b0c0c9d72269f4db76d7364cdd0f868bd61e"
+    },
+    {
+      "path": "scripts/build_candidate_manifest.py",
+      "sha256": "51113b720ea28ad36be5fa90b159eb52fb496a235fd06d5f1769d36841866849"
+    },
+    {
+      "path": "scripts/run_task_trust_d04.py",
+      "sha256": "cbabda2901584f46e8f2b21d074e9d045310a303833b3bf669f990ab7abb70ec"
+    },
+    {
+      "path": "tests/acceptance/test_task_trust_completion.py",
+      "sha256": "cca66149f7ada4337b06fc1f4e7f4dbd46210cce4423afefcfeb80da86977b34"
+    },
+    {
+      "path": "tests/acceptance/test_task_trust_d04_driver.py",
+      "sha256": "17e2e17774ee09302baa84e2378a4c269a56bdab10fc0844f0ffae2c9d020a5c"
+    },
+    {
+      "path": "tests/cli/test_contextual_decisions.py",
+      "sha256": "4bc29e3df8968059eeaeef053d70198f5d982d97a3d1ab1344692861d5ffdb25"
+    },
+    {
+      "path": "tests/cli/test_render.py",
+      "sha256": "24ab5ca9f5909443a6a714d96cc7623e611f980b813749c6bc375bb86473e656"
+    },
+    {
+      "path": "tests/continuity/test_contracts.py",
+      "sha256": "ca0824916af5b9a3ee4624fffd651d02b8fccf084b03bb3eafe075a309e0e10e"
+    },
+    {
+      "path": "tests/provider/test_remote_disclosure.py",
+      "sha256": "9ddd45a0f32fd8bd28f45fd5e44d34c3f71fdba813703a5d0a2ca76db63048f4"
+    },
+    {
+      "path": "tests/reference/test_candidate_manifest_safety.py",
+      "sha256": "015c5126d80674cd2bc4a298677aa94406fce751e5540e83127ede252266d328"
+    }
+  ],
+  "oracle_input_files": [
+    {
+      "path": "docs/audits/2026-10-17-post-closeout-product-audit/oracle-input/CONSULTATION.md",
+      "sha256": "4327653ba86dca264521e9eb38ae786178a415fa9812ba3be69306ef53b428f0"
+    },
+    {
+      "path": "docs/audits/2026-10-17-post-closeout-product-audit/oracle-input/LOCAL-FINDINGS.md",
+      "sha256": "de4738b49a0a9d1ead64ddb894864839fb57548d1f47093f7058b021add02e45"
+    },
+    {
+      "path": "docs/audits/2026-10-17-post-closeout-product-audit/oracle-input/CHANGES.patch",
+      "sha256": "3605451bb0a2c5a4de5fe93ba78ecd19f7c88e1f43f27c12ef2ccfa69dbecebd"
+    },
+    {
+      "path": "docs/audits/2026-10-17-post-closeout-product-audit/oracle-input/SOURCE-SLICES.md",
+      "sha256": "7d04e6fea934613097631e9e5ef167b34be5aa82f48ad9a78af4015e868c9f61"
+    },
+    {
+      "path": "README.md",
+      "sha256": "18937765afe8375850ae1aca99e5b07fd4c10ea6ae7ccc134bc8269d8113687c"
+    },
+    {
+      "path": "docs/architecture/KERNEL_ARCHITECTURE.md",
+      "sha256": "aea5f373ea44237afaa299df3fe57c9e0f8baf91f99c41c10ae6114a8cff0982"
+    },
+    {
+      "path": "docs/architecture/EXTENSION_CONTRACTS.md",
+      "sha256": "b8be9e299007d8f0436a69b08ab7f69e4b299e9394e3345a8bf80233e47b453b"
+    },
+    {
+      "path": "docs/architecture/CURRENT_CAPABILITY_STATUS.md",
+      "sha256": "83de6bd41c10d0d1bc8bf29cc066b1f713ede57a1fd6e1de1f35154ffdac0f37"
+    }
+  ]
+}

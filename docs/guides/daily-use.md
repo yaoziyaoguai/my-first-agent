@@ -1,7 +1,8 @@
 # First Agent 日用指南
 
-> 2026-10-10 执行包 S3 产物；2026-10-12 按候选安装物复核（Q1）：
-> extras 与元数据一致、安装物入口 `first-agent`、Textual 8.2.8。
+> 2026-10-18 CLI 个人试用收尾：日用采用 base 安装，不默认安装实验性 TUI。
+> 当前支持范围与验证结果见 [能力清单](capabilities.md) 和
+> [唯一执行记录](../handoffs/2026-10-11-product-reliability-closure/RESULTS.md)。
 > 详细命令清单见 [COMMANDS.md](../handoffs/2026-10-10-reliable-daily-use/COMMANDS.md)。
 
 ## 环境
@@ -11,11 +12,46 @@
 - Python：`pyproject.toml` 声明最低 **3.11**；本轮实际验证运行版本 **3.12.2**
   （未做跨 Python 矩阵）。
 - extras 严格来自当前元数据：`dev`、`browser`、`skill`、`mcp`、`tui`
-  （**没有** `web` extra）。TUI 需 `tui`（`textual>=8.2,<9`；本轮在 **8.2.8**
-  上验证）。
+  （**没有** `web` extra）。TUI 需 `tui`（`textual>=8.2,<9`），但当前有恢复外发确认的
+  交互缺口，不作为日用推荐入口。
 - 浏览器能力是 `browser` extra，使用专属测试 Chromium，不接管你的日常浏览器。
 
 ## 安装
+
+### 本机固定试用入口（2026-10-18）
+
+已使用独立、非 editable 的 base wheel 安装，不依赖开发仓库的未提交文件：
+
+```bash
+~/.local/share/first-agent/previews/20261018-cli-9rmRS6/start \
+  --workspace /绝对路径/项目副本
+```
+
+`start` 只调用该目录内的 `venv/bin/first-agent`，固定使用
+`openai_compatible / deepseek-v4-flash / thinking disabled` 和 `https://api.deepseek.com`。
+密钥只读取启动进程的 `DEEPSEEK_API_KEY`，不自动加载 shell profile、不读取或改写凭据文件。
+启动前在你自己的终端注入有效 key；本轮用户新提供的 key 已通过认证与实际模型调用，但未保存
+到安装目录或配置。普通编码样本已完整通过，纠正/恢复与零改写样本没有在本轮预算内全部闭合。
+
+会话保存在同一安装目录下的独立 `state/`，首次实际启动时创建；用同一命令和同一 workspace
+重启即可恢复。不要删除旧 state 来绕过未知效果。没有更改 PATH、已有安装、登录项或后台服务。
+首次试用建议使用可丢弃的项目副本，并给任务一个你能独立检查的验收条件。
+
+**先准备任务自己的依赖。** Agent 的 base 安装只带自身运行依赖，不会替所有 Python 项目安装
+pytest。若任务要跑项目测试，先在启动它的终端激活该项目的既有环境，并确认测试命令可运行：
+
+```bash
+source /绝对路径/项目副本/.venv/bin/activate
+command -v python3 pytest
+python3 -m pytest -q
+```
+
+然后从同一终端运行上面的 `start --workspace ...`。launcher 保留调用者 PATH，命令工具会净化
+和绑定它；只用绝对路径启动一个 venv 的 Python **不等于**已经激活该 venv 的命令搜索路径。
+本轮真实测试就遇到这个差异：外部验证有 pytest，Agent 的子进程却只找到系统 Python；修正
+测试进程 PATH 后才完成整条真实任务。不要把找不到依赖解释成 API key 失效或让 Agent 假报完成。
+
+### 自行安装
 
 **每个 venv 必须先创建**；下面两条路径分别对应"用户安装物启动"与"源码开发启动"。
 
@@ -24,7 +60,7 @@
 ```bash
 python3 -m venv ~/.local/share/first-agent/venv      # 先创建 venv
 ~/.local/share/first-agent/venv/bin/python -m pip install \
-  "dist/first_agent-1.0.0-py3-none-any.whl[tui]"     # 核心 + TUI
+  dist/first_agent-1.0.0-py3-none-any.whl           # base CLI
 ~/.local/share/first-agent/venv/bin/first-agent --workspace ~/myproject
 ```
 
@@ -40,13 +76,14 @@ python3 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
 核心与 `browser`/`skill`/`mcp` extras 分开安装；缺 extras 时启动会给出明确诊断
 （例如 TUI 缺依赖会提示安装 `tui` extra 而非缺配置）。
 
-## Provider 配置（DeepSeek Flash，已真实验证的路径）
+## Provider 配置（DeepSeek Flash）
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...        # 只在当前 shell 注入；不要写进任何文件
 first-agent setup \
-  --provider openai_compatible --model deepseek-flash \
-  --base-url https://api.deepseek.com --credential-env DEEPSEEK_API_KEY
+  --provider openai_compatible --model deepseek-v4-flash \
+  --base-url https://api.deepseek.com --credential-env DEEPSEEK_API_KEY \
+  --thinking-mode disabled
 ```
 
 （源码开发启动时把 `first-agent` 换成 `.venv/bin/python main.py`。）
@@ -54,6 +91,20 @@ first-agent setup \
 `setup` 把**非秘密**配置保存到 owner-only 的 owner-preferences（此后免参启动）；
 密钥永远只从环境变量注入，不会被保存、打印或写入 checkpoint。
 首次对话发送数据前会要求**数据外发确认**（y）——这是治理设计。
+
+## 最短支持路径（setup → 任务 → 第二任务 → 暂停 → 恢复）
+
+这是当前唯一明示支持的日用路径；其余入口（浏览器、MCP 等 extras）见 README 对应章节。
+
+1. **setup（不保存 key）**：按上节配置一次；key 只在 shell 里。
+2. **第一个任务**：进入 workspace 启动，直接输入任务文本。写入前你会看到审批预览；
+   `Verified delivery` 仅表示已登记证据项通过，模型只说"done"不算数。
+   显式文件要求有有限语法的完成下界保护，但不保证任意自然语言要求均被理解。
+   仍需检查 diff、独立测试和关键反例；`User acceptance` 提示不是独立业务验收。
+3. **`/new` 开第二任务**：第一个任务到终态后输入 `/new`，旧 Goal 与证据原样保留。
+4. **安全暂停**：任务中途 `/pause`（或在审批边界 `/exit` 退出）。
+5. **恢复**：同一 workspace + 同一 state-root 重新启动，按 `Resuming unfinished task`
+   提示批准继续；不需要重述任务，也不会重放已执行效果。
 
 ## 第一个任务（一分钟上手）
 
@@ -76,7 +127,7 @@ Task: change greet() in app.py to return 'howdy' and verify by running python3 c
 - `/help` 全部命令；`/new` 在任务终态后开新会话（旧证据保留）；
   `/exit` 退出；运行到审批边界时直接输入新文本 = **中途纠正**（撤销未执行的
   pending 调用，按新要求继续）。
-- TUI：F2 来源、F3 回看最近保留内容、F4 多行编辑、Ctrl-Q 安全退出
+- 实验性 TUI：F2 来源、F3 回看最近保留内容、F4 多行编辑、Ctrl-Q 安全退出
   （等待当前调用收口，不取消）。
 - 长调用会显示等待心跳；Ctrl-C 退出码 130 并提示检查可能已发生的副作用。
 
@@ -98,11 +149,11 @@ Task: change greet() in app.py to return 'howdy' and verify by running python3 c
 | 任务显示完成但未验证 | 看 `Verified delivery` 的证据范围行；`RunStatus.COMPLETED` 不等于验收完成 |
 | **Checkpoint 安全错误**（本次会话未能安全打开/关闭） | 先确认旧进程已结束、无未确认的执行资源，再用**原 workspace 与原 state 位置**重启。不要删除 checkpoint/lock、不要新建空状态绕过。若新进程仍失败：停止操作并保留状态，用于定位 |
 
-## 支持矩阵（2026-10-10）
+## 支持矩阵（2026-10-18）
 
 | 对象 | 状态 |
 |---|---|
-| DeepSeek Flash（api.deepseek.com，openai_compatible） | **真实任务 A/B/C 全链验证 PASS**（2026-10-10 候选；详见 handoffs） |
+| DeepSeek Flash `deepseek-v4-flash`（api.deepseek.com，openai_compatible，thinking disabled） | 本轮新 key 实际调用有效，新 wheel 普通编码样本完整 PASS；纠正/恢复样本额度暂停，零改写样本未运行。历史“完成但业务错误”不能据普通样本通过就算闭合；证据见唯一 RESULTS。官方模型列表本轮只列 `deepseek-flash` / `deepseek-v4-pro`，原授权名称仍可实际调用，未擅自换模型 |
 | 仓库内其它 adapter（anthropic_compatible 等） | 仅有离线测试证据；**未经真实调用验证** |
 | 其它"OpenAI 兼容"服务 | 未验证；协议名相近不等于支持 |
 | 非 macOS 平台 | 不支持（Seatbelt 专属） |

@@ -1,0 +1,133 @@
+{
+  "date": "2026-10-17",
+  "head": "0cc0db1ddbf6d2e9c9526e9588d66e80831b6640",
+  "base": "ef06b10",
+  "files": [
+    {
+      "path": "agent/runtime/state.py",
+      "sha256": "5c534f8e72d52a1270d7fb531792e06b7b1dba62b1c651ab1dbc2327d82de3fb",
+      "ranges": [
+        [
+          1559,
+          1740
+        ],
+        [
+          1843,
+          1890
+        ],
+        [
+          2472,
+          2543
+        ]
+      ]
+    },
+    {
+      "path": "agent/runtime/loop.py",
+      "sha256": "97a674d76b17d3984c9d8b18a58e74b5c76c95227152a79473a69e2e716bbeac",
+      "ranges": [
+        [
+          2751,
+          2998
+        ]
+      ]
+    },
+    {
+      "path": "agent/runtime/context.py",
+      "sha256": "74d62744541a7beb86557d6e222dae27abdc8f1dece1e8ecd5800987715645b7",
+      "ranges": [
+        [
+          1635,
+          1698
+        ]
+      ]
+    },
+    {
+      "path": "agent/runtime/context_control.py",
+      "sha256": "7408562aa69ae32d04fbb647f6c2f373788fbd69756dbbf15c4534386067f8d6",
+      "ranges": [
+        [
+          1,
+          330
+        ]
+      ]
+    },
+    {
+      "path": "agent/runtime/contracts.py",
+      "sha256": "3958e4e15c3941e07f6700be1dc1d18e1422f5562e0dcfa99ebe588e8b5bcaa7",
+      "ranges": [
+        [
+          677,
+          749
+        ],
+        [
+          1571,
+          1616
+        ]
+      ]
+    },
+    {
+      "path": "agent/runtime/views.py",
+      "sha256": "8f306682f27fb901080fcf2a10c7143ae4abb844bad3d856b8799ba2b6fc288b",
+      "ranges": [
+        [
+          173,
+          224
+        ]
+      ]
+    },
+    {
+      "path": "tests/acceptance/test_task_trust_completion.py",
+      "sha256": "c03f4b4bc4d84697a6bcaf823bbac30c19ce53fbf7a68863e72e38931e0f0e36",
+      "ranges": [
+        [
+          109,
+          143
+        ],
+        [
+          424,
+          440
+        ],
+        [
+          638,
+          911
+        ]
+      ]
+    },
+    {
+      "path": "tests/kernel/fakes.py",
+      "sha256": "fbb9efa42a2900868416f87d3f03d7a0557988442dca1a5539bbaa44c9e5dadb",
+      "ranges": [
+        [
+          63,
+          111
+        ],
+        [
+          174,
+          229
+        ]
+      ]
+    },
+    {
+      "path": "scripts/run_task_trust_d04.py",
+      "sha256": "a3af62190bf72ad7f7831ca55ba91e76edf30218895e50fea3e82eb738957826",
+      "ranges": [
+        [
+          1,
+          1079
+        ]
+      ]
+    },
+    {
+      "path": "README.md",
+      "sha256": "5d9ea584a30f6d7a0c070ad08c3ca8d149b39dc0bf0f39dba71e3a82b3dea80e"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "ffe57fe28fbf4b5aa269c6419e8a2b96ccf7daa46abde0b7ff983913ac830f6e"
+    },
+    {
+      "path": "docs/handoffs/2026-10-13-task-trust-repair/VALIDATION.md",
+      "sha256": "599223866db080a87e18b1d858bcd0587cc1f82f64baf79a7a3f2891b9462931"
+    }
+  ]
+}

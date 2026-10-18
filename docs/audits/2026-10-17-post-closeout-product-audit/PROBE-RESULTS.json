@@ -1,0 +1,133 @@
+{
+  "omission": [
+    {
+      "variant": "original",
+      "goal_status": "goal_ready",
+      "deliverable_paths": [
+        "retry_app/cli.py"
+      ],
+      "provider_calls": 5,
+      "cli_unchanged": true,
+      "cli_both_names": false
+    },
+    {
+      "variant": "no_space",
+      "goal_status": "verified_done",
+      "deliverable_paths": [],
+      "provider_calls": 4,
+      "cli_unchanged": true,
+      "cli_both_names": false
+    }
+  ],
+  "extraction": [
+    {
+      "text": "修改 app/config.py",
+      "paths": [
+        "app/config.py"
+      ]
+    },
+    {
+      "text": "修改app/config.py",
+      "paths": []
+    },
+    {
+      "text": "Update Python to 3.12",
+      "paths": [
+        "3.12"
+      ]
+    },
+    {
+      "text": "Implement SPEC.md requirements",
+      "paths": [
+        "SPEC.md"
+      ]
+    },
+    {
+      "text": "解释“创建 app/example.py；修改 app/other.py”的含义，不要修改任何文件。",
+      "paths": [
+        "app/example.py",
+        "app/other.py"
+      ]
+    },
+    {
+      "text": "日志显示：创建 app/old.py；请说明原因，不要修改文件。",
+      "paths": [
+        "app/old.py"
+      ]
+    },
+    {
+      "text": "Could you update app/config.py?",
+      "paths": []
+    }
+  ],
+  "overconstraint": {
+    "goal_status": "goal_ready",
+    "deliverable_paths": [
+      "app/example.py",
+      "app/other.py",
+      "retry_app/service.py"
+    ],
+    "rejection": "Control rejected by current trusted state: explicit user deliverable files are not covered by current admitted criteria: app/example.py, app/other.py. Use trusted_goal values and a new correlation_id.",
+    "admitted_file_paths": [
+      "retry_app/service.py"
+    ],
+    "service_unchanged": true
+  },
+  "disclosure": {
+    "reachable_orphan": true,
+    "answers": {
+      "y": {
+        "exit_message": null,
+        "action": "AcknowledgeProviderDisclosure",
+        "error": null
+      },
+      "n": {
+        "exit_message": null,
+        "action": "SubmitMessage",
+        "error": null
+      },
+      "no": {
+        "exit_message": null,
+        "action": "SubmitMessage",
+        "error": null
+      },
+      "否": {
+        "exit_message": null,
+        "action": "SubmitMessage",
+        "error": null
+      }
+    },
+    "new_correction_messages": [
+      "no"
+    ],
+    "result_status_after_no": "awaiting_disclosure",
+    "provider_calls": 0,
+    "tui_form": null,
+    "tui_actions": [
+      "pause_goal",
+      "correct_goal",
+      "cancel_goal"
+    ],
+    "tui_main_text": "goal resumed",
+    "empty_enter": {
+      "exit_code": 0,
+      "actions": 0,
+      "pending_prompts": 2,
+      "safe_refusal_message": false
+    }
+  },
+  "staged_evaluator": [
+    {
+      "mismatched_correction_id": false,
+      "goal_revision_increased": false,
+      "product_status": "completed",
+      "failures": []
+    },
+    {
+      "mismatched_correction_id": true,
+      "goal_revision_increased": false,
+      "product_status": "completed",
+      "failures": []
+    }
+  ]
+}

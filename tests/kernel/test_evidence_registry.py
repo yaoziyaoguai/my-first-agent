@@ -481,9 +481,40 @@ def test_gap_assessment_unknown_reason_falls_back_to_generic_instruction() -> No
 
     assert assessment.repairable_tools == ()
     assert assessment.repair_instruction == (
-        "Do not repeat completion. Call the concrete tools needed to create the "
-        "missing evidence, or send blocked_claim if no safe action can advance the Goal."
+        "Call the concrete tools needed to create the missing evidence, then "
+        "resend completion_claim. Do not report this Goal as blocked while a "
+        "safe action can still advance it."
     )
+
+
+def test_gap_assessment_routes_invalidated_process_receipt_gap_to_repair() -> None:
+    """曾满足判据的验证 receipt 被后续写入失效时是可修缺口：重跑验证并重发
+    completion_claim，不得把 Goal 报 blocked（2026-10-18 真实层 E1r2/E2 实测：
+    无条目时 blocked 守卫取得空工具列表而穿透接受 blocked）。"""
+
+    assessment = ClosedEvidenceRegistry().assess_gap(
+        "the process receipt that proved the criterion was invalidated by "
+        "later workspace activity",
+        available_tools=("local_process", "read_file"),
+    )
+
+    assert assessment.repairable_tools == ("local_process",)
+    assert "local_process" in assessment.repair_instruction
+    assert "resend completion_claim" in assessment.repair_instruction
+    assert "blocked_claim" not in assessment.repair_instruction
+
+
+def test_gap_assessment_keeps_unsatisfied_process_gap_unrepairable() -> None:
+    """从未满足判据的 process 缺口（如 timeout journey：重跑也不会产生匹配
+    receipt）不映射修复工具——blocked 守卫必须放行这类真实阻塞（015 j3
+    acceptance：timeout 意味着无验证，blocked 是合法终态）。"""
+
+    assessment = ClosedEvidenceRegistry().assess_gap(
+        "no exact process receipt proves the criterion",
+        available_tools=("local_process",),
+    )
+
+    assert assessment.repairable_tools == ()
 
 
 def test_gap_assessment_extended_web_kind_reason_keeps_substring_instruction() -> None:

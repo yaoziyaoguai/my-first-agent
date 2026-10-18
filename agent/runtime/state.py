@@ -68,7 +68,9 @@ from agent.runtime.contracts import (
     InvocationOrigin,
     PauseGoal,
     PersistedModelResponseV1,
+    ProcessAuthorityCandidateV1,
     ProcessAuthorityLeaseV1,
+    ProcessReceiptV1,
     ProposedCriterion,
     ProviderCallIntentV1,
     ProviderContinuationV1,
@@ -255,6 +257,64 @@ _PROCESS_ENTRYPOINT_CLAUSE_BOUNDARY = re.compile(
     r"(?:[，。；;,!?！？]+|\.(?=\s|$)|但是|但|而是|\bbut\b|\bhowever\b)",
     re.IGNORECASE,
 )
+# W1：明确文件交付对象的有限识别（与显式 process 要求同型，只认直接正向
+# 精确 workspace-relative 路径；阅读/参照/引文/疑问/禁止语境不进下界）。
+# 2026-10-18 发布包 A：token 边界改为显式校验（见 _deliverable_token_boundary_ok），
+# 允许汉字直接邻接 ASCII 相对路径；单文件形式的扩展名必须字母开头（3.12 这类
+# 版本号不是文件）。不再用 `(?<![/\w.])`——它的 Unicode \w 把相邻汉字也当排除。
+_DELIVERABLE_PATH_TOKEN = re.compile(
+    r"("
+    r"[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?"
+    r"(?:/[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?)+"
+    r"|[A-Za-z0-9_][A-Za-z0-9_-]*\.[A-Za-z][A-Za-z0-9]{0,11}"
+    r")"
+)
+# 分句级说明型语境：句首疑问词 + 任意位置的 explain；Could/Would you 礼貌
+# 请求不再被整句排除（发布包 A 矩阵：礼貌请求仍是交付要求）。
+_DELIVERABLE_QUESTION_CLAUSE = re.compile(
+    r"^\s*(?:如何|怎么|为什么|是否|请问|\bhow\b|\bwhat\b|\bwhy\b|\bcan\b|\bdo(?:es)?\b)",
+    re.IGNORECASE,
+)
+_DELIVERABLE_EXPLANATION_CLAUSE = re.compile(r"\bexplain\b", re.IGNORECASE)
+_DELIVERABLE_VERB_PATTERN = re.compile(
+    r"(?:创建|新建|生成|写入|修改|更新|编辑|添加|新增|实现|重构|"
+    r"\b(?:create|generate|write|update|modify|edit|implement|add|refactor)\b)",
+    re.IGNORECASE,
+)
+_DELIVERABLE_READING_VERB_PATTERN = re.compile(
+    r"(?:阅读|读取|查看|参照|参考|打开|"
+    r"\b(?:read|review|refer|consult)\b|\blook\s+at\b|\bsee\b)",
+    re.IGNORECASE,
+)
+_DELIVERABLE_SUBJECT_AFTER_PATTERN = re.compile(
+    r"^[\s\S]{0,20}?(?:必须|也要|要改|改为|改用|实现|写入|\bmust\b|\bshall\b)",
+)
+# "实现 SPEC.md 中要求的…" / "按 SPEC.md 的说明实现…"：紧跟路径的规格指称
+# 说明该文件是参考输入，不是交付对象（W1.3.3 输出/输入区分）。
+# 2026-10-18 发布包 A：扩requirements/实现需求 指称（Implement SPEC.md
+# requirements、根据 SPEC.md 实现需求——规格是输入不是输出）。
+_DELIVERABLE_REFERENCE_AFTER_PATTERN = re.compile(
+    r"^[\s\S]{0,6}?(?:中要求|中描述|中规定|中定义|中说明|的说明|的描述|的规定|的定义"
+    r"|实现需求|的需求|\brequirements?\b)"
+)
+# 「的说明」类属格后缀可被“直接修改 PATH 本身”压过：修改 SPEC.md 的说明
+# 中，修改紧邻路径，交付对象就是 SPEC.md；按/根据 引导时路径仍是输入。
+_DELIVERABLE_POSSESSIVE_AFTER_PATTERN = re.compile(r"^[\s\S]{0,4}?(?:的说明|的描述|的规定|的定义)")
+_DELIVERABLE_DIRECT_EDIT_BEFORE_PATTERN = re.compile(r"(?:修改|更新|编辑|重写|创建|新建|写入)\s*$")
+_DELIVERABLE_NEGATION_PATTERN = re.compile(
+    r"(?:不要|别|不得|禁止|无需|不用|不需要|不准|"
+    r"\bdo\s+not\b|\bdon't\b|\bmust\s+not\b|\bnever\b)",
+    re.IGNORECASE,
+)
+# 日志报告：句首「日志显示」起进入报告语境，跨分号继承；出现明确的
+# 「请修改…」类新请求时从该句起恢复权威。只覆盖这一有限语法。
+_DELIVERABLE_LOG_REPORT_CLAUSE = re.compile(r"^\s*日志显示")
+_DELIVERABLE_LOG_EXIT_REQUEST = re.compile(r"请(?:修改|更新|编辑|重写|创建|新建|写入|生成|添加)")
+_NON_AUTHORITATIVE_DELIVERABLE_SPANS = (
+    re.compile(r"```[\s\S]*?```"),
+    re.compile(r"「[^」]*」"),
+    re.compile(r"“[^”]*”"),
+)
 
 
 def _goal_source_text(
@@ -265,8 +325,7 @@ def _goal_source_text(
         (
             fact
             for fact in state.facts
-            if fact.fact_id == bootstrap.source_fact_id
-            and fact.kind is FactKind.USER_MESSAGE
+            if fact.fact_id == bootstrap.source_fact_id and fact.kind is FactKind.USER_MESSAGE
         ),
         None,
     )
@@ -363,12 +422,8 @@ def authoritative_process_entrypoints(state: ConversationState) -> frozenset[str
             )
             for clause in _PROCESS_ENTRYPOINT_CLAUSE_BOUNDARY.split(text)
         )
-        if (
-            fact.content.get("control") == "goal_correction"
-            and any(
-                _PROCESS_ENTRYPOINT_PATTERN.search(clause) is not None
-                for clause in clauses
-            )
+        if fact.content.get("control") == "goal_correction" and any(
+            _PROCESS_ENTRYPOINT_PATTERN.search(clause) is not None for clause in clauses
         ):
             # 显式 entrypoint correction 替换旧 command authority；artifact-only
             # correction 没有 process path，因此仍保留原来的 exact binding。
@@ -398,6 +453,149 @@ def process_entrypoint_matches_authority(
     return not requested or normalize_process_entrypoint(executable) in requested
 
 
+def _last_match_end(text: str, pattern: re.Pattern[str]) -> int:
+    return max((match.end() for match in pattern.finditer(text)), default=0)
+
+
+def _normalize_deliverable_path_token(value: str) -> str:
+    """交付路径 token 的安全校验：与 artifact_path 同一 workspace 相对语义。
+
+    额外要求"路径形状"（含 ``/`` 或以扩展名结尾），避免把 ``max_retries`` 这类
+    普通标识词当成文件交付对象；绝对路径、父目录逃逸与控制字符一律拒绝。
+    """
+
+    if (
+        not value
+        or len(value) > 1_000
+        or value.startswith("/")
+        or "\\" in value
+        or any(ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F for character in value)
+    ):
+        return ""
+    parts = value.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        return ""
+    if "/" not in value and re.search(r"\.[A-Za-z][A-Za-z0-9]{0,11}$", value) is None:
+        return ""
+    return value
+
+
+def _deliverable_token_boundary_ok(clause: str, start: int, end: int) -> bool:
+    """token 边界的显式校验（发布包 A）：既允许汉字直接邻接 ASCII 相对
+    路径（``命令行适配器retry_app/cli.py``），又拒绝从非法路径形状截取
+    合法子串（绝对/盘符/反斜线/URL/遍历续接/查询串/CJK 路径段）。
+    """
+
+    if start > 0:
+        previous = clause[start - 1]
+        if previous in "/.:-\\" or (previous.isascii() and (previous.isalnum() or previous == "_")):
+            return False
+        if not previous.isascii():
+            # 汉字邻接合法，但 CJK 前缀串本身若是路径段（前面还有 `/`、
+            # `:` 或 `\`），说明这是含非 ASCII 段的路径，不支持也不截后缀。
+            index = start - 1
+            while index >= 0 and not clause[index].isascii():
+                index -= 1
+            if index >= 0 and clause[index] in "/:\\":
+                return False
+    if end < len(clause):
+        following = clause[end]
+        if following in "\\:\ue000":
+            return False
+        if following == "?":
+            rest = clause[end + 1 :]
+            if rest and not rest[0].isspace():
+                return False
+        if clause.startswith("/.", end):
+            return False
+    return True
+
+
+def authoritative_deliverable_file_paths(
+    state: ConversationState,
+) -> frozenset[str]:
+    """提取当前 Goal 权威来源中仍生效的明确文件交付对象下界（W1）。
+
+    只读 ``created_from_fact_ids`` 绑定的真实 USER_MESSAGE 原文（含已消费
+    correction）。每个 clause 内按有限规则判定"直接正向的精确文件交付要求"：
+    路径 token 附近的交付动词（就近原则压过阅读动词）、或路径后紧跟的主体
+    要求词；疑问句、引文/代码块 span 与近距离禁止词不产生义务。跨 fact 按
+    顺序做正/负更新——correction 新增即生效、点名撤回只移除被点名对象、
+    沉默或无关 correction 不清空其它交付对象、未消费 correction 不生效。
+
+    这是完成判断的下界，不是工具权限，也不声称覆盖任意自然语言语义：
+    有限规则未识别的隐含要求仍由模型与独立验收负责。
+    """
+
+    goal = state.goal
+    if goal is None:
+        return frozenset()
+    source_ids = set(goal.created_from_fact_ids)
+    requested: set[str] = set()
+    for fact in state.facts:
+        if fact.fact_id not in source_ids or fact.kind is not FactKind.USER_MESSAGE:
+            continue
+        text = fact.content.get("text")
+        if not isinstance(text, str):
+            continue
+        # 引文/围栏 span 在整条 authority fact 上先遮蔽再分句，跨分句引文
+        # （“创建 a；修改 b”）不得借分句边界漏成权威请求。查询串（``?x=1``）
+        # 的半角问号本身是分句边界，先占位保护再分句，避免路径被截出合法子串。
+        text = _without_non_authoritative_spans(text, _NON_AUTHORITATIVE_DELIVERABLE_SPANS)
+        text = re.sub(r"[?？](?=\S)", "", text)
+        log_report = False
+        # 逐 clause 判定；沿用 process 的 path-safe 断句（``app/worker.py``
+        # 中的点号不当句边界）。
+        for raw_clause in _PROCESS_ENTRYPOINT_CLAUSE_BOUNDARY.split(text):
+            if not raw_clause.strip():
+                continue
+            if _DELIVERABLE_LOG_REPORT_CLAUSE.match(raw_clause):
+                log_report = True
+            if log_report:
+                if _DELIVERABLE_LOG_EXIT_REQUEST.search(raw_clause):
+                    # 明确新请求从本句起终止日志报告范围。
+                    log_report = False
+                else:
+                    continue
+            clause = raw_clause
+            if _DELIVERABLE_QUESTION_CLAUSE.match(clause) or _DELIVERABLE_EXPLANATION_CLAUSE.search(
+                clause
+            ):
+                continue
+            for match in _DELIVERABLE_PATH_TOKEN.finditer(clause):
+                path = _normalize_deliverable_path_token(match.group(1))
+                if not path:
+                    continue
+                start, end = match.span(1)
+                if not _deliverable_token_boundary_ok(clause, start, end):
+                    continue
+                if _DELIVERABLE_NEGATION_PATTERN.search(
+                    clause[max(0, start - 16) : start] + " " + clause[end : end + 12]
+                ):
+                    requested.discard(path)
+                    continue
+                reference = _DELIVERABLE_REFERENCE_AFTER_PATTERN.match(clause[end : end + 14])
+                if reference is not None:
+                    # 直接修改 PATH 本身优先于「的说明」类输入后缀：紧邻
+                    # 路径的直接编辑动词说明交付对象就是这个文件。
+                    direct_edit = _DELIVERABLE_DIRECT_EDIT_BEFORE_PATTERN.search(
+                        clause[max(0, start - 8) : start]
+                    )
+                    possessive = _DELIVERABLE_POSSESSIVE_AFTER_PATTERN.search(
+                        clause[end : end + 10]
+                    )
+                    if not (direct_edit is not None and possessive is not None):
+                        continue
+                window = clause[max(0, start - 24) : start]
+                deliverable_verb = _last_match_end(window, _DELIVERABLE_VERB_PATTERN)
+                reading_verb = _last_match_end(window, _DELIVERABLE_READING_VERB_PATTERN)
+                if deliverable_verb > reading_verb or (
+                    _DELIVERABLE_SUBJECT_AFTER_PATTERN.match(clause[end : end + 24])
+                ):
+                    requested.add(path)
+    return frozenset(requested)
+
+
 def _looks_like_invented_process_artifact(
     criterion: ProposedCriterion,
     *,
@@ -424,14 +622,18 @@ def _uses_runtime_owned_obligation_id(criterion: ProposedCriterion) -> bool:
 
 def _is_runtime_owned_obligation(criterion: ProposedCriterion) -> bool:
     return (
-        criterion.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
-        and criterion.criterion_id.startswith("criterion:required-public-web:")
-    ) or (
-        criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
-        and criterion.criterion_id.startswith("criterion:required-local-process:")
-    ) or (
-        criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
-        and criterion.criterion_id.startswith("criterion:required-governed-tool:")
+        (
+            criterion.oracle_kind is EvidenceOracleKind.WEB_SOURCE_RECEIPT
+            and criterion.criterion_id.startswith("criterion:required-public-web:")
+        )
+        or (
+            criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+            and criterion.criterion_id.startswith("criterion:required-local-process:")
+        )
+        or (
+            criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+            and criterion.criterion_id.startswith("criterion:required-governed-tool:")
+        )
     )
 
 
@@ -456,14 +658,10 @@ def _apply_correction_lower_bounds(
         (EvidenceOracleKind.TOOL_RECEIPT, _local_process_requirement(source_text)),
     )
     required = tuple(
-        oracle_kind
-        for oracle_kind, classification in classifications
-        if classification is True
+        oracle_kind for oracle_kind, classification in classifications if classification is True
     )
     prohibited = tuple(
-        oracle_kind
-        for oracle_kind, classification in classifications
-        if classification is False
+        oracle_kind for oracle_kind, classification in classifications if classification is False
     )
     if not required and not prohibited:
         return goal
@@ -484,10 +682,7 @@ def _apply_correction_lower_bounds(
         criteria = tuple(
             item
             for item in criteria
-            if not (
-                item.oracle_kind is oracle_kind
-                and item.criterion_id.startswith(prefix)
-            )
+            if not (item.oracle_kind is oracle_kind and item.criterion_id.startswith(prefix))
         )
     if not required and criteria == goal.proposed_criteria:
         return goal
@@ -573,10 +768,7 @@ def create_goal(state: ConversationState, goal: GoalFrame) -> ConversationState:
 
 
 def _require_unused_correlation(state: ConversationState, correlation_id: str) -> None:
-    if any(
-        receipt.correlation_id == correlation_id
-        for receipt in state.control_receipts
-    ):
+    if any(receipt.correlation_id == correlation_id for receipt in state.control_receipts):
         raise ValueError("control correlation_id was already accepted")
 
 
@@ -742,10 +934,7 @@ def accept_goal_draft_proposal(
             "targets": proposal.targets,
         }
     )
-    if any(
-        _uses_runtime_owned_obligation_id(item)
-        for item in proposal.proposed_criteria
-    ):
+    if any(_uses_runtime_owned_obligation_id(item) for item in proposal.proposed_criteria):
         raise ValueError(
             "criterion:required-* identifiers are reserved for Runtime-owned obligations"
         )
@@ -828,10 +1017,7 @@ def record_goal_progress(
         # 进度会把 Goal 翻回 EXECUTING;暂停状态只能被显式 ResumeGoal 解除,
         # 不允许模型上报的 progress 静默恢复任务。
         raise ValueError("paused goal requires an explicit resume before progress")
-    if any(
-        receipt.correlation_id == progress.correlation_id
-        for receipt in state.control_receipts
-    ):
+    if any(receipt.correlation_id == progress.correlation_id for receipt in state.control_receipts):
         raise ValueError("control correlation_id was already accepted")
     accepted_revision = state.revision + 1
     payload_digest = canonical_json_digest(
@@ -880,20 +1066,14 @@ def apply_goal_delta(state: ConversationState, delta: GoalDelta) -> Conversation
     }
     for field_name in tuple_fields & updates.keys():
         updates[field_name] = tuple(updates[field_name])
-    semantic_source_changed = bool(
-        {"user_outcome", "scope"} & delta.updates.keys()
-    )
+    semantic_source_changed = bool({"user_outcome", "scope"} & delta.updates.keys())
     if "proposed_criteria" in updates:
         updates["proposed_criteria"] = tuple(
             _decode_delta_proposed_criterion(item) for item in updates["proposed_criteria"]
         )
-        if any(
-            _uses_runtime_owned_obligation_id(item)
-            for item in updates["proposed_criteria"]
-        ):
+        if any(_uses_runtime_owned_obligation_id(item) for item in updates["proposed_criteria"]):
             raise ValueError(
-                "criterion:required-* identifiers are reserved for Runtime-owned "
-                "obligations"
+                "criterion:required-* identifiers are reserved for Runtime-owned obligations"
             )
         # 模型可重写文件 criteria，但 Web/process 义务只能由 Runtime 从
         # authoritative user fact 补铸。旧的 Runtime lower-bound 会继续保留；
@@ -1037,8 +1217,7 @@ def accept_goal_delta_proposal(
         # 区分"从未有 correction"与"已被此前的 delta 消费":后者说明 Goal 已被
         # 修正,模型应基于修正后的 Goal 继续,而不是反复重发 delta(016 J11 实测)。
         if any(
-            fact.kind is FactKind.USER_MESSAGE
-            and fact.content.get("control") == "goal_correction"
+            fact.kind is FactKind.USER_MESSAGE and fact.content.get("control") == "goal_correction"
             for fact in state.facts
         ):
             raise ValueError(
@@ -1067,9 +1246,7 @@ def accept_goal_delta_proposal(
         goal,
         created_from_fact_ids=(*goal.created_from_fact_ids, correction.fact_id),
         status=(
-            GoalStatus.GOAL_READY
-            if goal.status is GoalStatus.NEEDS_AUTHORITY
-            else goal.status
+            GoalStatus.GOAL_READY if goal.status is GoalStatus.NEEDS_AUTHORITY else goal.status
         ),
     )
     updated = replace(updated, goal=goal)
@@ -1094,16 +1271,12 @@ def acknowledge_noop_goal_delta(
     goal = state.goal
     if goal is None:
         raise ValueError("goal delta requires a current goal")
-    if (
-        proposal.delta.goal_id != goal.goal_id
-        or proposal.delta.expected_revision != goal.revision
-    ):
+    if proposal.delta.goal_id != goal.goal_id or proposal.delta.expected_revision != goal.revision:
         raise GoalRevisionConflictError("goal identity or revision mismatch")
     correction = _unconsumed_goal_correction(state, goal)
     if correction is None:
         if any(
-            fact.kind is FactKind.USER_MESSAGE
-            and fact.content.get("control") == "goal_correction"
+            fact.kind is FactKind.USER_MESSAGE and fact.content.get("control") == "goal_correction"
             for fact in state.facts
         ):
             raise ValueError(
@@ -1316,10 +1489,7 @@ def pause_goal(
         raise ValueError("goal is already paused")
     closed_suffix = _unstarted_batch_suffix_facts(
         state,
-        text=(
-            "Tool call was not executed because the Goal was paused before this "
-            "call started."
-        ),
+        text=("Tool call was not executed because the Goal was paused before this call started."),
     )
     active_run, result = _stop_safe_active_run(
         state,
@@ -1383,8 +1553,7 @@ def cancel_goal(
     closed_suffix = _unstarted_batch_suffix_facts(
         state,
         text=(
-            "Tool call was not executed because the Goal was cancelled before this "
-            "call started."
+            "Tool call was not executed because the Goal was cancelled before this call started."
         ),
     )
     active_run, result = _stop_safe_active_run(
@@ -1534,14 +1703,30 @@ def acknowledge_provider_disclosure(
 ) -> ConversationState:
     request = state.provider_disclosure_request
     active = state.active_run
-    if (
-        request is None
-        or request.request_digest != action.request_digest
-        or active is None
-        or active.status is not ActiveRunStatus.AWAITING_DISCLOSURE
-    ):
+    if request is None or request.request_digest != action.request_digest:
         raise ValueError("provider disclosure acknowledgement does not match")
     goal = state.goal
+    if active is None:
+        # /pause 允许落在 pending disclosure 上（2026-10-17 E1-B 真实旅程实测）：
+        # active run 已安全停止，但披露决定仍 durable。/resume 之后 ack 必须点燃
+        # 继续回合——与 SubmitMessage 的点火同型，否则挂起回合被静默丢弃成 idle。
+        if (
+            state.provider_disclosure_receipt is not None
+            or goal is None
+            or goal.status is not GoalStatus.GOAL_READY
+        ):
+            raise ValueError("provider disclosure acknowledgement does not match")
+        return replace(
+            state,
+            provider_disclosure_receipt=request.acknowledge(
+                receipt_id=f"disclosure-receipt:{action.action_seq}",
+                acknowledged_action_seq=action.action_seq,
+                acknowledged_at=action.acknowledged_at,
+            ),
+            active_run=ActiveRun(run_id=f"resume-{action.action_seq}"),
+        )
+    if active.status is not ActiveRunStatus.AWAITING_DISCLOSURE:
+        raise ValueError("provider disclosure acknowledgement does not match")
     if goal is not None and goal.status is GoalStatus.NEEDS_AUTHORITY:
         goal = replace(goal, status=GoalStatus.GOAL_READY)
     return replace(
@@ -1567,10 +1752,7 @@ def record_completion_claim(
     )
     if goal.status not in {GoalStatus.GOAL_READY, GoalStatus.EXECUTING}:
         raise ValueError("completion claim requires an executable goal")
-    if any(
-        receipt.correlation_id == claim.correlation_id
-        for receipt in state.control_receipts
-    ):
+    if any(receipt.correlation_id == claim.correlation_id for receipt in state.control_receipts):
         raise ValueError("control correlation_id was already accepted")
     evidence_ids = {record.evidence_id for record in state.evidence_records}
     if not set(claim.criterion_evidence_refs).issubset(evidence_ids):
@@ -1680,8 +1862,7 @@ def _require_requirement_coverage(
         cited.update(item.source_fact_ids)
         if any(fact_id not in source_ids for fact_id in item.source_fact_ids):
             raise ValueError(
-                "requirement coverage must cite the authoritative source facts of "
-                "the current goal"
+                "requirement coverage must cite the authoritative source facts of the current goal"
             )
     uncited = authoritative_ids - cited
     if uncited:
@@ -1703,16 +1884,11 @@ def _require_requirement_coverage(
                 "requirement coverage binds criterion ids that are not current "
                 f"admitted mandatory criteria: {sorted(unknown)}"
             )
-    covered = {
-        criterion_id
-        for item in coverage
-        for criterion_id in item.criterion_ids
-    }
+    covered = {criterion_id for item in coverage for criterion_id in item.criterion_ids}
     uncovered = mandatory_ids - covered
     if uncovered:
         raise ValueError(
-            "requirement coverage does not bind every mandatory criterion: "
-            f"{sorted(uncovered)}"
+            f"requirement coverage does not bind every mandatory criterion: {sorted(uncovered)}"
         )
 
 
@@ -1735,15 +1911,11 @@ def verify_goal_completion(state: ConversationState) -> ConversationState:
         for record in state.evidence_records
         if record.evidence_id in claim.criterion_evidence_refs
     }
-    mandatory = tuple(
-        criterion for criterion in goal.admitted_criteria if criterion.mandatory
-    )
+    mandatory = tuple(criterion for criterion in goal.admitted_criteria if criterion.mandatory)
     if not mandatory:
         raise ValueError("goal has no mandatory criterion")
     if any(criterion.oracle_kind is None for criterion in goal.proposed_criteria):
-        raise ValueError(
-            "every proposed completion criterion requires a typed evidence oracle"
-        )
+        raise ValueError("every proposed completion criterion requires a typed evidence oracle")
     artifact_requirements = tuple(
         criterion
         for criterion in goal.proposed_criteria
@@ -1756,9 +1928,7 @@ def verify_goal_completion(state: ConversationState) -> ConversationState:
             and criterion.predicate.get("path") == requirement.artifact_path
             for criterion in mandatory
         ):
-            raise ValueError(
-                "artifact criterion must be admitted before completion verification"
-            )
+            raise ValueError("artifact criterion must be admitted before completion verification")
     process_requirements = tuple(
         criterion
         for criterion in goal.proposed_criteria
@@ -1770,20 +1940,31 @@ def verify_goal_completion(state: ConversationState) -> ConversationState:
             and criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
             for criterion in mandatory
         ):
-            raise ValueError(
-                "process criterion must be admitted before completion verification"
-            )
+            raise ValueError("process criterion must be admitted before completion verification")
     _require_requirement_coverage(state, claim, goal=goal, mandatory=mandatory)
-    evidence_by_criterion = {
-        record.criterion_id: record for record in referenced.values()
-    }
+    # W1：权威原文的明确文件交付对象是完成下界；模型缩小后的 admitted 集
+    # 合（或一条泛化 coverage）不能替代被草稿遗漏的交付对象。
+    deliverable_paths = authoritative_deliverable_file_paths(state)
+    if deliverable_paths:
+        admitted_paths = {
+            criterion.predicate.get("path")
+            for criterion in mandatory
+            if criterion.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
+            and isinstance(criterion.predicate.get("path"), str)
+        }
+        missing = sorted(deliverable_paths - admitted_paths)
+        if missing:
+            raise ValueError(
+                "explicit user deliverable files are not covered by current "
+                "admitted criteria: " + ", ".join(missing)
+            )
+    evidence_by_criterion = {record.criterion_id: record for record in referenced.values()}
     if any(
         criterion.criterion_id not in evidence_by_criterion
         or not evidence_by_criterion[criterion.criterion_id].passed
         or evidence_by_criterion[criterion.criterion_id].goal_id != goal.goal_id
         or evidence_by_criterion[criterion.criterion_id].goal_revision != goal.revision
-        or evidence_by_criterion[criterion.criterion_id].oracle_kind
-        is not criterion.oracle_kind
+        or evidence_by_criterion[criterion.criterion_id].oracle_kind is not criterion.oracle_kind
         or evidence_by_criterion[criterion.criterion_id].predicate_digest
         != canonical_json_digest(criterion.predicate)
         for criterion in mandatory
@@ -1860,11 +2041,19 @@ def _goal_target_authorization_scope(
     ):
         return None
     if not directory:
-        return (
-            target
-            if target in goal.targets and safe_goal_authorization_target(target)
-            else None
-        )
+        if target in goal.targets and safe_goal_authorization_target(target):
+            return target
+        # W2：散文 targets 下，当前 Goal 已由 Runtime 准入（真实用户批准来源，
+        # `_admit_approved_file_criterion` 铸造）的精确文件同样可作为复用授权
+        # 候选。只认 durable admitted criterion 的闭合 predicate path，不把
+        # 任意 pending path 或模型自述提升为候选；显示/解析/铸造共用本判断。
+        if safe_goal_authorization_target(target) and any(
+            criterion.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
+            and criterion.predicate.get("path") == target
+            for criterion in goal.admitted_criteria
+        ):
+            return target
+        return None
     target_parts = target.split("/")
     candidates = []
     for goal_target in goal.targets:
@@ -1884,12 +2073,23 @@ def _action_is_legal(state: ConversationState, action: Action) -> tuple[bool, st
     active = state.active_run
     if isinstance(action, AcknowledgeProviderDisclosure):
         request = state.provider_disclosure_request
-        if (
-            request is None
-            or request.request_digest != action.request_digest
-            or active is None
-            or active.status is not ActiveRunStatus.AWAITING_DISCLOSURE
-        ):
+        goal = state.goal
+        live_match = (
+            request is not None
+            and request.request_digest == action.request_digest
+            and active is not None
+            and active.status is ActiveRunStatus.AWAITING_DISCLOSURE
+        )
+        # 暂停后孤儿披露：run 已停但决定仍 durable；/resume 后必须可应答并点火。
+        resumable_orphan = (
+            request is not None
+            and request.request_digest == action.request_digest
+            and state.provider_disclosure_receipt is None
+            and active is None
+            and goal is not None
+            and goal.status is GoalStatus.GOAL_READY
+        )
+        if not (live_match or resumable_orphan):
             return False, "provider_disclosure_mismatch"
         return True, None
     if isinstance(action, ConfirmCriterion):
@@ -1902,11 +2102,7 @@ def _action_is_legal(state: ConversationState, action: Action) -> tuple[bool, st
         ):
             return False, "goal_revision_mismatch"
         criterion = next(
-            (
-                item
-                for item in goal.admitted_criteria
-                if item.criterion_id == action.criterion_id
-            ),
+            (item for item in goal.admitted_criteria if item.criterion_id == action.criterion_id),
             None,
         )
         if (
@@ -2021,18 +2217,12 @@ def _action_is_legal(state: ConversationState, action: Action) -> tuple[bool, st
             return False, "pending_request_mismatch"
         if (
             action.authorize_goal_target
-            and _goal_target_authorization_scope(
-                state, pending, active, directory=False
-            )
-            is None
+            and _goal_target_authorization_scope(state, pending, active, directory=False) is None
         ):
             return False, "goal_target_authorization_mismatch"
         if (
             action.authorize_goal_directory
-            and _goal_target_authorization_scope(
-                state, pending, active, directory=True
-            )
-            is None
+            and _goal_target_authorization_scope(state, pending, active, directory=True) is None
         ):
             return False, "goal_directory_authorization_mismatch"
         return True, None
@@ -2225,11 +2415,7 @@ def begin_browser_takeover(
     if state.browser_takeover_pending is not None:
         raise ValueError("browser takeover already pending")
     goal = state.goal
-    if (
-        goal is None
-        or goal.goal_id != request.goal_id
-        or goal.revision != request.goal_revision
-    ):
+    if goal is None or goal.goal_id != request.goal_id or goal.revision != request.goal_revision:
         raise ValueError("browser takeover goal identity mismatch")
     active = state.active_run
     return replace(
@@ -2240,11 +2426,7 @@ def begin_browser_takeover(
         # 才能在后续 run_turn 重新 claim 并恢复同一 run。
         browser_leases=(),
         browser_takeover_pending=request,
-        active_run=(
-            replace(active, owner_invocation_id=None)
-            if active is not None
-            else None
-        ),
+        active_run=(replace(active, owner_invocation_id=None) if active is not None else None),
     )
 
 
@@ -2356,11 +2538,7 @@ def _admit_approved_read_only_validation_criterion(
     active = state.active_run
     call = (
         next(
-            (
-                item
-                for item in active.tool_calls
-                if item.tool_call_id == pending.tool_call_id
-            ),
+            (item for item in active.tool_calls if item.tool_call_id == pending.tool_call_id),
             None,
         )
         if active is not None
@@ -2384,18 +2562,10 @@ def _admit_approved_read_only_validation_criterion(
         ),
         None,
     )
-    if (
-        proposed_requirement is not None
-        and _is_runtime_owned_obligation(proposed_requirement)
-    ):
-        executable = (
-            call.arguments.get("executable")
-            if isinstance(call.arguments, dict)
-            else None
-        )
-        if (
-            not isinstance(executable, str)
-            or not process_entrypoint_matches_authority(state, executable)
+    if proposed_requirement is not None and _is_runtime_owned_obligation(proposed_requirement):
+        executable = call.arguments.get("executable") if isinstance(call.arguments, dict) else None
+        if not isinstance(executable, str) or not process_entrypoint_matches_authority(
+            state, executable
         ):
             # 与 process 审批同界：approval 不能把另一条命令改写成用户明示
             # validator 的完成证据。
@@ -2403,14 +2573,10 @@ def _admit_approved_read_only_validation_criterion(
     criterion_id = (
         proposed_requirement.criterion_id
         if proposed_requirement is not None
-        else (
-            f"criterion:sandbox-receipt:{goal.goal_id}:{goal.revision}:"
-            f"{pending.tool_call_id}"
-        )
+        else (f"criterion:sandbox-receipt:{goal.goal_id}:{goal.revision}:{pending.tool_call_id}")
     )
     if any(
-        item.criterion_id == criterion_id
-        and item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+        item.criterion_id == criterion_id and item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
         for item in goal.admitted_criteria
     ):
         return state
@@ -2418,8 +2584,7 @@ def _admit_approved_read_only_validation_criterion(
         (
             fact
             for fact in state.facts
-            if fact.fact_id in goal.created_from_fact_ids
-            and fact.kind is FactKind.USER_MESSAGE
+            if fact.fact_id in goal.created_from_fact_ids and fact.kind is FactKind.USER_MESSAGE
         ),
         None,
     )
@@ -2440,8 +2605,7 @@ def _admit_approved_read_only_validation_criterion(
     }
     binding = CriterionAdmissionBinding.create(
         binding_id=(
-            f"criterion-admission:sandbox-receipt:{pending.request_id}:"
-            f"{pending.tool_call_id}"
+            f"criterion-admission:sandbox-receipt:{pending.request_id}:{pending.tool_call_id}"
         ),
         goal_id=goal.goal_id,
         goal_revision=goal.revision,
@@ -2487,9 +2651,7 @@ def _mint_goal_target_authorization(
         directory=directory,
     )
     if authorized_target is None:
-        raise ValueError(
-            "goal authorization requires a current Goal file or directory target"
-        )
+        raise ValueError("goal authorization requires a current Goal file or directory target")
     goal = state.goal
     assert goal is not None
     if action.approved_at is None:
@@ -2503,9 +2665,7 @@ def _mint_goal_target_authorization(
         operation=pending.tool_name,
         normalized_target=authorized_target,
         scope=(
-            GoalAuthorizationScope.DIRECTORY
-            if directory
-            else GoalAuthorizationScope.EXACT_FILE
+            GoalAuthorizationScope.DIRECTORY if directory else GoalAuthorizationScope.EXACT_FILE
         ),
         source_kind=AuthoritySourceKind.HUMAN_APPROVAL,
         source_id=pending.request_id,
@@ -2548,9 +2708,7 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
         evidence = state.evidence_records
         if action.confirmed:
             criterion = next(
-                item
-                for item in goal.admitted_criteria
-                if item.criterion_id == action.criterion_id
+                item for item in goal.admitted_criteria if item.criterion_id == action.criterion_id
             )
             evidence = (
                 *evidence,
@@ -2580,10 +2738,10 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
             )
         return replace(state, facts=(*state.facts, fact), evidence_records=evidence)
     if isinstance(action, SubmitMessage):
-        terminal_goal = (
-            state.goal is not None
-            and state.goal.status in {GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED}
-        )
+        terminal_goal = state.goal is not None and state.goal.status in {
+            GoalStatus.VERIFIED_DONE,
+            GoalStatus.CANCELLED,
+        }
         correction = (
             state.goal is not None
             and state.goal.status
@@ -2603,31 +2761,24 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
             if state.active_run is not None:
                 superseded = tuple(
                     ConversationFact(
-                        fact_id=(
-                            f"action:{action.action_seq}:superseded-tool:"
-                            f"{call.tool_call_id}"
-                        ),
+                        fact_id=(f"action:{action.action_seq}:superseded-tool:{call.tool_call_id}"),
                         kind=FactKind.TOOL_RESULT,
                         content={
                             "tool_call_id": call.tool_call_id,
                             "text": (
-                                "Tool call was not executed because the user corrected "
-                                "the Goal."
+                                "Tool call was not executed because the user corrected the Goal."
                             ),
                             "is_error": True,
                             "executed": False,
                             "superseded": True,
                             **(
                                 {"invocation_origin": InvocationOrigin.OPERATOR.value}
-                                if state.active_run.invocation_origin
-                                is InvocationOrigin.OPERATOR
+                                if state.active_run.invocation_origin is InvocationOrigin.OPERATOR
                                 else {}
                             ),
                         },
                     )
-                    for call in state.active_run.tool_calls[
-                        state.active_run.batch_cursor :
-                    ]
+                    for call in state.active_run.tool_calls[state.active_run.batch_cursor :]
                 )
                 facts = (*facts, *superseded)
         fact = ConversationFact(
@@ -2679,9 +2830,7 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
             retained: tuple[ProcessAuthorityLeaseV1, ...] = ()
         else:
             retained = tuple(
-                lease
-                for lease in state.process_leases
-                if lease.lease_id != action.lease_id
+                lease for lease in state.process_leases if lease.lease_id != action.lease_id
             )
         return replace(state, process_leases=retained)
     if isinstance(action, RevokeGoalTargetAuthority):
@@ -2722,9 +2871,7 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
             updated_state = _mint_sandbox_authority_lease(
                 updated_state, pending, approved_at=action.approved_at
             )
-            updated_state = _admit_approved_read_only_validation_criterion(
-                updated_state, pending
-            )
+            updated_state = _admit_approved_read_only_validation_criterion(updated_state, pending)
             updated_state = _mint_browser_authority_lease(
                 updated_state, pending, approved_at=action.approved_at
             )
@@ -2735,7 +2882,9 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                 active=active,
             )
             updated_state = _admit_process_artifact_criterion(
-                updated_state, pending, action=action,
+                updated_state,
+                pending,
+                action=action,
             )
             updated_state = _admit_approved_process_receipt_criterion(
                 updated_state,
@@ -2829,11 +2978,7 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
                 # 标记失败不等于从未执行；分类来自可信执行意图（不采信模型文本），
                 # intent 缺失时不盖章 side_effect，证据/折叠消费者保守视为潜在写入。
                 "unknown_outcome": True,
-                **(
-                    {"side_effect": intent.side_effect.value}
-                    if intent is not None
-                    else {}
-                ),
+                **({"side_effect": intent.side_effect.value} if intent is not None else {}),
                 **(
                     {"invocation_origin": InvocationOrigin.OPERATOR.value}
                     if active.invocation_origin is InvocationOrigin.OPERATOR
@@ -2853,9 +2998,7 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
             executing_intent=None,
             batch_cursor=active.batch_cursor + 1,
             tool_calls=(
-                active.tool_calls
-                if active.batch_cursor + 1 < len(active.tool_calls)
-                else ()
+                active.tool_calls if active.batch_cursor + 1 < len(active.tool_calls) else ()
             ),
         )
         return replace(state, active_run=updated, facts=(*state.facts, synthetic))
@@ -2921,8 +3064,7 @@ def _apply_action(state: ConversationState, action: Action) -> ConversationState
         closed_suffix = _unstarted_batch_suffix_facts(
             state,
             text=(
-                "Tool call was not executed because the run was cancelled before "
-                "this call started."
+                "Tool call was not executed because the run was cancelled before this call started."
             ),
         )
         return replace(
@@ -2961,23 +3103,19 @@ def _admit_approved_file_criterion(
     matching_proposals = tuple(
         item
         for item in goal.proposed_criteria
-        if item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
-        and item.artifact_path == path
+        if item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST and item.artifact_path == path
     )
     deferred_proposals = tuple(
         item
         for item in goal.proposed_criteria
-        if item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST
-        and item.artifact_path is None
+        if item.oracle_kind is EvidenceOracleKind.FILESYSTEM_DIGEST and item.artifact_path is None
     )
     bound_proposal_id: str | None = None
     if not matching_proposals and len(deferred_proposals) == 1:
         matching_proposals = deferred_proposals
         bound_proposal_id = deferred_proposals[0].criterion_id
     if matching_proposals:
-        criteria = tuple(
-            (item.criterion_id, item.description) for item in matching_proposals
-        )
+        criteria = tuple((item.criterion_id, item.description) for item in matching_proposals)
     else:
         criteria = (
             (
@@ -2989,8 +3127,7 @@ def _admit_approved_file_criterion(
         (
             fact
             for fact in state.facts
-            if fact.fact_id in goal.created_from_fact_ids
-            and fact.kind is FactKind.USER_MESSAGE
+            if fact.fact_id in goal.created_from_fact_ids and fact.kind is FactKind.USER_MESSAGE
         ),
         None,
     )
@@ -3050,19 +3187,13 @@ def _admit_approved_file_criterion(
         )
     }
     retained_criteria = tuple(
-        item
-        for item in goal.admitted_criteria
-        if item.criterion_id not in superseded_ids
+        item for item in goal.admitted_criteria if item.criterion_id not in superseded_ids
     )
     retained_evidence = tuple(
-        item
-        for item in state.evidence_records
-        if item.criterion_id not in superseded_ids
+        item for item in state.evidence_records if item.criterion_id not in superseded_ids
     )
     proposed_criteria = tuple(
-        replace(item, artifact_path=path)
-        if item.criterion_id == bound_proposal_id
-        else item
+        replace(item, artifact_path=path) if item.criterion_id == bound_proposal_id else item
         for item in goal.proposed_criteria
     )
     return replace(
@@ -3129,8 +3260,7 @@ def _admit_approved_research_criterion(
         (
             fact
             for fact in state.facts
-            if fact.fact_id in goal.created_from_fact_ids
-            and fact.kind is FactKind.USER_MESSAGE
+            if fact.fact_id in goal.created_from_fact_ids and fact.kind is FactKind.USER_MESSAGE
         ),
         None,
     )
@@ -3139,9 +3269,12 @@ def _admit_approved_research_criterion(
     source_digest = canonical_json_digest(
         {"fact_id": source.fact_id, "kind": source.kind, "content": source.content}
     )
-    criterion_id = "criterion:research-provenance:" + canonical_json_digest(
-        {"goal_id": goal.goal_id, "artifact_path": manifest.artifact_path}
-    )[:16]
+    criterion_id = (
+        "criterion:research-provenance:"
+        + canonical_json_digest({"goal_id": goal.goal_id, "artifact_path": manifest.artifact_path})[
+            :16
+        ]
+    )
     predicate = {
         "artifact_path": manifest.artifact_path,
         "artifact_sha256": manifest.artifact_sha256,
@@ -3151,9 +3284,7 @@ def _admit_approved_research_criterion(
         "minimum_distinct_sources": len(manifest.citations),
         "required_source_kinds": [],
         "required_source_classes": [],
-        "required_receipt_digests": [
-            citation.receipt_digest for citation in manifest.citations
-        ],
+        "required_receipt_digests": [citation.receipt_digest for citation in manifest.citations],
     }
     binding = CriterionAdmissionBinding.create(
         binding_id=f"criterion-admission:research:{action.action_seq}:{call.tool_call_id}",
@@ -3187,6 +3318,189 @@ def _admit_approved_research_criterion(
     )
 
 
+# 真实层 E1r4（2026-10-18）：裸 pytest 在 pyenv shim 下 exit 2 后，模型用同一
+# validator 加「导入/收集环境修复 flag」跑通。这些 flag 不改变选中与执行语义，
+# 比较前剥离；值一律是字面常量，避免 flag 变成注入面——``-o addopts=`` 可注入
+# ``--collect-only``，``--ignore``/``-k``/``--deselect`` 直接改变选中，均不在此列。
+_ENVIRONMENT_REPAIR_FLAG_SEQUENCES: tuple[tuple[str, ...], ...] = (
+    ("-p", "no:cacheprovider"),
+    ("--import-mode=prepend",),
+    ("--import-mode=append",),
+    ("--import-mode", "prepend"),
+    ("--import-mode", "append"),
+    ("--rootdir=.",),
+    ("--rootdir", "."),
+    ("-o", "pythonpath=."),
+)
+
+
+def _strip_environment_repair_flags(rest: tuple[str, ...]) -> tuple[str, ...]:
+    """剥离已知不改变选中/执行语义的环境修复 flag；其余 token 原样保留。"""
+
+    kept: list[str] = []
+    index = 0
+    while index < len(rest):
+        for sequence in _ENVIRONMENT_REPAIR_FLAG_SEQUENCES:
+            if rest[index : index + len(sequence)] == sequence:
+                index += len(sequence)
+                break
+        else:
+            kept.append(rest[index])
+            index += 1
+    return tuple(kept)
+
+
+def _canonical_command_form(executable: object, argv: object) -> tuple[str, tuple[str, ...]] | None:
+    """命令的 canonical 等价形式：(entrypoint, rest argv)。
+
+    归一两种**不改变执行语义**的改写：``pythonX -m <module> <rest>`` ⇔
+    ``<module> <rest>``（pyenv shim 下模块调用与直接入口等价，这正是真实层
+    E1r2/E2 需要的形态），以及已知的环境修复 flag 剥离。其余一切差异（选择类
+    flag、不同 rest）都视为不同命令。
+    """
+
+    if not isinstance(executable, str):
+        return None
+    entry = normalize_process_entrypoint(executable)
+    if not entry:
+        return None
+    rest: list[str] = []
+    if isinstance(argv, (list, tuple)):
+        rest = [item for item in argv if isinstance(item, str)]
+    if re.fullmatch(r"python(?:3(?:\.\d+)?)?", entry) and len(rest) >= 2 and rest[0] == "-m":
+        module = normalize_process_entrypoint(rest[1])
+        if not module:
+            return None
+        return module, _strip_environment_repair_flags(tuple(rest[2:]))
+    return entry, _strip_environment_repair_flags(tuple(rest))
+
+
+_ENVIRONMENT_CLASS_EXIT_CODES = frozenset({2, 5})
+
+
+def _environment_class_process_failure(receipt: ProcessReceiptV1) -> bool:
+    """区分「环境/调用方式失败」与「被测代码真实失败」。
+
+    P1（对抗审查 2026-10-18）：重绑定资格此前只看「有没有 exited/0」，于是
+    ``pytest`` exit 1（测试红了）与 exit 2（用法/导入/中断）同等可重绑定——
+    模型可以换一条不验证的命令把红测试掩盖成 VERIFIED_DONE。保守规则：
+    只有退出码属于环境类（2 = 用法/中断/收集错误、5 = 无测试被收集）才视为
+    「该命令在此环境不可用」，允许用户显式 opt-in 后重绑定；其余非零退出
+    （1 测试失败、3 内部错误、4 用法错误以外）一律视为真实验证结果，不可重绑定。
+    """
+
+    return receipt.exit_code in _ENVIRONMENT_CLASS_EXIT_CODES
+
+
+def _rebindable_failed_process_obligation(
+    state: ConversationState,
+    new_call_arguments: Mapping[str, object],
+    *,
+    candidate: ProcessAuthorityCandidateV1 | None,
+) -> AdmittedCriterion | None:
+    """发现 3（2026-10-18 真实层 E1r2/E2）：runtime-owned 验证义务的重绑定候选。
+
+    义务在批准时 pin「首个被批准命令的 fingerprint + exited/0」。当该命令在当前
+    Goal 内已执行且从未成功（如裸 ``pytest -q`` 在 pyenv shim 下恒 exit 2）、用户
+    又通过 exact approval 批准了一条 **canonical 等价**命令（``python3 -m pytest
+    -q``）时，新命令承接该义务；否则旧 fingerprint 永远无法满足，Goal 只能 blocked。
+
+    等价判定必须严格：仅 ``pythonX -m <entry>`` ⇔ ``<entry>`` 归一，entry 与其余
+    argv 精确相等。曾成功过（重跑可再满足，由失效型修复知识引导）、从未执行、
+    sandbox 型 predicate、跨 Goal receipt、或不等价的命令一律不重绑定（fail
+    closed；对抗审查 2026-10-18 实机复现 ``pytest --help``/``--collect-only`` 曾冒领）。
+    """
+
+    goal = state.goal
+    if (
+        goal is None
+        or candidate is None
+        or candidate.goal_id != goal.goal_id
+        or candidate.goal_revision != goal.revision
+        or candidate.workspace_identity_digest != goal.workspace_identity_digest
+    ):
+        return None
+    new_form = _canonical_command_form(
+        new_call_arguments.get("executable"), new_call_arguments.get("argv")
+    )
+    if new_form is None:
+        return None
+    outcomes_by_fingerprint: dict[str, list[tuple[str, int | None]]] = {}
+    receipts_by_fingerprint: dict[str, list[ProcessReceiptV1]] = {}
+    forms_by_fingerprint: dict[str, tuple[str, tuple[str, ...]] | None] = {}
+    arguments_by_call_id: dict[str, tuple[object, object]] = {}
+    for fact in state.facts:
+        if fact.kind is FactKind.TOOL_CALLS:
+            for raw in fact.content.get("calls", ()):
+                if not isinstance(raw, dict) or raw.get("name") != "local_process":
+                    continue
+                arguments = raw.get("arguments")
+                call_id = raw.get("tool_call_id")
+                if isinstance(arguments, dict) and isinstance(call_id, str):
+                    arguments_by_call_id[call_id] = (
+                        arguments.get("executable"),
+                        arguments.get("argv"),
+                    )
+        elif fact.kind is FactKind.TOOL_RESULT:
+            metadata = fact.content.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            try:
+                receipt = ProcessReceiptV1.from_json(metadata.get("process_receipt"))
+            except ValueError:
+                continue
+            if receipt.goal_id != goal.goal_id or receipt.goal_revision != goal.revision:
+                # P3（对抗审查）：资格必须 Goal 作用域——早前 Goal 的同命令失败
+                # 不能让当前 Goal「从未执行」的义务变成可重绑定。
+                continue
+            fingerprint = receipt.command_fingerprint
+            outcomes_by_fingerprint.setdefault(fingerprint, []).append(
+                (receipt.outcome.value, receipt.exit_code)
+            )
+            receipts_by_fingerprint.setdefault(fingerprint, []).append(receipt)
+            call_id = fact.content.get("tool_call_id")
+            if isinstance(call_id, str) and fingerprint not in forms_by_fingerprint:
+                forms_by_fingerprint[fingerprint] = _canonical_command_form(
+                    *arguments_by_call_id.get(call_id, (None, None))
+                )
+    for criterion in goal.admitted_criteria:
+        if not criterion.criterion_id.startswith("criterion:required-local-process:"):
+            continue
+        if criterion.predicate.get("receipt_kind") != "process_v1":
+            # sandbox 型 predicate 的 fingerprint 与前台 process 同源，混算会
+            # 用另一模态的失败/成功误判（对抗审查 P2）。
+            continue
+        fingerprint = criterion.predicate.get("command_fingerprint")
+        if not isinstance(fingerprint, str):
+            continue
+        outcomes = outcomes_by_fingerprint.get(fingerprint)
+        if not outcomes:
+            continue
+        if any(outcome == ("exited", 0) for outcome in outcomes):
+            continue
+        if any(
+            receipt.workspace_identity_digest != candidate.workspace_identity_digest
+            or receipt.cwd_digest != candidate.cwd_digest
+            or receipt.resource_profile != candidate.resource_profile
+            or receipt.environment_policy_digest != candidate.environment_policy_digest
+            or receipt.execution_authority is not candidate.execution_authority
+            for receipt in receipts_by_fingerprint[fingerprint]
+        ):
+            # 命令文本相同不代表验证范围相同。比较 Kernel 准入/回执中的作用域，
+            # 不把子目录的成功、不同环境或权限下的执行替换成原验证；不猜测路径别名。
+            continue
+        if not all(
+            _environment_class_process_failure(receipt)
+            for receipt in receipts_by_fingerprint.get(fingerprint, ())
+        ):
+            # P1：只要有一次失败不是环境类（例如测试真的红了 exit 1），就不
+            # 允许重绑定——否则可用不验证的命令掩盖真实失败。
+            continue
+        if forms_by_fingerprint.get(fingerprint) == new_form:
+            return criterion
+    return None
+
+
 def _admit_approved_process_receipt_criterion(
     state: ConversationState,
     pending: ApprovalRequest,
@@ -3202,11 +3516,7 @@ def _admit_approved_process_receipt_criterion(
     active = state.active_run
     call = (
         next(
-            (
-                item
-                for item in active.tool_calls
-                if item.tool_call_id == pending.tool_call_id
-            ),
+            (item for item in active.tool_calls if item.tool_call_id == pending.tool_call_id),
             None,
         )
         if active is not None
@@ -3233,15 +3543,8 @@ def _admit_approved_process_receipt_criterion(
         ),
         None,
     )
-    if (
-        proposed_requirement is not None
-        and _is_runtime_owned_obligation(proposed_requirement)
-    ):
-        executable = (
-            call.arguments.get("executable")
-            if call.name == "local_process"
-            else None
-        )
+    if proposed_requirement is not None and _is_runtime_owned_obligation(proposed_requirement):
+        executable = call.arguments.get("executable") if call.name == "local_process" else None
         if not isinstance(executable, str):
             raise ValueError(
                 "Runtime-owned process criterion requires the pending local_process call"
@@ -3250,26 +3553,35 @@ def _admit_approved_process_receipt_criterion(
             # approval 只授予这笔 effect 的 lease；它不能把另一个命令改写成用户
             # 明示 validator 的完成证据。
             return state
+    rebindable = (
+        None
+        if proposed_requirement is not None or not action.authorize_obligation_rebind
+        else _rebindable_failed_process_obligation(
+            state, call.arguments, candidate=candidate
+        )
+    )
     criterion_id = (
         proposed_requirement.criterion_id
         if proposed_requirement is not None
         else (
-            f"criterion:process-receipt:{goal.goal_id}:{goal.revision}:"
-            f"{pending.tool_call_id}"
+            rebindable.criterion_id
+            if rebindable is not None
+            else (
+                f"criterion:process-receipt:{goal.goal_id}:{goal.revision}:{pending.tool_call_id}"
+            )
         )
     )
-    if any(
-        item.criterion_id == criterion_id
-        and item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+    if rebindable is None and any(
+        item.criterion_id == criterion_id and item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
         for item in goal.admitted_criteria
     ):
+        # per-call 去重；重绑定路径同 id 属预期（retained 替换），不作早退。
         return state
     source = next(
         (
             fact
             for fact in state.facts
-            if fact.fact_id in goal.created_from_fact_ids
-            and fact.kind is FactKind.USER_MESSAGE
+            if fact.fact_id in goal.created_from_fact_ids and fact.kind is FactKind.USER_MESSAGE
         ),
         None,
     )
@@ -3286,8 +3598,7 @@ def _admit_approved_process_receipt_criterion(
     }
     binding = CriterionAdmissionBinding.create(
         binding_id=(
-            f"criterion-admission:process-receipt:{action.action_seq}:"
-            f"{pending.tool_call_id}"
+            f"criterion-admission:process-receipt:{action.action_seq}:{pending.tool_call_id}"
         ),
         goal_id=goal.goal_id,
         goal_revision=goal.revision,
@@ -3302,8 +3613,30 @@ def _admit_approved_process_receipt_criterion(
     admitted = binding.admit(
         proposed_requirement.description
         if proposed_requirement is not None
-        else "approved local_process must produce the exact successful Kernel receipt"
+        else (
+            rebindable.description
+            if rebindable is not None
+            else "approved local_process must produce the exact successful Kernel receipt"
+        )
     )
+    if rebindable is not None:
+        # 重绑定沿用 admit_research_provenance 的 retained 替换模式：同
+        # criterion_id 换新 predicate/binding，并作废旧绑定下的证据记录。
+        retained_criteria = tuple(
+            item for item in goal.admitted_criteria if item.criterion_id != criterion_id
+        )
+        retained_evidence = tuple(
+            item for item in state.evidence_records if item.criterion_id != criterion_id
+        )
+        return replace(
+            state,
+            goal=replace(
+                goal,
+                admitted_criteria=(*retained_criteria, admitted),
+            ),
+            evidence_records=retained_evidence,
+            completion_claim=None,
+        )
     return replace(
         state,
         goal=replace(
@@ -3326,14 +3659,12 @@ def _add_approved_governed_tool_requirement(
     if goal is None or active.batch_cursor >= len(active.tool_calls):
         return state
     call = active.tool_calls[active.batch_cursor]
-    if (
-        call.tool_call_id != pending.tool_call_id
-        or not call.name.startswith(("mcp__", "subagent__"))
+    if call.tool_call_id != pending.tool_call_id or not call.name.startswith(
+        ("mcp__", "subagent__")
     ):
         return state
     criterion_id = (
-        f"criterion:required-governed-tool:{goal.goal_id}:{goal.revision}:"
-        f"{call.tool_call_id}"
+        f"criterion:required-governed-tool:{goal.goal_id}:{goal.revision}:{call.tool_call_id}"
     )
     if any(
         item.criterion_id == criterion_id
@@ -3342,9 +3673,7 @@ def _add_approved_governed_tool_requirement(
         return state
     requirement = ProposedCriterion(
         criterion_id=criterion_id,
-        description=(
-            f"the approved {call.name} call returns an exact Kernel-governed receipt"
-        ),
+        description=(f"the approved {call.name} call returns an exact Kernel-governed receipt"),
         oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
     )
     return replace(
@@ -3385,20 +3714,14 @@ def _admit_process_artifact_criterion(
         )
     if action.defer_artifact_confirmation:
         if requirement is None:
-            raise ValueError(
-                "artifact confirmation can be deferred only for a pending requirement"
-            )
+            raise ValueError("artifact confirmation can be deferred only for a pending requirement")
         # 这里只批准生成 effect。未铸造 FILESYSTEM_DIGEST criterion；未来字节必须
         # 由 confirm_file 重新读取、展示并经独立 approval 后才可成为完成证据。
         return state
     if requirement is not None and (
-        ea_path is None
-        or ea_sha is None
-        or ea_path != requirement.artifact_path
+        ea_path is None or ea_sha is None or ea_path != requirement.artifact_path
     ):
-        raise ValueError(
-            "artifact confirmation must match the pending path and include sha256"
-        )
+        raise ValueError("artifact confirmation must match the pending path and include sha256")
     if ea_path is None and ea_sha is None:
         return state
     import re as _re
@@ -3428,8 +3751,7 @@ def _admit_process_artifact_criterion(
         (
             fact
             for fact in state.facts
-            if fact.fact_id in goal.created_from_fact_ids
-            and fact.kind is FactKind.USER_MESSAGE
+            if fact.fact_id in goal.created_from_fact_ids and fact.kind is FactKind.USER_MESSAGE
         ),
         None,
     )
@@ -3453,9 +3775,7 @@ def _admit_process_artifact_criterion(
         predicate=predicate,
         required_evidence_class="workspace_file",
     )
-    admitted = binding.admit(
-        f"process artifact {ea_path} reads back with exact approved sha256"
-    )
+    admitted = binding.admit(f"process artifact {ea_path} reads back with exact approved sha256")
     return replace(
         state,
         goal=replace(
@@ -3485,8 +3805,7 @@ def admit_process_receipt_criterion(
         return state
     criterion_id = f"criterion:process-receipt:{goal.goal_id}:{goal.revision}:{tool_call_id}"
     if any(
-        item.criterion_id == criterion_id
-        and item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+        item.criterion_id == criterion_id and item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
         for item in goal.admitted_criteria
     ):
         return state
@@ -3494,8 +3813,7 @@ def admit_process_receipt_criterion(
         (
             fact
             for fact in state.facts
-            if fact.fact_id in goal.created_from_fact_ids
-            and fact.kind is FactKind.USER_MESSAGE
+            if fact.fact_id in goal.created_from_fact_ids and fact.kind is FactKind.USER_MESSAGE
         ),
         None,
     )
@@ -3556,8 +3874,7 @@ def admit_sandbox_receipt_criterion(
         return state
     criterion_id = f"criterion:sandbox-receipt:{goal.goal_id}:{goal.revision}:{tool_call_id}"
     if any(
-        item.criterion_id == criterion_id
-        and item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+        item.criterion_id == criterion_id and item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
         for item in goal.admitted_criteria
     ):
         return state
@@ -3565,8 +3882,7 @@ def admit_sandbox_receipt_criterion(
         (
             fact
             for fact in state.facts
-            if fact.fact_id in goal.created_from_fact_ids
-            and fact.kind is FactKind.USER_MESSAGE
+            if fact.fact_id in goal.created_from_fact_ids and fact.kind is FactKind.USER_MESSAGE
         ),
         None,
     )
@@ -3628,10 +3944,7 @@ def admit_governed_tool_receipt_criterion(
         or any(character not in "0123456789abcdef" for character in receipt_digest)
     ):
         return state
-    criterion_id = (
-        f"criterion:required-governed-tool:{goal.goal_id}:{goal.revision}:"
-        f"{tool_call_id}"
-    )
+    criterion_id = f"criterion:required-governed-tool:{goal.goal_id}:{goal.revision}:{tool_call_id}"
     requirement = next(
         (
             item
@@ -3647,8 +3960,7 @@ def admit_governed_tool_receipt_criterion(
         (
             fact
             for fact in state.facts
-            if fact.fact_id in goal.created_from_fact_ids
-            and fact.kind is FactKind.USER_MESSAGE
+            if fact.fact_id in goal.created_from_fact_ids and fact.kind is FactKind.USER_MESSAGE
         ),
         None,
     )
@@ -3669,9 +3981,7 @@ def admit_governed_tool_receipt_criterion(
         predicate={"receipt_digest": receipt_digest},
         required_evidence_class="governed_tool_receipt",
     )
-    admitted = binding.admit(
-        f"{tool_name} completed with the exact Kernel-governed result receipt"
-    )
+    admitted = binding.admit(f"{tool_name} completed with the exact Kernel-governed result receipt")
     return replace(
         state,
         goal=replace(goal, admitted_criteria=(*goal.admitted_criteria, admitted)),
@@ -3739,8 +4049,7 @@ def admit_web_source_criterion(
         (
             item
             for item in state.facts
-            if item.fact_id in goal.created_from_fact_ids
-            and item.kind is FactKind.USER_MESSAGE
+            if item.fact_id in goal.created_from_fact_ids and item.kind is FactKind.USER_MESSAGE
         ),
         None,
     )
@@ -3825,16 +4134,8 @@ def _close_orphaned_tool_batches(
         malformed = not isinstance(raw_calls, list) or not raw_calls
         if not malformed:
             for raw_call in raw_calls:
-                call_id = (
-                    raw_call.get("tool_call_id")
-                    if isinstance(raw_call, dict)
-                    else None
-                )
-                if (
-                    not isinstance(call_id, str)
-                    or not call_id
-                    or call_id in expected
-                ):
+                call_id = raw_call.get("tool_call_id") if isinstance(raw_call, dict) else None
+                if not isinstance(call_id, str) or not call_id or call_id in expected:
                     malformed = True
                     break
                 expected.append(call_id)
@@ -4059,15 +4360,10 @@ def complete_run(
         raise ValueError("active run required")
     # R1 窄不变量：UNKNOWN 只能经 recovery 分类收尾；正常完成不得抹去它。
     if _has_unknown_effect(state):
-        raise ValueError(
-            "unknown effect recovery has priority over run completion"
-        )
+        raise ValueError("unknown effect recovery has priority over run completion")
     closed_suffix = _unstarted_batch_suffix_facts(
         state,
-        text=(
-            "Tool call was not executed because the run completed before this "
-            "call started."
-        ),
+        text=("Tool call was not executed because the run completed before this call started."),
     )
     facts = (*state.facts, *closed_suffix)
     if message is not None:
@@ -4237,10 +4533,10 @@ def reclaim_background_run(state: ConversationState, invocation_id: str) -> Conv
         raise ValueError("background active run required")
     # TOOL cursor 是 Runtime 已持久化的安全续跑点；EXECUTING 的未知副作用仍由
     # recovery 接管，未落盘 response 的 provider intent 也绝不在这里重发。
-    runnable_continuation = (
-        active.status is ActiveRunStatus.RUNNABLE
-        and active.phase in {ContinuationPhase.MODEL, ContinuationPhase.TOOL}
-    )
+    runnable_continuation = active.status is ActiveRunStatus.RUNNABLE and active.phase in {
+        ContinuationPhase.MODEL,
+        ContinuationPhase.TOOL,
+    }
     persisted_provider_response = (
         active.status is ActiveRunStatus.MODEL_EXECUTING
         and active.phase is ContinuationPhase.MODEL
@@ -4290,12 +4586,14 @@ def start_operator_tool(
         kind=FactKind.TOOL_CALLS,
         content={
             "invocation_origin": InvocationOrigin.OPERATOR.value,
-            "calls": [{
-                "tool_call_id": call.tool_call_id,
-                "name": call.name,
-                "arguments": {},
-                "arguments_redacted": True,
-            }],
+            "calls": [
+                {
+                    "tool_call_id": call.tool_call_id,
+                    "name": call.name,
+                    "arguments": {},
+                    "arguments_redacted": True,
+                }
+            ],
         },
     )
     return replace(
@@ -4448,15 +4746,10 @@ def end_run(
         raise ValueError("active run required")
     # R1 窄不变量：未知 effect 只能经 recovery 分类收尾，普通终态不得抹去它。
     if _has_unknown_effect(state):
-        raise ValueError(
-            "unknown effect recovery has priority over run termination"
-        )
+        raise ValueError("unknown effect recovery has priority over run termination")
     closed_suffix = _unstarted_batch_suffix_facts(
         state,
-        text=(
-            "Tool call was not executed because the run ended before this call "
-            "started."
-        ),
+        text=("Tool call was not executed because the run ended before this call started."),
     )
     result = RecordedRunResult(
         status=status,
@@ -4502,6 +4795,8 @@ def record_nonexecuted_tool_result(
             approval_grant=None,
         ),
     )
+
+
 def pause_for_approval(
     state: ConversationState,
     request: ApprovalRequest,
@@ -4576,12 +4871,12 @@ def mark_executing(
         if class_counter is not None and class_counter >= class_limit:
             raise ValueError(f"background {expected_class} budget is exhausted")
         if background_action_authority is not None and (
-                expected_class is None
-                or class_counter is None
-                or background_action_authority.occurrence_binding_digest
-                != background_binding.binding_digest
-                or background_action_authority.action_class != expected_class
-                or background_action_authority.budget_ordinal != class_counter + 1
+            expected_class is None
+            or class_counter is None
+            or background_action_authority.occurrence_binding_digest
+            != background_binding.binding_digest
+            or background_action_authority.action_class != expected_class
+            or background_action_authority.budget_ordinal != class_counter + 1
         ):
             raise ValueError("background action authority does not bind this transition")
     record = ExecutingIntentRecord(
@@ -4601,9 +4896,7 @@ def mark_executing(
         # F1（P1 review finding 2026-08-16）：LOCAL_SAME_UID_PROCESS 的 EXECUTING
         # checkpoint 必须绑定 exact durable lease（lease use 单调消费的载体）；
         # 无 lease 不得进入 EXECUTING（裸 ApprovalGrant 不能绕过 lease 合同）。
-        raise ValueError(
-            "process executing intent must consume an exact durable lease"
-        )
+        raise ValueError("process executing intent must consume an exact durable lease")
     process_leases = state.process_leases
     if process_lease_id is not None:
         # lease use 在 durable EXECUTING checkpoint 时单调消费；超过 max_uses 由
@@ -4612,9 +4905,7 @@ def mark_executing(
         consumed = False
         for lease in process_leases:
             if lease.lease_id == process_lease_id and not consumed:
-                incremented.append(
-                    replace(lease, uses_consumed=lease.uses_consumed + 1)
-                )
+                incremented.append(replace(lease, uses_consumed=lease.uses_consumed + 1))
                 consumed = True
             else:
                 incremented.append(lease)
@@ -4629,18 +4920,14 @@ def mark_executing(
             or background_action_authority.action_class != "sandbox_confined"
         )
     ):
-        raise ValueError(
-            "sandbox executing intent must consume an exact durable lease"
-        )
+        raise ValueError("sandbox executing intent must consume an exact durable lease")
     sandbox_leases = state.sandbox_leases
     if sandbox_lease_id is not None:
         incremented_sandbox: list[SandboxAuthorityLeaseV1] = []
         consumed_sandbox = False
         for lease in sandbox_leases:
             if lease.lease_id == sandbox_lease_id and not consumed_sandbox:
-                incremented_sandbox.append(
-                    lease.with_use_consumed(lease.uses_consumed + 1)
-                )
+                incremented_sandbox.append(lease.with_use_consumed(lease.uses_consumed + 1))
                 consumed_sandbox = True
             else:
                 incremented_sandbox.append(lease)
@@ -4653,9 +4940,7 @@ def mark_executing(
         consumed_browser = False
         for lease in browser_leases:
             if lease.lease_id == browser_lease_id and not consumed_browser:
-                incremented_browser.append(
-                    lease.with_use_consumed(lease.uses_consumed + 1)
-                )
+                incremented_browser.append(lease.with_use_consumed(lease.uses_consumed + 1))
                 consumed_browser = True
             else:
                 incremented_browser.append(lease)
@@ -4780,21 +5065,13 @@ def apply_compaction_summary(
     """
 
     removable = validate_compaction_removal(state, removable_fact_ids)
-    expected_source_digest = canonical_json_digest(
-        [fact.fact_id for fact in removable]
-    )
+    expected_source_digest = canonical_json_digest([fact.fact_id for fact in removable])
     if summary.source_fact_ids_digest != expected_source_digest:
-        raise ValueError(
-            "conversation summary does not bind the removable facts in state order"
-        )
+        raise ValueError("conversation summary does not bind the removable facts in state order")
     # removal 可非连续：用 selected id 集合遍历全量 facts，不能按前缀切片。
     selected_ids = frozenset(fact.fact_id for fact in removable)
     fact_id = _context_summary_fact_id(summary)
-    if any(
-        fact.fact_id == fact_id
-        for fact in state.facts
-        if fact.fact_id not in selected_ids
-    ):
+    if any(fact.fact_id == fact_id for fact in state.facts if fact.fact_id not in selected_ids):
         raise ValueError("context summary fact_id collides with retained facts")
     summary_fact = ConversationFact(
         fact_id=fact_id,

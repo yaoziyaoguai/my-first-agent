@@ -124,8 +124,12 @@ class EvidenceGapAssessment:
 
 
 _GENERIC_GAP_INSTRUCTION = (
-    "Do not repeat completion. Call the concrete tools needed to create the "
-    "missing evidence, or send blocked_claim if no safe action can advance the Goal."
+    # 2026-10-18 真实层 E1r2/E2：旧文案把 blocked_claim 并列为出路，模型在
+    # 补足 read-back 后仅剩可修缺口时仍被引向 blocked_claim。兜底指引必须
+    # 指向「补足证据后重发 completion_claim」；blocked 通道本身不被移除。
+    "Call the concrete tools needed to create the missing evidence, then "
+    "resend completion_claim. Do not report this Goal as blocked while a "
+    "safe action can still advance it."
 )
 
 # 使既有 workspace 验证失效的治理写入工具（evidence 失效判断与 loop 抑制折叠
@@ -301,6 +305,22 @@ _GAP_REPAIRS: dict[str, _GapRepairKnowledge] = {
     ),
     # 第 65/70 轮 J11 实测:refs 抄错(复制了 revision 变更前的旧 trusted_goal
     # 投影块)并无"缺失 evidence"可创建;此语境的唯一正确修复是逐字复制当前投影。
+    # 2026-10-18 真实层 E1r2/E2：workspace 在最后一次验证后又发生写入，旧
+    # receipt 按保守失效规则不再证明最终候选（失效判定本身正确）。缺该条目
+    # 时 blocked 守卫取得空修复工具而穿透接受 blocked；正确出路是重跑同一
+    # 验证命令拿到新 receipt 后重发 completion_claim。只挂「曾满足后被失效」
+    # 型 reason——「从未满足」型（重跑不必然推进，如 timeout journey）必须
+    # 保持可 blocked（015 j3 acceptance）。
+    "the process receipt that proved the criterion was invalidated by "
+    "later workspace activity": _GapRepairKnowledge(
+        tools=("local_process",),
+        instruction=(
+            "Do not report this Goal as blocked: the recorded verification "
+            "receipt no longer proves the final workspace state. Re-run the "
+            "same verification command with local_process now, then resend "
+            "completion_claim with the fresh receipt."
+        ),
+    ),
     "completion claim is stale": _GapRepairKnowledge(
         instruction=(
             "Do not resend the same claim and do not report this Goal as blocked: "
@@ -1380,6 +1400,7 @@ class ClosedEvidenceRegistry:
                 )
             digest_expectations[label] = expected_output_digest
         source: list[ConversationFact] = []
+        invalidated_match = False
         for fact_index, fact in enumerate(facts):
             metadata = fact.content.get("metadata")
             if (
@@ -1439,6 +1460,7 @@ class ClosedEvidenceRegistry:
             ):
                 # 验证之后又发生 workspace mutation 或另一次本地执行时，无法
                 # 证明旧测试仍对应最终候选。保守要求重新跑最终验证。
+                invalidated_match = True
                 continue
             if managed_writer_active_at(facts, fact_index):
                 # W1（2026-10-12）：同一资格语义也约束 process receipt：
@@ -1446,8 +1468,14 @@ class ClosedEvidenceRegistry:
                 continue
             source.append(fact)
         if not source:
+            # 2026-10-18 真实层 E1r2/E2：区分「曾满足判据后被失效」（重跑同一
+            # 验证命令可再取得 receipt）与「从未满足」（重跑不必然推进，如
+            # timeout journey）——只有前者把 blocked_claim 判为可修缺口。
             raise EvidenceVerificationError(
-                "no exact process receipt proves the criterion"
+                "the process receipt that proved the criterion was "
+                "invalidated by later workspace activity"
+                if invalidated_match
+                else "no exact process receipt proves the criterion"
             )
         return self._record(
             source[:1],

@@ -15,16 +15,21 @@ from agent.runtime.contracts import (
     AcknowledgeProviderDisclosure,
     ActiveRun,
     ActiveRunStatus,
+    AdmittedCriterion,
     ApprovalRequest,
     ContinuationPhase,
     ConversationState,
     EgressClass,
+    EvidenceOracleKind,
     ExecutingIntentRecord,
     ExecutionAuthorityClass,
     GoalFrame,
     GoalStatus,
     LoadedSnapshot,
+    ModelResponse,
+    ModelTextBlock,
     ProposedCriterion,
+    ProviderDisclosureReceipt,
     ProviderDisclosureRequest,
     RecoverUnknownObservation,
     RecoveryRequest,
@@ -221,9 +226,259 @@ def test_contextual_disclosure_no_exits_without_send_action(answer: str) -> None
 
     assert exit_code == 0
     assert runtime.actions == []
-    # 输入前显示的是 disclosure 决策提示；退出消息是最后一行且未伪造任何发送。
+    # 输入前显示的是 disclosure 决策提示；退出消息只陈述本次 pending 未发送
+    # （B，2026-10-18），不笼统声称历史零发送。
     assert output[0].startswith("Remote provider disclosure required")
-    assert output[-1] == "Nothing was sent."
+    assert output[-1] == _RELEASE_B_REFUSAL
+
+
+def _resumed_disclosure_state() -> ConversationState:
+    """E1-B 缺口形态（2026-10-17）：/pause 停掉 active run、/resume 已把 Goal 翻回
+    GOAL_READY，挂起披露仍 durable——y 必须仍可应答以点燃继续回合。"""
+    request = ProviderDisclosureRequest.create(
+        disclosure_id="disclosure-1",
+        provider_descriptor_digest="descriptor-1",
+        canonical_destination="https://provider.example/v1",
+        model="daily-model",
+        data_classes=("user_message",),
+    )
+    goal = GoalFrame(
+        goal_id="goal-1",
+        revision=1,
+        created_from_fact_ids=("action:1:user",),
+        workspace_identity_digest="workspace-digest-1",
+        user_outcome="Persist the requested fixture note",
+        beneficiary="user",
+        targets=("workspace",),
+        scope=("workspace/fixtures",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(
+            ProposedCriterion("criterion-1", "fixture note exists"),
+        ),
+        admitted_criteria=(),
+        authority_snapshot="authority-1",
+        status=GoalStatus.GOAL_READY,
+        created_at="2026-10-17T00:00:00Z",
+        updated_at="2026-10-17T00:00:00Z",
+    )
+    return replace(
+        ConversationState.new("conversation-1"),
+        goal=goal,
+        provider_disclosure_request=request,
+    )
+
+
+def test_contextual_disclosure_yes_after_goal_resume_binds_pending_digest() -> None:
+    state = _resumed_disclosure_state()
+    runtime, _, exit_code = _run(state, "y", "/exit")
+
+    assert exit_code == 0
+    action = runtime.actions[0]
+    assert isinstance(action, AcknowledgeProviderDisclosure)
+    assert action.request_digest == state.provider_disclosure_request.request_digest
+
+
+def test_contextual_disclosure_yes_stays_inactive_while_goal_still_paused() -> None:
+    base = _resumed_disclosure_state()
+    assert base.goal is not None
+    state = replace(base, goal=replace(base.goal, status=GoalStatus.PAUSED))
+    runtime, _, exit_code = _run(state, "y", "/exit")
+
+    assert exit_code == 0
+    assert all(
+        not isinstance(action, AcknowledgeProviderDisclosure)
+        for action in runtime.actions
+    )
+
+
+# ---- B（2026-10-18 CLI release blockers）：pending 外发确认的 yes/no/空回车
+# 在活跃 AWAITING_DISCLOSURE 与 /pause→/resume 恢复形状下是同一个决定 ----
+
+_RELEASE_B_REFUSAL = (
+    "The pending disclosure was not sent. The task is preserved; leaving this session."
+)
+
+
+@pytest.mark.parametrize(
+    "state_factory", [_disclosure_state, _resumed_disclosure_state]
+)
+@pytest.mark.parametrize("answer", ["n", "no", "否", "", "   "])
+def test_release_b_refusal_and_default_refusal_exit_safely(
+    state_factory, answer: str
+) -> None:
+    """n/no/否/空回车/纯空格都等于拒绝：当前输入后立即安全退出，不提交
+    业务消息、不生成 receipt、不触发任何 run_turn（含空输入——只提供一次
+    输入，第二次读取即失败，证明拒绝发生在当前输入而非下一轮）。"""
+
+    runtime, output, exit_code = _run(state_factory(), answer)
+
+    assert exit_code == 0
+    assert runtime.actions == []
+    assert output[0].startswith("Remote provider disclosure required")
+    assert output[-1] == _RELEASE_B_REFUSAL
+
+
+@pytest.mark.parametrize("answer", ["y", "yes", "是", "n", "no", "否"])
+def test_release_b_paused_guard_prompts_resume_without_business_message(
+    answer: str,
+) -> None:
+    """窄范围 PAUSED 保护：active=None、Goal=PAUSED、request!=None、receipt=None
+    时裸 yes/no（含原同义词）只提示先 /resume，不提交业务消息。"""
+
+    base = _resumed_disclosure_state()
+    assert base.goal is not None
+    state = replace(base, goal=replace(base.goal, status=GoalStatus.PAUSED))
+    runtime, output, exit_code = _run(state, answer, "/exit")
+
+    assert exit_code == 0
+    assert runtime.actions == []
+    rendered = "\n".join(output)
+    assert _RELEASE_B_REFUSAL not in rendered
+    assert "/resume" in rendered
+
+
+def test_release_b_paused_empty_stays_ignored() -> None:
+    base = _resumed_disclosure_state()
+    assert base.goal is not None
+    state = replace(base, goal=replace(base.goal, status=GoalStatus.PAUSED))
+    runtime, output, exit_code = _run(state, "", "/exit")
+
+    assert exit_code == 0
+    assert runtime.actions == []
+    rendered = "\n".join(output)
+    assert _RELEASE_B_REFUSAL not in rendered
+    assert "/resume" not in rendered
+
+
+def test_release_b_empty_without_pending_stays_ignored() -> None:
+    runtime, output, exit_code = _run(ConversationState.new("conversation-1"), "", "/exit")
+
+    assert exit_code == 0
+    assert runtime.actions == []
+    assert _RELEASE_B_REFUSAL not in "\n".join(output)
+
+
+def _receipt_for(request: ProviderDisclosureRequest) -> ProviderDisclosureReceipt:
+    return ProviderDisclosureReceipt(
+        receipt_id="receipt-1",
+        request_digest=request.request_digest,
+        acknowledged_action_seq=1,
+        acknowledged_at="2026-10-18T00:00:00Z",
+    )
+
+
+@pytest.mark.parametrize(
+    "state_factory", [_disclosure_state, _resumed_disclosure_state]
+)
+def test_release_b_receipt_present_is_not_hijacked_by_refusal(state_factory) -> None:
+    """已 receipt 的形状不是 answerable pending：n 不被拒绝分支接管为安全退出。
+    活跃形状命中既有“run 等待专属命令”守卫；恢复形状走普通业务输入。"""
+
+    state = state_factory()
+    assert state.provider_disclosure_request is not None
+    state = replace(
+        state, provider_disclosure_receipt=_receipt_for(state.provider_disclosure_request)
+    )
+    runtime, output, exit_code = _run(state, "n")
+
+    assert exit_code == 0
+    rendered = "\n".join(output)
+    assert _RELEASE_B_REFUSAL not in rendered
+    assert all(
+        not isinstance(action, AcknowledgeProviderDisclosure)
+        for action in runtime.actions
+    )
+    if state.active_run is not None:
+        assert runtime.actions == []
+        assert "reserved command" in rendered
+    else:
+        assert runtime.actions and isinstance(runtime.actions[0], SubmitMessage)
+
+
+def test_release_b_refused_pending_survives_checkpoint_reopen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """经历 checkpoint 落盘、新进程重开：同一 pending 仍可渲染与拒绝，
+    拒绝零外发、零状态演进，且 Goal 已 ready 不强迫再 /resume。"""
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state-root"
+    opened = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000042",
+    )
+    assert opened.store is not None and opened.snapshot is not None
+    binding = opened.snapshot.state.workspace_binding
+    assert binding is not None
+    base = _resumed_disclosure_state()
+    assert base.goal is not None
+    pending = replace(
+        base,
+        conversation_id=opened.snapshot.state.conversation_id,
+        workspace_binding=binding,
+        goal=replace(base.goal, workspace_identity_digest=binding.workspace_identity_digest),
+    )
+    lease = opened.store.try_acquire(pending.conversation_id)
+    assert lease is not None
+    try:
+        opened.store.compare_and_swap(opened.snapshot, pending)
+    finally:
+        lease.release()
+    before = opened.store.load().state
+    provider_calls: list[str] = []
+    monkeypatch.setattr(
+        entrypoint.FakeProvider,
+        "generate",
+        lambda *_args, **_kwargs: provider_calls.append("generate")
+        or ModelResponse((ModelTextBlock("sent"),)),
+    )
+    output: list[str] = []
+
+    exit_code = entrypoint.main(
+        [
+            "--workspace",
+            str(workspace),
+            "--state-root",
+            str(state_root),
+            "--provider",
+            "fake",
+        ],
+        input_fn=lambda _prompt: "n",
+        write_fn=output.append,
+    )
+
+    assert exit_code == 0
+    assert provider_calls == []
+    assert LocalCheckpointStore(opened.checkpoint_path).load().state == before
+    rendered = "\n".join(output)
+    assert "Remote provider disclosure required" in rendered
+    assert rendered.rstrip().endswith(_RELEASE_B_REFUSAL)
+    # 同一落盘 pending 重开后 y 仍可应答：拒绝不清 pending、不写 DENIED。
+    output_yes: list[str] = []
+    reopened = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000043",
+    )
+    assert reopened.snapshot is not None
+    assert reopened.snapshot.state.goal is not None
+    assert reopened.snapshot.state.goal.status is GoalStatus.GOAL_READY
+    assert reopened.snapshot.state.provider_disclosure_request is not None
+    runtime_reopen = RecordingRuntime()
+    yes_values = iter(("y", "/exit"))
+    yes_code = run_repl(
+        runtime_reopen,
+        opened.store,
+        input_fn=lambda _prompt: next(yes_values),
+        write_fn=output_yes.append,
+        run_id_factory=lambda: "run-reopen",
+    )
+
+    assert yes_code == 0
+    assert isinstance(runtime_reopen.actions[0], AcknowledgeProviderDisclosure)
 
 
 @pytest.mark.parametrize(
@@ -590,8 +845,27 @@ def _goal_scoped_approval_state(
     targets: tuple[str, ...] = ("notes/idea.md", "reports"),
     request_id: str = "approval-internal-id",
     preview: str | None = None,
+    admitted_paths: tuple[str, ...] = (),
 ) -> ConversationState:
-    """R4 现场构造：活跃 Goal 的文件写入待审批；path 决定短命令适用范围。"""
+    """R4 现场构造：活跃 Goal 的文件写入待审批；path 决定短命令适用范围。
+
+    ``admitted_paths`` 追加 W2 场景的 Runtime 已准入 FILESYSTEM_DIGEST
+    criterion（真实链路里由 `_admit_approved_file_criterion` 在用户批准
+    写入时铸造；这里只构造同一 durable 状态形状）。
+    """
+
+    admitted = tuple(
+        AdmittedCriterion(
+            criterion_id=f"criterion:approved-write:{index}",
+            description="the approved write bound this exact file",
+            source_fact_id="user-1",
+            oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+            predicate={"path": admitted_path, "sha256": "a" * 64},
+            required_evidence_class="workspace_file",
+            admission_digest="b" * 64,
+        )
+        for index, admitted_path in enumerate(admitted_paths)
+    )
 
     goal = GoalFrame(
         goal_id="goal-1",
@@ -605,7 +879,7 @@ def _goal_scoped_approval_state(
         non_goals=(),
         assumptions=(),
         proposed_criteria=(ProposedCriterion("criterion-1", "files exist"),),
-        admitted_criteria=(),
+        admitted_criteria=admitted,
         authority_snapshot="authority-1",
         status=GoalStatus.GOAL_READY,
         created_at="2026-08-02T00:00:00Z",
@@ -709,6 +983,68 @@ def test_write_inside_goal_targets_keeps_r4_prompt_without_transparency_note() -
 
     assert "/approve-goal-target" in output[0]
     assert "No reusable Goal scope" not in output[0]
+
+
+def test_prose_target_write_reuses_runtime_admitted_file_scope() -> None:
+    """W2（P2 原场景）：散文 targets 下 Runtime 已准入的当前文件成为精确复用候选。
+
+    targets 是模型草稿的散文目标；notes/idea.md 有当前 Goal 的
+    FILESYSTEM_DIGEST admitted criterion（真实链路来自用户首次 y 批准写入）。
+    显示、解析与铸造共享同一 scope 判断：默认提示出现短命令，短命令解析为
+    authorize_goal_target 的 ResolveApproval。
+    """
+
+    state = _goal_scoped_approval_state(
+        targets=("实现 SPEC.md 中要求的笔记功能",),
+        admitted_paths=("notes/idea.md",),
+    )
+    runtime, output, _ = _run(state, "/approve-goal-target", "/exit")
+
+    assert output[0].startswith("Approval required")
+    assert "/approve-goal-target" in output[0]
+    assert "No reusable Goal scope" not in output[0]
+    assert len(runtime.actions) == 1
+    action = runtime.actions[0]
+    assert isinstance(action, ResolveApproval)
+    pending = state.active_run.pending_request
+    assert action.request_id == pending.request_id
+    assert action.binding_digest == pending.binding_digest
+    assert action.authorize_goal_target is True
+    assert action.authorize_goal_directory is False
+
+
+def test_prose_target_without_admitted_criterion_stays_single_shot() -> None:
+    """散文 targets 且无任何准入绑定时保持原 P2 行为：无复用 scope。"""
+
+    state = _goal_scoped_approval_state(targets=("实现 SPEC.md 中要求的笔记功能",))
+    runtime, output, _ = _run(state, "/approve-goal-target", "/exit")
+
+    assert runtime.actions == []
+    assert "No reusable Goal scope for this write" in output[0]
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "notes/idea.md.bak",
+        "notes",
+        "notes/other.md",
+        "other/idea.md",
+        ".env",
+    ),
+)
+def test_admitted_file_scope_fails_closed_outside_exact_binding(path: str) -> None:
+    """准入候选只对同一路径生效：相邻前缀/父目录/兄弟路径/敏感路径不放行。"""
+
+    state = _goal_scoped_approval_state(
+        path=path,
+        targets=("实现 SPEC.md 中要求的笔记功能",),
+        admitted_paths=("notes/idea.md",),
+    )
+    runtime, output, _ = _run(state, "/approve-goal-target", "/exit")
+
+    assert runtime.actions == []
+    assert "No reusable Goal scope for this write" in output[0]
 
 
 def test_plain_yes_stays_single_shot_at_goal_scoped_prompt() -> None:

@@ -133,6 +133,7 @@ from agent.runtime.state import (
     append_policy_result,
     apply_compaction_summary,
     apply_control_request,
+    authoritative_deliverable_file_paths,
     authoritative_process_entrypoints,
     begin_browser_takeover,
     begin_provider_call,
@@ -2844,6 +2845,61 @@ class AgentRuntime:
                             )
                             continue
                     else:
+                        # W1.5：与完成门复用同一交付缺口判断。admitted 证据全部
+                        # 可推导不等于权威原文的明确交付对象已覆盖；缺口未闭合
+                        # 时不得断言"证据已完整"并指示重发 completion_claim——
+                        # 那会让服从指引的 claim 立即被完成门以同一缺口拒绝。
+                        deliverable_gap = sorted(
+                            authoritative_deliverable_file_paths(current.state)
+                            - {
+                                criterion.predicate.get("path")
+                                for criterion in goal_frame.admitted_criteria
+                                if criterion.mandatory
+                                and criterion.oracle_kind
+                                is EvidenceOracleKind.FILESYSTEM_DIGEST
+                                and isinstance(
+                                    criterion.predicate.get("path"), str
+                                )
+                            }
+                        )
+                        if deliverable_gap:
+                            if no_progress.repair_exhausted(
+                                (
+                                    "blocked_claim_with_deliverable_gap",
+                                    *deliverable_gap,
+                                ),
+                                allowance=self._limits.max_no_progress_replans,
+                                observation_id=model_calls,
+                            ):
+                                return self._finish_no_progress(
+                                    current,
+                                    action,
+                                    warnings,
+                                    message=(
+                                        "Provider repeated blocked claims while "
+                                        "explicit deliverable files were still "
+                                        "missing from admitted criteria."
+                                    ),
+                                )
+                            no_progress_since_product_action = True
+                            current = self._save(
+                                current,
+                                append_policy_result(
+                                    current.state,
+                                    code="blocked_claim_not_verified",
+                                    message=(
+                                        "The blocked_claim was not accepted: explicit "
+                                        "user deliverable files are still outside the "
+                                        "current admitted criteria: "
+                                        + ", ".join(deliverable_gap)
+                                        + ". Advance them through the normal approval "
+                                        "and final read-back path, or produce a "
+                                        "durable blocker for them, before reporting "
+                                        "this Goal as blocked."
+                                    ),
+                                ),
+                            )
+                            continue
                         # 016 第 96 轮 a2 J7:edit+process 均成功(exit 0、durable
                         # receipts)后模型以 blocked 收尾。守卫合同要求 attempt
                         # "produces a durable blocker";完成证据已可推导时

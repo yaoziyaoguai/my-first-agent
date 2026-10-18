@@ -17,6 +17,7 @@ from agent.runtime.contracts import (
     GoalStatus,
     ProcessAuthorityCandidateV1,
     ProposedCriterion,
+    ProviderDisclosureReceipt,
     ProviderDisclosureRequest,
     RecoveryRequest,
     RunResult,
@@ -138,6 +139,7 @@ def test_completed_goal_renders_authoritative_verification_scope() -> None:
     assert "Targets: workspace" in output[1]
     assert "Required evidence: 1/1 passed" in output[1]
     assert "Durable task permissions: closed." in output[1]
+    assert "User acceptance: not established by these evidence checks." in output[1]
     assert "Evidence scope: exact current bytes of reports/final.md" in output[-2]
     assert "does not independently establish numerical or semantic correctness" in output[-2]
     assert output[-1] == "Task is closed. Use /new to start another task in this workspace."
@@ -307,6 +309,88 @@ def test_render_pending_owns_contextual_prompts_without_protocol_ids() -> None:
     assert "internal-disclosure-digest" not in rendered
     assert "internal-recovery-id" not in rendered
     assert "/ack-provider" not in rendered
+
+
+def _resumed_disclosure_pending_state(status: GoalStatus) -> ConversationState:
+    """E1-B 缺口形态（2026-10-17）：/pause 停掉 active run 后挂起披露仍 durable。"""
+    request = ProviderDisclosureRequest.create(
+        disclosure_id="disclosure-1",
+        provider_descriptor_digest="descriptor-1",
+        canonical_destination="https://provider.example/v1",
+        model="daily-model",
+        data_classes=("user_message",),
+    )
+    goal = GoalFrame(
+        goal_id="goal-1",
+        revision=1,
+        created_from_fact_ids=("action:1:user",),
+        workspace_identity_digest="workspace-digest-1",
+        user_outcome="Persist the requested fixture note",
+        beneficiary="user",
+        targets=("workspace",),
+        scope=("workspace/fixtures",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(
+            ProposedCriterion("criterion-1", "fixture note exists"),
+        ),
+        admitted_criteria=(),
+        authority_snapshot="authority-1",
+        status=status,
+        created_at="2026-10-17T00:00:00Z",
+        updated_at="2026-10-17T00:00:00Z",
+    )
+    return replace(
+        ConversationState.new("conversation-1"),
+        goal=goal,
+        provider_disclosure_request=request,
+    )
+
+
+def test_render_pending_re_raises_disclosure_only_after_goal_resume() -> None:
+    """/resume 完成后必须重升挂起披露（等价审批的重升语义）；Goal 仍 PAUSED
+    时不升——先 /resume 才可应答，避免暂停窗口里的误导提示。"""
+
+    resumed: list[str] = []
+    TerminalRenderer(resumed.append).render_pending(
+        _resumed_disclosure_pending_state(GoalStatus.GOAL_READY)
+    )
+    assert any(
+        line.startswith("Remote provider disclosure required") for line in resumed
+    )
+
+    paused: list[str] = []
+    TerminalRenderer(paused.append).render_pending(
+        _resumed_disclosure_pending_state(GoalStatus.PAUSED)
+    )
+    assert paused == []
+
+
+def test_release_b_render_uses_one_predicate_for_both_pending_shapes() -> None:
+    """B（2026-10-18）：render_pending 与 y/n/空回车共用同一只读 pending 判定——
+    已 receipt 的活跃形状不再是 answerable pending，不得渲染 [y/N] 提示。"""
+
+    request = ProviderDisclosureRequest.create(
+        disclosure_id="disclosure-1",
+        provider_descriptor_digest="descriptor-1",
+        canonical_destination="https://provider.example/v1",
+        model="daily-model",
+        data_classes=("user_message",),
+    )
+    state = replace(
+        _disclosure_pending_state(),
+        provider_disclosure_receipt=ProviderDisclosureReceipt(
+            receipt_id="receipt-1",
+            request_digest=request.request_digest,
+            acknowledged_action_seq=1,
+            acknowledged_at="2026-10-18T00:00:00Z",
+        ),
+    )
+    output: list[str] = []
+
+    TerminalRenderer(output.append).render_pending(state)
+
+    assert output == []
 
 
 def test_render_pending_artifact_generation_defers_content_confirmation() -> None:

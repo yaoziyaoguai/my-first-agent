@@ -20,9 +20,11 @@ from agent.runtime.contracts import (
 from agent.runtime.views import (
     SourceView,
     delivery_summary_message,
+    pending_provider_disclosure_decision,
     project_goal_authorization_scopes,
     project_goal_target_reuse_unavailable,
     project_goal_view,
+    project_obligation_rebind_disclosure,
     project_process_leases,
     project_visible_source_views,
     verification_scope_message,
@@ -108,10 +110,7 @@ class TerminalRenderer:
         sources = goal_view.sources
         if sources:
             self._write(self._sources_message(sources))
-        if (
-            goal_view.status == GoalStatus.VERIFIED_DONE.value
-            and goal_view.verification_scope
-        ):
+        if goal_view.status == GoalStatus.VERIFIED_DONE.value and goal_view.verification_scope:
             self._write(
                 terminal_text(
                     self._verification_scope_message(goal_view.verification_scope),
@@ -121,8 +120,7 @@ class TerminalRenderer:
         if (
             goal_view.goal_id is not None
             and goal_view.goal_revision is not None
-            and goal_view.status
-            in {GoalStatus.VERIFIED_DONE.value, GoalStatus.CANCELLED.value}
+            and goal_view.status in {GoalStatus.VERIFIED_DONE.value, GoalStatus.CANCELLED.value}
         ):
             terminal_key = (
                 goal_view.goal_id,
@@ -131,9 +129,7 @@ class TerminalRenderer:
             )
             if terminal_key not in self._terminal_hints:
                 self._terminal_hints.add(terminal_key)
-                self._write(
-                    "Task is closed. Use /new to start another task in this workspace."
-                )
+                self._write("Task is closed. Use /new to start another task in this workspace.")
         for warning in result.delivery_warnings:
             self._write(f"Warning: {terminal_text(warning)}")
 
@@ -142,14 +138,13 @@ class TerminalRenderer:
         不暴露内部 request identity。
         """
 
-        active = state.active_run
-        if active is None:
-            return
-        if (
-            active.status is ActiveRunStatus.AWAITING_DISCLOSURE
-            and state.provider_disclosure_request is not None
-        ):
+        # B（2026-10-18）：活跃 AWAITING_DISCLOSURE 与 /pause→/resume 恢复形状
+        # （active=None、Goal=GOAL_READY）共用 views 的同一只读判定；已 receipt
+        # 的形状不是 answerable pending，不渲染 [y/N]。Goal 仍 PAUSED 时不升
+        # ——先 /resume。
+        if pending_provider_disclosure_decision(state):
             request = state.provider_disclosure_request
+            assert request is not None
             self._write(
                 self._disclosure_message(
                     destination=request.canonical_destination,
@@ -157,6 +152,9 @@ class TerminalRenderer:
                     data_classes=request.data_classes,
                 )
             )
+            return
+        active = state.active_run
+        if active is None:
             return
         if active.status is ActiveRunStatus.AWAITING_APPROVAL and isinstance(
             active.pending_request, ApprovalRequest
@@ -169,11 +167,10 @@ class TerminalRenderer:
                     risk=request.risk or "unknown",
                     side_effect=request.side_effect or "unknown",
                     preview=request.preview,
-                    artifact_path=(
-                        requirement.artifact_path if requirement is not None else None
-                    ),
+                    artifact_path=(requirement.artifact_path if requirement is not None else None),
                     authorization_scopes=project_goal_authorization_scopes(state),
                     goal_scope_unavailable=project_goal_target_reuse_unavailable(state),
+                    obligation_rebind_disclosure=project_obligation_rebind_disclosure(state),
                 )
             )
             return
@@ -335,6 +332,7 @@ class TerminalRenderer:
         artifact_path: str | None = None,
         authorization_scopes: tuple[str | None, str | None] = (None, None),
         goal_scope_unavailable: bool = False,
+        obligation_rebind_disclosure: str | None = None,
     ) -> str:
         lines = [
             "Approval required",
@@ -382,6 +380,10 @@ class TerminalRenderer:
                 "the current task targets. Approving here covers only this one "
                 "operation; later writes will each require approval again."
             )
+        if obligation_rebind_disclosure is not None:
+            # P2（对抗审查 2026-10-18）：批准=执行这一笔；若本次批准会同时把
+            # 一条已失败的验证义务重绑定到这条命令，必须在批准前如实披露。
+            lines.append(terminal_text(obligation_rebind_disclosure))
         return "\n".join(lines)
 
     @staticmethod

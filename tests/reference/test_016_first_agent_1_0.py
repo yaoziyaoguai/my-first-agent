@@ -95,6 +95,20 @@ def test_everyday_policy_treats_explicit_verifiable_work_as_a_goal() -> None:
     )
     assert "never invent or save an output artifact" in EVERYDAY_SYSTEM_POLICY
     assert "use that exact executable and argv directly" in EVERYDAY_SYSTEM_POLICY
+    # 2026-10-18 真实层 E3 already-correct 3/3 行为方差：模型把已满足的任务当
+    # 「补全覆盖」处理（重写测试/实现）。policy 必须指引先读交付物、已满足则
+    # 直接走完成仪式，不做未请求的写入。
+    assert (
+        "read the SPEC-relevant deliverable files and run the requested validation "
+        "before writing" in EVERYDAY_SYSTEM_POLICY
+    )
+    assert (
+        "complete the Goal directly from that evidence instead of writing again"
+        in EVERYDAY_SYSTEM_POLICY
+    )
+    assert "unrequested improvements are not part of the requested outcome" in (
+        EVERYDAY_SYSTEM_POLICY
+    )
     assert "never spend local_process authority on workspace discovery" in (
         EVERYDAY_SYSTEM_POLICY
     )
@@ -219,6 +233,14 @@ def test_intent_contract_uses_one_prose_only_test_for_mixed_tasks() -> None:
         assert "direct_response" not in request_pack.control_schema["input_schema"][
             "properties"
         ]["kind"]["enum"]
+
+
+def test_trial_closeout_policy_requires_checks_for_explicit_behavior() -> None:
+    """指引合同，不把这条离线断言当成真实模型必然理解正确的证据。"""
+
+    assert "verify each explicit requirement and the latest correction" in EVERYDAY_SYSTEM_POLICY
+    assert "including boundary and negative cases" in EVERYDAY_SYSTEM_POLICY
+    assert "Keep unverified requirements pending" in EVERYDAY_SYSTEM_POLICY
 
 
 def test_artifact_validation_separates_existing_and_process_created_files() -> None:

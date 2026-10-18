@@ -4419,6 +4419,11 @@ class ResolveApproval(RuntimeAction):
     authorize_goal_target: bool = False
     # 只有当前调用位于 Goal 明确列出的目录 target 下时才可铸造；不从文件父目录猜测。
     authorize_goal_directory: bool = False
+    # 2026-10-18 发现 3：显式 opt-in——把本次批准同时授权「把一条已执行且从未
+    # 成功的 runtime-owned 验证义务重绑定到这条 canonical 等价命令」。默认 False
+    # 保持逐笔批准语义（批准=执行这一笔，不改写 admitted 义务）；对抗审查指出
+    # 隐式重绑定把 execute-scoped 批准静默升级为 obligation mutation。
+    authorize_obligation_rebind: bool = False
 
     def __post_init__(self) -> None:
         if self.defer_artifact_confirmation and (
@@ -4435,6 +4440,8 @@ class ResolveApproval(RuntimeAction):
             raise ValueError("goal directory authorization requires approval")
         if self.authorize_goal_target and self.authorize_goal_directory:
             raise ValueError("choose either exact target or directory authorization")
+        if self.authorize_obligation_rebind and not self.approved:
+            raise ValueError("obligation rebind authorization requires approval")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -34,9 +34,7 @@ from agent.runtime.contracts import (
 # 选择 79(NR_UNRESOLVABLE 之外的未占用私人区段)只是进程内信令,不是 errno 声明。
 NEW_SESSION_REQUESTED = 79
 
-_TERMINAL_GOAL_STATUSES = frozenset(
-    {GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED}
-)
+_TERMINAL_GOAL_STATUSES = frozenset({GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED})
 
 
 def new_session_gate(state: ConversationState) -> str | None:
@@ -49,14 +47,10 @@ def new_session_gate(state: ConversationState) -> str | None:
     """
     active = state.active_run
     if active is not None:
-        return (
-            "Resolve the pending run or recovery state before starting a new task."
-        )
+        return "Resolve the pending run or recovery state before starting a new task."
     goal = state.goal
     if goal is not None and goal.status not in _TERMINAL_GOAL_STATUSES:
-        return (
-            "The current goal is still active; finish or cancel it before /new."
-        )
+        return "The current goal is still active; finish or cancel it before /new."
     return None
 
 
@@ -131,6 +125,7 @@ def build_resolve_approval(
     defer_artifact_confirmation: bool = False,
     authorize_goal_target: bool = False,
     authorize_goal_directory: bool = False,
+    authorize_obligation_rebind: bool = False,
 ) -> ResolveApproval:
     return ResolveApproval(
         conversation_id=state.conversation_id,
@@ -145,6 +140,7 @@ def build_resolve_approval(
         defer_artifact_confirmation=defer_artifact_confirmation,
         authorize_goal_target=authorize_goal_target,
         authorize_goal_directory=authorize_goal_directory,
+        authorize_obligation_rebind=authorize_obligation_rebind,
     )
 
 
@@ -169,8 +165,7 @@ def parse_artifact_confirmation(argument: str) -> tuple[str, str]:
         or ".." in path.split("/")
     ):
         raise ValueError(
-            "Use /approve-artifact <64-lowercase-hex-sha256> "
-            "<workspace-relative-path>."
+            "Use /approve-artifact <64-lowercase-hex-sha256> <workspace-relative-path>."
         )
     return path, sha256
 

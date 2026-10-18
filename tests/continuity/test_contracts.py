@@ -2559,3 +2559,475 @@ def test_014_contract_extensions_preserve_preexisting_positional_prefixes() -> N
     )
     assert intent.safety_binding == {"stable": True}
     assert intent.egress is EgressClass.NONE
+
+
+# ---------------------------------------------------------------------------
+# W1：authoritative_deliverable_file_paths 冻结判别表（2026-10-17 日用收口包）。
+# 期望集 = 当前权威 USER_MESSAGE 原文里"直接正向要求的 workspace 相对文件
+# 交付对象"下界。阅读输入、参照/禁止对象、疑问句、非路径关键词、危险路径、
+# 非权威来源（TOOL_RESULT）一律不得进入交付约束。与显式 process 要求同型：
+# 纯派生、逐 clause、按 fact 顺序做正/负更新。
+# ---------------------------------------------------------------------------
+
+W1_D04_TASK = (
+    "完成 retry_app 的 bounded retry 行为：瞬态 RuntimeError 失败需要重试，新的"
+    "公开参数名是 max_retries，命令行适配器 retry_app/cli.py 必须使用同一个值；"
+    "负数限制无效，一次操作的执行次数上限是 1 + max_retries。同时保留旧的"
+    " retry_count 关键字与 CLI 选项作为别名；旧名与新名同时提供时必须拒绝这个"
+    "有歧义的请求。"
+)
+W1_RENAMED_TASK = (
+    "为 metrics_app 新增阈值处理：在 metrics_app/threshold.py 实现 "
+    "clamp(value, *, span)，把 value 限制在 [0, span] 区间内，越界时取最近的"
+    "边界；span 必须是正数，非正数直接报错。metrics_app/report.py 的 "
+    "format_row 也要改为对每个数值调用 clamp，输出 row=<序号>:<限幅值> 并用"
+    "空格连接。"
+)
+W1_CONFIRM_TASK = (
+    "在 retry_app/service.py 实现有界重试：瞬态 RuntimeError 失败需要重试，"
+    "公开参数名是 max_retries，负数限制无效，一次操作的执行次数上限是 "
+    "1 + max_retries；同时保留旧的 retry_count 关键字作为别名，旧名与新名"
+    "同时提供时必须拒绝这个有歧义的请求。"
+)
+
+_W1_FROZEN_INPUTS = (
+    (
+        "D04 原文只点名 CLI",
+        W1_D04_TASK,
+        frozenset({"retry_app/cli.py"}),
+    ),
+    (
+        "改名同构双交付",
+        W1_RENAMED_TASK,
+        frozenset({"metrics_app/threshold.py", "metrics_app/report.py"}),
+    ),
+    (
+        "双交付中文",
+        "更新 app/worker.py；app/command.py 必须使用相同配置",
+        frozenset({"app/worker.py", "app/command.py"}),
+    ),
+    (
+        "双交付英文",
+        "Update app/worker.py; app/command.py must use the same configuration.",
+        frozenset({"app/worker.py", "app/command.py"}),
+    ),
+    (
+        "阅读输入不算交付",
+        "阅读 SPEC.md，修改 app/worker.py",
+        frozenset({"app/worker.py"}),
+    ),
+    (
+        "参照与禁止对象不强制修改",
+        "参考 docs/example.py，不要修改它；更新 app/worker.py",
+        frozenset({"app/worker.py"}),
+    ),
+    (
+        "R3 原文 process 路径不算文件交付",
+        "创建 notes.txt 并 运行 ./check.sh",
+        frozenset({"notes.txt"}),
+    ),
+    (
+        "疑问句不产生交付要求",
+        "如何修改 app/config.py？",
+        frozenset(),
+    ),
+    (
+        "非路径关键词不算交付对象",
+        "把 max_retries 的默认值改为 3",
+        frozenset(),
+    ),
+    (
+        "纯散文无显式交付对象",
+        "把重试逻辑改成有界的",
+        frozenset(),
+    ),
+    (
+        "句内明确禁止对象",
+        "更新 app/worker.py，不要改动 app/legacy.py",
+        frozenset({"app/worker.py"}),
+    ),
+    (
+        "已正确目标的单文件任务",
+        W1_CONFIRM_TASK,
+        frozenset({"retry_app/service.py"}),
+    ),
+    (
+        "参照规格实现不把规格当交付对象",
+        "实现 SPEC.md 中要求的笔记功能",
+        frozenset(),
+    ),
+    (
+        "按说明实现不把规格当交付对象",
+        "按 SPEC.md 的说明实现笔记功能：创建 notes/idea.md，记录当天想法。",
+        frozenset({"notes/idea.md"}),
+    ),
+    (
+        "绝对路径与父目录逃逸拒绝",
+        "更新 /etc/hosts 和 ../outside.py",
+        frozenset(),
+    ),
+)
+
+
+def _deliverable_extractor():
+    # 局部导入：Red 阶段只让新测试失败，不让整个模块 collection 报错。
+    from agent.runtime.state import authoritative_deliverable_file_paths
+
+    return authoritative_deliverable_file_paths
+
+
+def _w1_state(
+    fact_texts: tuple[tuple[str, str, dict], ...],
+    source_ids: tuple[str, ...],
+) -> ConversationState:
+    """按 (fact_id, text, extra_content) 构造权威来源绑定的 W1 状态。"""
+
+    facts = tuple(
+        ConversationFact(
+            fact_id=fact_id,
+            kind=FactKind.USER_MESSAGE,
+            content={"text": text, **extra},
+        )
+        for fact_id, text, extra in fact_texts
+    )
+    return replace(
+        ConversationState.new("conversation:w1-deliverable"),
+        goal=replace(
+            _goal(),
+            created_from_fact_ids=source_ids,
+        ),
+        facts=facts,
+    )
+
+
+@pytest.mark.parametrize(
+    ("label", "user_text", "expected"),
+    _W1_FROZEN_INPUTS,
+    ids=[item[0] for item in _W1_FROZEN_INPUTS],
+)
+def test_w1_deliverable_lower_bound_recognizes_direct_file_requirements(
+    label: str,
+    user_text: str,
+    expected: frozenset[str],
+) -> None:
+    """W1.4 矩阵：明确文件交付下界只认直接正向要求，拒绝扩大解释。"""
+
+    state = _w1_state(
+        (("fact:user:w1", user_text, {}),),
+        ("fact:user:w1",),
+    )
+
+    assert _deliverable_extractor()(state) == expected, label
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-18 CLI 首发阻断包 A（审计 F1/F2）：交付对象来源分类的冻结矩阵。
+# 既有 _W1_FROZEN_INPUTS 全部继续生效；本表只补发布包新增的有限语法行。
+# ---------------------------------------------------------------------------
+
+_RELEASE_A_FROZEN_INPUTS = (
+    (
+        "中文紧邻路径仍是交付对象",
+        "修改app/config.py",
+        frozenset({"app/config.py"}),
+    ),
+    (
+        "行内反引号路径仍是交付对象",
+        "修改 `app/config.py`",
+        frozenset({"app/config.py"}),
+    ),
+    (
+        "中文紧邻双交付下界",
+        "命令行适配器retry_app/cli.py 必须使用同一个值",
+        frozenset({"retry_app/cli.py"}),
+    ),
+    (
+        "礼貌请求是交付要求",
+        "Could you update app/config.py?",
+        frozenset({"app/config.py"}),
+    ),
+    (
+        "please 礼貌请求是交付要求",
+        "Could you please update app/config.py?",
+        frozenset({"app/config.py"}),
+    ),
+    (
+        "would 礼貌请求是交付要求",
+        "Would you update app/config.py?",
+        frozenset({"app/config.py"}),
+    ),
+    (
+        "would please 礼貌请求是交付要求",
+        "Would you please update app/config.py?",
+        frozenset({"app/config.py"}),
+    ),
+    (
+        "解释型请求不产生义务",
+        "Could you explain how to update app/config.py?",
+        frozenset(),
+    ),
+    (
+        "英文说明型疑问不产生义务",
+        "How do I update app/config.py?",
+        frozenset(),
+    ),
+    (
+        "版本号不是交付文件",
+        "Update Python to 3.12",
+        frozenset(),
+    ),
+    (
+        "数字版本目录不排除路径",
+        "修改 app/v3.12/config.py",
+        frozenset({"app/v3.12/config.py"}),
+    ),
+    (
+        "requirements 规格指称不是交付对象",
+        "Implement SPEC.md requirements",
+        frozenset(),
+    ),
+    (
+        "根据规格实现需求不是交付对象",
+        "根据 SPEC.md 实现需求",
+        frozenset(),
+    ),
+    (
+        "直接修改优先于说明后缀",
+        "修改 SPEC.md 的说明",
+        frozenset({"SPEC.md"}),
+    ),
+    (
+        "跨分句引文不产生义务",
+        "解释“创建 app/example.py；修改 app/other.py”的含义，不要修改任何文件。",
+        frozenset(),
+    ),
+    (
+        "日志报告不产生义务",
+        "日志显示：创建 app/old.py；请说明原因，不要修改文件。",
+        frozenset(),
+    ),
+    (
+        "日志范围跨分号继承",
+        "日志显示：创建 app/old.py；修改 app/other.py；请说明原因",
+        frozenset(),
+    ),
+    (
+        "明确新请求终止日志范围",
+        "日志显示：创建 app/old.py；请修改 app/live.py",
+        frozenset({"app/live.py"}),
+    ),
+    (
+        "阅读加修改只计修改对象",
+        "阅读 SPEC.md，然后修改 app/config.py",
+        frozenset({"app/config.py"}),
+    ),
+    (
+        "根据说明修改只计修改对象",
+        "根据 SPEC.md 的说明修改 app/config.py",
+        frozenset({"app/config.py"}),
+    ),
+    (
+        "围栏代码块示例不产生义务",
+        "修改 app/live.py；下面代码块只是示例，勿执行：\n"
+        "```text\n创建 app/demo.py\n修改 app/example.py\n```",
+        frozenset({"app/live.py"}),
+    ),
+    (
+        "绝对与逃逸路径不是交付对象",
+        "修改 /tmp/out.py、../out.py 和 dir/../out.py",
+        frozenset(),
+    ),
+    (
+        "遍历续接不截取前缀",
+        "修改 dir/out.py/../other.py",
+        frozenset(),
+    ),
+    (
+        "反斜线附尾不截取",
+        "修改 dir/out.py\\x",
+        frozenset(),
+    ),
+    (
+        "Windows 盘符不截取",
+        "修改 C:\\tmp\\out.py",
+        frozenset(),
+    ),
+    (
+        "URL 不截取",
+        "修改 https://host/out.py",
+        frozenset(),
+    ),
+    (
+        "CJK 段内不截取后缀",
+        "修改 /tmp/中文out.py",
+        frozenset(),
+    ),
+    (
+        "查询串不截取",
+        "修改 app/config.py?x=1",
+        frozenset(),
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "user_text", "expected"),
+    _RELEASE_A_FROZEN_INPUTS,
+    ids=[item[0] for item in _RELEASE_A_FROZEN_INPUTS],
+)
+def test_release_a_deliverable_source_classification(
+    label: str,
+    user_text: str,
+    expected: frozenset[str],
+) -> None:
+    """发布包 A 矩阵：中文紧邻/礼貌请求计入下界；输入指称、引文、
+    围栏示例、日志报告、版本号与非法 token 形状不产生或截取交付义务。"""
+
+    state = _w1_state(
+        (("fact:user:release-a", user_text, {}),),
+        ("fact:user:release-a",),
+    )
+
+    assert _deliverable_extractor()(state) == expected, label
+
+
+def test_w1_correction_adds_deliverable_without_clearing_others() -> None:
+    """correction 新增对象则约束生效，且不清空其它既有交付对象。"""
+
+    state = _w1_state(
+        (
+            ("fact:user:w1", "更新 app/worker.py", {}),
+            (
+                "fact:user:w1-fix",
+                "另外还要创建 app/flags.py",
+                {"control": "goal_correction"},
+            ),
+        ),
+        ("fact:user:w1", "fact:user:w1-fix"),
+    )
+
+    assert _deliverable_extractor()(state) == frozenset(
+        {"app/worker.py", "app/flags.py"}
+    )
+
+
+def test_w1_correction_withdrawal_updates_only_named_target() -> None:
+    """明确撤回只移除被点名对象，其余交付对象保留。"""
+
+    state = _w1_state(
+        (
+            (
+                "fact:user:w1",
+                "更新 app/worker.py；app/command.py 必须使用相同配置",
+                {},
+            ),
+            (
+                "fact:user:w1-fix",
+                "不要修改 app/command.py，只修改 app/worker.py",
+                {"control": "goal_correction"},
+            ),
+        ),
+        ("fact:user:w1", "fact:user:w1-fix"),
+    )
+
+    assert _deliverable_extractor()(state) == frozenset({"app/worker.py"})
+
+
+def test_w1_silent_correction_keeps_existing_deliverables() -> None:
+    """沉默或仅改无关要求的 correction 不能清空既有交付对象。"""
+
+    state = _w1_state(
+        (
+            (
+                "fact:user:w1",
+                "更新 app/worker.py；app/command.py 必须使用相同配置",
+                {},
+            ),
+            (
+                "fact:user:w1-fix",
+                "界面文案换成中文",
+                {"control": "goal_correction"},
+            ),
+        ),
+        ("fact:user:w1", "fact:user:w1-fix"),
+    )
+
+    assert _deliverable_extractor()(state) == frozenset(
+        {"app/worker.py", "app/command.py"}
+    )
+
+
+def test_w1_unconsumed_correction_does_not_apply_early() -> None:
+    """未消费 correction（未进 created_from_fact_ids）不提前生效。"""
+
+    state = _w1_state(
+        (
+            ("fact:user:w1", "更新 app/worker.py", {}),
+            (
+                "fact:user:w1-fix",
+                "另外还要创建 app/flags.py",
+                {"control": "goal_correction"},
+            ),
+        ),
+        ("fact:user:w1",),
+    )
+
+    assert _deliverable_extractor()(state) == frozenset({"app/worker.py"})
+
+
+def test_w1_withdraw_then_readd_restores_deliverable() -> None:
+    """按 fact 顺序做正/负更新：撤回后再要求恢复交付对象。"""
+
+    state = _w1_state(
+        (
+            ("fact:user:w1", "更新 app/worker.py", {}),
+            (
+                "fact:user:w1-fix-1",
+                "不要更新 app/worker.py",
+                {"control": "goal_correction"},
+            ),
+            (
+                "fact:user:w1-fix-2",
+                "还是要更新 app/worker.py",
+                {"control": "goal_correction"},
+            ),
+        ),
+        ("fact:user:w1", "fact:user:w1-fix-1", "fact:user:w1-fix-2"),
+    )
+
+    assert _deliverable_extractor()(state) == frozenset({"app/worker.py"})
+
+
+def test_w1_tool_output_text_cannot_create_deliverable_requirement() -> None:
+    """W1.4：TOOL_RESULT 里的“修改 app/other.py”不是用户交付要求。
+
+    与 R3 的工具输出非权威边界同型：交付下界只从 created_from_fact_ids
+    绑定的 USER_MESSAGE 原文派生，工具输出/日志引文不铸造义务。
+    """
+
+    user = ConversationFact(
+        fact_id="fact:user:w1-tool-output",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "修复启动失败的问题"},
+    )
+    tool_output = ConversationFact(
+        fact_id="fact:result:w1-tool-output",
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": "read-log",
+            "text": "日志显示：修改 app/other.py 后即可恢复。",
+            "is_error": False,
+            "executed": True,
+            "metadata": {},
+        },
+    )
+    state = replace(
+        ConversationState.new("conversation:w1-tool-output"),
+        goal=replace(
+            _goal(),
+            created_from_fact_ids=("fact:user:w1-tool-output",),
+        ),
+        facts=(user, tool_output),
+    )
+
+    assert _deliverable_extractor()(state) == frozenset()

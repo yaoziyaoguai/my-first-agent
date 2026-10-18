@@ -138,7 +138,7 @@ def test_015_process_receipt_criterion_can_be_admitted_and_verified() -> None:
             "metadata": {"tool_name": "edit_file"},
         },
     )
-    with pytest.raises(EvidenceVerificationError, match="no exact process receipt"):
+    with pytest.raises(EvidenceVerificationError, match="was invalidated by later workspace"):
         registry._tool_receipt(
             (fact, later_edit),
             goal_id="goal-j1",
@@ -206,7 +206,7 @@ def test_015_process_receipt_criterion_can_be_admitted_and_verified() -> None:
             },
         },
     )
-    with pytest.raises(EvidenceVerificationError, match="no exact process receipt"):
+    with pytest.raises(EvidenceVerificationError, match="was invalidated by later workspace"):
         registry._tool_receipt(
             (fact, later_failed_process),
             goal_id="goal-j1",
@@ -415,7 +415,7 @@ def test_015_unsandboxed_validation_processes_no_longer_coexist_read_only_sandbo
     lint_fact = receipt_fact("b", "b" * 64)
     # 后续已执行 result 使先前的验证证据失效：不得凭两个未沙箱 receipt 完成两个
     # criterion（旧合同在此放行，是审计确认的 VERIFIED_DONE 误判来源）。
-    with pytest.raises(EvidenceVerificationError, match="no exact process receipt"):
+    with pytest.raises(EvidenceVerificationError, match="was invalidated by later workspace"):
         registry._tool_receipt(
             (tests_fact, lint_fact),
             goal_id="goal-j1",

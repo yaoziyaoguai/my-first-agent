@@ -15,16 +15,26 @@ from agent.runtime.contracts import (
     ConversationFact,
     ConversationState,
     FactKind,
+    GoalStatus,
     ModelResponse,
     ModelTextBlock,
+    PauseGoal,
     ProviderDescriptor,
     Resume,
+    ResumeGoal,
     RunStatus,
     SubmitMessage,
 )
 from agent.runtime.loop import AgentRuntime, InvocationLimits
 from agent.runtime.tools import KernelToolRuntime
-from tests.kernel.fakes import CollectingSink, InMemoryCheckpointStore, ScriptedProvider
+from tests.kernel.fakes import (
+    CollectingSink,
+    InMemoryCheckpointStore,
+    ScriptedProvider,
+    ScriptedResponse,
+    conversation_with_active_goal,
+    goal_noop_response,
+)
 
 
 def _descriptor(*, model: str = "remote-model") -> ProviderDescriptor:
@@ -37,9 +47,15 @@ def _descriptor(*, model: str = "remote-model") -> ProviderDescriptor:
     )
 
 
-def _runtime(state: ConversationState, descriptor: ProviderDescriptor | None):
+def _runtime(
+    state: ConversationState,
+    descriptor: ProviderDescriptor | None,
+    responses: tuple[ScriptedResponse, ...] | None = None,
+):
     store = InMemoryCheckpointStore(state)
-    provider = ScriptedProvider(ModelResponse((ModelTextBlock("done"),)))
+    provider = ScriptedProvider(
+        *(responses if responses is not None else (ModelResponse((ModelTextBlock("done"),)),))
+    )
     runtime = AgentRuntime(
         provider=provider,
         provider_descriptor=descriptor,
@@ -104,7 +120,141 @@ def test_exact_acknowledgement_allows_one_bound_context_pack() -> None:
     assert store.state.provider_disclosure_receipt.request_digest == request.request_digest
 
 
-def test_model_destination_or_data_class_change_invalidates_receipt() -> None:
+def test_pending_disclosure_survives_goal_pause_and_ack_continues_after_resume() -> None:
+    """E1-B 真实缺口（2026-10-17）：/pause 恰落在 pending provider disclosure 上时，
+    active run 被停掉但挂起披露仍 durable。新进程 /resume 后，精确 ack 必须可应答
+    并点燃继续回合（与 SubmitMessage 同型点火），而不是静默 idle 丢掉挂起回合。"""
+
+    runtime, store, provider = _runtime(
+        conversation_with_active_goal(),
+        _descriptor(),
+        responses=(
+            ModelResponse((ModelTextBlock("sent"),)),
+            goal_noop_response("correlation-resume-2"),
+        ),
+    )
+    runtime.run_turn(_submit(store.state), store.load())
+    request = store.state.provider_disclosure_request
+    assert request is not None
+
+    def _control(action_cls, **kwargs):
+        state = store.state
+        goal = state.goal
+        assert goal is not None
+        return action_cls(
+            conversation_id=state.conversation_id,
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            goal_id=goal.goal_id,
+            goal_revision=goal.revision,
+            **kwargs,
+        )
+
+    paused = runtime.run_turn(_control(PauseGoal), store.load())
+    assert paused.message == "goal paused at a safe boundary"
+    assert store.state.active_run is None
+    assert store.state.goal.status is GoalStatus.PAUSED
+    assert store.state.provider_disclosure_request is not None
+
+    resumed = runtime.run_turn(_control(ResumeGoal), store.load())
+    assert resumed.message == "goal resumed"
+    assert store.state.goal.status is GoalStatus.GOAL_READY
+    assert store.state.active_run is None
+    assert store.state.provider_disclosure_request is not None
+    assert store.state.provider_disclosure_receipt is None
+
+    state = store.state
+    ack = AcknowledgeProviderDisclosure(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+        request_digest=request.request_digest,
+        acknowledged_at="2026-10-17T00:00:00Z",
+    )
+    ignited = runtime.run_turn(ack, store.load())
+
+    # 恢复后的上下文多了 pause/resume 控制回执：数据类集合变化按既有合同要求
+    # 新披露。第一步 ack 的职责是点燃继续回合（active run 回来），而不是免检。
+    assert ignited.status is RunStatus.AWAITING_DISCLOSURE
+    assert store.state.active_run is not None
+    assert store.state.active_run.status is ActiveRunStatus.AWAITING_DISCLOSURE
+    renewed = store.state.provider_disclosure_request
+    assert renewed is not None and renewed.request_digest != request.request_digest
+    assert renewed.data_classes != request.data_classes
+    assert store.state.provider_disclosure_receipt is None
+
+    state = store.state
+    final_ack = AcknowledgeProviderDisclosure(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+        request_digest=renewed.request_digest,
+        acknowledged_at="2026-10-17T00:01:00Z",
+    )
+    result = runtime.run_turn(final_ack, store.load())
+
+    # 恢复的回合真实发出（修复前此处 0 发送、静默 idle）；有限脚本下 run 停在
+    # 下一次数据类增长的新披露上——与既有「数据类变更需重新披露」合同一致，
+    # 不是免检直通。
+    assert result.status is RunStatus.AWAITING_DISCLOSURE
+    assert len(provider.calls) == 2
+    assert store.state.provider_disclosure_receipt is None
+    third = store.state.provider_disclosure_request
+    assert third is not None and third.request_digest != renewed.request_digest
+
+
+def test_release_b_orphan_refusal_via_repl_keeps_zero_egress_delta() -> None:
+    """B（2026-10-18）：生产 Runtime 走 Submit→Pause→Resume 到达恢复形状后，
+    REPL 输入 n 必须安全退出——零 provider 请求、零业务消息、零 receipt、
+    零状态演进，任务与 pending 决策原样保留。"""
+
+    runtime, store, provider = _runtime(
+        conversation_with_active_goal(),
+        _descriptor(),
+        responses=(ModelResponse((ModelTextBlock("sent"),)),),
+    )
+    runtime.run_turn(_submit(store.state), store.load())
+    assert provider.calls == []
+
+    def _control(action_cls):  # noqa: ANN001
+        state = store.state
+        goal = state.goal
+        assert goal is not None
+        return action_cls(
+            conversation_id=state.conversation_id,
+            action_seq=state.next_action_seq,
+            expected_revision=state.revision,
+            goal_id=goal.goal_id,
+            goal_revision=goal.revision,
+        )
+
+    runtime.run_turn(_control(PauseGoal), store.load())
+    resumed = runtime.run_turn(_control(ResumeGoal), store.load())
+    assert resumed.message == "goal resumed"
+    assert store.state.active_run is None
+    assert store.state.goal is not None
+    assert store.state.goal.status is GoalStatus.GOAL_READY
+    before = store.state
+    output: list[str] = []
+
+    from agent.cli.app import run_repl
+
+    exit_code = run_repl(
+        runtime,
+        store,
+        input_fn=lambda _prompt: "n",
+        write_fn=output.append,
+        run_id_factory=lambda: "run-refuse",
+    )
+
+    assert exit_code == 0
+    assert provider.calls == []
+    assert output[-1] == (
+        "The pending disclosure was not sent. The task is preserved; leaving this session."
+    )
+    assert store.state == before
+    assert store.state.provider_disclosure_request is not None
+    assert store.state.provider_disclosure_receipt is None
     runtime, store, provider = _runtime(ConversationState.new("conversation-1"), _descriptor())
     runtime.run_turn(_submit(store.state), store.load())
     request = store.state.provider_disclosure_request

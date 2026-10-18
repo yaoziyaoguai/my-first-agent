@@ -43,14 +43,21 @@ from agent.runtime.ports import CheckpointStore
 from agent.runtime.views import (
     GoalView,
     SourceView,
+    pending_provider_disclosure_decision,
     project_goal_authorization_scopes,
     project_goal_view,
+    project_obligation_rebind_disclosure,
     project_process_leases,
     project_visible_source_views,
 )
 
 _AFFIRMATIVE = frozenset({"y", "yes", "是", "允许"})
 _NEGATIVE = frozenset({"n", "no", "否", "不允许"})
+# B（2026-10-18）：拒绝/默认拒绝 pending 外发确认的安全退出文案。只陈述本次
+# 待确认内容未发送，不笼统声称历史上 Nothing was sent——此前别的请求可能已发送。
+_PENDING_DISCLOSURE_REFUSAL = (
+    "The pending disclosure was not sent. The task is preserved; leaving this session."
+)
 _RECOVERY_SUCCEEDED = frozenset({"已成功", "成功", "succeeded", "success"})
 _RECOVERY_FAILED = frozenset({"未成功", "失败", "failed", "failure"})
 _RECOVERY_STOP = frozenset({"先停止", "停止", "stop"})
@@ -153,12 +160,18 @@ def run_repl(
             write_fn(_HELP_TEXT)
             continue
         if not raw.strip():
+            # B（2026-10-18）：answerable pending disclosure 上的空回车/纯空格
+            # 与 [y/N] 提示一致地默认拒绝——安全退出，保留任务；无 pending 时
+            # 保留既有忽略行为。
+            if pending_provider_disclosure_decision(snapshot.state):
+                write_fn(_PENDING_DISCLOSURE_REFUSAL)
+                return 0
             continue
         if raw.strip().startswith("/browser-profiles"):
             if browser_profile_command is None:
                 write_fn("Browser profiles are unavailable in this session.")
                 continue
-            suffix = raw.strip()[len("/browser-profiles"):].strip() or "list"
+            suffix = raw.strip()[len("/browser-profiles") :].strip() or "list"
             try:
                 write_fn(browser_profile_command(suffix))
             except ValueError as error:
@@ -230,12 +243,12 @@ def _parse_action(
     normalized = raw.strip().casefold()
 
     disclosure = state.provider_disclosure_request
-    if (
-        disclosure is not None
-        and state.active_run is not None
-        and state.active_run.status is ActiveRunStatus.AWAITING_DISCLOSURE
-        and normalized in _AFFIRMATIVE
-    ):
+    goal = state.goal
+    # B（2026-10-18）：活跃与恢复形状共用唯一只读判定（views 谓词）；
+    # render/yes/no/空白同源，Runtime 仍校验 action 合法性。
+    disclosure_pending = pending_provider_disclosure_decision(state)
+    if disclosure_pending and normalized in _AFFIRMATIVE:
+        assert disclosure is not None
         return (
             AcknowledgeProviderDisclosure(
                 **common,
@@ -244,21 +257,42 @@ def _parse_action(
             ),
             None,
         )
+    if disclosure_pending and (normalized in _NEGATIVE or not normalized):
+        # REPL 在到达 parse 前已由 contextual exit/空输入路径安全退出；
+        # 该兜底只约束直接调用方（如 TUI/probe）不把拒绝写成业务 SubmitMessage。
+        return None, _PENDING_DISCLOSURE_REFUSAL
+    if (
+        disclosure is not None
+        and state.provider_disclosure_receipt is None
+        and state.active_run is None
+        and goal is not None
+        and goal.status is GoalStatus.PAUSED
+        and normalized in _AFFIRMATIVE | _NEGATIVE
+    ):
+        # 窄范围 PAUSED 保护：暂停窗口里的裸 yes/no 不产生业务消息，先 /resume。
+        return (
+            None,
+            "The task is paused; run /resume before answering the pending disclosure.",
+        )
 
     approval = _approval_request(state)
     if approval is not None and normalized in _AFFIRMATIVE | _NEGATIVE:
+        approved = normalized in _AFFIRMATIVE
         return (
             build_resolve_approval(
                 state,
                 request_id=approval.request_id,
                 binding_digest=approval.binding_digest,
-                approved=normalized in _AFFIRMATIVE,
-                approved_at=(
-                    approval_time_factory() if normalized in _AFFIRMATIVE else None
-                ),
+                approved=approved,
+                approved_at=(approval_time_factory() if normalized in _AFFIRMATIVE else None),
                 defer_artifact_confirmation=(
                     normalized in _AFFIRMATIVE
                     and approval.artifact_confirmation_requirement is not None
+                ),
+                # P2（对抗审查 2026-10-18）：重绑定只在审批提示已如实披露时
+                # 随这次批准授权——用户看到的那条提示就是他的同意范围。
+                authorize_obligation_rebind=(
+                    approved and project_obligation_rebind_disclosure(state) is not None
                 ),
             ),
             None,
@@ -348,25 +382,16 @@ def _parse_action(
         request = _approval_request(state)
         if request is None:
             return None, "No approval request is pending."
-        if command in {"/approve-goal-target", "/approve-goal-directory"} and (
-            not separator
-        ):
+        if command in {"/approve-goal-target", "/approve-goal-directory"} and (not separator):
             # R4：文件审批提示不展示内部 request identity；无参数短命令绑定
             # REPL 刚显示的同一 authoritative pending request（显示与解析共用
             # 循环内同一 snapshot；输入期间漂移由 expected_revision CAS
             # fail closed，不重绑新请求）。适用范围与 Runtime 铸授权共用
             # 同一 scope 判定，不适用即拒绝，绝不静默降级为逐笔批准。
             file_scope, directory_scope = project_goal_authorization_scopes(state)
-            applicable = (
-                file_scope
-                if command == "/approve-goal-target"
-                else directory_scope
-            )
+            applicable = file_scope if command == "/approve-goal-target" else directory_scope
             if applicable is None:
-                return None, (
-                    "The pending approval has no matching Goal scope "
-                    "for this command."
-                )
+                return None, ("The pending approval has no matching Goal scope for this command.")
         elif not separator or argument != request.request_id:
             return None, "Use the exact pending request ID."
         return (
@@ -377,16 +402,18 @@ def _parse_action(
                 approved=command != "/reject",
                 approved_at=(
                     approval_time_factory()
-                    if command
-                    in {"/approve", "/approve-goal-target", "/approve-goal-directory"}
+                    if command in {"/approve", "/approve-goal-target", "/approve-goal-directory"}
                     else None
                 ),
                 defer_artifact_confirmation=(
-                    command != "/reject"
-                    and request.artifact_confirmation_requirement is not None
+                    command != "/reject" and request.artifact_confirmation_requirement is not None
                 ),
                 authorize_goal_target=command == "/approve-goal-target",
                 authorize_goal_directory=command == "/approve-goal-directory",
+                authorize_obligation_rebind=(
+                    command == "/approve"
+                    and project_obligation_rebind_disclosure(state) is not None
+                ),
             ),
             None,
         )
@@ -527,14 +554,10 @@ def _contextual_exit_message(raw: str, state: ConversationState) -> str | None:
     """拒绝 disclosure 或停止 unknown-outcome 时安全退出，且不伪造状态变更。"""
 
     normalized = raw.strip().casefold()
-    active = state.active_run
-    if (
-        state.provider_disclosure_request is not None
-        and active is not None
-        and active.status is ActiveRunStatus.AWAITING_DISCLOSURE
-        and normalized in _NEGATIVE
-    ):
-        return "Nothing was sent."
+    if pending_provider_disclosure_decision(state) and normalized in _NEGATIVE:
+        # B（2026-10-18）：活跃与恢复形状同判；拒绝零副作用退出。文案只陈述
+        # 本次 pending 未发送，不声称历史零发送。
+        return _PENDING_DISCLOSURE_REFUSAL
     if _recovery_request(state) is not None and normalized in _RECOVERY_STOP:
         return "Stopped without classifying or retrying the previous operation."
     return None

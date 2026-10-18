@@ -28,6 +28,7 @@ from agent.continuity.sessions import open_workspace_session
 from agent.runtime.checkpoint import LocalCheckpointStore
 from agent.runtime.context import ContextLimits
 from agent.runtime.contracts import (
+    BlockedClaim,
     CompletionClaim,
     EvidenceOracleKind,
     FactKind,
@@ -40,12 +41,14 @@ from agent.runtime.contracts import (
     ModelToolCall,
     ProposedCriterion,
     RequirementCoverage,
+    ResolveApproval,
     RunStatus,
     SubmitMessage,
     canonical_json_digest,
 )
 from agent.runtime.control import ControlInbox
 from agent.runtime.loop import InvocationLimits
+from agent.runtime.state import authoritative_deliverable_file_paths
 from tests.kernel.fakes import CollectingSink, goal_draft_from_frame
 
 R3_TASK = "创建 notes.txt 并 运行 ./check.sh"
@@ -1204,3 +1207,709 @@ def test_renamed_two_component_task_completes_without_scenario_special_casing(
         str(key): bool(value) for key, value in json.loads(completed.stdout).items()
     }
     assert checks and all(checks.values()), checks
+
+
+# ---------------------------------------------------------------------------
+# W1（2026-10-17 日用收口包）：非空泛化声明不能掩盖明确交付对象遗漏。
+# 与 hollow（空 coverage）旅程互补：这里 coverage 非空、引用全部权威来源与
+# 当前 admitted criterion——欺骗面是"泛化陈述覆盖一切"，不是"忘写 coverage"。
+# ---------------------------------------------------------------------------
+
+W1_CONFIRM_ONLY_TASK = (
+    "在 retry_app/service.py 实现有界重试：瞬态 RuntimeError 失败需要重试，"
+    "公开参数名是 max_retries，负数限制无效，一次操作的执行次数上限是 "
+    "1 + max_retries；同时保留旧的 retry_count 关键字作为别名，旧名与新名"
+    "同时提供时必须拒绝这个有歧义的请求。"
+)
+
+
+class _NonemptyOmissionProvider(_FileTaskProvider):
+    """W1 反例 provider：非空泛化 coverage 声明后拒绝补做，直接停笔。
+
+    hollow 阶段改为发出 `_claim_for` 的完整非空 coverage（引用全部权威
+    来源 fact 与当前全部 mandatory criterion），随后仅回文本结束旅程——
+    复现"草稿漏掉明确交付对象、泛化声明掩盖遗漏"的真实模型行为。修复后
+    完成门必须点名缺的具体文件路径拒绝，而不是只说 coverage 不完整。
+    """
+
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN202
+        # 拦截分支自行计数；透传分支由基类入口计数，避免双计。
+        if self.stage == "hollow":
+            self.calls += 1
+            self.stage = "post-claim"
+            return ModelResponse(
+                (), control=_claim_for(context, f"omission-{self.spec.goal_id}")
+            )
+        if self.stage == "post-claim":
+            self.calls += 1
+            # 被拒后不补做（真实用户旅程里模型放弃）：仅回文本，run 结束。
+            self.stage = "stopped"
+            return ModelResponse((ModelTextBlock("I will stop here."),))
+        return super().generate(context, delta_observer=delta_observer)
+
+
+def _w1_rejection_naming(final, *paths: str) -> str:
+    """取 invalid_model_control 拒绝文本；必须点名至少一个缺失交付对象。"""
+
+    return next(
+        (
+            str(fact.content.get("text", ""))
+            for fact in final.facts
+            if fact.kind is FactKind.POLICY_RESULT
+            and fact.content.get("code") == "invalid_model_control"
+            and any(path in str(fact.content.get("text", "")) for path in paths)
+        ),
+        "",
+    )
+
+
+def test_w1_nonempty_omission_claim_cannot_verify_done(tmp_path: Path) -> None:
+    """W1.4 首行原字节反例：非空泛化 claim + 永不补 CLI 不得 VERIFIED_DONE。
+
+    原 P1 路径：draft 只提 service criterion → service 写入/读回证据有效 →
+    一条非空 coverage（引用全部来源与全部 admitted criterion）。修前当前树
+    会 VERIFIED_DONE 而 CLI 字节不变；修复后必须给出点名 retry_app/cli.py
+    的可修复拒绝，且 run 非终态收尾（incomplete，不是假完成）。
+    """
+
+    workspace = _d04_workspace(tmp_path)
+    spec = _FileTaskSpec(
+        goal_id="w1-omission",
+        outcome="retry_app implements the requested bounded retry behavior",
+        targets=(D04_SERVICE_PATH,),
+        proposed=(
+            ProposedCriterion(
+                "criterion:w1-service",
+                "the service implements the requested retry behavior",
+                EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path=D04_SERVICE_PATH,
+            ),
+        ),
+        first_path=D04_SERVICE_PATH,
+        first_content=_D04_SERVICE_REFERENCE,
+        second_path=D04_CLI_PATH,
+        second_content=_D04_CLI_REFERENCE,
+        hollow_claim=True,
+    )
+    provider = _NonemptyOmissionProvider(spec, D04_TASK)
+    opened, composition = _open_and_drive(tmp_path, provider, ControlInbox())
+
+    state = opened.store.load().state
+    composition.runtime.run_turn(
+        _submit(state, "run-w1-omission", D04_TASK), opened.store.load()
+    )
+    _approve_pending(opened, composition)
+
+    final = LocalCheckpointStore(opened.checkpoint_path).load().state
+    goal = final.goal
+    assert goal is not None
+    assert goal.status is not GoalStatus.VERIFIED_DONE, (
+        "non-empty generic coverage must not substitute for the omitted "
+        "explicit deliverable",
+    )
+    # 拒绝必须点名具体缺失交付对象，可被模型在同一主 loop 读取修复。
+    assert _w1_rejection_naming(final, D04_CLI_PATH), (
+        "the rejection must name the missing explicit deliverable path"
+    )
+    # CLI 全程未被写入：与 fixture 原字节一致。
+    assert (workspace / D04_CLI_PATH).read_text(encoding="utf-8") == (
+        D04_FIXTURE / D04_CLI_PATH
+    ).read_text(encoding="utf-8")
+    # 外部业务判据同步作证：CLI 组件确实未完成。
+    supplemental = _supplemental_d04_checks(workspace)
+    assert supplemental["cli_both_names"] is False, supplemental
+    assert provider.calls == 5, provider.calls
+
+
+def test_w1_renamed_omission_isomorph_cannot_verify_done(tmp_path: Path) -> None:
+    """W1.4 改名同构负例：产品不得靠 D04/retry_app/cli.py 专名特判。
+
+    与上一测试同构：draft 漏 report.py → 非空泛化 claim → 停笔。修复后必须
+    点名 metrics_app/report.py 拒绝；report.py 原字节保留。
+    """
+
+    workspace = tmp_path / "workspace"
+    (workspace / "metrics_app").mkdir(parents=True)
+    (workspace / "metrics_app" / "__init__.py").write_text("", encoding="utf-8")
+    original_report = 'def format_row(values, *, span):\n    return ""\n'
+    (workspace / "metrics_app" / "report.py").write_text(
+        original_report, encoding="utf-8"
+    )
+    spec = _FileTaskSpec(
+        goal_id="w1-renamed-omission",
+        outcome="metrics_app implements the requested clamping behavior",
+        targets=(RENAMED_FIRST_PATH,),
+        proposed=(
+            ProposedCriterion(
+                "criterion:w1-threshold",
+                "clamp implements the requested threshold behavior",
+                EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path=RENAMED_FIRST_PATH,
+            ),
+        ),
+        first_path=RENAMED_FIRST_PATH,
+        first_content=_RENAMED_THRESHOLD_REFERENCE,
+        second_path=RENAMED_SECOND_PATH,
+        second_content=_RENAMED_REPORT_REFERENCE,
+        hollow_claim=True,
+    )
+    provider = _NonemptyOmissionProvider(spec, RENAMED_TASK)
+    opened, composition = _open_and_drive(tmp_path, provider, ControlInbox())
+
+    state = opened.store.load().state
+    composition.runtime.run_turn(
+        _submit(state, "run-w1-renamed", RENAMED_TASK), opened.store.load()
+    )
+    _approve_pending(opened, composition)
+
+    final = LocalCheckpointStore(opened.checkpoint_path).load().state
+    goal = final.goal
+    assert goal is not None
+    assert goal.status is not GoalStatus.VERIFIED_DONE, goal.status
+    assert _w1_rejection_naming(final, RENAMED_SECOND_PATH)
+    assert (workspace / RENAMED_SECOND_PATH).read_text(encoding="utf-8") == (
+        original_report
+    )
+    assert provider.calls == 5, provider.calls
+
+
+class _ConfirmOnlyProvider:
+    """W1.4“已正确目标无需改写”pin：draft → confirm_file → 显式 claim。
+
+    目标文件已含正确内容；旅程不发生任何写文件。修复不得为凑 evidence 强制
+    改写相同文件：confirm_file（exact_current_content_confirmation）+ 现有
+    admission/derive 链必须足以 VERIFIED_DONE。
+    """
+
+    def __init__(self, goal_id: str, path: str) -> None:
+        self.goal_id = goal_id
+        self.path = path
+        self.calls = 0
+        self.stage = "draft"
+
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN202
+        self.calls += 1
+        if self.stage == "draft":
+            bootstrap = context.goal_bootstrap
+            assert bootstrap is not None
+            frame = GoalFrame(
+                goal_id=self.goal_id,
+                revision=1,
+                created_from_fact_ids=(bootstrap.source_fact_id,),
+                workspace_identity_digest=bootstrap.workspace_identity_digest,
+                user_outcome=f"{self.path} implements the requested retry behavior",
+                beneficiary="user",
+                targets=(self.path,),
+                scope=("workspace",),
+                non_goals=(),
+                assumptions=(),
+                proposed_criteria=(
+                    ProposedCriterion(
+                        f"criterion:{self.goal_id}-file",
+                        "the file matches the requested retry behavior",
+                        EvidenceOracleKind.FILESYSTEM_DIGEST,
+                        artifact_path=self.path,
+                    ),
+                ),
+                admitted_criteria=(),
+                authority_snapshot=bootstrap.authority_snapshot,
+                status=GoalStatus.GOAL_READY,
+                created_at="2026-10-17T00:00:00Z",
+                updated_at="2026-10-17T00:00:00Z",
+            )
+            self.stage = "confirm"
+            return ModelResponse(
+                (),
+                control=goal_draft_from_frame(f"proposal-{self.goal_id}", frame),
+            )
+        if self.stage == "confirm":
+            self.stage = "claim"
+            return ModelResponse(
+                (ModelToolCall("confirm-file", "confirm_file", {"path": self.path}),)
+            )
+        if self.stage == "claim":
+            return ModelResponse(
+                (), control=_claim_for(context, f"claim-{self.goal_id}")
+            )
+        raise AssertionError(f"unexpected stage {self.stage}")
+
+
+def test_w1_already_correct_target_completes_without_rewrite(tmp_path: Path) -> None:
+    """W1.4“已正确目标”行：不产生多余写入也能取得有效证据并完成。
+
+    service.py 预置参考实现；旅程只有 draft → confirm_file → claim，零
+    write_file/edit_file。下界约束不得迫使模型改写相同内容来“凑证据”。
+    """
+
+    workspace = _d04_workspace(tmp_path)
+    (workspace / D04_SERVICE_PATH).write_text(
+        _D04_SERVICE_REFERENCE, encoding="utf-8"
+    )
+    provider = _ConfirmOnlyProvider("w1-confirm-only", D04_SERVICE_PATH)
+    opened, composition = _open_and_drive(tmp_path, provider, ControlInbox())
+
+    state = opened.store.load().state
+    composition.runtime.run_turn(
+        _submit(state, "run-w1-confirm", W1_CONFIRM_ONLY_TASK),
+        opened.store.load(),
+    )
+    _approve_pending(opened, composition)
+
+    final = LocalCheckpointStore(opened.checkpoint_path).load().state
+    goal = final.goal
+    assert goal is not None
+    assert goal.status is GoalStatus.VERIFIED_DONE, goal.status
+    assert provider.calls == 3, provider.calls
+    # 全程零改写：字节保持参考实现。
+    assert (workspace / D04_SERVICE_PATH).read_text(encoding="utf-8") == (
+        _D04_SERVICE_REFERENCE
+    )
+    assert [c.criterion_id for c in goal.admitted_criteria] == [
+        f"criterion:{provider.goal_id}-file"
+    ]
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-18 CLI 首发阻断包 A（审计 F1/F2）：两个完整生产 Runtime 反例。
+# ---------------------------------------------------------------------------
+
+D04_TASK_NO_SPACE = D04_TASK.replace(
+    "适配器 retry_app/cli.py", "适配器retry_app/cli.py"
+)
+
+
+def test_release_a_no_space_chinese_adjacent_path_cannot_verify_done(
+    tmp_path: Path,
+) -> None:
+    """F1 反例：删掉中文空格的同义任务不得漏做 CLI 仍 VERIFIED_DONE。
+
+    与既有 W1 原文反例同构，仅把「适配器 retry_app/cli.py」改成无空格
+    「适配器retry_app/cli.py」。provider 仍只做 service 并给非空泛化
+    coverage；修复后下界必须仍含 retry_app/cli.py，完成门点名拒绝。
+    """
+
+    workspace = _d04_workspace(tmp_path)
+    assert "适配器retry_app/cli.py" in D04_TASK_NO_SPACE
+    spec = _FileTaskSpec(
+        goal_id="release-a-omission",
+        outcome="retry_app implements the requested bounded retry behavior",
+        targets=(D04_SERVICE_PATH,),
+        proposed=(
+            ProposedCriterion(
+                "criterion:release-a-service",
+                "the service implements the requested retry behavior",
+                EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path=D04_SERVICE_PATH,
+            ),
+        ),
+        first_path=D04_SERVICE_PATH,
+        first_content=_D04_SERVICE_REFERENCE,
+        second_path=D04_CLI_PATH,
+        second_content=_D04_CLI_REFERENCE,
+        hollow_claim=True,
+    )
+    provider = _NonemptyOmissionProvider(spec, D04_TASK_NO_SPACE)
+    opened, composition = _open_and_drive(tmp_path, provider, ControlInbox())
+
+    state = opened.store.load().state
+    composition.runtime.run_turn(
+        _submit(state, "run-release-a-omission", D04_TASK_NO_SPACE),
+        opened.store.load(),
+    )
+    _approve_pending(opened, composition)
+
+    final = LocalCheckpointStore(opened.checkpoint_path).load().state
+    goal = final.goal
+    assert goal is not None
+    assert goal.status is not GoalStatus.VERIFIED_DONE, (
+        "Chinese-adjacent direct file requirement must stay in the "
+        "completion lower bound",
+    )
+    assert D04_CLI_PATH in authoritative_deliverable_file_paths(final)
+    assert _w1_rejection_naming(final, D04_CLI_PATH), (
+        "the rejection must name the missing explicit deliverable path"
+    )
+    assert (workspace / D04_CLI_PATH).read_text(encoding="utf-8") == (
+        D04_FIXTURE / D04_CLI_PATH
+    ).read_text(encoding="utf-8")
+    assert _supplemental_d04_checks(workspace)["cli_both_names"] is False
+
+
+class _StopAfterConfirmationClaim(_ConfirmOnlyProvider):
+    """F2 反例 provider：confirm/claim 后被卡住就停笔，不补做示例文件。"""
+
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN202
+        if self.calls >= 3:
+            self.calls += 1
+            return ModelResponse((ModelTextBlock("I stop here."),))
+        return super().generate(context, delta_observer=delta_observer)
+
+
+RELEASE_A_QUOTED_EXAMPLES_TASK = (
+    W1_CONFIRM_ONLY_TASK
+    + " 同时解释“创建 app/example.py；修改 app/other.py”的含义。"
+    + "引文仅供解释，不要修改示例文件。"
+)
+
+
+def test_release_a_quoted_examples_do_not_block_confirm_only_completion(
+    tmp_path: Path,
+) -> None:
+    """F2 反例：解释性跨分句引文不得凭空生成交付义务卡住合法收尾。
+
+    目标文件已正确，confirm_file 取证后完成；附带引文只是解释对象。
+    修复后：不产生 app/example.py/app/other.py 义务、零额外写入、
+    VERIFIED_DONE；拒绝信息不得再点名两个示例文件。
+    """
+
+    workspace = _d04_workspace(tmp_path)
+    (workspace / D04_SERVICE_PATH).write_text(
+        _D04_SERVICE_REFERENCE, encoding="utf-8"
+    )
+    provider = _StopAfterConfirmationClaim(
+        "release-a-inputs", D04_SERVICE_PATH
+    )
+    opened, composition = _open_and_drive(tmp_path, provider, ControlInbox())
+
+    state = opened.store.load().state
+    composition.runtime.run_turn(
+        _submit(state, "run-release-a-inputs", RELEASE_A_QUOTED_EXAMPLES_TASK),
+        opened.store.load(),
+    )
+    _approve_pending(opened, composition)
+
+    final = LocalCheckpointStore(opened.checkpoint_path).load().state
+    goal = final.goal
+    assert goal is not None
+    assert goal.status is GoalStatus.VERIFIED_DONE, goal.status
+    assert authoritative_deliverable_file_paths(final) == frozenset(
+        {D04_SERVICE_PATH}
+    )
+    assert provider.calls == 3, provider.calls
+    assert (workspace / D04_SERVICE_PATH).read_text(encoding="utf-8") == (
+        _D04_SERVICE_REFERENCE
+    )
+    # 两个示例文件从未被创建或写入。
+    assert not (workspace / "app").exists()
+
+
+class _BlockedOmissionProvider(_FileTaskProvider):
+    """W1.5 探针 provider：service 证据闭合后不碰 CLI 直接报 blocked。
+
+    blocked 被拒后按当时指引重发 completion_claim（复现模型服从引导的行为），
+    随后停笔。用于验证 blocked 指引与完成门是否复用同一交付缺口判断——
+    指引不得在明确交付对象缺失时断言"证据已完整、不要报 blocked"。
+    """
+
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN202
+        # 拦截分支自行计数；透传分支由基类入口计数，避免双计。
+        if self.stage == "hollow":
+            self.calls += 1
+            self.stage = "guided-claim"
+            goal = _context_goal(context)
+            return ModelResponse(
+                (),
+                control=BlockedClaim(
+                    correlation_id=f"blocked-{self.spec.goal_id}",
+                    goal_id=goal["goal_id"],
+                    goal_revision=goal["goal_revision"],
+                    blocker="cannot finish the remaining adapter work",
+                    safe_attempts=("wrote the service component",),
+                    resume_condition="user confirms the service-only scope",
+                ),
+            )
+        if self.stage == "guided-claim":
+            self.calls += 1
+            self.stage = "stopped"
+            return ModelResponse(
+                (), control=_claim_for(context, f"guided-{self.spec.goal_id}")
+            )
+        if self.stage == "stopped":
+            self.calls += 1
+            self.stage = "ended"
+            return ModelResponse((ModelTextBlock("I will stop here."),))
+        return super().generate(context, delta_observer=delta_observer)
+
+
+def test_w1_blocked_guidance_shares_deliverable_gap_with_completion_gate(
+    tmp_path: Path,
+) -> None:
+    """W1.5：blocked 指引与完成门复用同一交付缺口，不产生分歧指引。
+
+    service 写入/读回证据闭合、CLI 交付对象从未尝试时，blocked claim 仍应被
+    拒绝（对 CLI 没有 durable blocker，goal 不得终化为 blocked），但拒绝指引
+    必须点名与完成门相同的缺失交付对象 retry_app/cli.py——不能一边断言
+    "every mandatory criterion already has derivable evidence, do not report
+    blocked"，一边让随后服从指引的 completion_claim 被完成门以同一缺口拒绝。
+    """
+
+    workspace = _d04_workspace(tmp_path)
+    spec = _FileTaskSpec(
+        goal_id="w1-blocked-omission",
+        outcome="retry_app implements the requested bounded retry behavior",
+        targets=(D04_SERVICE_PATH,),
+        proposed=(
+            ProposedCriterion(
+                "criterion:w1-blocked-service",
+                "the service implements the requested retry behavior",
+                EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path=D04_SERVICE_PATH,
+            ),
+        ),
+        first_path=D04_SERVICE_PATH,
+        first_content=_D04_SERVICE_REFERENCE,
+        second_path=D04_CLI_PATH,
+        second_content=_D04_CLI_REFERENCE,
+        hollow_claim=True,
+    )
+    provider = _BlockedOmissionProvider(spec, D04_TASK)
+    opened, composition = _open_and_drive(tmp_path, provider, ControlInbox())
+
+    state = opened.store.load().state
+    composition.runtime.run_turn(
+        _submit(state, "run-w1-blocked", D04_TASK), opened.store.load()
+    )
+    _approve_pending(opened, composition)
+
+    final = LocalCheckpointStore(opened.checkpoint_path).load().state
+    goal = final.goal
+    assert goal is not None
+    # blocked 不得终化（CLI 没有 durable blocker），也不得假完成。
+    assert goal.status not in {
+        GoalStatus.VERIFIED_DONE,
+        GoalStatus.BLOCKED,
+    }, goal.status
+    # blocked 分支的拒绝指引必须点名同一缺失交付对象（与完成门同一判断）。
+    blocked_guidance = next(
+        str(fact.content.get("text", ""))
+        for fact in final.facts
+        if fact.kind is FactKind.POLICY_RESULT
+        and fact.content.get("code")
+        in {"completion_evidence_available", "blocked_claim_not_verified"}
+    )
+    assert D04_CLI_PATH in blocked_guidance, blocked_guidance
+    # 服从指引重发的 completion_claim 被完成门以同一缺口拒绝（收敛证据仍在）。
+    assert _w1_rejection_naming(final, D04_CLI_PATH)
+    assert (workspace / D04_CLI_PATH).read_text(encoding="utf-8") == (
+        D04_FIXTURE / D04_CLI_PATH
+    ).read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# W2（2026-10-17 日用收口包）：散文 targets 下的精确文件复用授权。
+# 冻结正例：散文 targets → 首次普通 y（单次、无租约、Runtime 绑定该文件）→
+# 同文件再次写入的默认提示出现精确选项 → 用户显式 /approve-goal-target 铸
+# 有界租约 → 第三次同范围执行复用 → 任务正常收尾。全程真实 Runtime 与
+# 真实 checkpoint 重开，不手填 targets 文件值、不手造 admitted criterion。
+# ---------------------------------------------------------------------------
+
+W2_TASK = "按 SPEC.md 的说明实现笔记功能：创建 notes/idea.md，记录当天想法。"
+W2_NOTE_V1 = "day one note\n"
+W2_NOTE_V2 = "day one note, revised\n"
+W2_NOTE_V3 = "day one note, final\n"
+W2_PROSE_TARGETS = ("按 SPEC.md 的说明实现笔记功能",)
+
+
+class _ProseTargetProvider:
+    """W2 旅程 provider：draft（散文 targets）→ 三次同文件写入 → 读回 → claim。"""
+
+    def __init__(self, *, start_stage: str = "draft") -> None:
+        self.calls = 0
+        self.stage = start_stage
+
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN202
+        self.calls += 1
+        if self.stage == "draft":
+            bootstrap = context.goal_bootstrap
+            assert bootstrap is not None
+            frame = GoalFrame(
+                goal_id="goal-w2-prose",
+                revision=1,
+                created_from_fact_ids=(bootstrap.source_fact_id,),
+                workspace_identity_digest=bootstrap.workspace_identity_digest,
+                user_outcome="notes feature implemented per SPEC.md",
+                beneficiary="user",
+                targets=W2_PROSE_TARGETS,
+                scope=("workspace",),
+                non_goals=(),
+                assumptions=(),
+                proposed_criteria=(
+                    ProposedCriterion(
+                        "criterion:w2-note",
+                        "the note file matches the requested feature",
+                        EvidenceOracleKind.FILESYSTEM_DIGEST,
+                        artifact_path=None,
+                    ),
+                ),
+                admitted_criteria=(),
+                authority_snapshot=bootstrap.authority_snapshot,
+                status=GoalStatus.GOAL_READY,
+                created_at="2026-10-17T00:00:00Z",
+                updated_at="2026-10-17T00:00:00Z",
+            )
+            self.stage = "write-1"
+            return ModelResponse(
+                (),
+                control=goal_draft_from_frame("proposal-w2-prose", frame),
+            )
+        if self.stage == "write-1":
+            self.stage = "write-2"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "w2-write-1",
+                        "write_file",
+                        {"path": "notes/idea.md", "content": W2_NOTE_V1},
+                    ),
+                )
+            )
+        if self.stage == "write-2":
+            self.stage = "write-3"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "w2-write-2",
+                        "write_file",
+                        {"path": "notes/idea.md", "content": W2_NOTE_V2},
+                    ),
+                )
+            )
+        if self.stage == "write-3":
+            self.stage = "confirm"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "w2-write-3",
+                        "write_file",
+                        {"path": "notes/idea.md", "content": W2_NOTE_V3},
+                    ),
+                )
+            )
+        if self.stage == "confirm":
+            # 租约执行的写入不经过逐笔审批事件，admitted criterion 仍绑定
+            # write-2 的旧 digest；confirm_file（exact_current_content_
+            # confirmation，ALWAYS 审批）为最终字节绑定当前 digest——与
+            # W1“已正确目标”pin 同一条诚实完成链。
+            self.stage = "claim"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "w2-confirm", "confirm_file", {"path": "notes/idea.md"}
+                    ),
+                )
+            )
+        if self.stage == "claim":
+            self.stage = "done"
+            return ModelResponse((), control=_claim_for(context, "claim-w2-prose"))
+        if self.stage == "done":
+            return ModelResponse((ModelTextBlock("I will stop here."),))
+        raise AssertionError(f"unexpected stage {self.stage}")
+
+
+def test_w2_prose_target_full_reuse_journey_with_checkpoint_reopen(
+    tmp_path: Path,
+) -> None:
+    """W2 冻结正例：散文 targets 下 Runtime 准入文件可被显式选择为有界复用。
+
+    旅程跨越两个进程（真实 durable checkpoint 重开）：run1 首次写入在真实
+    ResolveApproval（普通 y，单次）边界暂停；新进程读到同一状态，同文件第
+    二次写入的默认提示出现 /approve-goal-target（scope 由当前准入候选派
+    生），用户显式选择后铸造租约，第三次同文件写入复用租约免逐笔审批，
+    最终 VERIFIED_DONE。普通 y 不自动产生租约；SPEC.md 输入不被改写。
+    """
+
+    from agent.runtime.views import project_goal_authorization_scopes
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / "SPEC.md").write_text(
+        "# Notes feature\n记录当天的想法。\n", encoding="utf-8"
+    )
+    (workspace / "notes").mkdir()
+    original_spec = (workspace / "SPEC.md").read_text(encoding="utf-8")
+
+    provider1 = _ProseTargetProvider()
+    opened, composition = _open_and_drive(tmp_path, provider1, ControlInbox())
+    state = opened.store.load().state
+    result1 = composition.runtime.run_turn(
+        _submit(state, "run-w2-1", W2_TASK), opened.store.load()
+    )
+    # 首次写入：真实审批边界暂停。
+    assert result1.status is RunStatus.AWAITING_APPROVAL
+    assert result1.request is not None
+
+    from agent.cli.app import _parse_action as _parse
+
+    paused1 = LocalCheckpointStore(opened.checkpoint_path).load().state
+    active1 = paused1.active_run
+    assert active1 is not None and active1.pending_request is not None
+    # 普通 y：只批准这一次，不创建租约。
+    approve, error = _parse(
+        "/approve " + active1.pending_request.request_id,
+        paused1,
+        lambda: "run-w2-1",
+        approval_time_factory=_approval_now,
+    )
+    assert error is None and approve is not None
+    composition.runtime.run_turn(approve, opened.store.load())
+    after_first = LocalCheckpointStore(opened.checkpoint_path).load().state
+    assert after_first.goal_authorizations == (), "plain y must not mint a lease"
+    # Runtime 已把该文件绑定为 admitted criterion（第一次写入的准入来源）。
+    assert after_first.goal is not None
+    assert {
+        criterion.predicate.get("path")
+        for criterion in after_first.goal.admitted_criteria
+    } == {"notes/idea.md"}
+    # 第二次同文件写入再次到达审批边界（尚无租约）。
+    paused2 = LocalCheckpointStore(opened.checkpoint_path).load().state
+    active2 = paused2.active_run
+    assert active2 is not None and active2.pending_request is not None
+
+    # 新进程：对同一 durable checkpoint 构造全新 store/composition。
+    provider2 = _ProseTargetProvider(start_stage="write-3")
+    opened2, composition2 = _open_and_drive(tmp_path, provider2, ControlInbox())
+    state2 = opened2.store.load().state
+    assert state2.active_run is not None
+    assert state2.active_run.pending_request is not None
+    # W2 修复点：散文 targets 下，当前准入候选使精确 scope 可用（P2 修前
+    # 为 (None, None)）。
+    scopes = project_goal_authorization_scopes(state2)
+    assert scopes == ("notes/idea.md", None), scopes
+
+    # 用户显式 opt-in：/approve-goal-target 绑定刚显示的同一 pending request。
+    opt_in, opt_in_error = _parse(
+        "/approve-goal-target",
+        state2,
+        lambda: "run-w2-2",
+        approval_time_factory=_approval_now,
+    )
+    assert opt_in_error is None and opt_in is not None
+    assert isinstance(opt_in, ResolveApproval)
+    assert opt_in.authorize_goal_target is True
+    composition2.runtime.run_turn(opt_in, opened2.store.load())
+
+    # 租约生效证明：第三次同文件写入（write-3）复用授权执行，未再逐笔审批。
+    # 铸造审批本身消耗 1 次、write-3 消耗 1 次；在终态关闭租约前读取。
+    after_reuse = LocalCheckpointStore(opened2.checkpoint_path).load().state
+    leases = after_reuse.goal_authorizations
+    assert len(leases) == 1
+    assert leases[0].normalized_target == "notes/idea.md"
+    assert leases[0].operation == "write_file"
+    assert leases[0].uses_consumed == 2
+    assert leases[0].remaining_uses == 14
+
+    # 租约写入后的最终字节仍需一次 exact-content 确认（confirm_file 的
+    # ALWAYS 审批=每次必审）：普通 y 批准这一次，Runtime 为最终内容绑定
+    # 当前 digest，随后 claim 在同一主 loop 内收尾。
+    _approve_pending(opened2, composition2)
+
+    final = LocalCheckpointStore(opened2.checkpoint_path).load().state
+    goal = final.goal
+    assert goal is not None
+    assert goal.status is GoalStatus.VERIFIED_DONE, goal.status
+    assert (workspace / "notes" / "idea.md").read_text(encoding="utf-8") == (
+        W2_NOTE_V3
+    )
+    assert (workspace / "SPEC.md").read_text(encoding="utf-8") == original_spec
+    # 终态关闭租约（既有合同）；旅程内只铸造过这一条文件租约。
+    assert final.goal_authorizations == ()

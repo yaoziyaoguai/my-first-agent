@@ -547,7 +547,7 @@ def test_f1_successful_validation_then_input_rewriting_process_invalidates_valid
     mutation = _process_receipt_fact(
         "mutation-rewrite", fingerprint="12" * 32, exit_code=0
     )
-    with pytest.raises(EvidenceVerificationError, match="no exact process receipt"):
+    with pytest.raises(EvidenceVerificationError, match="was invalidated by later workspace"):
         REGISTRY._tool_receipt(
             (validation, mutation),
             goal_id="goal-f1",
@@ -595,7 +595,7 @@ def test_f1_unsandboxed_validations_no_longer_coexist_conservatively() -> None:
         _process_receipt_criterion(_receipt_of(lint_fact)),
         criterion_id="criterion:lint",
     )
-    with pytest.raises(EvidenceVerificationError, match="no exact process receipt"):
+    with pytest.raises(EvidenceVerificationError, match="was invalidated by later workspace"):
         REGISTRY._tool_receipt(
             (tests_fact, lint_fact),
             goal_id="goal-f1",
@@ -671,7 +671,7 @@ def test_f1_unexecuted_rejection_and_spawn_failure_preserve_validation() -> None
 
     # 已执行失败：exit 1 → 失效。
     failed = _process_receipt_fact("failed-run", fingerprint="34" * 32, exit_code=1)
-    with pytest.raises(EvidenceVerificationError, match="no exact process receipt"):
+    with pytest.raises(EvidenceVerificationError, match="was invalidated by later workspace"):
         REGISTRY._tool_receipt(
             (*base, failed),
             goal_id="goal-f1",
@@ -688,7 +688,7 @@ def test_f1_unexecuted_rejection_and_spawn_failure_preserve_validation() -> None
         exit_code=1,
         outcome=ProcessOutcome.TIMED_OUT_REAPED,
     )
-    with pytest.raises(EvidenceVerificationError, match="no exact process receipt"):
+    with pytest.raises(EvidenceVerificationError, match="was invalidated by later workspace"):
         REGISTRY._tool_receipt(
             (*base, timed_out),
             goal_id="goal-f1",

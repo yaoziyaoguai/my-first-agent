@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from agent.runtime.contracts import (
@@ -85,7 +86,8 @@ def delivery_summary_message(view: GoalView) -> str:
         f"Verified delivery: {view.user_outcome}\n"
         f"Targets: {targets}\n"
         f"Required evidence: {view.criteria_verified}/{view.criteria_total} passed\n"
-        f"Durable task permissions: {authority_status}."
+        f"Durable task permissions: {authority_status}.\n"
+        "User acceptance: not established by these evidence checks."
     )
 
 
@@ -173,6 +175,27 @@ def _lease_readable(lease) -> str:  # noqa: ANN001
     return lease.readable_command
 
 
+def pending_provider_disclosure_decision(state: ConversationState) -> bool:
+    """B（2026-10-18）：pending provider 外发确认的唯一只读判定。
+
+    活跃 AWAITING_DISCLOSURE 与 /pause→/resume 后的孤儿形状
+    （active=None、Goal=GOAL_READY）在 request 非空且 receipt=None 时
+    是同一个 answerable pending 决策；render_pending 与 CLI 的
+    y/n/空回车路由共用本判定，Runtime 仍独立校验 action 合法性。
+    只读，不推进状态。
+    """
+
+    if state.provider_disclosure_request is None:
+        return False
+    if state.provider_disclosure_receipt is not None:
+        return False
+    active = state.active_run
+    if active is not None:
+        return active.status is ActiveRunStatus.AWAITING_DISCLOSURE
+    goal = state.goal
+    return goal is not None and goal.status is GoalStatus.GOAL_READY
+
+
 def project_goal_authorization_scopes(
     state: ConversationState,
 ) -> tuple[str | None, str | None]:
@@ -221,6 +244,84 @@ def project_goal_target_reuse_unavailable(state: ConversationState) -> bool:
     ):
         return False
     return active.pending_request.tool_name in {"write_file", "edit_file"}
+
+
+def project_obligation_rebind_disclosure(state: ConversationState) -> str | None:
+    """发现 3 的审批透明度纯投影：本次批准是否会重绑定一条失败的验证义务。
+
+    批准语义是「执行这一笔操作」；重绑定会改写 admitted 义务的 pinned 命令。
+    对抗审查 2026-10-18 指出该改写此前对用户不可见。返回 None 表示不会重绑定。
+    与 Runtime 共用同一资格判定，不触发 Runtime/Provider/Tool/持久化。
+    """
+
+    from agent.runtime.state import _rebindable_failed_process_obligation
+
+    active = state.active_run
+    if (
+        active is None
+        or active.status is not ActiveRunStatus.AWAITING_APPROVAL
+        or not isinstance(active.pending_request, ApprovalRequest)
+        or active.pending_request.tool_name != "local_process"
+        or not active.tool_calls
+        or active.batch_cursor >= len(active.tool_calls)
+    ):
+        return None
+    call = active.tool_calls[active.batch_cursor]
+    arguments = call.arguments if isinstance(call.arguments, dict) else {}
+    candidate = active.pending_request.process_authority_candidate
+    criterion = _rebindable_failed_process_obligation(
+        state, arguments, candidate=candidate
+    )
+    if criterion is None:
+        return None
+    new_text = (
+        candidate.readable_command
+        if candidate is not None and candidate.readable_command
+        else _literal_command_text(arguments)
+    )
+    old_text = _pinned_command_text(state, criterion)
+    return (
+        f"Note: the earlier validation command `{old_text}` did not run "
+        "successfully in this environment. Approving now also re-binds that "
+        f"pending verification obligation to `{new_text}`; the required evidence "
+        "becomes this command's successful run."
+    )
+
+
+def _literal_command_text(arguments: Mapping[str, object]) -> str:
+    executable = arguments.get("executable")
+    argv = arguments.get("argv")
+    parts = [executable] if isinstance(executable, str) else []
+    if isinstance(argv, (list, tuple)):
+        parts.extend(item for item in argv if isinstance(item, str))
+    return " ".join(parts) if parts else "this command"
+
+
+def _pinned_command_text(state: ConversationState, criterion: AdmittedCriterion) -> str:
+    """还原义务当前 pinned 命令的字面形式（展示用；等价判定另走 canonical form）。"""
+
+    fingerprint = criterion.predicate.get("command_fingerprint")
+    if not isinstance(fingerprint, str):
+        return "an earlier command"
+    calls: dict[str, object] = {}
+    for fact in state.facts:
+        if fact.kind is not FactKind.TOOL_CALLS:
+            continue
+        for raw in fact.content.get("calls", ()):
+            if isinstance(raw, dict) and isinstance(raw.get("tool_call_id"), str):
+                calls[raw["tool_call_id"]] = raw.get("arguments")
+    for fact in state.facts:
+        if fact.kind is not FactKind.TOOL_RESULT:
+            continue
+        metadata = fact.content.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        if metadata.get("command_fingerprint") != fingerprint:
+            continue
+        call_arguments = calls.get(fact.content.get("tool_call_id"))
+        if isinstance(call_arguments, dict):
+            return _literal_command_text(call_arguments)
+    return "an earlier command"
 
 
 def project_goal_view(state: ConversationState) -> GoalView:
@@ -396,9 +497,7 @@ def project_source_views(
         call_id = fact.content.get("tool_call_id")
         call = calls.get(call_id) if isinstance(call_id, str) else None
         metadata = fact.content.get("metadata")
-        raw_receipts = (
-            metadata.get("source_receipts") if isinstance(metadata, dict) else None
-        )
+        raw_receipts = metadata.get("source_receipts") if isinstance(metadata, dict) else None
         receipts: list[SourceReceiptV1] = []
         if isinstance(raw_receipts, (list, tuple)):
             for raw_receipt in raw_receipts:
@@ -410,10 +509,7 @@ def project_source_views(
                     continue
                 if goal_id is not None and receipt.goal_id != goal_id:
                     continue
-                if (
-                    goal_revision is not None
-                    and receipt.goal_revision != goal_revision
-                ):
+                if goal_revision is not None and receipt.goal_revision != goal_revision:
                     continue
                 receipts.append(receipt)
         refs = _source_refs(metadata) if advanced else {}

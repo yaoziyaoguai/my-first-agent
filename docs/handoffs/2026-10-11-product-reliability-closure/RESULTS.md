@@ -40,6 +40,17 @@
   项目当前可交付状态：源树=合同+门+dogfood 实证完备；发布物=wheel 已冻结
   待干净安装验证；历史验收 E2/E3 待上游模型重冻结决策。
 
+### Git 分批交付（2026-10-23 晚，用户明确授权"分批提交推送"）
+
+- 基线 `main @ 97f5c58`（与 origin/main 同步）；四批提交并推送至
+  `https://github.com/yaoziyaoguai/my-first-agent.git` main：
+  1. `6343a49` feat(runtime): 会话许可门/v2 披露/文件来源证明/schema 11
+  2. `c64cb5b` feat(cli): s/f/d 快捷键与 /revoke-provider-consent
+  3. `b76cdd7` test(consent): 合同套件与受影响套件更新（67 项）
+  4. `c83ce95` docs: 冻结合同包、审计链与收口记录
+- 每批均过 pre-commit ruff；提交内容与全库门 4100 绿的工作树逐字节一致；
+  未创建 tag/release、未改 remote/可见性；未知 `result.phase.json` 未提交未改动。
+
 ## 历史摘要（2026-10-23 r2 修复执行：oracle 采纳缺陷全部修复，全库门 4100 绿）
 
 - **用户指令：** "可以 开始吧"——执行 oracle r2 审计（§F 顺序）采纳的修复。全程

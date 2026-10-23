@@ -117,6 +117,13 @@ from agent.runtime.ports import (
     RetryableProviderError,
     ToolRuntime,
 )
+from agent.runtime.provider_consent import (
+    ProviderDispatchGateV1,
+    charge_provider_dispatch,
+    evaluate_provider_dispatch,
+    final_dispatch_expiry_check,
+    invalidate_provider_consent,
+)
 from agent.runtime.resource_lifecycle import managed_process_receipts
 from agent.runtime.state import (
     accept_action,
@@ -219,6 +226,65 @@ class InvocationLimits:
             raise ValueError("max_retryable_provider_retries must be non-negative")
         if self.max_no_progress_replans < 0:
             raise ValueError("max_no_progress_replans must be non-negative")
+
+
+# invalid_repairs 计数器覆盖的全部修复型 policy code（闭合集合）。consent
+# 披露暂停会中断 run_turn 并在恢复时重建 _drive 局部计数器；若不从 durable
+# 的 run 级 POLICY_RESULT facts 重建额度，"空响应修复 × 外发确认暂停"交替
+# 会让修复上限永远重置（2026-10-23 E3 harness 实测 1000+ 次无界循环）。
+_INVALID_REPAIR_POLICY_CODES = frozenset(
+    (
+        "invalid_provider_response",
+        "invalid_model_output",
+        "invalid_model_control",
+        "invalid_goal_proposal",
+        "invalid_goal_delta",
+        "unadvertised_tool",
+        "paused_goal_requires_resume",
+        "explicit_non_prose_outcome_requires_goal",
+        "active_goal_requires_control",
+    )
+)
+
+
+def _run_invalid_repairs(state) -> int:
+    """从本 run 已落盘的修复型 policy facts 重建连续无效响应额度。
+
+    只数尾部连续的修复 facts：有效模型输出会追加自己的 fact（answer/
+    calls/控制草案），打断链条，与计数器"连续无效响应"的运行中语义一致。
+    """
+
+    active = state.active_run
+    if active is None:
+        return 0
+    prefix = f"run:{active.run_id}:policy:"
+    count = 0
+    for fact in reversed(state.facts):
+        if (
+            fact.fact_id.startswith(prefix)
+            and fact.kind is FactKind.POLICY_RESULT
+            and fact.content.get("code") in _INVALID_REPAIR_POLICY_CODES
+        ):
+            count += 1
+        else:
+            break
+    return count
+
+
+def _run_transient_retries(state) -> int:
+    """从本 run 的 `provider_transient_retry` facts 累计重建瞬态重试额度。"""
+
+    active = state.active_run
+    if active is None:
+        return 0
+    prefix = f"run:{active.run_id}:policy:"
+    return sum(
+        1
+        for fact in state.facts
+        if fact.fact_id.startswith(prefix)
+        and fact.kind is FactKind.POLICY_RESULT
+        and fact.content.get("code") == "provider_transient_retry"
+    )
 
 
 @dataclass(slots=True)
@@ -429,7 +495,11 @@ class AgentRuntime:
                     state=current.state,
                     error_code="browser_takeover_pending",
                 )
-            transition = accept_action(current.state, action)
+            transition = accept_action(
+                current.state,
+                action,
+                now=self._run_time_factory(),
+            )
             if transition.disposition is ActionDisposition.CONFLICT:
                 return RunResult(
                     status=RunStatus.CONFLICT,
@@ -920,8 +990,12 @@ class AgentRuntime:
         input_tokens = 0
         output_tokens = 0
         compaction_batches = 0
-        invalid_repairs = 0
-        retryable_provider_retries = 0
+        # consent 披露暂停会拆分 run_turn；修复额度从 durable 的 run 级
+        # policy facts 重建，避免"空响应修复 × 确认暂停"交替无界循环。
+        invalid_repairs = _run_invalid_repairs(current.state)
+        # oracle r2 §F-4：瞬态重试额度同样跨 resume 重建。该计数在 run 内
+        # 是累计语义（有效响应不复位），因此用全量计数而非尾部连续。
+        retryable_provider_retries = _run_transient_retries(current.state)
         no_progress = _NoProgressTracker()
         no_progress_since_product_action = False
         (
@@ -1586,14 +1660,35 @@ class AgentRuntime:
                         return self._finish_context_limit(
                             current, action, warnings, error
                         )
-                    # 与普通 provider 分支相同的 disclosure exact-receipt 门禁。
-                    disclosure = self._required_disclosure(context)
-                    if disclosure is not None and (
-                        current.state.provider_disclosure_receipt is None
-                        or current.state.provider_disclosure_receipt.request_digest
-                        != disclosure.request_digest
-                    ):
-                        paused = pause_for_provider_disclosure(current.state, disclosure)
+                    # 与普通 provider 分支共用同一许可判断；常规许可/最后一份
+                    # 精确例外之外仍必须重新决定。
+                    gate_now = self._run_time_factory()
+                    gate_run_id = (
+                        current.state.active_run.run_id
+                        if current.state.active_run is not None
+                        else f"compaction:{action.action_seq}"
+                    )
+                    current, disclosure_gate = self._provider_gate(
+                        current,
+                        context,
+                        purpose="compaction",
+                        now=gate_now,
+                        run_id=gate_run_id,
+                    )
+                    if not disclosure_gate.admitted:
+                        if disclosure_gate.request is None:
+                            return self._finish(
+                                current,
+                                action,
+                                status=RunStatus.FAILED_FATAL,
+                                warnings=warnings,
+                                event_kind=RuntimeEventKind.FAILED,
+                                error_code="consent_scope_missing",
+                                outcome_state=current.state,
+                            )
+                        paused = pause_for_provider_disclosure(
+                            current.state, disclosure_gate.request
+                        )
                         return self._finish(
                             current,
                             action,
@@ -1621,13 +1716,60 @@ class AgentRuntime:
                     # compaction 也是一次真实模型尝试：必须与普通调用一样在
                     # 发送前持久化扣账。失败不退款，Resume 也不会重置。
                     compaction_source = current
+                    attempted = charge_provider_dispatch(
+                        current.state,
+                        disclosure_gate,
+                        descriptor=self._provider_descriptor,
+                        scope=context.consent_scope,
+                        purpose="compaction",
+                        run_id=gate_run_id,
+                        now=self._run_time_factory(),
+                    )
                     current = self._save(
                         current,
                         record_foreground_model_attempt(
-                            current.state,
+                            attempted,
                             input_tokens=context.budget.estimated_input_tokens,
                         ),
                     )
+                    # S6：校验后跨过到期点，transport 前最后重验；过期即重新
+                    # 要求决策，不因已扣次继续发送。
+                    expired = final_dispatch_expiry_check(
+                        current.state,
+                        disclosure_gate,
+                        now=self._run_time_factory(),
+                    )
+                    if expired is not None:
+                        refreshed = evaluate_provider_dispatch(
+                            state=current.state,
+                            descriptor=self._provider_descriptor,
+                            scope=context.consent_scope,
+                            purpose="compaction",
+                            run_id=gate_run_id,
+                            now=self._run_time_factory(),
+                        )
+                        if refreshed.request is None:
+                            return self._finish(
+                                current,
+                                action,
+                                status=RunStatus.FAILED_FATAL,
+                                warnings=warnings,
+                                event_kind=RuntimeEventKind.FAILED,
+                                error_code="consent_scope_missing",
+                                outcome_state=current.state,
+                            )
+                        paused = pause_for_provider_disclosure(
+                            current.state, refreshed.request
+                        )
+                        return self._finish(
+                            current,
+                            action,
+                            status=RunStatus.AWAITING_DISCLOSURE,
+                            warnings=warnings,
+                            event_kind=RuntimeEventKind.DISCLOSURE_REQUESTED,
+                            message="remote provider disclosure acknowledgement required",
+                            outcome_state=paused,
+                        )
                     model_calls += 1
                     input_tokens += context.budget.estimated_input_tokens
                     try:
@@ -1737,22 +1879,67 @@ class AgentRuntime:
                 )
             except ContextLimitError as error:
                 return self._finish_context_limit(current, action, warnings, error)
-            disclosure = self._required_disclosure(context)
-            if disclosure is not None and (
-                current.state.provider_disclosure_receipt is None
-                or current.state.provider_disclosure_receipt.request_digest
-                != disclosure.request_digest
-            ):
-                paused = pause_for_provider_disclosure(current.state, disclosure)
-                return self._finish(
-                    current,
-                    action,
-                    status=RunStatus.AWAITING_DISCLOSURE,
-                    warnings=warnings,
-                    event_kind=RuntimeEventKind.DISCLOSURE_REQUESTED,
-                    message="remote provider disclosure acknowledgement required",
-                    outcome_state=paused,
-                )
+            disclosure: ProviderDisclosureRequest | None = None
+            disclosure_gate: ProviderDispatchGateV1 | None = None
+            if not recovering_persisted_response:
+                if background_binding is not None:
+                    # 后台 occurrence 有独立的授权权威，不得借用交互会话 grant。
+                    disclosure = self._required_disclosure(context)
+                    if disclosure is not None and (
+                        current.state.provider_disclosure_receipt is None
+                        or current.state.provider_disclosure_receipt.request_digest
+                        != disclosure.request_digest
+                    ):
+                        paused = pause_for_provider_disclosure(
+                            current.state, disclosure
+                        )
+                        return self._finish(
+                            current,
+                            action,
+                            status=RunStatus.AWAITING_DISCLOSURE,
+                            warnings=warnings,
+                            event_kind=RuntimeEventKind.DISCLOSURE_REQUESTED,
+                            message="remote provider disclosure acknowledgement required",
+                            outcome_state=paused,
+                        )
+                else:
+                    current, disclosure_gate = self._provider_gate(
+                        current,
+                        context,
+                        purpose="runtime_progress",
+                        now=self._run_time_factory(),
+                        run_id=active.run_id,
+                    )
+                    if not disclosure_gate.admitted:
+                        if disclosure_gate.request is None:
+                            return self._finish(
+                                current,
+                                action,
+                                status=RunStatus.FAILED_FATAL,
+                                warnings=warnings,
+                                event_kind=RuntimeEventKind.FAILED,
+                                error_code="consent_scope_missing",
+                                outcome_state=current.state,
+                            )
+                        paused = pause_for_provider_disclosure(
+                            current.state, disclosure_gate.request
+                        )
+                        return self._finish(
+                            current,
+                            action,
+                            status=RunStatus.AWAITING_DISCLOSURE,
+                            warnings=warnings,
+                            event_kind=RuntimeEventKind.DISCLOSURE_REQUESTED,
+                            message="remote provider disclosure acknowledgement required",
+                            outcome_state=paused,
+                        )
+                    disclosure = (
+                        disclosure_gate.request
+                        if isinstance(
+                            disclosure_gate.request, ProviderDisclosureRequest
+                        )
+                        else None
+                    )
             if (
                 not recovering_persisted_response
                 and background_binding is not None
@@ -1863,13 +2050,64 @@ class AgentRuntime:
                         ),
                     )
                 else:
+                    attempted = current.state
+                    if disclosure_gate is not None:
+                        # 许可扣次与 attempt record 必须在同一 durable
+                        # transition 落盘；失败不退款，恢复也不再扣。
+                        attempted = charge_provider_dispatch(
+                            attempted,
+                            disclosure_gate,
+                            descriptor=self._provider_descriptor,
+                            scope=context.consent_scope,
+                            purpose="runtime_progress",
+                            run_id=active.run_id,
+                            now=self._run_time_factory(),
+                        )
                     current = self._save(
                         current,
                         record_foreground_model_attempt(
-                            current.state,
+                            attempted,
                             input_tokens=context.budget.estimated_input_tokens,
                         ),
                     )
+                    if disclosure_gate is not None:
+                        # S6：校验后跨过到期点，transport 前最后重验。
+                        expired = final_dispatch_expiry_check(
+                            current.state,
+                            disclosure_gate,
+                            now=self._run_time_factory(),
+                        )
+                        if expired is not None:
+                            refreshed = evaluate_provider_dispatch(
+                                state=current.state,
+                                descriptor=self._provider_descriptor,
+                                scope=context.consent_scope,
+                                purpose="runtime_progress",
+                                run_id=active.run_id,
+                                now=self._run_time_factory(),
+                            )
+                            if refreshed.request is None:
+                                return self._finish(
+                                    current,
+                                    action,
+                                    status=RunStatus.FAILED_FATAL,
+                                    warnings=warnings,
+                                    event_kind=RuntimeEventKind.FAILED,
+                                    error_code="consent_scope_missing",
+                                    outcome_state=current.state,
+                                )
+                            paused = pause_for_provider_disclosure(
+                                current.state, refreshed.request
+                            )
+                            return self._finish(
+                                current,
+                                action,
+                                status=RunStatus.AWAITING_DISCLOSURE,
+                                warnings=warnings,
+                                event_kind=RuntimeEventKind.DISCLOSURE_REQUESTED,
+                                message="remote provider disclosure acknowledgement required",
+                                outcome_state=paused,
+                            )
             progress_reporter = None
             try:
                 if not recovering_persisted_response:
@@ -4295,7 +4533,12 @@ class AgentRuntime:
             source_checkpoint_digest=source.token.removeprefix("sha256:"),
             source_fact_ids_digest=canonical_json_digest(list(plan.removable_fact_ids)),
         )
-        reduced = apply_compaction_summary(current.state, summary, plan.removable_fact_ids)
+        reduced = apply_compaction_summary(
+            current.state,
+            summary,
+            plan.removable_fact_ids,
+            source_scope=context.consent_scope,
+        )
         archive_compaction_source(
             self._conversation_archive,
             source,
@@ -4340,6 +4583,41 @@ class AgentRuntime:
             and definition.execution_authority is ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS
             for definition in self._tool_runtime.definitions()
         )
+
+    def _provider_gate(
+        self,
+        current: LoadedSnapshot,
+        context: ContextPack,
+        *,
+        purpose: str,
+        now: str,
+        run_id: str,
+    ) -> tuple[LoadedSnapshot, ProviderDispatchGateV1]:
+        """统一的只读许可判断；身份漂移先落 durable fence 再重新请求。"""
+
+        gate = evaluate_provider_dispatch(
+            state=current.state,
+            descriptor=self._provider_descriptor,
+            scope=context.consent_scope,
+            now=now,
+            purpose=purpose,
+            run_id=run_id,
+        )
+        if gate.grant_invalidated:
+            invalidated = invalidate_provider_consent(current.state)
+            if invalidated != current.state:
+                current = self._save(current, invalidated)
+            # 旧 grant 已不适用于当前身份；重新生成不带旧 grant 的候选，
+            # 避免把不可用许可继续显示成 s 或沿用旧额度。
+            gate = evaluate_provider_dispatch(
+                state=current.state,
+                descriptor=self._provider_descriptor,
+                scope=context.consent_scope,
+                now=now,
+                purpose=purpose,
+                run_id=run_id,
+            )
+        return current, gate
 
     def _required_disclosure(
         self,
@@ -4844,6 +5122,12 @@ class AgentRuntime:
             "executed": result.executed,
             "metadata": result.metadata,
         }
+        if result.result_source_proof is not None:
+            # 该键只由 KernelToolRuntime 在成功执行后填充；record_tool_result
+            # 会重新校验并转存为 state-owned proof，同时从 fact 中移除。
+            content["runtime_source_proof"] = (
+                result.result_source_proof.to_dict()
+            )
         if active.invocation_origin is InvocationOrigin.OPERATOR:
             content["invocation_origin"] = InvocationOrigin.OPERATOR.value
         return ConversationFact(

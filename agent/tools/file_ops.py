@@ -9,6 +9,7 @@ from agent.runtime.contracts import (
     ExecutionAuthorityClass,
     OutputPolicy,
     PolicyDecision,
+    ResultSourceKind,
     SideEffectClass,
     SourceKind,
     ToolRisk,
@@ -118,6 +119,13 @@ def build_file_tool_registrations(
                 return {"denied": True, "reason": "workspace_file_policy"}
 
         return prepare
+
+    def file_effect_binding(arguments, operation):
+        # 规范化目标只用于显示与稳定边界；authority 仍由 target_digest 和
+        # 已重新校验的 safety_binding 决定。
+        binding = operation(arguments)
+        parts = boundary.validate_relative(arguments["path"])
+        return {**binding, "consent_target": "/".join(parts)}
 
     file_policy = _WorkspaceFilePolicy()
     traversal_limits = TraversalLimits(
@@ -245,15 +253,19 @@ def build_file_tool_registrations(
                 content=intent.arguments["content"],
             ),
             prepare_binding=safe_binding(
-                lambda arguments: prepare_write_binding(
-                    boundary,
-                    path=arguments["path"],
-                    content=arguments["content"],
-                    max_bytes=max_file_bytes,
+                lambda arguments: file_effect_binding(
+                    arguments,
+                    lambda values: prepare_write_binding(
+                        boundary,
+                        path=values["path"],
+                        content=values["content"],
+                        max_bytes=max_file_bytes,
+                    ),
                 ),
                 explain_missing_parent=True,
             ),
             policy=file_policy,
+            result_source_kind=ResultSourceKind.WORKSPACE_FILE_EFFECT,
         ),
         RegisteredTool(
             _edit_spec(),
@@ -265,15 +277,19 @@ def build_file_tool_registrations(
                 max_bytes=max_file_bytes,
             ),
             prepare_binding=safe_binding(
-                lambda arguments: _prepare_edit_binding(
-                    boundary,
-                    path=arguments["path"],
-                    old_text=arguments["old_text"],
-                    new_text=arguments["new_text"],
-                    max_bytes=max_file_bytes,
+                lambda arguments: file_effect_binding(
+                    arguments,
+                    lambda values: _prepare_edit_binding(
+                        boundary,
+                        path=values["path"],
+                        old_text=values["old_text"],
+                        new_text=values["new_text"],
+                        max_bytes=max_file_bytes,
+                    ),
                 )
             ),
             policy=file_policy,
+            result_source_kind=ResultSourceKind.WORKSPACE_FILE_EFFECT,
         ),
     )
 

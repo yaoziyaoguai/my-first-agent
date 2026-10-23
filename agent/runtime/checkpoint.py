@@ -52,8 +52,13 @@ from agent.runtime.contracts import (
     ProcessAuthorityLeaseV1,
     ProposedCriterion,
     ProviderCallIntentV1,
+    ProviderConsentGrantV1,
     ProviderDisclosureReceipt,
+    ProviderDisclosureReceiptV2,
     ProviderDisclosureRequest,
+    ProviderDisclosureRequestV2,
+    ProviderFileSourceProofV1,
+    ProviderSummarySourceBoundaryV1,
     RecordedRunResult,
     RecoveryRequest,
     ReplayRecord,
@@ -69,7 +74,11 @@ from agent.runtime.contracts import (
 )
 from agent.runtime.ports import CheckpointCASConflictError, CheckpointUsage
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
+# v10 是 consent 之前的当前 timing/contract 版本；v11 只新增有限外发许可、
+# v2 披露 request/receipt 与 Runtime-owned 来源证明。旧版本继续按原合同解码。
+CONSENT_SCHEMA_VERSION = 11
+TIMING_SCHEMA_VERSION = 10
 # v3 是 process-authority migration source；v4 是旧 strict process schema；v5 加入
 # artifact confirmation。v6 绑定 candidate/lease 全部 immutable authority 字段，并把
 # readable command 持久化到 lease。旧版本显式重算收窄后的 digest；v6 漂移 fail closed。
@@ -555,28 +564,37 @@ def _encode_state(state: ConversationState) -> bytes:
         criterion.oracle_kind is not None or criterion.artifact_path is not None
         for criterion in state.goal.proposed_criteria
     )
+    has_consent_records = (
+        state.provider_consent_grant is not None
+        or isinstance(state.provider_disclosure_request, ProviderDisclosureRequestV2)
+        or isinstance(state.provider_disclosure_receipt, ProviderDisclosureReceiptV2)
+        or bool(state.provider_source_proofs)
+        or bool(state.summary_source_boundaries)
+    )
+    current_runtime_state = (
+        state.workspace_binding is not None
+        or state.active_run is not None
+        or state.goal_authorizations
+        or state.process_leases
+        or state.sandbox_leases
+        or state.browser_leases
+        or state.browser_takeover_pending is not None
+        or state.background_occurrence_binding is not None
+        or has_structured_proposal
+    )
     version = (
         SCHEMA_VERSION
-        if (
-            state.workspace_binding is not None
-            or state.active_run is not None
-            or state.goal_authorizations
-            or state.process_leases
-            or state.sandbox_leases
-            or state.browser_leases
-            or state.browser_takeover_pending is not None
-            or state.background_occurrence_binding is not None
-            or has_structured_proposal
-        )
-        else LEGACY_SCHEMA_VERSION
+        if has_consent_records
+        else (TIMING_SCHEMA_VERSION if current_runtime_state else LEGACY_SCHEMA_VERSION)
     )
     document = {
         "schema_version": version,
         "state": _state_to_dict(
             state,
-            include_workspace_binding=version == SCHEMA_VERSION,
-            include_proposed_contract=version == SCHEMA_VERSION,
-            include_background_binding=version == SCHEMA_VERSION,
+            include_workspace_binding=version != LEGACY_SCHEMA_VERSION,
+            include_proposed_contract=version != LEGACY_SCHEMA_VERSION,
+            include_background_binding=version != LEGACY_SCHEMA_VERSION,
+            include_consent=version == SCHEMA_VERSION,
         ),
     }
     return (
@@ -602,6 +620,7 @@ def _decode_state(data: bytes) -> ConversationState:
         BROWSER_SCHEMA_VERSION,
         BACKGROUND_SCHEMA_VERSION,
         ORIGIN_SCHEMA_VERSION,
+        TIMING_SCHEMA_VERSION,
         SCHEMA_VERSION,
     }:
         raise CheckpointVersionError(f"unsupported checkpoint schema version: {version}")
@@ -617,6 +636,7 @@ def _decode_state(data: bytes) -> ConversationState:
                 BROWSER_SCHEMA_VERSION,
                 BACKGROUND_SCHEMA_VERSION,
                 ORIGIN_SCHEMA_VERSION,
+                TIMING_SCHEMA_VERSION,
                 SCHEMA_VERSION,
             },
             process_contract_current=version
@@ -625,6 +645,7 @@ def _decode_state(data: bytes) -> ConversationState:
                 BROWSER_SCHEMA_VERSION,
                 BACKGROUND_SCHEMA_VERSION,
                 ORIGIN_SCHEMA_VERSION,
+                TIMING_SCHEMA_VERSION,
                 SCHEMA_VERSION,
             },
             sandbox_contract_current=version
@@ -632,12 +653,21 @@ def _decode_state(data: bytes) -> ConversationState:
                 BROWSER_SCHEMA_VERSION,
                 BACKGROUND_SCHEMA_VERSION,
                 ORIGIN_SCHEMA_VERSION,
+                TIMING_SCHEMA_VERSION,
                 SCHEMA_VERSION,
             },
             background_contract_current=version
-            in {BACKGROUND_SCHEMA_VERSION, ORIGIN_SCHEMA_VERSION, SCHEMA_VERSION},
-            origin_contract_current=version in {ORIGIN_SCHEMA_VERSION, SCHEMA_VERSION},
-            timing_contract_current=version == SCHEMA_VERSION,
+            in {
+                BACKGROUND_SCHEMA_VERSION,
+                ORIGIN_SCHEMA_VERSION,
+                TIMING_SCHEMA_VERSION,
+                SCHEMA_VERSION,
+            },
+            origin_contract_current=version
+            in {ORIGIN_SCHEMA_VERSION, TIMING_SCHEMA_VERSION, SCHEMA_VERSION},
+            timing_contract_current=version
+            in {TIMING_SCHEMA_VERSION, SCHEMA_VERSION},
+            consent_contract_current=version == SCHEMA_VERSION,
         )
     except CheckpointVersionError:
         raise
@@ -651,6 +681,7 @@ def _state_to_dict(
     include_workspace_binding: bool,
     include_proposed_contract: bool,
     include_background_binding: bool,
+    include_consent: bool,
 ) -> dict:
     value = {
         "conversation_id": state.conversation_id,
@@ -702,6 +733,18 @@ def _state_to_dict(
         value["background_occurrence_binding"] = _background_binding_to_dict(
             state.background_occurrence_binding
         )
+    if include_consent:
+        value["provider_consent_grant"] = (
+            state.provider_consent_grant.to_dict()
+            if state.provider_consent_grant is not None
+            else None
+        )
+        value["provider_source_proofs"] = [
+            proof.to_dict() for proof in state.provider_source_proofs
+        ]
+        value["summary_source_boundaries"] = [
+            boundary.to_dict() for boundary in state.summary_source_boundaries
+        ]
     return value
 
 
@@ -716,6 +759,7 @@ def _state_from_dict(
     background_contract_current: bool = False,
     origin_contract_current: bool = False,
     timing_contract_current: bool = False,
+    consent_contract_current: bool = False,
 ) -> ConversationState:
     keys = {
         "conversation_id",
@@ -755,6 +799,14 @@ def _state_from_dict(
         keys.add("browser_takeover_pending")
     if background_contract_current:
         keys.add("background_occurrence_binding")
+    if consent_contract_current:
+        keys.update(
+            {
+                "provider_consent_grant",
+                "provider_source_proofs",
+                "summary_source_boundaries",
+            }
+        )
     _expect_keys(value, keys, "state")
     return ConversationState(
         conversation_id=_string(value["conversation_id"], "conversation_id"),
@@ -810,10 +862,44 @@ def _state_from_dict(
             _string(value["interaction_state"], "interaction_state")
         ),
         provider_disclosure_request=_disclosure_request_from_dict(
-            value["provider_disclosure_request"]
+            value["provider_disclosure_request"],
+            consent_current=consent_contract_current,
         ),
         provider_disclosure_receipt=_disclosure_receipt_from_dict(
-            value["provider_disclosure_receipt"]
+            value["provider_disclosure_receipt"],
+            consent_current=consent_contract_current,
+        ),
+        provider_consent_grant=(
+            ProviderConsentGrantV1.from_dict(value["provider_consent_grant"])
+            if consent_contract_current
+            and value["provider_consent_grant"] is not None
+            else None
+        ),
+        provider_source_proofs=(
+            tuple(
+                ProviderFileSourceProofV1.from_dict(
+                    _object(item, "provider_source_proof")
+                )
+                for item in _array(
+                    value["provider_source_proofs"],
+                    "provider_source_proofs",
+                )
+            )
+            if consent_contract_current
+            else ()
+        ),
+        summary_source_boundaries=(
+            tuple(
+                ProviderSummarySourceBoundaryV1.from_dict(
+                    _object(item, "summary_source_boundary")
+                )
+                for item in _array(
+                    value["summary_source_boundaries"],
+                    "summary_source_boundaries",
+                )
+            )
+            if consent_contract_current
+            else ()
         ),
         control_receipts=tuple(
             _control_receipt_from_dict(_object(item, "control_receipt"))
@@ -1415,9 +1501,13 @@ def _completion_claim_from_dict(value) -> CompletionClaim | None:
     )
 
 
-def _disclosure_request_to_dict(value: ProviderDisclosureRequest | None) -> dict | None:
+def _disclosure_request_to_dict(
+    value: ProviderDisclosureRequest | ProviderDisclosureRequestV2 | None,
+) -> dict | None:
     if value is None:
         return None
+    if isinstance(value, ProviderDisclosureRequestV2):
+        return value.to_dict()
     return {
         "disclosure_id": value.disclosure_id,
         "provider_descriptor_digest": value.provider_descriptor_digest,
@@ -1428,10 +1518,20 @@ def _disclosure_request_to_dict(value: ProviderDisclosureRequest | None) -> dict
     }
 
 
-def _disclosure_request_from_dict(value) -> ProviderDisclosureRequest | None:
+def _disclosure_request_from_dict(
+    value,
+    *,
+    consent_current: bool,
+) -> ProviderDisclosureRequest | ProviderDisclosureRequestV2 | None:
     if value is None:
         return None
     value = _object(value, "provider_disclosure_request")
+    if "request_version" in value:
+        if not consent_current:
+            raise CheckpointVersionError(
+                "v2 disclosure request requires a current checkpoint version"
+            )
+        return ProviderDisclosureRequestV2.from_dict(value)
     keys = {
         "disclosure_id",
         "provider_descriptor_digest",
@@ -1460,9 +1560,13 @@ def _disclosure_request_from_dict(value) -> ProviderDisclosureRequest | None:
     )
 
 
-def _disclosure_receipt_to_dict(value: ProviderDisclosureReceipt | None) -> dict | None:
+def _disclosure_receipt_to_dict(
+    value: ProviderDisclosureReceipt | ProviderDisclosureReceiptV2 | None,
+) -> dict | None:
     if value is None:
         return None
+    if isinstance(value, ProviderDisclosureReceiptV2):
+        return value.to_dict()
     return {
         "receipt_id": value.receipt_id,
         "request_digest": value.request_digest,
@@ -1471,10 +1575,20 @@ def _disclosure_receipt_to_dict(value: ProviderDisclosureReceipt | None) -> dict
     }
 
 
-def _disclosure_receipt_from_dict(value) -> ProviderDisclosureReceipt | None:
+def _disclosure_receipt_from_dict(
+    value,
+    *,
+    consent_current: bool,
+) -> ProviderDisclosureReceipt | ProviderDisclosureReceiptV2 | None:
     if value is None:
         return None
     value = _object(value, "provider_disclosure_receipt")
+    if "receipt_version" in value:
+        if not consent_current:
+            raise CheckpointVersionError(
+                "v2 disclosure receipt requires a current checkpoint version"
+            )
+        return ProviderDisclosureReceiptV2.from_dict(value)
     keys = {"receipt_id", "request_digest", "acknowledged_action_seq", "acknowledged_at"}
     _expect_keys(value, keys, "provider_disclosure_receipt")
     return ProviderDisclosureReceipt(

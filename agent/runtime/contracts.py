@@ -1400,6 +1400,867 @@ class ProviderDisclosureRequest:
         )
 
 
+# 2026-10-21 确认体验修复：单一会话级常规外发许可。
+# 这些是持久化合同，不能由 CLI 或工具自报字段推导；运行时只接受闭合值。
+CONSENT_PROFILE_ROUTINE = "routine_conversation_v1"
+CONSENT_MAX_USES = 32
+CONSENT_TTL_SECONDS = 3_600
+NO_WORKSPACE_IDENTITY = "NO_WORKSPACE"
+
+
+def _is_consent_workspace_identity(value: object) -> bool:
+    """workspace identity 是既有 opaque 值；空值只能用 NO_WORKSPACE 明确表示。"""
+
+    return isinstance(value, str) and bool(value)
+
+
+ROUTINE_DATA_CLASSES = (
+    "control_receipts",
+    "conversation_history",
+    "conversation_summary",
+    "goal",
+    "goal_bootstrap",
+    "runtime_progress",
+    "system_policy",
+    "tool_schemas",
+    "user_messages",
+)
+
+
+class ProviderConsentGrantStatus(StrEnum):
+    ACTIVE = "active"
+    REVOKED = "revoked"
+    INVALIDATED = "invalidated"
+
+
+class ResultSourceKind(StrEnum):
+    """闭合的 Kernel 结果来源能力；不是工具可自报的自由字符串。"""
+
+    WORKSPACE_FILE_EFFECT = "workspace_file_effect"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderConsentToolBindingV1:
+    name: str
+    identity_digest: str
+
+    def __post_init__(self) -> None:
+        if not self.name or not _is_lower_hex(self.identity_digest, length=64):
+            raise ValueError("provider consent tool binding is invalid")
+
+    @property
+    def binding_digest(self) -> str:
+        return canonical_json_digest(
+            {"name": self.name, "identity_digest": self.identity_digest}
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderDisclosureSourceV1:
+    """一次外发中非常规来源的稳定边界。
+
+    ``boundary_digest`` 对文件效果来自 Kernel 证明的稳定身份（不含调用 ID、
+    结果字节或 state revision）；未知来源只能携带一次性内容 digest。
+    ``reusable`` 为 False 时，即使内容相同也只可消费一次明确许可。
+    """
+
+    data_class: str
+    boundary_digest: str
+    label: str
+    reusable: bool
+
+    def __post_init__(self) -> None:
+        if not self.data_class or not self.label:
+            raise ValueError("provider disclosure source fields must not be empty")
+        if not _is_lower_hex(self.boundary_digest, length=64):
+            raise ValueError("provider disclosure source digest must be sha256")
+        if not isinstance(self.reusable, bool):
+            raise TypeError("provider disclosure source reuse must be a bool")
+
+    def identity_payload(self) -> dict[str, JSONValue]:
+        return {
+            "data_class": self.data_class,
+            "boundary_digest": self.boundary_digest,
+            "label": self.label,
+            "reusable": self.reusable,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderConsentScopeV1:
+    """ContextManager 生成的只读许可投影；不直接授予任何权限。"""
+
+    workspace_identity_digest: str
+    goal_id: str | None
+    goal_revision: int | None
+    tool_bindings: tuple[ProviderConsentToolBindingV1, ...]
+    control_schema_digest: str
+    data_classes: tuple[str, ...]
+    sources: tuple[ProviderDisclosureSourceV1, ...]
+    routine_compatible: bool
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "tool_bindings", tuple(self.tool_bindings))
+        object.__setattr__(self, "sources", tuple(self.sources))
+        if not _is_consent_workspace_identity(self.workspace_identity_digest):
+            raise ValueError(
+                "consent workspace identity must be NO_WORKSPACE or workspace:v1:sha256"
+            )
+        if (self.goal_id is None) != (self.goal_revision is None):
+            raise ValueError("consent goal identity must be paired")
+        if self.goal_id is not None and self.goal_revision < 1:
+            raise ValueError("consent goal revision must be positive")
+        if not _is_lower_hex(self.control_schema_digest, length=64):
+            raise ValueError("consent control schema digest must be sha256")
+        if tuple(sorted(set(self.data_classes))) != self.data_classes or any(
+            not item for item in self.data_classes
+        ):
+            raise ValueError("consent data classes must be sorted and unique")
+        tool_names = tuple(binding.name for binding in self.tool_bindings)
+        if tool_names != tuple(sorted(set(tool_names))):
+            raise ValueError("consent tool bindings must be unique and sorted")
+        source_keys = tuple(
+            (source.data_class, source.boundary_digest, source.label)
+            for source in self.sources
+        )
+        if source_keys != tuple(sorted(set(source_keys))):
+            raise ValueError("consent sources must be unique and sorted")
+        if not isinstance(self.routine_compatible, bool):
+            raise TypeError("consent routine_compatible must be a bool")
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderFileSourceProofV1:
+    """Kernel 对内建文件写入成功结果铸造的稳定来源证明。
+
+    证明同时绑定一次真实执行（intent/result digest）和可复用边界。ContextManager
+    只信任 Runtime 保存进 state 的证明，工具自报的同名字段不会进入这里。
+    """
+
+    proof_id: str
+    conversation_id: str
+    run_id: str
+    workspace_identity_digest: str
+    tool_call_id: str
+    tool_name: str
+    tool_identity_digest: str
+    policy_identity: str
+    execution_authority: str
+    operation: str
+    normalized_target: str
+    target_digest: str
+    goal_id: str
+    goal_revision: int
+    intent_digest: str
+    result_content_digest: str
+    boundary_digest: str
+    proof_digest: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "proof_id",
+            "conversation_id",
+            "run_id",
+            "workspace_identity_digest",
+            "tool_call_id",
+            "tool_name",
+            "tool_identity_digest",
+            "policy_identity",
+            "execution_authority",
+            "operation",
+            "normalized_target",
+            "goal_id",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"file source proof {name} must not be empty")
+        for name in (
+            "target_digest",
+            "intent_digest",
+            "result_content_digest",
+            "boundary_digest",
+            "proof_digest",
+            "tool_identity_digest",
+        ):
+            if not _is_lower_hex(getattr(self, name), length=64):
+                raise ValueError(f"file source proof {name} must be sha256")
+        if not isinstance(self.goal_revision, int) or isinstance(self.goal_revision, bool):
+            raise TypeError("file source proof goal revision must be an integer")
+        if self.goal_revision < 1:
+            raise ValueError("file source proof goal revision must be positive")
+        if self.proof_digest != canonical_json_digest(self._payload()):
+            raise ValueError("file source proof digest mismatch")
+
+    def _payload(self) -> dict[str, JSONValue]:
+        return {
+            "proof_id": self.proof_id,
+            "conversation_id": self.conversation_id,
+            "run_id": self.run_id,
+            "workspace_identity_digest": self.workspace_identity_digest,
+            "tool_call_id": self.tool_call_id,
+            "tool_name": self.tool_name,
+            "tool_identity_digest": self.tool_identity_digest,
+            "policy_identity": self.policy_identity,
+            "execution_authority": self.execution_authority,
+            "operation": self.operation,
+            "normalized_target": self.normalized_target,
+            "target_digest": self.target_digest,
+            "goal_id": self.goal_id,
+            "goal_revision": self.goal_revision,
+            "intent_digest": self.intent_digest,
+            "result_content_digest": self.result_content_digest,
+            "boundary_digest": self.boundary_digest,
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {**self._payload(), "proof_digest": self.proof_digest}
+
+    @classmethod
+    def from_dict(cls, raw: object) -> ProviderFileSourceProofV1:
+        if not isinstance(raw, dict):
+            raise ValueError("file source proof must be an object")
+        expected = {
+            "proof_id",
+            "conversation_id",
+            "run_id",
+            "workspace_identity_digest",
+            "tool_call_id",
+            "tool_name",
+            "tool_identity_digest",
+            "policy_identity",
+            "execution_authority",
+            "operation",
+            "normalized_target",
+            "target_digest",
+            "goal_id",
+            "goal_revision",
+            "intent_digest",
+            "result_content_digest",
+            "boundary_digest",
+            "proof_digest",
+        }
+        if set(raw) != expected:
+            raise ValueError("file source proof fields are not closed")
+        return cls(**raw)
+
+    @staticmethod
+    def boundary_payload(
+        *,
+        conversation_id: str,
+        workspace_identity_digest: str,
+        tool_name: str,
+        tool_identity_digest: str,
+        policy_identity: str,
+        execution_authority: str,
+        operation: str,
+        target_digest: str,
+        goal_id: str,
+        goal_revision: int,
+    ) -> dict[str, JSONValue]:
+        return {
+            "profile": "workspace_file_effect_v1",
+            "conversation_id": conversation_id,
+            "workspace_identity_digest": workspace_identity_digest,
+            "tool_name": tool_name,
+            "tool_identity_digest": tool_identity_digest,
+            "policy_identity": policy_identity,
+            "execution_authority": execution_authority,
+            "operation": operation,
+            "target_digest": target_digest,
+            "goal_id": goal_id,
+            "goal_revision": goal_revision,
+        }
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        conversation_id: str,
+        run_id: str,
+        workspace_identity_digest: str,
+        tool_call_id: str,
+        tool_name: str,
+        tool_identity_digest: str,
+        policy_identity: str,
+        execution_authority: str,
+        operation: str,
+        normalized_target: str,
+        target_digest: str,
+        goal_id: str,
+        goal_revision: int,
+        intent_digest: str,
+        result_content_digest: str,
+    ) -> ProviderFileSourceProofV1:
+        boundary_digest = canonical_json_digest(
+            cls.boundary_payload(
+                conversation_id=conversation_id,
+                workspace_identity_digest=workspace_identity_digest,
+                tool_name=tool_name,
+                tool_identity_digest=tool_identity_digest,
+                policy_identity=policy_identity,
+                execution_authority=execution_authority,
+                operation=operation,
+                target_digest=target_digest,
+                goal_id=goal_id,
+                goal_revision=goal_revision,
+            )
+        )
+        proof_id = (
+            "file-source-proof:"
+            + canonical_json_digest(
+                {
+                    "conversation_id": conversation_id,
+                    "run_id": run_id,
+                    "tool_call_id": tool_call_id,
+                    "intent_digest": intent_digest,
+                }
+            )[:16]
+        )
+        payload = {
+            "proof_id": proof_id,
+            "conversation_id": conversation_id,
+            "run_id": run_id,
+            "workspace_identity_digest": workspace_identity_digest,
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_name,
+            "tool_identity_digest": tool_identity_digest,
+            "policy_identity": policy_identity,
+            "execution_authority": execution_authority,
+            "operation": operation,
+            "normalized_target": normalized_target,
+            "target_digest": target_digest,
+            "goal_id": goal_id,
+            "goal_revision": goal_revision,
+            "intent_digest": intent_digest,
+            "result_content_digest": result_content_digest,
+            "boundary_digest": boundary_digest,
+        }
+        return cls(**payload, proof_digest=canonical_json_digest(payload))
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderSummarySourceBoundaryV1:
+    """一次压缩实际输入来源边界的 Runtime-owned 证明。"""
+
+    summary_fact_id: str
+    data_classes: tuple[str, ...]
+    sources: tuple[ProviderDisclosureSourceV1, ...]
+    routine_compatible: bool
+    boundary_digest: str
+
+    def __post_init__(self) -> None:
+        if not self.summary_fact_id:
+            raise ValueError("summary source boundary must bind a summary fact")
+        object.__setattr__(self, "data_classes", tuple(self.data_classes))
+        object.__setattr__(self, "sources", tuple(self.sources))
+        if tuple(sorted(set(self.data_classes))) != self.data_classes or any(
+            not item for item in self.data_classes
+        ):
+            raise ValueError("summary source data classes must be sorted and unique")
+        source_keys = tuple(
+            (source.data_class, source.boundary_digest, source.label)
+            for source in self.sources
+        )
+        if source_keys != tuple(sorted(set(source_keys))):
+            raise ValueError("summary sources must be unique and sorted")
+        if not isinstance(self.routine_compatible, bool):
+            raise TypeError("summary routine_compatible must be a bool")
+        if not _is_lower_hex(self.boundary_digest, length=64):
+            raise ValueError("summary source boundary digest must be sha256")
+        if self.boundary_digest != canonical_json_digest(self._payload()):
+            raise ValueError("summary source boundary digest mismatch")
+
+    def _payload(self) -> dict[str, JSONValue]:
+        return {
+            "summary_fact_id": self.summary_fact_id,
+            "data_classes": list(self.data_classes),
+            "sources": [source.identity_payload() for source in self.sources],
+            "routine_compatible": self.routine_compatible,
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {**self._payload(), "boundary_digest": self.boundary_digest}
+
+    @classmethod
+    def from_dict(cls, raw: object) -> ProviderSummarySourceBoundaryV1:
+        if not isinstance(raw, dict) or set(raw) != {
+            "summary_fact_id",
+            "data_classes",
+            "sources",
+            "routine_compatible",
+            "boundary_digest",
+        }:
+            raise ValueError("summary source boundary fields are not closed")
+        sources_raw = raw["sources"]
+        classes_raw = raw["data_classes"]
+        if not isinstance(sources_raw, list) or not isinstance(classes_raw, list):
+            raise ValueError("summary source boundary collections are invalid")
+        if any(not isinstance(source, dict) for source in sources_raw):
+            raise ValueError("summary source boundary source is invalid")
+        return cls(
+            summary_fact_id=raw["summary_fact_id"],
+            data_classes=tuple(classes_raw),
+            sources=tuple(
+                ProviderDisclosureSourceV1(
+                    data_class=source["data_class"],
+                    boundary_digest=source["boundary_digest"],
+                    label=source["label"],
+                    reusable=source["reusable"],
+                )
+                for source in sources_raw
+                if isinstance(source, dict)
+            ),
+            routine_compatible=raw["routine_compatible"],
+            boundary_digest=raw["boundary_digest"],
+        )
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        summary_fact_id: str,
+        data_classes: tuple[str, ...],
+        sources: tuple[ProviderDisclosureSourceV1, ...],
+        routine_compatible: bool,
+    ) -> ProviderSummarySourceBoundaryV1:
+        payload = {
+            "summary_fact_id": summary_fact_id,
+            "data_classes": list(tuple(sorted(set(data_classes)))),
+            "sources": [
+                source.identity_payload()
+                for source in sorted(
+                    set(sources),
+                    key=lambda item: (item.data_class, item.boundary_digest, item.label),
+                )
+            ],
+            "routine_compatible": routine_compatible,
+        }
+        return cls(
+            summary_fact_id=summary_fact_id,
+            data_classes=tuple(payload["data_classes"]),
+            sources=tuple(
+                sorted(
+                    set(sources),
+                    key=lambda item: (item.data_class, item.boundary_digest, item.label),
+                )
+            ),
+            routine_compatible=routine_compatible,
+            boundary_digest=canonical_json_digest(payload),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderDisclosureRequestV2:
+    """新模式的外发请求：真实类别 + 稳定来源边界 + 授予候选。
+
+    旧 v1 request 保持原字段和 digest 语义；v2 的 ``scope_digest`` 只覆盖非常规
+    来源边界与身份，不随常规历史/回执涨落。
+    """
+
+    disclosure_id: str
+    provider_descriptor_digest: str
+    canonical_destination: str
+    model: str
+    workspace_identity_digest: str
+    data_classes: tuple[str, ...]
+    sources: tuple[ProviderDisclosureSourceV1, ...]
+    tool_bindings: tuple[ProviderConsentToolBindingV1, ...]
+    control_schema_digest: str
+    grant_id: str | None
+    grant_eligible: bool
+    purpose: str
+    run_id: str
+    goal_id: str | None
+    goal_revision: int | None
+    scope_digest: str
+    request_digest: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "disclosure_id",
+            "provider_descriptor_digest",
+            "canonical_destination",
+            "model",
+            "workspace_identity_digest",
+            "control_schema_digest",
+            "purpose",
+            "run_id",
+        ):
+            if not getattr(self, name):
+                raise ValueError(f"provider disclosure v2 {name} must not be empty")
+        object.__setattr__(self, "data_classes", tuple(self.data_classes))
+        if tuple(sorted(set(self.data_classes))) != self.data_classes or any(
+            not item for item in self.data_classes
+        ):
+            raise ValueError("provider disclosure v2 data classes must be sorted and unique")
+        object.__setattr__(self, "sources", tuple(self.sources))
+        object.__setattr__(self, "tool_bindings", tuple(self.tool_bindings))
+        if not isinstance(self.grant_eligible, bool):
+            raise TypeError("provider disclosure v2 grant eligibility must be a bool")
+        if not _is_consent_workspace_identity(self.workspace_identity_digest):
+            raise ValueError("provider disclosure v2 workspace identity is invalid")
+        if (self.goal_id is None) != (self.goal_revision is None):
+            raise ValueError("provider disclosure v2 goal identity must be paired")
+        if self.request_digest != self._expected_digest():
+            raise ValueError("provider disclosure v2 request digest mismatch")
+        if self.scope_digest != self._expected_scope_digest():
+            raise ValueError("provider disclosure v2 scope digest mismatch")
+
+    def _payload(self) -> dict[str, JSONValue]:
+        return {
+            "request_version": 2,
+            "disclosure_id": self.disclosure_id,
+            "provider_descriptor_digest": self.provider_descriptor_digest,
+            "canonical_destination": self.canonical_destination,
+            "model": self.model,
+            "workspace_identity_digest": self.workspace_identity_digest,
+            "data_classes": list(self.data_classes),
+            "sources": [source.identity_payload() for source in self.sources],
+            "tool_bindings": [
+                {"name": binding.name, "identity_digest": binding.identity_digest}
+                for binding in self.tool_bindings
+            ],
+            "control_schema_digest": self.control_schema_digest,
+            "grant_id": self.grant_id,
+            "grant_eligible": self.grant_eligible,
+            "purpose": self.purpose,
+            "run_id": self.run_id,
+            "goal_id": self.goal_id,
+            "goal_revision": self.goal_revision,
+        }
+
+    def _expected_digest(self) -> str:
+        return canonical_json_digest(self._payload())
+
+    def _expected_scope_digest(self) -> str:
+        return canonical_json_digest(
+            {
+                "profile": CONSENT_PROFILE_ROUTINE,
+                "provider_descriptor_digest": self.provider_descriptor_digest,
+                "canonical_destination": self.canonical_destination,
+                "model": self.model,
+                "workspace_identity_digest": self.workspace_identity_digest,
+                "goal_id": self.goal_id,
+                "goal_revision": self.goal_revision,
+                "sources": [source.identity_payload() for source in self.sources],
+            }
+        )
+
+    def acknowledge(
+        self,
+        *,
+        receipt_id: str,
+        acknowledged_action_seq: int,
+        acknowledged_at: str,
+    ) -> ProviderDisclosureReceiptV2:
+        return ProviderDisclosureReceiptV2(
+            receipt_id=receipt_id,
+            request_digest=self.request_digest,
+            acknowledged_action_seq=acknowledged_action_seq,
+            acknowledged_at=acknowledged_at,
+            consumed_at=None,
+        )
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {
+            **self._payload(),
+            "scope_digest": self.scope_digest,
+            "request_digest": self.request_digest,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: object) -> ProviderDisclosureRequestV2:
+        if not isinstance(raw, dict):
+            raise ValueError("provider disclosure v2 must be an object")
+        expected = {
+            "request_version",
+            "disclosure_id",
+            "provider_descriptor_digest",
+            "canonical_destination",
+            "model",
+            "workspace_identity_digest",
+            "data_classes",
+            "sources",
+            "tool_bindings",
+            "control_schema_digest",
+            "grant_id",
+            "grant_eligible",
+            "purpose",
+            "run_id",
+            "goal_id",
+            "goal_revision",
+            "scope_digest",
+            "request_digest",
+        }
+        if set(raw) != expected or raw.get("request_version") != 2:
+            raise ValueError("provider disclosure v2 fields are not closed")
+        raw_sources = raw["sources"]
+        raw_bindings = raw["tool_bindings"]
+        if not isinstance(raw_sources, list) or not isinstance(raw_bindings, list):
+            raise ValueError("provider disclosure v2 collections are invalid")
+        if any(not isinstance(item, dict) for item in (*raw_sources, *raw_bindings)):
+            raise ValueError("provider disclosure v2 collection item is invalid")
+        return cls(
+            disclosure_id=raw["disclosure_id"],
+            provider_descriptor_digest=raw["provider_descriptor_digest"],
+            canonical_destination=raw["canonical_destination"],
+            model=raw["model"],
+            workspace_identity_digest=raw["workspace_identity_digest"],
+            data_classes=tuple(raw["data_classes"]),
+            sources=tuple(
+                ProviderDisclosureSourceV1(
+                    data_class=item["data_class"],
+                    boundary_digest=item["boundary_digest"],
+                    label=item["label"],
+                    reusable=item["reusable"],
+                )
+                for item in raw_sources
+            ),
+            tool_bindings=tuple(
+                ProviderConsentToolBindingV1(
+                    name=item["name"],
+                    identity_digest=item["identity_digest"],
+                )
+                for item in raw_bindings
+            ),
+            control_schema_digest=raw["control_schema_digest"],
+            grant_id=raw["grant_id"],
+            grant_eligible=raw["grant_eligible"],
+            purpose=raw["purpose"],
+            run_id=raw["run_id"],
+            goal_id=raw["goal_id"],
+            goal_revision=raw["goal_revision"],
+            scope_digest=raw["scope_digest"],
+            request_digest=raw["request_digest"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderDisclosureReceiptV2:
+    receipt_id: str
+    request_digest: str
+    acknowledged_action_seq: int
+    acknowledged_at: str
+    consumed_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.receipt_id or not self.request_digest or not self.acknowledged_at:
+            raise ValueError("provider disclosure v2 receipt fields must not be empty")
+        if self.acknowledged_action_seq < 1:
+            raise ValueError("disclosure acknowledgement action sequence must be positive")
+        if self.consumed_at is not None and not self.consumed_at:
+            raise ValueError("consumed receipt time must not be empty")
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {
+            "receipt_version": 2,
+            "receipt_id": self.receipt_id,
+            "request_digest": self.request_digest,
+            "acknowledged_action_seq": self.acknowledged_action_seq,
+            "acknowledged_at": self.acknowledged_at,
+            "consumed_at": self.consumed_at,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: object) -> ProviderDisclosureReceiptV2:
+        if not isinstance(raw, dict) or set(raw) != {
+            "receipt_version",
+            "receipt_id",
+            "request_digest",
+            "acknowledged_action_seq",
+            "acknowledged_at",
+            "consumed_at",
+        } or raw.get("receipt_version") != 2:
+            raise ValueError("provider disclosure v2 receipt fields are not closed")
+        return cls(
+            receipt_id=raw["receipt_id"],
+            request_digest=raw["request_digest"],
+            acknowledged_action_seq=raw["acknowledged_action_seq"],
+            acknowledged_at=raw["acknowledged_at"],
+            consumed_at=raw["consumed_at"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderConsentGrantV1:
+    grant_id: str
+    conversation_id: str
+    workspace_identity_digest: str
+    provider_descriptor_digest: str
+    canonical_destination: str
+    model: str
+    profile: str
+    allowed_data_classes: tuple[str, ...]
+    tool_bindings: tuple[ProviderConsentToolBindingV1, ...]
+    control_schema_digest: str
+    disclosure_request_digest: str
+    scope_digest: str
+    granted_action_seq: int
+    issued_at: str
+    expires_at: str
+    max_uses: int
+    uses_consumed: int
+    status: ProviderConsentGrantStatus
+    grant_digest: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "grant_id",
+            "conversation_id",
+            "workspace_identity_digest",
+            "provider_descriptor_digest",
+            "canonical_destination",
+            "model",
+            "profile",
+            "issued_at",
+            "expires_at",
+        ):
+            if not getattr(self, name):
+                raise ValueError(f"provider consent grant {name} must not be empty")
+        if self.profile != CONSENT_PROFILE_ROUTINE:
+            raise ValueError("provider consent grant profile is unsupported")
+        object.__setattr__(self, "allowed_data_classes", tuple(self.allowed_data_classes))
+        if tuple(sorted(set(self.allowed_data_classes))) != self.allowed_data_classes:
+            raise ValueError("provider consent grant classes must be sorted and unique")
+        if not set(self.allowed_data_classes).issubset(ROUTINE_DATA_CLASSES):
+            raise ValueError("provider consent grant classes exceed the routine scope")
+        object.__setattr__(self, "tool_bindings", tuple(self.tool_bindings))
+        tool_names = tuple(binding.name for binding in self.tool_bindings)
+        if tool_names != tuple(sorted(set(tool_names))):
+            raise ValueError("provider consent grant tool bindings must be unique and sorted")
+        if not isinstance(self.status, ProviderConsentGrantStatus):
+            raise TypeError("provider consent grant status must be closed")
+        for name in ("max_uses", "uses_consumed", "granted_action_seq"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise TypeError(f"provider consent grant {name} must be an integer")
+        if self.max_uses != CONSENT_MAX_USES:
+            raise ValueError("provider consent grant max_uses is fixed")
+        if not 0 <= self.uses_consumed <= self.max_uses:
+            raise ValueError("provider consent grant uses_consumed is out of range")
+        if self.granted_action_seq < 1:
+            raise ValueError("provider consent grant action sequence must be positive")
+        if not _is_consent_workspace_identity(self.workspace_identity_digest):
+            raise ValueError("provider consent grant workspace identity is invalid")
+        for name in (
+            "provider_descriptor_digest",
+            "control_schema_digest",
+            "disclosure_request_digest",
+            "scope_digest",
+            "grant_digest",
+        ):
+            if not _is_lower_hex(getattr(self, name), length=64):
+                raise ValueError(f"provider consent grant {name} must be sha256")
+        if self.grant_digest != canonical_json_digest(self._payload()):
+            raise ValueError("provider consent grant digest mismatch")
+
+    def _payload(self) -> dict[str, JSONValue]:
+        return {
+            "grant_id": self.grant_id,
+            "conversation_id": self.conversation_id,
+            "workspace_identity_digest": self.workspace_identity_digest,
+            "provider_descriptor_digest": self.provider_descriptor_digest,
+            "canonical_destination": self.canonical_destination,
+            "model": self.model,
+            "profile": self.profile,
+            "allowed_data_classes": list(self.allowed_data_classes),
+            "tool_bindings": [
+                {"name": binding.name, "identity_digest": binding.identity_digest}
+                for binding in self.tool_bindings
+            ],
+            "control_schema_digest": self.control_schema_digest,
+            "disclosure_request_digest": self.disclosure_request_digest,
+            "scope_digest": self.scope_digest,
+            "granted_action_seq": self.granted_action_seq,
+            "issued_at": self.issued_at,
+            "expires_at": self.expires_at,
+            "max_uses": self.max_uses,
+            "uses_consumed": self.uses_consumed,
+            "status": self.status.value,
+        }
+
+    def with_status(self, status: ProviderConsentGrantStatus) -> ProviderConsentGrantV1:
+        payload = self._payload()
+        payload["status"] = status.value
+        return replace(
+            self,
+            status=status,
+            grant_digest=canonical_json_digest(payload),
+        )
+
+    def with_use(self) -> ProviderConsentGrantV1:
+        if self.status is not ProviderConsentGrantStatus.ACTIVE:
+            raise ValueError("provider consent grant is not active")
+        return replace(
+            self,
+            uses_consumed=self.uses_consumed + 1,
+            grant_digest=canonical_json_digest(
+                {**self._payload(), "uses_consumed": self.uses_consumed + 1}
+            ),
+        )
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {**self._payload(), "grant_digest": self.grant_digest}
+
+    @classmethod
+    def from_dict(cls, raw: object) -> ProviderConsentGrantV1:
+        expected = {
+            "grant_id",
+            "conversation_id",
+            "workspace_identity_digest",
+            "provider_descriptor_digest",
+            "canonical_destination",
+            "model",
+            "profile",
+            "allowed_data_classes",
+            "tool_bindings",
+            "control_schema_digest",
+            "disclosure_request_digest",
+            "scope_digest",
+            "granted_action_seq",
+            "issued_at",
+            "expires_at",
+            "max_uses",
+            "uses_consumed",
+            "status",
+            "grant_digest",
+        }
+        if not isinstance(raw, dict) or set(raw) != expected:
+            raise ValueError("provider consent grant fields are not closed")
+        raw_bindings = raw["tool_bindings"]
+        if not isinstance(raw_bindings, list) or any(
+            not isinstance(item, dict) for item in raw_bindings
+        ):
+            raise ValueError("provider consent grant tool bindings are invalid")
+        return cls(
+            grant_id=raw["grant_id"],
+            conversation_id=raw["conversation_id"],
+            workspace_identity_digest=raw["workspace_identity_digest"],
+            provider_descriptor_digest=raw["provider_descriptor_digest"],
+            canonical_destination=raw["canonical_destination"],
+            model=raw["model"],
+            profile=raw["profile"],
+            allowed_data_classes=tuple(raw["allowed_data_classes"]),
+            tool_bindings=tuple(
+                ProviderConsentToolBindingV1(
+                    name=item["name"],
+                    identity_digest=item["identity_digest"],
+                )
+                for item in raw_bindings
+            ),
+            control_schema_digest=raw["control_schema_digest"],
+            disclosure_request_digest=raw["disclosure_request_digest"],
+            scope_digest=raw["scope_digest"],
+            granted_action_seq=raw["granted_action_seq"],
+            issued_at=raw["issued_at"],
+            expires_at=raw["expires_at"],
+            max_uses=raw["max_uses"],
+            uses_consumed=raw["uses_consumed"],
+            status=ProviderConsentGrantStatus(raw["status"]),
+            grant_digest=raw["grant_digest"],
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class ControlReceipt:
     correlation_id: str
@@ -4159,8 +5020,12 @@ class ConversationState:
     evidence_records: tuple[EvidenceRecord, ...] = ()
     completion_claim: CompletionClaim | None = None
     interaction_state: InteractionState = InteractionState.IDLE
-    provider_disclosure_request: ProviderDisclosureRequest | None = None
-    provider_disclosure_receipt: ProviderDisclosureReceipt | None = None
+    provider_disclosure_request: (
+        ProviderDisclosureRequest | ProviderDisclosureRequestV2 | None
+    ) = None
+    provider_disclosure_receipt: (
+        ProviderDisclosureReceipt | ProviderDisclosureReceiptV2 | None
+    ) = None
     control_receipts: tuple[ControlReceipt, ...] = ()
     workspace_binding: ConversationWorkspaceBindingV1 | None = None
     background_occurrence_binding: BackgroundOccurrenceBindingV1 | None = None
@@ -4173,6 +5038,11 @@ class ConversationState:
     # takeover 只携带 opaque identity，永不携带 credential/storage-state）。
     browser_leases: tuple[BrowserAuthorityLeaseV1, ...] = ()
     browser_takeover_pending: BrowserTakeoverRequestV1 | None = None
+    # 2026-10-21：单槽会话级常规外发许可与 Runtime-owned 来源证明。
+    # 旧 checkpoint 缺省为空；存在任何记录（含 revoked/invalidated）都写 schema 11。
+    provider_consent_grant: ProviderConsentGrantV1 | None = None
+    provider_source_proofs: tuple[ProviderFileSourceProofV1, ...] = ()
+    summary_source_boundaries: tuple[ProviderSummarySourceBoundaryV1, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.conversation_id:
@@ -4294,6 +5164,37 @@ class ConversationState:
             != self.provider_disclosure_request.request_digest
         ):
             raise ValueError("provider disclosure receipt must bind the current request")
+        if self.provider_consent_grant is not None and (
+            not isinstance(self.provider_consent_grant, ProviderConsentGrantV1)
+            or self.provider_consent_grant.conversation_id != self.conversation_id
+        ):
+            raise ValueError("provider consent grant must bind this conversation")
+        object.__setattr__(self, "provider_source_proofs", tuple(self.provider_source_proofs))
+        proof_ids = tuple(proof.proof_id for proof in self.provider_source_proofs)
+        if len(set(proof_ids)) != len(proof_ids):
+            raise ValueError("provider source proof ids must be unique")
+        if any(
+            proof.conversation_id != self.conversation_id
+            for proof in self.provider_source_proofs
+        ):
+            raise ValueError("provider source proof must bind this conversation")
+        object.__setattr__(
+            self,
+            "summary_source_boundaries",
+            tuple(self.summary_source_boundaries),
+        )
+        summary_fact_ids = tuple(
+            boundary.summary_fact_id for boundary in self.summary_source_boundaries
+        )
+        if len(set(summary_fact_ids)) != len(summary_fact_ids):
+            raise ValueError("summary source boundary ids must be unique")
+        facts_by_id = {fact.fact_id: fact for fact in self.facts}
+        if any(
+            boundary.summary_fact_id not in facts_by_id
+            or facts_by_id[boundary.summary_fact_id].kind is not FactKind.CONTEXT_SUMMARY
+            for boundary in self.summary_source_boundaries
+        ):
+            raise ValueError("summary source boundary must bind a summary fact")
         correlation_ids = tuple(receipt.correlation_id for receipt in self.control_receipts)
         if len(set(correlation_ids)) != len(correlation_ids):
             raise ValueError("control receipt correlation_id must be unique")
@@ -4544,6 +5445,25 @@ class AcknowledgeProviderDisclosure(RuntimeAction):
             raise ValueError("provider disclosure acknowledgement fields must not be empty")
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GrantProviderConsent(RuntimeAction):
+    """用户显式选择 s：只依据当前显示的同一条 v2 request 铸造有限许可。"""
+
+    request_digest: str
+    scope_digest: str
+
+    def __post_init__(self) -> None:
+        if not self.request_digest or not self.scope_digest:
+            raise ValueError("provider consent grant action must bind request and scope")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RevokeProviderConsent(RuntimeAction):
+    """撤销当前会话范围许可；不触发 provider/tool，也不伪造网络中断。"""
+
+    pass
+
+
 def _validate_goal_action(goal_id: str, goal_revision: int) -> None:
     if not goal_id:
         raise ValueError("goal action must bind a goal")
@@ -4638,6 +5558,8 @@ Action: TypeAlias = (
     | Resume
     | CancelRun
     | AcknowledgeProviderDisclosure
+    | GrantProviderConsent
+    | RevokeProviderConsent
     | SelectGoal
     | PauseGoal
     | ResumeGoal
@@ -5047,6 +5969,9 @@ class ContextPack:
     control_receipts: tuple[ControlReceipt, ...] = ()
     data_classes: tuple[str, ...] = ()
     goal_bootstrap: GoalBootstrap | None = None
+    # Runtime-owned 只读许可投影：ContextManager 从实际选中的 facts/tools
+    # 生成；Provider adapter 不消费它，也不改变 wire payload。
+    consent_scope: ProviderConsentScopeV1 | None = None
 
     def __post_init__(self) -> None:
         if self.control_schema is not None:
@@ -6222,6 +7147,9 @@ class ToolResult:
     # 018：browser tool 请求 user takeover 的 typed 通道；唯一 AgentRuntime
     # 在持久化 pending 之前不得把该结果作为完成返回。
     browser_takeover_request: BrowserTakeoverRequestV1 | None = None
+    # 2026-10-21：仅 Kernel 在受信任文件 registration 成功执行后填充；工具
+    # 自报的同名字段会在 invoke 结果构造时被丢弃。
+    result_source_proof: ProviderFileSourceProofV1 | None = None
 
     def __post_init__(self) -> None:
         _assert_json_compatible(self.metadata, path="tool_result.metadata")

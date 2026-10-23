@@ -42,6 +42,8 @@ from agent.runtime.contracts import (
     ProcessAuthorityLeaseV1,
     ProcessOutcome,
     ProcessReceiptV1,
+    ProviderFileSourceProofV1,
+    ResultSourceKind,
     SandboxAuthorityCandidateV1,
     SandboxAuthorityLeaseV1,
     SandboxReceiptV1,
@@ -142,10 +144,17 @@ class RegisteredTool:
     prepare_authority_binding: AuthorityBindingPreparer | None = None
     policy: ToolPolicy | None = None
     exposure: ToolExposure = ToolExposure.MODEL
+    # 闭合 registration 标记：只有受信任厂商代码显式声明才能在成功结果上
+    # 获得 Kernel 铸造的来源证明。默认 None，绝不按工具名推断。
+    result_source_kind: ResultSourceKind | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.exposure, ToolExposure):
             raise TypeError("registered tool exposure must be closed")
+        if self.result_source_kind is not None and not isinstance(
+            self.result_source_kind, ResultSourceKind
+        ):
+            raise TypeError("tool result source kind must be closed")
 
 
 class KernelToolRuntime:
@@ -818,6 +827,41 @@ class KernelToolRuntime:
             "truncated": len(content) > registration.spec.output_limit_chars,
             "tool_identity": registration.spec.identity_digest,
         }
+        result_content = content[: registration.spec.output_limit_chars]
+        result_source_proof: ProviderFileSourceProofV1 | None = None
+        if (
+            registration.result_source_kind
+            is ResultSourceKind.WORKSPACE_FILE_EFFECT
+        ):
+            normalized_target = current_binding.get("consent_target")
+            target_digest = current_binding.get("target_digest")
+            if (
+                isinstance(normalized_target, str)
+                and normalized_target
+                and isinstance(target_digest, str)
+                and intent.goal_id
+                and intent.goal_revision is not None
+                and intent.workspace_identity_digest
+            ):
+                result_source_proof = ProviderFileSourceProofV1.create(
+                    conversation_id=intent.conversation_id,
+                    run_id=intent.run_id,
+                    workspace_identity_digest=intent.workspace_identity_digest,
+                    tool_call_id=intent.tool_call_id,
+                    tool_name=registration.spec.name,
+                    tool_identity_digest=registration.spec.identity_digest,
+                    policy_identity=self._policy_for(registration).identity,
+                    execution_authority=registration.spec.execution_authority.value,
+                    operation=intent.operation or registration.spec.name,
+                    normalized_target=normalized_target,
+                    target_digest=target_digest,
+                    goal_id=intent.goal_id,
+                    goal_revision=intent.goal_revision,
+                    intent_digest=intent.intent_digest,
+                    result_content_digest=hashlib.sha256(
+                        result_content.encode("utf-8")
+                    ).hexdigest(),
+                )
         if registration.spec.side_effect is not SideEffectClass.READ_ONLY:
             metadata.update(
                 {
@@ -842,8 +886,9 @@ class KernelToolRuntime:
             )
         return ToolResult(
             tool_call_id=intent.tool_call_id,
-            content=content[: registration.spec.output_limit_chars],
+            content=result_content,
             metadata=metadata,
+            result_source_proof=result_source_proof,
         )
 
     @staticmethod

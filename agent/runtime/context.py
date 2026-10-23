@@ -53,7 +53,10 @@ from agent.runtime.contracts import (
     InvocationOrigin,
     JSONValue,
     ModelMessage,
+    ProviderConsentScopeV1,
     ProviderContinuationV1,
+    ProviderDisclosureSourceV1,
+    ProviderFileSourceProofV1,
     SideEffectClass,
     SubmitMessage,
     ToolDefinition,
@@ -63,6 +66,12 @@ from agent.runtime.contracts import (
     source_result_since_latest_user,
 )
 from agent.runtime.ports import ContextSource, RetryableContextSourceError
+from agent.runtime.provider_consent import (
+    CONTROL_SCHEMA_STRUCTURE_DIGEST,
+    ROUTINE_DATA_CLASS_SET,
+    no_workspace_identity,
+    tool_bindings_for,
+)
 
 # 这不是自然语言分类器：只识别句首、语法上已明确要求非文字结果的窄集合，
 # 用来 veto “直接文字即可完成”。其余表达仍由同一个 typed intent gate 判断。
@@ -203,8 +212,149 @@ def _fact_disclosure_data_classes(
     if kind is FactKind.USER_MESSAGE:
         return ("user_messages",)
     if kind is FactKind.CONTEXT_SUMMARY:
-        return ("conversation_summary",)
+        return source_data_classes or ("conversation_summary",)
     return ("conversation_history",)
+
+
+def _file_proof_projection() -> ToolResultSourceProjection:
+    return ToolResultSourceProjection(
+        receipts=(),
+        data_classes=("workspace_excerpt",),
+        source_refs=(),
+        citation_sources=(),
+    )
+
+
+def _file_consent_source(
+    proof: ProviderFileSourceProofV1,
+) -> ProviderDisclosureSourceV1:
+    return ProviderDisclosureSourceV1(
+        data_class="workspace_excerpt",
+        boundary_digest=proof.boundary_digest,
+        label=f"{proof.tool_name} {proof.normalized_target}",
+        reusable=True,
+    )
+
+
+def _valid_file_proof(
+    fact: ConversationFact,
+    state: ConversationState,
+) -> ProviderFileSourceProofV1 | None:
+    """只接受 Runtime 持久化且与当前 facts/Goal/workspace 一致的证明。"""
+
+    goal = state.goal
+    if goal is None:
+        return None
+    text = fact.content.get("text")
+    if not isinstance(text, str) or fact.content.get("is_error") is True:
+        return None
+    tool_call_id = fact.content.get("tool_call_id")
+    if not isinstance(tool_call_id, str) or not tool_call_id:
+        return None
+    parts = fact.fact_id.split(":", 3)
+    if len(parts) != 4 or parts[0] != "run":
+        return None
+    expected_workspace = (
+        state.workspace_binding.workspace_identity_digest
+        if state.workspace_binding is not None
+        else None
+    )
+    content_digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    for proof in state.provider_source_proofs:
+        if (
+            proof.run_id == parts[1]
+            and proof.tool_call_id == tool_call_id
+            and proof.result_content_digest == content_digest
+            and proof.goal_id == goal.goal_id
+            and proof.goal_revision == goal.revision
+            and (
+                expected_workspace is None
+                or proof.workspace_identity_digest == expected_workspace
+            )
+        ):
+            return proof
+    return None
+
+
+def _summary_consent_sources(
+    fact: ConversationFact,
+    state: ConversationState,
+) -> tuple[
+    tuple[str, ...],
+    tuple[ProviderDisclosureSourceV1, ...],
+]:
+    for boundary in state.summary_source_boundaries:
+        if boundary.summary_fact_id == fact.fact_id:
+            return boundary.data_classes, boundary.sources
+    # 旧 summary 没有 Runtime-owned 输入边界证明：按未知的一次性来源处理，
+    # 不能因为文本看似普通历史就获得自动复用。
+    digest = hashlib.sha256(
+        canonical_json_digest(fact.content).encode("utf-8")
+    ).hexdigest()
+    return (
+        ("conversation_summary",),
+        (
+            ProviderDisclosureSourceV1(
+                data_class="conversation_summary",
+                boundary_digest=digest,
+                label="unverified summary",
+                reusable=False,
+            ),
+        ),
+    )
+
+
+def _generic_tool_sources(
+    fact: ConversationFact,
+    projection: ToolResultSourceProjection,
+) -> tuple[ProviderDisclosureSourceV1, ...]:
+    digest = hashlib.sha256(
+        canonical_json_digest(fact.content).encode("utf-8")
+    ).hexdigest()
+    return tuple(
+        ProviderDisclosureSourceV1(
+            data_class=data_class,
+            boundary_digest=canonical_json_digest(
+                {"data_class": data_class, "content_digest": digest}
+            ),
+            label=f"{data_class} tool output",
+            reusable=False,
+        )
+        for data_class in projection.data_classes
+    )
+
+
+def _consent_scope(
+    *,
+    state: ConversationState,
+    data_classes: tuple[str, ...],
+    sources: tuple[ProviderDisclosureSourceV1, ...],
+    tools: tuple[ToolDefinition, ...],
+    workspace_identity_digest: str | None,
+    control_schema_digest: str,
+) -> ProviderConsentScopeV1:
+    unique_sources = tuple(
+        sorted(
+            set(sources),
+            key=lambda item: (item.data_class, item.boundary_digest, item.label),
+        )
+    )
+    routine = not unique_sources and set(data_classes).issubset(
+        ROUTINE_DATA_CLASS_SET
+    )
+    goal = state.goal
+    return ProviderConsentScopeV1(
+        workspace_identity_digest=no_workspace_identity(
+            workspace_identity_digest
+        ),
+        goal_id=goal.goal_id if goal is not None else None,
+        goal_revision=goal.revision if goal is not None else None,
+        tool_bindings=tool_bindings_for(tools),
+        control_schema_digest=control_schema_digest,
+        data_classes=data_classes,
+        sources=unique_sources,
+        routine_compatible=routine,
+    )
 
 
 def _receipt_continuity_payload(receipt: ControlReceipt) -> dict[str, JSONValue]:
@@ -248,6 +398,7 @@ class _ContextGroup:
     has_tool_result: bool = False
     pinned: bool = False
     data_classes: tuple[str, ...] = ()
+    consent_sources: tuple[ProviderDisclosureSourceV1, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -477,15 +628,33 @@ class KernelContextManager:
             data_classes.add("tool_schemas")
         if state.control_receipts:
             data_classes.add("control_receipts")
+        data_class_tuple = tuple(sorted(data_classes))
+        consent_scope = _consent_scope(
+            state=state,
+            data_classes=data_class_tuple,
+            sources=tuple(
+                source
+                for group in plan.selected
+                for source in group.consent_sources
+            ),
+            tools=plan.exposed_tools,
+            workspace_identity_digest=(
+                state.workspace_binding.workspace_identity_digest
+                if state.workspace_binding is not None
+                else self._workspace_identity_digest
+            ),
+            control_schema_digest=CONTROL_SCHEMA_STRUCTURE_DIGEST,
+        )
         return ContextPack(
             system=plan.system_policy,
             messages=messages,
             tools=plan.exposed_tools,
             control_schema=plan.control_schema,
             control_receipts=state.control_receipts,
-            data_classes=tuple(sorted(data_classes)),
+            data_classes=data_class_tuple,
             goal_bootstrap=plan.goal_bootstrap,
             budget=self._budget_report(plan),
+            consent_scope=consent_scope,
         )
 
     def usage(
@@ -626,8 +795,20 @@ class KernelContextManager:
             [fact.fact_id for fact in removable]
         )
         projected_facts, clipped_ids = self._clip_tool_results(removable)
-        data_classes = self._compaction_disclosure_data_classes(
-            projected_facts, state.conversation_id
+        data_classes, consent_sources = self._compaction_consent_inputs(
+            state, projected_facts
+        )
+        consent_scope = _consent_scope(
+            state=state,
+            data_classes=data_classes,
+            sources=consent_sources,
+            tools=(),
+            workspace_identity_digest=(
+                state.workspace_binding.workspace_identity_digest
+                if state.workspace_binding is not None
+                else self._workspace_identity_digest
+            ),
+            control_schema_digest=CONTROL_SCHEMA_STRUCTURE_DIGEST,
         )
         facts_projection = []
         for fact in projected_facts:
@@ -671,32 +852,47 @@ class KernelContextManager:
             control_receipts=(),
             data_classes=data_classes,
             goal_bootstrap=None,
+            consent_scope=consent_scope,
         )
 
-    def _compaction_disclosure_data_classes(
+    def _compaction_consent_inputs(
         self,
+        state: ConversationState,
         facts: tuple[ConversationFact, ...],
-        conversation_id: str,
-    ) -> tuple[str, ...]:
-        """F3：由实际进入 compaction payload 的 facts 精确推导 disclosure 类别。
-
-        不复用普通 build 的 active-Goal stale-source omission：compaction
-        发送 raw historical content，TOOL_RESULT 的类别必须由 receipts 重新
-        验证得出（与普通 build 同一校验器），metadata 不一致在 provider
-        调用前 fail closed（ContextLimitError）。
-        """
+    ) -> tuple[
+        tuple[str, ...],
+        tuple[ProviderDisclosureSourceV1, ...],
+    ]:
+        """由实际进入 compaction payload 的 facts 精确推导许可投影。"""
 
         classes: set[str] = {"system_policy"}
+        sources: list[ProviderDisclosureSourceV1] = []
         for fact in facts:
-            source_data_classes: tuple[str, ...] = ()
             if fact.kind is FactKind.TOOL_RESULT:
-                source_data_classes = validate_tool_result_source(
-                    fact, conversation_id
-                ).data_classes
-            classes.update(
-                _fact_disclosure_data_classes(fact.kind, source_data_classes)
-            )
-        return tuple(sorted(classes))
+                proof = _valid_file_proof(fact, state)
+                if proof is not None:
+                    classes.add("workspace_excerpt")
+                    sources.append(_file_consent_source(proof))
+                    continue
+                projection = validate_tool_result_source(
+                    fact, state.conversation_id
+                )
+                classes.update(
+                    _fact_disclosure_data_classes(
+                        fact.kind, projection.data_classes
+                    )
+                )
+                sources.extend(_generic_tool_sources(fact, projection))
+                continue
+            if fact.kind is FactKind.CONTEXT_SUMMARY:
+                inherited_classes, inherited_sources = _summary_consent_sources(
+                    fact, state
+                )
+                classes.update(inherited_classes)
+                sources.extend(inherited_sources)
+                continue
+            classes.update(_fact_disclosure_data_classes(fact.kind, ()))
+        return tuple(sorted(classes)), tuple(sources)
 
     def _budget_report(self, plan: _ContextPlan) -> BudgetReport:
         return BudgetReport(
@@ -813,6 +1009,13 @@ class KernelContextManager:
             projected_facts,
             state,
         )
+        source_projections = dict(source_projections)
+        for fact in projected_facts:
+            if fact.kind is not FactKind.TOOL_RESULT:
+                continue
+            proof = _valid_file_proof(fact, state)
+            if proof is not None:
+                source_projections[fact.fact_id] = _file_proof_projection()
         if public_web_requirement_pending(state, source_projections):
             # mandatory Web receipt 尚未存在时，保留定位当前 workspace 输入所需的
             # bounded read 工具和真正能闭合前置条件的 web_search；history 来源既不能
@@ -899,6 +1102,7 @@ class KernelContextManager:
         exposed_tools = tuple(constrained_tools)
         groups = self._group_facts(
             projected_facts,
+            state=state,
             source_projections=source_projections,
         )
         groups = self._pin_groups(groups, state)
@@ -1381,6 +1585,23 @@ class KernelContextManager:
                     "owner_preferences": "owner_preferences",
                 }.get(candidate.source_name, "recalled_context"),
             ),
+            consent_sources=(
+                ProviderDisclosureSourceV1(
+                    data_class={
+                        "memory": "workspace_memory",
+                        "owner_preferences": "owner_preferences",
+                    }.get(candidate.source_name, "recalled_context"),
+                    boundary_digest=canonical_json_digest(
+                        {
+                            "source_name": candidate.source_name,
+                            "candidate_id": candidate.candidate_id,
+                            "content_digest": candidate.content_digest,
+                        }
+                    ),
+                    label=f"{candidate.source_name} context result",
+                    reusable=False,
+                ),
+            ),
         )
 
     def _project_candidate(self, candidate: ContextCandidate) -> ContextCandidate:
@@ -1464,6 +1685,7 @@ class KernelContextManager:
         self,
         facts: tuple[ConversationFact, ...],
         *,
+        state: ConversationState,
         source_projections: dict[str, ToolResultSourceProjection],
     ) -> tuple[_ContextGroup, ...]:
         groups: list[_ContextGroup] = []
@@ -1474,6 +1696,7 @@ class KernelContextManager:
                 groups.append(
                     self._single_fact_group(
                         fact,
+                        state=state,
                         source_projections=source_projections,
                     )
                 )
@@ -1511,6 +1734,7 @@ class KernelContextManager:
             fact_ids = [fact.fact_id]
             result_blocks: list[dict[str, JSONValue]] = []
             result_data_classes: set[str] = set()
+            result_sources: list[ProviderDisclosureSourceV1] = []
             next_index = index + 1
             while next_index < len(facts) and facts[next_index].kind is FactKind.TOOL_RESULT:
                 result = facts[next_index]
@@ -1520,6 +1744,13 @@ class KernelContextManager:
                 projection = source_projections[result.fact_id]
                 receipt_data_classes = projection.data_classes
                 result_data_classes.update(receipt_data_classes)
+                proof = _valid_file_proof(result, state)
+                if proof is not None:
+                    result_sources.append(_file_consent_source(proof))
+                else:
+                    result_sources.extend(
+                        _generic_tool_sources(result, projection)
+                    )
                 block: dict[str, JSONValue] = {"type": "tool_result", **result.content}
                 metadata = result.content.get("metadata")
                 if receipt_data_classes != ("tool_results",) or (
@@ -1560,6 +1791,16 @@ class KernelContextManager:
                         if result_blocks
                         else ("conversation_history",)
                     ),
+                    consent_sources=tuple(
+                        sorted(
+                            set(result_sources),
+                            key=lambda item: (
+                                item.data_class,
+                                item.boundary_digest,
+                                item.label,
+                            ),
+                        )
+                    ),
                 )
             )
             index = next_index
@@ -1569,6 +1810,7 @@ class KernelContextManager:
         self,
         fact: ConversationFact,
         *,
+        state: ConversationState,
         source_projections: dict[str, ToolResultSourceProjection],
     ) -> _ContextGroup:
         if fact.kind is FactKind.USER_MESSAGE:
@@ -1597,6 +1839,18 @@ class KernelContextManager:
             else None
         )
         source_data_classes = projection.data_classes if projection is not None else ()
+        consent_sources: tuple[ProviderDisclosureSourceV1, ...] = ()
+        if fact.kind is FactKind.TOOL_RESULT and projection is not None:
+            proof = _valid_file_proof(fact, state)
+            if proof is not None:
+                source_data_classes = ("workspace_excerpt",)
+                consent_sources = (_file_consent_source(proof),)
+            else:
+                consent_sources = _generic_tool_sources(fact, projection)
+        if fact.kind is FactKind.CONTEXT_SUMMARY:
+            source_data_classes, consent_sources = _summary_consent_sources(
+                fact, state
+            )
         metadata = fact.content.get("metadata")
         if (
             source_data_classes
@@ -1630,6 +1884,7 @@ class KernelContextManager:
             tool_call_ids=(tool_call_id,) if isinstance(tool_call_id, str) else (),
             has_tool_result=fact.kind is FactKind.TOOL_RESULT,
             data_classes=group_data_classes,
+            consent_sources=consent_sources,
         )
 
     def _pin_groups(

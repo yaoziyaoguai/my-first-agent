@@ -64,6 +64,7 @@ from agent.runtime.contracts import (
     GoalProgress,
     GoalProposal,
     GoalStatus,
+    GrantProviderConsent,
     InteractionState,
     InvocationOrigin,
     PauseGoal,
@@ -73,8 +74,13 @@ from agent.runtime.contracts import (
     ProcessReceiptV1,
     ProposedCriterion,
     ProviderCallIntentV1,
+    ProviderConsentGrantStatus,
+    ProviderConsentScopeV1,
     ProviderContinuationV1,
     ProviderDisclosureRequest,
+    ProviderDisclosureRequestV2,
+    ProviderFileSourceProofV1,
+    ProviderSummarySourceBoundaryV1,
     RecordedRunResult,
     RecoverUnknownObservation,
     RecoveryRequest,
@@ -85,6 +91,7 @@ from agent.runtime.contracts import (
     ResumeGoal,
     RevokeGoalTargetAuthority,
     RevokeProcessAuthority,
+    RevokeProviderConsent,
     RunStatus,
     SandboxAuthorityLeaseV1,
     SideEffectClass,
@@ -96,6 +103,9 @@ from agent.runtime.contracts import (
     canonical_json_digest,
     safe_goal_authorization_target,
     source_result_since_latest_user,
+)
+from agent.runtime.provider_consent import (
+    mint_provider_consent_grant,
 )
 from agent.runtime.resource_lifecycle import active_task_resources
 
@@ -1670,7 +1680,7 @@ def apply_control_request(
 
 def pause_for_provider_disclosure(
     state: ConversationState,
-    request: ProviderDisclosureRequest,
+    request: ProviderDisclosureRequest | ProviderDisclosureRequestV2,
 ) -> ConversationState:
     active = state.active_run
     if active is None or active.phase is not ContinuationPhase.MODEL:
@@ -1700,11 +1710,18 @@ def pause_for_provider_disclosure(
 def acknowledge_provider_disclosure(
     state: ConversationState,
     action: AcknowledgeProviderDisclosure,
+    *,
+    now: str | None = None,
 ) -> ConversationState:
     request = state.provider_disclosure_request
     active = state.active_run
     if request is None or request.request_digest != action.request_digest:
         raise ValueError("provider disclosure acknowledgement does not match")
+    acknowledged_at = (
+        now
+        if isinstance(request, ProviderDisclosureRequestV2) and now is not None
+        else action.acknowledged_at
+    )
     goal = state.goal
     if active is None:
         # /pause 允许落在 pending disclosure 上（2026-10-17 E1-B 真实旅程实测）：
@@ -1721,7 +1738,7 @@ def acknowledge_provider_disclosure(
             provider_disclosure_receipt=request.acknowledge(
                 receipt_id=f"disclosure-receipt:{action.action_seq}",
                 acknowledged_action_seq=action.action_seq,
-                acknowledged_at=action.acknowledged_at,
+                acknowledged_at=acknowledged_at,
             ),
             active_run=ActiveRun(run_id=f"resume-{action.action_seq}"),
         )
@@ -1735,9 +1752,76 @@ def acknowledge_provider_disclosure(
         provider_disclosure_receipt=request.acknowledge(
             receipt_id=f"disclosure-receipt:{action.action_seq}",
             acknowledged_action_seq=action.action_seq,
-            acknowledged_at=action.acknowledged_at,
+            acknowledged_at=acknowledged_at,
         ),
         active_run=replace(active, status=ActiveRunStatus.RUNNABLE),
+    )
+
+
+def grant_provider_consent(
+    state: ConversationState,
+    action: GrantProviderConsent,
+    *,
+    now: str,
+) -> ConversationState:
+    """把当前已显示的同一条 v2 request 铸造成有限常规许可。"""
+
+    request = state.provider_disclosure_request
+    active = state.active_run
+    if (
+        not isinstance(request, ProviderDisclosureRequestV2)
+        or request.request_digest != action.request_digest
+        or request.scope_digest != action.scope_digest
+        or not request.grant_eligible
+        or state.provider_disclosure_receipt is not None
+    ):
+        raise ValueError("provider consent grant does not match the pending request")
+    goal = state.goal
+    if active is None:
+        if goal is None or goal.status is not GoalStatus.GOAL_READY:
+            raise ValueError("provider consent grant does not match the pending request")
+        active_run = ActiveRun(run_id=f"resume-{action.action_seq}")
+    elif active.status is ActiveRunStatus.AWAITING_DISCLOSURE:
+        if goal is not None and goal.status is GoalStatus.NEEDS_AUTHORITY:
+            goal = replace(goal, status=GoalStatus.GOAL_READY)
+        active_run = replace(active, status=ActiveRunStatus.RUNNABLE)
+    else:
+        raise ValueError("provider consent grant does not match the pending request")
+    grant = mint_provider_consent_grant(
+        state=state,
+        request=request,
+        action_seq=action.action_seq,
+        now=now,
+    )
+    return replace(
+        state,
+        goal=goal,
+        active_run=active_run,
+        provider_consent_grant=grant,
+        provider_disclosure_request=None,
+        provider_disclosure_receipt=None,
+    )
+
+
+def revoke_provider_consent(
+    state: ConversationState,
+    action: RevokeProviderConsent,
+) -> ConversationState:
+    del action
+    grant = state.provider_consent_grant
+    if grant is None:
+        raise ValueError("provider consent grant is missing")
+    active = state.active_run
+    if active is not None and active.status is ActiveRunStatus.AWAITING_DISCLOSURE:
+        active = replace(active, status=ActiveRunStatus.RUNNABLE)
+    return replace(
+        state,
+        provider_consent_grant=grant.with_status(
+            ProviderConsentGrantStatus.REVOKED
+        ),
+        provider_disclosure_request=None,
+        provider_disclosure_receipt=None,
+        active_run=active,
     )
 
 
@@ -2158,6 +2242,39 @@ def _action_is_legal(state: ConversationState, action: Action) -> tuple[bool, st
             or action.expected_profile_revision != pending_takeover.profile_revision
         ):
             return False, "browser_takeover_mismatch"
+        return True, None
+
+    if isinstance(action, GrantProviderConsent):
+        request = state.provider_disclosure_request
+        goal = state.goal
+        if _has_unknown_effect(state):
+            return False, "unknown_effect_recovery_required"
+        if (
+            not isinstance(request, ProviderDisclosureRequestV2)
+            or request.request_digest != action.request_digest
+            or request.scope_digest != action.scope_digest
+            or not request.grant_eligible
+            or state.provider_disclosure_receipt is not None
+        ):
+            return False, "provider_consent_mismatch"
+        live_match = (
+            active is not None
+            and active.status is ActiveRunStatus.AWAITING_DISCLOSURE
+        )
+        resumable_orphan = (
+            active is None
+            and goal is not None
+            and goal.status is GoalStatus.GOAL_READY
+        )
+        if not (live_match or resumable_orphan):
+            return False, "provider_consent_mismatch"
+        return True, None
+
+    if isinstance(action, RevokeProviderConsent):
+        if _has_unknown_effect(state):
+            return False, "unknown_effect_recovery_required"
+        if state.provider_consent_grant is None:
+            return False, "provider_consent_missing"
         return True, None
 
     if isinstance(action, (RevokeProcessAuthority, RevokeGoalTargetAuthority)):
@@ -2688,11 +2805,24 @@ def _mint_goal_target_authorization(
     return replace(state, goal_authorizations=(*retained, binding))
 
 
-def _apply_action(state: ConversationState, action: Action) -> ConversationState:
+def _apply_action(
+    state: ConversationState,
+    action: Action,
+    *,
+    now: str | None = None,
+) -> ConversationState:
     if isinstance(action, ExecuteOperatorTool):
         return start_operator_tool(state, action)
     if isinstance(action, AcknowledgeProviderDisclosure):
-        return acknowledge_provider_disclosure(state, action)
+        return acknowledge_provider_disclosure(state, action, now=now)
+    if isinstance(action, GrantProviderConsent):
+        return grant_provider_consent(
+            state,
+            action,
+            now=now or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        )
+    if isinstance(action, RevokeProviderConsent):
+        return revoke_provider_consent(state, action)
     if isinstance(action, ConfirmCriterion):
         goal = state.goal
         if goal is None:
@@ -4236,6 +4366,7 @@ def accept_action(
     action: Action,
     *,
     max_replay_records: int = 64,
+    now: str | None = None,
 ) -> ActionTransition:
     if state is None:
         state = ConversationState.new(action.conversation_id)
@@ -4296,7 +4427,7 @@ def accept_action(
     )
     if with_replay is None:
         return _conflict(state, "replay_capacity_exhausted")
-    applied = _apply_action(with_replay, action)
+    applied = _apply_action(with_replay, action, now=now)
     applied = replace(
         applied,
         revision=state.revision + 1,
@@ -4993,6 +5124,65 @@ def mark_executing(
     )
 
 
+def _validated_recorded_source_proof(
+    *,
+    state: ConversationState,
+    result: ConversationFact,
+    intent,
+) -> tuple[ProviderFileSourceProofV1 | None, ConversationFact]:
+    raw_proof = result.content.get("runtime_source_proof")
+    if raw_proof is None:
+        return None, result
+    try:
+        proof = ProviderFileSourceProofV1.from_dict(raw_proof)
+    except (TypeError, ValueError) as error:
+        raise ValueError("tool result contains an invalid source proof") from error
+    text = result.content.get("text")
+    active = state.active_run
+    tool_call = (
+        active.tool_calls[active.batch_cursor]
+        if active is not None
+        and 0 <= active.batch_cursor < len(active.tool_calls)
+        else None
+    )
+    # workspace 校验：state 绑定是会话级真相；组合可能只在 Kernel 执行层
+    # 携带 workspace 身份（ExecutingIntentRecord 不含该字段），此时信任
+    # 铸造端（tools.py 已强制 intent.workspace_identity_digest 非空）。
+    # 与 context.py `_valid_file_proof` 的 None-容忍语义保持一致。
+    workspace_identity = (
+        state.workspace_binding.workspace_identity_digest
+        if state.workspace_binding is not None
+        else None
+    )
+    goal = state.goal
+    if (
+        not isinstance(text, str)
+        or result.content.get("is_error") is True
+        or result.content.get("executed") is False
+        or active is None
+        or tool_call is None
+        or proof.conversation_id != state.conversation_id
+        or proof.run_id != active.run_id
+        or proof.tool_call_id != intent.tool_call_id
+        or proof.tool_name != tool_call.name
+        or proof.operation != (intent.operation or tool_call.name)
+        or proof.intent_digest != intent.intent_digest
+        or proof.execution_authority != intent.execution_authority.value
+        or proof.result_content_digest
+        != hashlib.sha256(text.encode("utf-8")).hexdigest()
+        or (
+            workspace_identity is not None
+            and proof.workspace_identity_digest != workspace_identity
+        )
+        or proof.goal_id != (goal.goal_id if goal is not None else None)
+        or proof.goal_revision != (goal.revision if goal is not None else None)
+    ):
+        raise ValueError("tool result source proof does not bind the executing intent")
+    content = dict(result.content)
+    content.pop("runtime_source_proof", None)
+    return proof, replace(result, content=content)
+
+
 def record_tool_result(
     state: ConversationState,
     result: ConversationFact,
@@ -5011,12 +5201,23 @@ def record_tool_result(
         or result.kind is not FactKind.TOOL_RESULT
     ):
         raise ValueError("matching EXECUTING intent and Tool Result required")
+    proof, recorded_result = _validated_recorded_source_proof(
+        state=state,
+        result=result,
+        intent=intent,
+    )
     next_cursor = active.batch_cursor + 1
     has_more = next_cursor < len(active.tool_calls)
+    proofs = state.provider_source_proofs
+    if proof is not None and all(
+        existing.proof_id != proof.proof_id for existing in proofs
+    ):
+        proofs = (*proofs, proof)
     return replace(
         state,
         revision=state.revision + 1,
-        facts=(*state.facts, result),
+        facts=(*state.facts, recorded_result),
+        provider_source_proofs=proofs,
         active_run=replace(
             active,
             phase=ContinuationPhase.TOOL if has_more else ContinuationPhase.MODEL,
@@ -5049,6 +5250,8 @@ def apply_compaction_summary(
     state: ConversationState,
     summary: ConversationSummaryV1,
     removable_fact_ids: tuple[str, ...],
+    *,
+    source_scope: ProviderConsentScopeV1 | None = None,
 ) -> ConversationState:
     """020 长会话压缩：把已归档的 summary 应用为唯一的 CONTEXT_SUMMARY fact。
 
@@ -5078,6 +5281,27 @@ def apply_compaction_summary(
         kind=FactKind.CONTEXT_SUMMARY,
         content=summary.to_content(),
     )
+    if source_scope is None:
+        summary_classes = ("conversation_summary",)
+        summary_sources = ()
+        summary_routine = False
+    else:
+        summary_classes = tuple(
+            sorted(
+                {
+                    "conversation_summary",
+                    *source_scope.data_classes,
+                }
+            )
+        )
+        summary_sources = source_scope.sources
+        summary_routine = source_scope.routine_compatible
+    summary_boundary = ProviderSummarySourceBoundaryV1.create(
+        summary_fact_id=fact_id,
+        data_classes=summary_classes,
+        sources=summary_sources,
+        routine_compatible=summary_routine,
+    )
     facts: list[ConversationFact] = []
     inserted = False
     for fact in state.facts:
@@ -5091,6 +5315,14 @@ def apply_compaction_summary(
         state,
         revision=state.revision + 1,
         facts=tuple(facts),
+        summary_source_boundaries=(
+            *tuple(
+                boundary
+                for boundary in state.summary_source_boundaries
+                if boundary.summary_fact_id not in selected_ids
+            ),
+            summary_boundary,
+        ),
     )
 
 

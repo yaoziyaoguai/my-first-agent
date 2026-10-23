@@ -478,12 +478,13 @@ def test_015_v6_missing_proposed_oracle_fails_closed(tmp_path) -> None:
 
 
 def test_015_unknown_schema_version_still_rejected(tmp_path) -> None:
+    # v11 现为当前 consent schema；未知版本探针随当前版本前移到 12。
     document = json.loads(_encode_state(_current_state()).decode("utf-8"))
-    document["schema_version"] = 11
+    document["schema_version"] = 12
     path = tmp_path / "conversation.json"
     _write_document(path, document)
 
-    with pytest.raises(CheckpointVersionError, match="schema version: 11"):
+    with pytest.raises(CheckpointVersionError, match="schema version: 12"):
         LocalCheckpointStore(path).load()
 
 

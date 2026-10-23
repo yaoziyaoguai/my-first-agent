@@ -434,8 +434,17 @@ def test_rejects_revision_other_than_exactly_one_step() -> None:
 def test_rejects_reduced_facts_without_context_summary() -> None:
     source = _source_state()
     reduced = _reduced_from(source, SOURCE_TOKEN.removeprefix("sha256:"))
-    _assert_rejected(source, replace(reduced, facts=()))
-    _assert_rejected(source, replace(reduced, facts=(_user("action:9:user"),)))
+    # 摘掉 summary facts 的负例必须同时摘掉其 Runtime-owned 来源边界，
+    # 否则 ConversationState 的闭合不变量会先于 commit 校验拒绝构造。
+    _assert_rejected(
+        source, replace(reduced, facts=(), summary_source_boundaries=())
+    )
+    _assert_rejected(
+        source,
+        replace(
+            reduced, facts=(_user("action:9:user"),), summary_source_boundaries=()
+        ),
+    )
 
 
 def test_rejects_reduced_facts_with_multiple_context_summaries() -> None:
@@ -470,7 +479,10 @@ def test_rejects_malformed_summary_content() -> None:
             content={"objective": "not a closed summary shape"},
         ),
     )
-    _assert_rejected(source, replace(reduced, facts=malformed))
+    # 同上：malformed 负例替换了 summary fact_id，需同步摘掉旧边界再构造。
+    _assert_rejected(
+        source, replace(reduced, facts=malformed, summary_source_boundaries=())
+    )
 
 
 def test_rejects_summary_not_bound_to_source_token() -> None:

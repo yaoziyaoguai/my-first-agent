@@ -35,13 +35,14 @@ def test_state_and_ports_depend_only_on_leaf_contracts() -> None:
     )
 
     leaf_only = {"agent.runtime.contracts"}
-    # state 额外依赖两个窄 leaf：compaction_rules 负责 turn grammar/removal，
-    # resource_lifecycle 只从 closed receipts 推导 active ownership。context 依赖
-    # compaction leaf 并可依赖 ports（ContextSource 等）。禁止 context -> state。
+    # state 额外依赖三个窄 leaf：compaction_rules 负责 turn grammar/removal，
+    # resource_lifecycle 只从 closed receipts 推导 active ownership，
+    # provider_consent 只做许可投影/比较，不推进循环或写 state。
     assert {name for name in state_imports if name.startswith("agent.")} <= {
         "agent.runtime.contracts",
         "agent.runtime.compaction_rules",
         "agent.runtime.resource_lifecycle",
+        "agent.runtime.provider_consent",
     }
     assert {name for name in port_imports if name.startswith("agent.")} <= leaf_only
     assert {name for name in context_imports if name.startswith("agent.")} <= {
@@ -50,6 +51,7 @@ def test_state_and_ports_depend_only_on_leaf_contracts() -> None:
         "agent.runtime.context_source",
         "agent.runtime.ports",
         "agent.runtime.compaction_rules",
+        "agent.runtime.provider_consent",
     }
     assert {
         name for name in context_control_imports if name.startswith("agent.")

@@ -110,6 +110,7 @@ def test_product_tree_contains_only_kernel_packages() -> None:
         "agent/runtime/events.py",
             "agent/runtime/loop.py",
             "agent/runtime/ports.py",
+            "agent/runtime/provider_consent.py",
             "agent/runtime/resource_lifecycle.py",
             "agent/runtime/state.py",
         "agent/runtime/tool_governance.py",

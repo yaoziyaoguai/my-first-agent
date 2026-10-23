@@ -559,7 +559,8 @@ def test_new_source_data_class_requires_a_new_provider_disclosure() -> None:
     )
     store = InMemoryCheckpointStore(state)
     provider = ScriptedProvider(
-        ModelResponse((), control=BeginAnswer("begin-source-disclosure"))
+        ModelResponse((), control=BeginAnswer("begin-source-disclosure")),
+        ModelResponse((), control=BeginAnswer("continue-source-disclosure")),
     )
     from agent.runtime.loop import AgentRuntime, InvocationLimits
 
@@ -588,11 +589,22 @@ def test_new_source_data_class_requires_a_new_provider_disclosure() -> None:
         store.load(),
     )
 
+    # 2026-10-21 consent-ux V2 语义：存储的 legacy 请求/回执对在当前 pack 类别
+    # 与其一致时可复用（SPEC S5 旧精确语义保留）。首次派发实际只含常规类别，
+    # 因此允许一次发送——关键不变量是"发送内容与已披露类别一致"：
+    # 实际发送的 pack 不得包含未披露的 workspace_excerpt。
     assert result.status is RunStatus.AWAITING_DISCLOSURE
-    assert provider.calls == []
+    assert len(provider.calls) == 1
+    assert provider.calls[0].data_classes == ("system_policy", "user_messages")
+
+    # 新 source 类别在下一次派发出现时必须先拦停：v2 请求如实披露该类别
+    # 与不可复用来源，legacy 回执不得被升级成 grant。
     intent_request = store.state.provider_disclosure_request
     assert intent_request is not None
-    assert "workspace_excerpt" not in intent_request.data_classes
+    assert intent_request.__class__.__name__ == "ProviderDisclosureRequestV2"
+    assert "workspace_excerpt" in intent_request.data_classes
+    assert intent_request.sources and not intent_request.sources[0].reusable
+    assert store.state.provider_consent_grant is None
 
     result = agent_runtime.run_turn(
         AcknowledgeProviderDisclosure(
@@ -605,11 +617,9 @@ def test_new_source_data_class_requires_a_new_provider_disclosure() -> None:
         store.load(),
     )
 
+    # 明确批准后，含 workspace_excerpt 的派发才被发送（先披露后发送）。
     assert result.status is RunStatus.AWAITING_DISCLOSURE
-    assert len(provider.calls) == 1
+    assert len(provider.calls) == 2
+    assert "workspace_excerpt" in provider.calls[1].data_classes
     assert store.state.provider_disclosure_request is not None
-    assert "workspace_excerpt" in store.state.provider_disclosure_request.data_classes
-    assert (
-        store.state.provider_disclosure_request.request_digest
-        != intent_request.request_digest
-    )
+    assert store.state.provider_consent_grant is None

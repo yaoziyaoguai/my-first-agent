@@ -302,7 +302,8 @@ def test_registration_closures_do_not_capture_runtime_owners(tmp_path):
         closure = registration.func.__closure__ or ()
         captured_type_names = {type(cell.cell_contents).__name__ for cell in closure}
         assert captured_type_names.isdisjoint(forbidden_types), registration.spec.name
-        # RegisteredTool 仍只暴露既有五个静态 seam，没有 browser 自建 loop。
+        # RegisteredTool 仍只暴露既有六个静态 seam，没有 browser 自建 loop；
+        # result_source_kind 是闭合的 Kernel 来源能力标记，不是运行时 owner。
         assert {item.name for item in fields(registration)} == {
             "spec",
             "func",
@@ -310,6 +311,7 @@ def test_registration_closures_do_not_capture_runtime_owners(tmp_path):
             "prepare_authority_binding",
             "policy",
             "exposure",
+            "result_source_kind",
         }
 
 

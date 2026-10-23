@@ -67,8 +67,11 @@ SCOPE_DIGEST = "ab" * 32
 WORKSPACE_IDENTITY_DIGEST = f"workspace:v1:{SCOPE_DIGEST}"
 CHECKPOINT_DIGEST = "9" * 64
 
-# 除 reducer 唯一允许变更的两个字段外，其余字段必须逐字段严格保留。
-_MUTATED_FIELDS = frozenset({"revision", "facts"})
+# 除 reducer 唯一允许变更的字段外，其余字段必须逐字段严格保留。
+# 2026-10-21 consent-ux W1：apply_compaction_summary 现在按 SPEC S4.6 把压缩
+# 输入的可信来源边界持久化为 Runtime-owned 字段（旧 summary 缺省"不足以
+# 稳定复用"），summary_source_boundaries 因此与 facts 同为允许变更字段。
+_MUTATED_FIELDS = frozenset({"revision", "facts", "summary_source_boundaries"})
 
 # 可移除前缀：一个旧 CONTEXT_SUMMARY + 两个完整 closed turn（含完整 tool 批次）。
 _REMOVABLE_IN_STATE_ORDER = (

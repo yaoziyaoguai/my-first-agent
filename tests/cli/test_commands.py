@@ -104,23 +104,22 @@ def test_approval_commands_require_the_exact_pending_id() -> None:
     assert action.binding_digest == request.binding_digest
     assert action.approved is False
 
-    scoped_runtime, _, _ = _run_once(
+    # 2026-10-21 consent-ux W3/S2：Goal 不存在时没有可复用 scope，显式 ID 的
+    # scoped 审批也必须明确拒绝且零 action（N1：不适用范围不展示且不接受），
+    # 不再回退到旧的"带 ID 即铸造"宽松语义。
+    scoped_runtime, scoped_output, _ = _run_once(
         state,
         "/approve-goal-target approval-full-id",
     )
-    scoped = scoped_runtime.actions[0]
-    assert isinstance(scoped, ResolveApproval)
-    assert scoped.approved is True
-    assert scoped.authorize_goal_target is True
+    assert scoped_runtime.actions == []
+    assert any("no matching Goal scope" in item for item in scoped_output)
 
-    directory_runtime, _, _ = _run_once(
+    directory_runtime, directory_output, _ = _run_once(
         state,
         "/approve-goal-directory approval-full-id",
     )
-    directory = directory_runtime.actions[0]
-    assert isinstance(directory, ResolveApproval)
-    assert directory.approved is True
-    assert directory.authorize_goal_directory is True
+    assert directory_runtime.actions == []
+    assert any("no matching Goal scope" in item for item in directory_output)
 
 
 def test_revoke_goal_target_command_maps_to_typed_action() -> None:

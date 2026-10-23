@@ -1,0 +1,95 @@
+{
+  "schema": "my-first-agent/consent-ux-baseline/v1",
+  "source_head": "97f5c584e9e266930fbcf283aa3199b3609e8178",
+  "network_calls": 0,
+  "private_sessions_read": false,
+  "file_choices": {
+    "yes": {
+      "approved": true,
+      "reuse_file": false,
+      "reuse_directory": false,
+      "exit_code": 0,
+      "prompt_mentions_shortcut": true
+    },
+    "/approve-goal-target": {
+      "approved": true,
+      "reuse_file": true,
+      "reuse_directory": false,
+      "exit_code": 0,
+      "prompt_mentions_shortcut": true
+    }
+  },
+  "plain_conversation": {
+    "user_turns": 3,
+    "provider_calls": 3,
+    "confirmations": [
+      {
+        "turn": 1,
+        "data_classes": [
+          "system_policy",
+          "user_messages"
+        ]
+      },
+      {
+        "turn": 2,
+        "data_classes": [
+          "conversation_history",
+          "system_policy",
+          "user_messages"
+        ]
+      }
+    ]
+  },
+  "category_set_transition": {
+    "sequence": [
+      "A",
+      "B",
+      "A",
+      "B",
+      "B"
+    ],
+    "digest_requires_new_ack": [
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "resumed_disclosure": {
+    "stages": [
+      {
+        "stage": "before_pause",
+        "data_classes": [
+          "goal",
+          "system_policy",
+          "user_messages"
+        ]
+      },
+      {
+        "stage": "after_resume_ack_1",
+        "status": "awaiting_disclosure",
+        "data_classes": [
+          "conversation_history",
+          "goal",
+          "system_policy",
+          "user_messages"
+        ],
+        "provider_calls": 1
+      },
+      {
+        "stage": "after_resume_ack_2",
+        "status": "awaiting_disclosure",
+        "data_classes": [
+          "control_receipts",
+          "conversation_history",
+          "goal",
+          "system_policy",
+          "user_messages"
+        ],
+        "provider_calls": 2
+      }
+    ],
+    "scope": "bounded prefix, not a completed task"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "schema": "my-first-agent/oracle-consent-ux-audit/v1",
+  "session_id": "mfa-consent-ux-20261021-a7b29e",
+  "status": "completed",
+  "started_at": "2026-10-21T03:42:28.310Z",
+  "completed_at": "2026-10-21T03:59:24.224Z",
+  "requested_cli_model": "gpt-5.6-sol",
+  "web_model_claim": "not independently identified; current UI selection wins",
+  "selection": {
+    "requestedModel": "GPT-5.6 Sol",
+    "resolvedLabel": "Power, item 5 of 5 (slider ARIA)",
+    "strategy": "current",
+    "status": "already-selected",
+    "verified": true,
+    "source": "thinking-time-control",
+    "capturedAt": "2026-10-21T03:43:06.788Z"
+  },
+  "requested_strength": "5/5",
+  "pre_attachment_and_presend_5_of_5_count": 2,
+  "committed_conversation_url": "https://chatgpt.com/c/6ad834be-0618-83e9-a346-ed672cac3a28",
+  "prompt_submitted": true,
+  "answer_capture": "completed session transcript, exact Answer section",
+  "answer_sha256": "5e541746e9777298aeef0311da3a433baaedef52d5cd3f267822f3f6a97df51e",
+  "transcript_sha256": "fc313527f01ee6fad048a4a412dbb66b78445176dcdc7a7aaa51efb56eb4d65c",
+  "inputs": [
+    {
+      "path": "oracle-input/CONSULTATION.md",
+      "sha256": "b9d3d86a22309441badbdaa18a991982a174fa6ad739ffdac376b59c0986fd15"
+    },
+    {
+      "path": "oracle-input/SOURCE-SLICES.md",
+      "sha256": "a2a5ce4da96e910cad08a217f7b633d8d91234b6795dd41ffd6f384be10f95d4"
+    },
+    {
+      "path": "oracle-input/SOURCE-IDENTITY.json",
+      "sha256": "21fe051392fc17367b7a25124f026e6723dd22d435cb33acc0ae3430aae0531f"
+    },
+    {
+      "path": "BASELINE.json",
+      "sha256": "5613e41957264ca7925917b258f8b1af3eb9375af07e095c7f1a20296ea52456"
+    },
+    {
+      "path": "baseline_probe.py",
+      "sha256": "23771cc14e00574f59f43df897f0bc51f76099c7389371fc4edcdeb2c8ed33f9"
+    }
+  ],
+  "cleanup": {
+    "chrome_pid": 65648,
+    "chrome_pid_alive": false,
+    "temporary_profile_exists": false,
+    "checked_at": "2026-10-21T04:01:25.108Z"
+  },
+  "limits": [
+    "Oracle advice only, not executed repository tests",
+    "No actual user session or credential attached",
+    "No real First Agent provider request authorized or sent"
+  ]
+}

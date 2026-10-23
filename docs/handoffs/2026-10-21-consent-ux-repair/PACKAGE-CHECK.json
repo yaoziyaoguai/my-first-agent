@@ -1,0 +1,270 @@
+{
+  "schema": "my-first-agent/consent-ux-package-check/v1",
+  "checked_at": "2026-10-21T04:14:47.315Z",
+  "source_head": "97f5c584e9e266930fbcf283aa3199b3609e8178",
+  "product_code_changed": false,
+  "source_identity": [
+    {
+      "path": "agent/runtime/contracts.py",
+      "sha256": "e8c5008d140591d399406d3b8210a4e5d8dc47aadca2f3af05e336b758662302",
+      "match": true
+    },
+    {
+      "path": "agent/runtime/state.py",
+      "sha256": "793941421b944a26d85c75458384ed01c04216f047f2b17d503716a595cc521d",
+      "match": true
+    },
+    {
+      "path": "agent/cli/app.py",
+      "sha256": "80556af31fa916f31048c1adc1b5f597a5f1788d5886470916cafc0a4a2ff021",
+      "match": true
+    },
+    {
+      "path": "agent/cli/render.py",
+      "sha256": "fdbaa180732af1b98481299ac2858da8670a194009a602cb0f219b7cd5a4d21e",
+      "match": true
+    },
+    {
+      "path": "agent/runtime/views.py",
+      "sha256": "eae28aa6c6964918e37137156053a0f5c4526a6a8a9e93f1da96576fc2fc1fb5",
+      "match": true
+    },
+    {
+      "path": "agent/runtime/loop.py",
+      "sha256": "2c647a9dbceade8833f72e5962fa2f8f089b9aec3a5915c603f7ddd8714900a3",
+      "match": true
+    },
+    {
+      "path": "agent/runtime/context.py",
+      "sha256": "74d62744541a7beb86557d6e222dae27abdc8f1dece1e8ecd5800987715645b7",
+      "match": true
+    },
+    {
+      "path": "agent/runtime/context_source.py",
+      "sha256": "9777af94d7c226977f9d097b115fd1652ea9fbd86f2a8526771fc910536ed8d5",
+      "match": true
+    },
+    {
+      "path": "agent/runtime/checkpoint.py",
+      "sha256": "ced1c4e77e491680471d082da56e03ebd36ae006c60563db62458e7d40da13a0",
+      "match": true
+    },
+    {
+      "path": "agent/process/tools.py",
+      "sha256": "6d2c75abb46748ce5daa394353be467770614d082a04196888ce5ab004bb24be",
+      "match": true
+    },
+    {
+      "path": "agent/cli/actions.py",
+      "sha256": "a241df4ddb18c481a45cefa9c301c356e61934b337225b09d051fcb9c4f92e1d",
+      "match": true
+    },
+    {
+      "path": "README.md",
+      "sha256": "e9536f61e9dfd0fcc96a836d71f648ddf86fb84330a11853430dcdcbed6657b6",
+      "match": true
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "ffe57fe28fbf4b5aa269c6419e8a2b96ccf7daa46abde0b7ff983913ac830f6e",
+      "match": true
+    }
+  ],
+  "oracle_input_identity": [
+    {
+      "path": "oracle-input/CONSULTATION.md",
+      "match": true
+    },
+    {
+      "path": "oracle-input/SOURCE-SLICES.md",
+      "match": true
+    },
+    {
+      "path": "oracle-input/SOURCE-IDENTITY.json",
+      "match": true
+    },
+    {
+      "path": "BASELINE.json",
+      "match": true
+    },
+    {
+      "path": "baseline_probe.py",
+      "match": true
+    }
+  ],
+  "oracle_answer_matches": true,
+  "oracle_completed": true,
+  "oracle_strength": "5/5 twice verified",
+  "oracle_cleanup": {
+    "chrome_pid": 65648,
+    "chrome_pid_alive": false,
+    "temporary_profile_exists": false,
+    "checked_at": "2026-10-21T04:01:25.108Z"
+  },
+  "local_links": [
+    {
+      "from": "START-HERE.md",
+      "target": "AUDIT.md",
+      "exists": true
+    },
+    {
+      "from": "START-HERE.md",
+      "target": "SPEC.md",
+      "exists": true
+    },
+    {
+      "from": "START-HERE.md",
+      "target": "WORK-PACKAGES.md",
+      "exists": true
+    },
+    {
+      "from": "START-HERE.md",
+      "target": "VALIDATION.md",
+      "exists": true
+    },
+    {
+      "from": "START-HERE.md",
+      "target": "../2026-10-11-product-reliability-closure/RESULTS.md",
+      "exists": true
+    },
+    {
+      "from": "START-HERE.md",
+      "target": "PROMPT.md",
+      "exists": true
+    },
+    {
+      "from": "START-HERE.md",
+      "target": "ORACLE-ANSWER.md",
+      "exists": true
+    },
+    {
+      "from": "START-HERE.md",
+      "target": "RECONCILIATION.md",
+      "exists": true
+    },
+    {
+      "from": "START-HERE.md",
+      "target": "ORACLE-RECEIPT.json",
+      "exists": true
+    },
+    {
+      "from": "START-HERE.md",
+      "target": "oracle-input/SOURCE-IDENTITY.json",
+      "exists": true
+    },
+    {
+      "from": "START-HERE.md",
+      "target": "BASELINE.json",
+      "exists": true
+    },
+    {
+      "from": "START-HERE.md",
+      "target": "baseline_probe.py",
+      "exists": true
+    }
+  ],
+  "key_like_or_private_key_matches": [],
+  "whitespace": {
+    "tracked_diff_exit": 0,
+    "untracked_new_files_errors": [],
+    "exact_archive_attribute_exemptions": [
+      "ORACLE-ANSWER.md",
+      "oracle-input/SOURCE-SLICES.md"
+    ],
+    "note": "no-index exit 1 means a new file differs, not a whitespace failure"
+  },
+  "baseline_replay": {
+    "exit_code": 0,
+    "equals_frozen_output": true,
+    "network_calls": 0
+  },
+  "focused_tests": {
+    "passed": 153,
+    "seconds": 0.89,
+    "exit_code": 0,
+    "source_head": "97f5c584e9e266930fbcf283aa3199b3609e8178",
+    "note": "run earlier in this audit on unchanged product sources; not implementation tests"
+  },
+  "implementation": "NOT_STARTED",
+  "new_wheel": "NOT_BUILT",
+  "real_provider": "NOT_RUN_AUTHORIZATION",
+  "user_acceptance": "NOT_RUN",
+  "package_files": [
+    {
+      "path": "AUDIT.md",
+      "sha256": "1de2a9ef930ed3f93154d5f3783da1c9184b3b4154ea6b9ccba76490ff9b0afe",
+      "bytes": 9480
+    },
+    {
+      "path": "BASELINE.json",
+      "sha256": "5613e41957264ca7925917b258f8b1af3eb9375af07e095c7f1a20296ea52456",
+      "bytes": 1970
+    },
+    {
+      "path": "ORACLE-ANSWER.md",
+      "sha256": "5e541746e9777298aeef0311da3a433baaedef52d5cd3f267822f3f6a97df51e",
+      "bytes": 35192
+    },
+    {
+      "path": "ORACLE-RECEIPT.json",
+      "sha256": "0a7b04a38d8743e61e4411f1a9d5db2306dd109af90ac4225fccebf35cfc8450",
+      "bytes": 2140
+    },
+    {
+      "path": "PROMPT.md",
+      "sha256": "7fcd12cbe5e926c0c1bc42688da2ced73d65e4870bfdd0dd1da82a63219de364",
+      "bytes": 5535
+    },
+    {
+      "path": "RECONCILIATION.md",
+      "sha256": "ccc9c8044ebd5327322aff035d908222d27d3a8552a1a2b68f5207ee18de13bc",
+      "bytes": 5014
+    },
+    {
+      "path": "SPEC.md",
+      "sha256": "8e42d7ff0c4a8f516344e40454565ffbf35a0a47fdc15154e4bf012ccea374b6",
+      "bytes": 15898
+    },
+    {
+      "path": "START-HERE.md",
+      "sha256": "99d7f999a3a2a64b723140ff3dd2f21d12c3fbde919226eb4f4d0ac84dcf2578",
+      "bytes": 4702
+    },
+    {
+      "path": "VALIDATION.md",
+      "sha256": "e62a097c513ddb0c20ec506834ea9b8ec55772614d243f7f589ffe97d5635828",
+      "bytes": 13581
+    },
+    {
+      "path": "WORK-PACKAGES.md",
+      "sha256": "d0621db86f7b6df5ad7452a5217a2c9c31f10a11dc0d94c9703268e98c2be836",
+      "bytes": 8606
+    },
+    {
+      "path": "baseline_probe.py",
+      "sha256": "23771cc14e00574f59f43df897f0bc51f76099c7389371fc4edcdeb2c8ed33f9",
+      "bytes": 6376
+    },
+    {
+      "path": "oracle-input/CONSULTATION.md",
+      "sha256": "b9d3d86a22309441badbdaa18a991982a174fa6ad739ffdac376b59c0986fd15",
+      "bytes": 7096
+    },
+    {
+      "path": "oracle-input/SOURCE-IDENTITY.json",
+      "sha256": "21fe051392fc17367b7a25124f026e6723dd22d435cb33acc0ae3430aae0531f",
+      "bytes": 2160
+    },
+    {
+      "path": "oracle-input/SOURCE-SLICES.md",
+      "sha256": "a2a5ce4da96e910cad08a217f7b633d8d91234b6795dd41ffd6f384be10f95d4",
+      "bytes": 60773
+    }
+  ],
+  "related_edits": [
+    ".gitattributes",
+    "docs/handoffs/2026-10-11-product-reliability-closure/RESULTS.md"
+  ],
+  "unknown_untracked_file": "result.phase.json not read or modified",
+  "status": "PASS_PACKAGE_INTEGRITY_ONLY"
+}

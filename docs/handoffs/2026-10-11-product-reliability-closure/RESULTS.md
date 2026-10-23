@@ -1,6 +1,268 @@
 # 本轮执行记录（唯一可变进度）
 
-## 当前摘要（2026-10-18：本地收尾完成，可个人试用；完整真实验收未闭合）
+## 当前摘要（2026-10-23 晚：项目收口 + 真实模型 dogfood——核心疲劳实证修复、读类输出疲劳定量；E2/E3 因上游模型退役阻塞）
+
+- **用户指令：** "收口这个项目吧 同时 dogfood 看看到底好用不"；会话中提供新
+  DeepSeek key（仅注入子进程环境，未写入任何文件/配置/记录）。
+- **Dogfood（真实 DeepSeek，openai_compatible/deepseek-flash，PTY 交互驱动，
+  22 次模型请求；证据 `~/.local/share/first-agent/previews/consentux-20261023/
+  dogfood/`）：**
+  1. **会话级许可真实生效**：首次发送 1 次 `s` → 全程常规发送零再问；额度
+     反馈行（"31 of 32 model sends left, expires at…"）如设计渲染。
+  2. **文件复用真实生效**："3 次完整重写同一文件"任务全程**仅 1 次文件审批**
+     （`f`），最终内容逐字正确（`最终版`）；写结果的稳定来源经例外路径静默
+     复用，未产生额外提示。
+  3. **撤销→重新决策**链路实测通过（`/revoke-provider-consent` 后下一次发送
+     重新披露）。
+  4. **抗误用**：驱动曾对无 scope 的 make_directory 审批误按 `f` 139 次，
+     产品每次以明确错误拒绝、状态零损坏（S2"不适用选项明确拒绝"实证）。
+  5. **剩余疲劳定量（本轮合同接受的边界）**：模型在写入间正常地列目录/读
+     文件（谨慎行为），其 tool_results 输出无稳定来源 → 同一小任务产生
+     **16 次额外外发确认**（17 个 y 中 16 个源于此）。这是下一轮最重要的
+     产品决策输入：读/验证类输出的会话级许可边界。
+  6. 上游现实：DeepSeek 已下线 anthropic 兼容端点（404 空体）与
+     `deepseek-v4-flash`（openai 端点 404；catalog 仅剩 deepseek-flash /
+     deepseek-v4-pro）。当前源树经 openai_compatible/deepseek-flash 实测可用。
+- **E2/E3 补跑（-2026-10-23b，0 次请求消耗）：
+  BLOCKED_UPSTREAM_MODEL_RETIRED**——冻结合同与安装候选清单绑定
+  `deepseek-v4-flash`，产品按设计拒绝模型替换（"refusing to dispatch:
+  model configuration does not match the manifest"，这本身是完整性检查的
+  正确行为实证）。解除阻塞需要用户决策：以新模型重冻结旅程合同并构建新
+  候选（当前源树已被 dogfood 证明可在 deepseek-flash 上端到端工作）。
+- **G 包 wheel（r2 修复版）：** 已重建并冻结
+  `previews/consentux-20261023/dist/first_agent-1.0.0-py3-none-any.whl`，
+  sha256=`d19303537472e22679d6f2bd6b5aeb6e73f244abc0ef11e56f1c785efb6d8b95`；
+  11 个 consent 相关模块与工作树逐字节一致（旧 `f0d756d3…` 轮已过时弃用）。
+  干净 venv 安装仍 BLOCKED_NO_NETWORK_DEPS（离线缺 httpx/pytest wheelhouse）。
+- **收口状态：** 全库门 4100 passed / 1 skipped / 0 failed（r2 修复后）；
+  ruff/diff-check 净；oracle 审计链（原答→采纳→修复→复验）完整；工作树
+  约 45 处变更未 commit（分批方案见交接块），待用户一句话授权 Git 交付。
+  项目当前可交付状态：源树=合同+门+dogfood 实证完备；发布物=wheel 已冻结
+  待干净安装验证；历史验收 E2/E3 待上游模型重冻结决策。
+
+## 历史摘要（2026-10-23 r2 修复执行：oracle 采纳缺陷全部修复，全库门 4100 绿）
+
+- **用户指令：** "可以 开始吧"——执行 oracle r2 审计（§F 顺序）采纳的修复。全程
+  Red→Green；新增 3 个测试文件 `tests/consent_ux/test_consent_ux_r2_{hardening,
+  recovery_and_codec,retryable_budget}.py`（21 项），consent 套件合计 46 项。
+- **§F-1 精确回执生命周期（P0-1/P0-2，修复）：**
+  1. 单次 y 的桥接等价关系收紧为"同一 pending 单元"：purpose/工具定义
+     （tool_bindings 全等）/control_schema_digest 必须一致；工具定义变化不再能
+     经桥绕过重新披露（S1/S4）。
+  2. 新内容判界改为 **"ack 之后无新用户消息"**（`_no_new_user_input_since`，
+     按 USER_MESSAGE fact 的 action seq 判定）：新用户消息使待发授权失配（S5），
+     同时保留孤儿 pending 跨重启 resume 的 run_id 重标复用（N14/E1-B 合同，
+     首版 run_id 全等实现过严、被 `test_pending_disclosure_survives_goal_pause…`
+     抓红后修正）。
+  3. `_exception_is_covered` 增加 receipt↔previous.request_digest 绑定（纵深防御；
+     错配对在有效 ConversationState 构造不变量层已被拒绝——测试钉住该不变量）。
+  4. 文件例外首用在同一 transition 消费单次票据（`mark_receipt_consumed` 幂等），
+     grant 耗尽/到期后旧 y 不得再放行（P0-2 反例测试：32/32 后拒绝）。
+- **§F-2 派发边界（修复）：** `charge_provider_dispatch` 重算 gate 并要求决策
+  一致——未批准 gate、或针对已变化 descriptor/scope/purpose/run 的陈旧 gate 一律
+  拒绝；loop 两处发送点在 checkpoint 之后、transport 之前增加
+  `final_dispatch_expiry_check`（仅查 grant 时间边界，第 32 次仍可发送）。
+  **N20 busy-revoke 测试落地**：真实 flock 租约下 RevokeProviderConsent 返回
+  `conversation_busy` 且零撤销写入，释放后撤销成功、后续发送停止。
+- **§F-3 来源与 codec 证据（测试）：** 伪造 proof 双负测（非文件工具的顶层完美
+  proof 因 tool_name↔tool_call 绑定被拒；文本内嵌 proof JSON 不构成来源）；
+  v11 严格解码矩阵 9 例全拒（未知键/缺必需键/坏枚举/负数与 bool 计数/非法时间/
+  超限计数）；v10 真 decoder 加载 legacy pending 验证。真实 write/edit 正路径
+  由 reference 012/013 端到端覆盖（当日已绿）。
+- **§F-4 retryable 跨 resume 重置（红→修）：** 反例证实 resume 每次白拿全套
+  瞬态重试额度（2 extra sends）；修复为从 run 级 `provider_transient_retry`
+  facts **累计**重建（与 invalid_repairs 同法但为全量计数——该计数器 run 内
+  有效响应不复位）。no_progress tracker 同类风险仍在（跨 resume 重置），但其
+  暴露需要审批暂停与 GoalProgress 停滞交替的编排，本轮未证明失败，按 oracle
+  "仅红才修"记录为已知边界。
+- **结构性结论（N17）：** "持久化响应恢复零新扣次"对 grant 是**空命题**——
+  persisted response 协议仅存在于 background 分支，而 S3 禁止 background 消费
+  交互 grant；前台不持久化响应。若未来前台引入响应持久化必须补写该测试
+  （测试文件内留有注释锚点）。
+- **门状态：** ruff 全绿；consent 46 + 受影响面（kernel/provider/continuity/
+  automation-recovery）全绿；**全库门：4100 passed / 1 skipped / 0 failed，
+  619.18s，exit 0**（含全部 reference；唯一 skip 为 launchd host gate）。
+- **Git/隐私：** 未 commit/push；未读凭据/未知文件；oracle 会话
+  `consent-ux-arch-audit-20261023-r2` 原答与本记录构成完整审计链。
+
+## 历史摘要（2026-10-23 下午：oracle-web 交叉架构审计——发现 2 项 P0 授权缺陷，已由 r2 修复执行闭合）
+
+- **审计方式：** 用户授权的独立交叉审计（oracle-web，session
+  `consent-ux-arch-audit-20261023-r2`，强度 4/5 extra-high，21m34s，18.2k/2.8k
+  tokens，证据=SPEC+provider_consent.py+合同测试三附件）+ 本地 codebase-design
+  视角接缝审查。原答存于 oracle 会话目录；本节为交叉验证后的采纳裁决，
+  oracle 仅为建议、不构成授权。
+- **本地自审结论（通过）：** provider_consent 是干净接缝上的较深模块——3 个
+  角色化消费方（loop: gate/charge/invalidate；state: mint；context: 投影常量）、
+  删除测试成立、两处 provider.generate（主派发+压缩）均在 gate→charge 之后。
+- **oracle 采纳的 P0 发现（均已对代码验证属实，均为本轮 bridge 修复引入或
+  未覆盖的缺口，修复留待下一轮，顺序按 oracle §F）：**
+  1. **`_exact_receipt_matches` 回退过宽**：只比较 scope_digest+sources+类别
+     增量⊆{control_receipts}，不含 tool_bindings/control_schema_digest——
+     工具定义变化可借桥绕过重新披露（违反 S1/S4）；且新用户消息场景下旧
+     未消费 y 可授权含新内容的派发（违反 S5"新用户消息必须使待发授权失配"，
+     崩溃重启后可达）。修法：回退比较加入 tool_bindings+control_schema 全等，
+     并把回退限定为同一 pending 单元（禁止跨新用户消息）。
+  2. **文件例外不消费单次票据**：grant_exception 走 grant_use、receipt 留存
+     未消费；grant 到期/耗尽后 exact_receipt 仍可消费这张旧 y，在 32 次额度
+     之外多送一次（违反 S6）。修法：例外首用时同一 transition 标记票据已
+     消费（保留为历史例外证明，exact_receipt 不得重消费）；"批准后未发送
+     即失效"场景须允许新 y 批准一次。
+  - 附带防御加固（B2/B4）：`_exception_is_covered` 增加
+    receipt↔previous.request_digest 绑定校验；`grant_identity_matches` 补
+    conversation_id；`mint` 入口补 grant_eligible 闭合校验（生产路径已有
+    state.py 前置校验，属纵深防御）。
+- **oracle 澄清的已知边界表述（E2）：** retryable/no_progress 局部计数的
+  "外部有界"说法不成立——grant 上限只覆盖 grant 模式派发，legacy 路径与
+  非发送型 no-progress 循环不受其约束；下一轮应先各做一个跨 resume 反例，
+  失败才按 invalid_repairs 同法从 durable facts 重建（不建第二状态机）。
+- **验收两项特别要求（S6，本轮未测）：** busy-revoke（真持 mutation lease
+  竞争撤销→conversation_busy/零假成功）与 persisted-response 恢复零新派发
+  零新扣次——与本地自审发现的 N20/N17 盲区一致。
+- **v11 严格解码（B5）：** 现有测试只覆盖单字段篡改；未知键/必需字段缺失/
+  非法时间/bool 计数矩阵未证，v10 真 decoder 加载旧 pending 未证——列为
+  下一轮测试补齐项，未证实前不得宣称 S7 完全满足。
+- **架构裁决（采纳）：** 不拆 provider_consent、不加 consent service/第二
+  状态机/独立复核 Agent；Policy Core + Runtime 唯一入口 + ContextManager
+  投影的主体方向保留。oracle 总判：**模块拆分方向认可；精确回执生命周期
+  尚不合格；派发事务与真实来源链路需最终集成证据；4078 绿不足以覆盖这些
+  结论。**
+- **本轮不实施修复**（审计轮范围）；oracle 的最小执行顺序（§F 1→4）已录入，
+  待用户开启下一修复轮。
+
+## 历史摘要（2026-10-23 上午：consent-ux 已按合同实施到合同测试层；全库门 4078 绿）
+
+- **用户指令：** "开始吧 把所有的收尾做完后 再审计 这个项目的agent是否好用，还缺什么能力"——按
+  [2026-10-21 冻结合同](../2026-10-21-consent-ux-repair/START-HERE.md)实施，另含收尾清单中的
+  E2/E3 补跑与能力状态刷新。本轮未获 Git 交付授权，未 commit/push。
+- **接手核对（W0）：** 工作树已含上一执行者的 W1-W3 实现（+2114 行、`provider_consent.py` 未跟踪），
+  允许修改面与 WORK-PACKAGES 一致，保留；本轮只补缺口。基线 HEAD `97f5c58`。
+- **新增验收测试：** `tests/consent_ux/test_consent_ux_contract.py`，24 项 `test_consent_ux_*`
+  （U1 三轮一许可三发送、U7 旧 y 永不铸 grant、U9 A→B→A→B 例外复用+新来源拦截、S3 到期重选
+  s/身份漂移 A→B→A 不复活、S5 单次 y 恰一次消费、S6 32/33 次/扣账竞态守卫、S7 schema11
+  roundtrip/篡改拒绝/v10 兼容、N6/N7/N9/N12/N13/N19 负控、W3 CLI s/f/d 与
+  /revoke-provider-consent、S2 渲染）。U2-U6/U8 完整旅程（真实文件效果/pause→resume/压缩/
+  固定 4 次预算）未在本轮执行，见下方未完成。
+- **Red→Green 修复（5 个实现缺陷，均由新测试先复现）：**
+  1. `_exception_is_covered` 误用全类子集——文件来源例外永远不可达，U9 复用合同被破坏；
+     改为例外路径只要求常规部分结构性覆盖（SPEC S5）。
+  2. 非 ACTIVE grant 的身份漂移短路——INVALIDATED/REVOKED 后同 runtime 内 ack 回执永远
+     无法使用，无限重复暂停；改为仅 ACTIVE grant 触发 invalidate fence（SPEC S3：失效是
+     不复活，不是阻塞）。
+  3. paused 窗口裸 `s` 掉成业务消息；把 PAUSED 保护分支扩展到 s（SPEC S2：有 pending 但
+     选项不适用时给明确错误、零模型/效果）。
+  4. `_exact_routine_receipt_covers` 要求类别完全相等——ack 自身新增 control_receipts 即
+     失配，授权回执制造无限重问；改为常规集合内涨落可容忍（SPEC S5 明文）。
+  5. 精确路径无 control_receipts 桥接——带 tool_results 来源的请求在 ack 后 digest 漂移；
+     新增 `_exact_receipt_matches`：sources/scope 严格一致、增量仅为授权自身回执时视为
+     同一份已批准待发内容（SPEC S5）。
+  另：`tests/continuity/test_checkpoint_v4.py` 未知版本探针 11→12（v11 已为当前 schema）。
+- **质量门状态：** ruff 全绿；focused 受影响套件 206 passed。全库门首跑曾在
+  `tests/reference/test_015_e3_harness.py` 无限循环（60min 强停）。随后按用户
+  "修复→审计→修复→审计"指令完成三轮循环修复（见下），`--ignore` 版全库为
+  4023 passed / 16 failed / 1 skipped @496.97s，其中 12 项为合同性测试更新或
+  环境抖动（compaction 9、cli 1、automation/managed_web 2 复跑通过）；
+  **三轮修复后 reference 套件 572 passed、kernel+continuity+process 1164
+  passed**；**最终全库门（含全部 reference，无任何 ignore/deselect）：
+  4078 passed / 1 skipped / 0 failed，595.16s，exit 0**（唯一 skip 为
+  `tests/automation_hosts/test_launchd_real.py` 的显式 host gate）。
+- **修复→审计循环（2026-10-23 第二批，全部 Red→Green）：**
+  1. **source_contracts（1 项）**：用 HEAD 克隆对照证实旧测试通过依赖
+     "disclosure_id 参与 digest"的偶然，而 dispatch-1 的 pack 在 HEAD 也不含
+     新 source 类别。V2 语义（发送内容与已披露类别一致、新类别出现即拦停）
+     合同正确；测试改为编码真实无泄漏不变量（实际发送 pack 不得含未披露
+     类别 + 新来源先披露后发送）。
+  2. **reference 012/013（4 项）**：根因是 W1 文件来源证明的 workspace 校验
+     对比 `state.workspace_binding`，而组合（如 013）只在 Kernel 执行层携带
+     workspace 身份（ExecutingIntentRecord 无该字段）→ 写入结果一律被判
+     "does not bind"→ unknown outcome → 旅程停摆。修复：state 绑定存在时
+     严格校验、缺失时信任铸造端（tools.py 已强制 intent workspace 非空），
+     与 context.py `_valid_file_proof` 的 None-容忍语义对齐。
+  3. **015 harness 死循环**：探针证实 pause=ack=真实发送（400:400:400）但
+     digest 恒定、旅程不推进；policy-fact 探针定位到 `invalid_model_output`
+     （空响应修复）无界循环——根因是 `invalid_repairs` 为 `_drive` 局部变量，
+     consent 披露暂停中断 run_turn 后恢复时计数器归零，"空响应修复×确认
+     暂停"交替永不清空额度。修复：`_run_invalid_repairs` 从 durable 的
+     run 级 POLICY_RESULT facts 尾部连续重建额度（有效输出追加 fact 自然
+     打断链条，保持"连续无效响应"语义）。**这是 consent 暂停语义引入后暴露
+     的真实产品缺陷**（真实 provider 空响应+用户逐次确认同样会触发），
+     不止是测试问题。修复后 j5 旅程按合同在修复额度耗尽时 FAILED_FATAL
+     收口，harness 测试 16s 通过。
+  审计批注：`retryable_provider_retries`/`no_progress` 仍是 run_turn 局部
+  计数，同类重置风险存在但当前由 harness/预算外部有界（E3 harness
+  max_retryable_resumes=2、model-attempt 预算），记录为已知边界而非本轮缺陷。
+- **reference harness 死循环（已由上述循环修复第 3 项闭合）：** 诊断数据——
+  827 次连续 disclosure pause、第 9 次起 request digest 恒定、pause=ack=真实
+  provider 派发（400:400:400）、旅程状态不推进；根因为修复额度重置（见上），
+  非 harness 本身缺陷，015 冻结 harness 未做任何改动。含 `local_process`
+  产物的旅程在 V2 下每次派发需重新外发确认是本轮合同保留的产品边界
+  （process stdout 不设稳定来源）；两个同样带 auto-ack 循环的文件
+  （test_014_grounded_personal_knowledge、test_j1_production_verified_done）实测通过。
+- **E2/E3 补跑（收尾清单项）：** 新预算/新 evidence 目录
+  `~/.local/share/first-agent/previews/20261018-cli-9rmRS6/real-validation-2026-10-23/`
+  （编排脚本 `run-e2e3-2026-10-23.py`，E2≤40/E3≤20 物理请求硬上限，不触碰旧 80 次预算与
+  ledger）。实际：继承的进程环境 `DEEPSEEK_API_KEY` 预检 **HTTP 401**（与 2026-10-18 首次
+  继承 key 401 的经历一致），两样本各 1 次请求后被产品认证失败安全拦截，判
+  **BLOCKED_AUTHORIZATION**（无有效凭据；按合同不捞历史 key/凭据文件）。失败样本与 401
+  预检记录完整保留在上目录；补跑只需在有效 key 的进程环境重跑该脚本。
+- **本轮未完成（如实）：** ① U2-U6/U8 旅程级验收与固定 4 次确认预算实测未执行；
+  ② G 包干净安装验证部分受阻——本轮已离线构建 wheel 并冻结身份
+    （`~/.local/share/first-agent/previews/consentux-20261023/dist/first_agent-1.0.0-py3-none-any.whl`，
+    sha256=`f0d756d3a6fdbe5844f8cd5fd92817a106b8e00a3897fb6e98391ae09a58935a`；
+    解包比对 11 个 consent 相关模块与工作树逐字节一致、`provider_consent.py`
+    已入 wheel），但全新 venv 离线安装缺 httpx/pytest 依赖（无本地 wheelhouse），
+    按 VALIDATION §5 不擅自联网，干净安装 collect==execute 记
+    BLOCKED_NO_NETWORK_DEPS；独立 preview/launcher/交付说明同样待此解除；
+  ③ consent-ux 真实 API 按 VALIDATION §6 记 NOT_RUN_AUTHORIZATION；
+  ④ `retryable_provider_retries`/`no_progress` 的跨 resume 重置风险记录为
+  已知边界（见审计批注）。
+- **Git 和隐私：** 未 commit/push/merge/tag；未读取未知 `result.phase.json`、凭据、私人
+  会话；探针输出不回显 key；E2/E3 编排输出做了 key 抹除。本轮所有改动在工作树内待用户
+  决定 Git 交付。
+- **交接状态（2026-10-23 dev_co 收尾轮）：** 范围收紧审查完成——工作树 39 处变更全部
+  可追溯（consent 实施 11 个产品文件、24 项合同测试与 3 组既有套件合同性更新、
+  schema/repair 两处产品修复、上一执行者的 RegisteredTool 字段断言与 .gitattributes
+  oracle 空白例外均核对为合同所需）；无调试残留；门后零源码变动，4078 passed 证据
+  仍对应当前输入。未跟踪交付物仅 `agent/runtime/provider_consent.py`、
+  `tests/consent_ux/`、handoff 包文档；`result.phase.json` 仍为用户内容未读未动。
+  **下一步（按依赖序）：** ① Git 分批交付待用户一句话授权（建议分组：consent 产品
+  实现+修复 / 合同测试与既有套件更新 / handoff 包与记录文档）；② 联网环境下完成
+  wheel 干净安装 collect==execute（解除 BLOCKED_NO_NETWORK_DEPS）；③ 有效
+  DEEPSEEK_API_KEY 进程环境重跑 `run-e2e3-2026-10-23.py`（解除 E2/E3
+  BLOCKED_AUTHORIZATION）；④ U2-U6/U8 旅程实测与真实 API 小样本（需按 VALIDATION
+  §6 新授权）。失败试验的可复用证据已全部保留（E3 827-pause/400-send 探针数据、
+  proof 字段对比 dump、401 预检），下一执行者不必重走这些诊断路线。
+
+## 历史摘要（2026-10-21：确认疲劳审计与执行包已定稿；合同已由 2026-10-23 执行）
+
+- **用户目标：** 试用后反馈反复yes、交互太麻烦；要求Codex本地审计+Oracle Web交叉审计，
+  交付由另一coding agent执行的修复包。本轮不是产品实现或Git授权。
+- **最终入口：** [START-HERE](../2026-10-21-consent-ux-repair/START-HERE.md)、
+  [可复制Prompt](../2026-10-21-consent-ux-repair/PROMPT.md)。SPEC/WORK-PACKAGES/VALIDATION为
+  最终冻结合同，Oracle原答仅咨询意见；本文件继续作为唯一可变进度。
+- **本地发现：** 三轮零工具对话2次外发确认（第二次仅多history）；文件默认yes单笔、scope
+  选项藏在长命令；恢复后history/control_receipts会再问。有153项相关测试通过，但不能据此
+  说交互合格。未读用户私人试用会话，未统计其具体每条确认来源。
+- **Oracle：** 新会话 `mfa-consent-ux-20261021-a7b29e`，上传前/发送前均5/5，已提交到新
+  conversation并完整捕获答案；精确Chrome PID已退出、临时profile已清理。原答/receipt与
+  本地采纳裁决位于包内。未复用旧会话，未手工发送。
+- **冻结范围：** W1有限许可/最小可信文件来源/schema11→W2共享发送门/计数/撤销→W3 CLI
+  s/f/d→G固定交互预算与新wheel安装；32次/60分钟会话外发显式opt-in，现有文件/命令效果
+  边界不变。不建设全局信任、通用来源平台、异步撤销服务或新Agent循环。
+- **重要本地裁决：** 补齐真实goal_bootstrap/runtime_progress类别；撤销复用已有mutation
+  lease，忙时不假报成功；组合验收包含真实read-back及typed终态，不能沿Oracle四响应例子
+  省略验证。新预算尚未实现/实测，见VALIDATION U8：3外发+1文件决定=4。
+- **本次实际验证：** 公开离线探针exit0（零网络）；相关6文件153 passed/0.89s；探针ruff
+  通过。新包做引用/身份/泄密模式/空白核验，具体以PACKAGE-CHECK为准。没有本轮全库、
+  新安装或真实provider测试，不复用旧结果冒称通过。
+- **Git和隐私：** 基线main `97f5c584e9e266930fbcf283aa3199b3609e8178`；只新增公开修复包和
+  更新本记录；.gitattributes仅为本次Oracle原答/送审摘录两个精确归档路径保留空白，产品
+  源码未改。未commit/push；未知result.phase.json未读未动；不读凭据，
+  未继承旧API预算。旧预览未改，用户目前运行的仍是旧行为。
+- **下一步：** 用户将PROMPT交给接手者后，按包TDD实施、focused→最终完整门→fresh安装；
+  本轮产物是待执行合同，不宣称确认疲劳已经修好。真实E2/E3历史缺口仍保留，不在本轮扩展。
+
+## 历史摘要（2026-10-18：本地收尾完成，可个人试用；完整真实验收未闭合）
 
 - **当前授权与范围：** 本地收尾按用户“做收尾，同时列出各种能力”完成独立审计 F1–F4 的限定工作与固定 CLI 试用入口。随后用户明确授权“分批提交，把最新代码合入主分支并推送”；当前只整理本次公开成果到现有 `origin/main`，不新增能力、不再调用付费模型、不创建 tag/release、不更改 remote。未知 `result.phase.json` 不读取、不提交、不删除。
 - **本地修复：** F1 通过受信任 candidate/receipt 的 cwd、workspace、资源/环境/权限身份阻止跨范围承接验证；F3 `/approve <id>` 与 `y` 的已披露重绑定一致。两项已精确 Red→Green，相关首轮 106 passed；新增真实 Runtime→prepare→审批→spawn→receipt 的同目录/跨目录两条对照通过。cwd 比较使用既有 digest，不声称额外证明目录 inode 不变。

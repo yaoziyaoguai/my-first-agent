@@ -1,0 +1,70 @@
+{
+  "source_head": "97f5c584e9e266930fbcf283aa3199b3609e8178",
+  "files": [
+    {
+      "path": "agent/runtime/contracts.py",
+      "sha256": "e8c5008d140591d399406d3b8210a4e5d8dc47aadca2f3af05e336b758662302",
+      "line_count": 6264
+    },
+    {
+      "path": "agent/runtime/state.py",
+      "sha256": "793941421b944a26d85c75458384ed01c04216f047f2b17d503716a595cc521d",
+      "line_count": 5122
+    },
+    {
+      "path": "agent/cli/app.py",
+      "sha256": "80556af31fa916f31048c1adc1b5f597a5f1788d5886470916cafc0a4a2ff021",
+      "line_count": 564
+    },
+    {
+      "path": "agent/cli/render.py",
+      "sha256": "fdbaa180732af1b98481299ac2858da8670a194009a602cb0f219b7cd5a4d21e",
+      "line_count": 471
+    },
+    {
+      "path": "agent/runtime/views.py",
+      "sha256": "eae28aa6c6964918e37137156053a0f5c4526a6a8a9e93f1da96576fc2fc1fb5",
+      "line_count": 755
+    },
+    {
+      "path": "agent/runtime/loop.py",
+      "sha256": "2c647a9dbceade8833f72e5962fa2f8f089b9aec3a5915c603f7ddd8714900a3",
+      "line_count": 4854
+    },
+    {
+      "path": "agent/runtime/context.py",
+      "sha256": "74d62744541a7beb86557d6e222dae27abdc8f1dece1e8ecd5800987715645b7",
+      "line_count": 1676
+    },
+    {
+      "path": "agent/runtime/context_source.py",
+      "sha256": "9777af94d7c226977f9d097b115fd1652ea9fbd86f2a8526771fc910536ed8d5",
+      "line_count": 273
+    },
+    {
+      "path": "agent/runtime/checkpoint.py",
+      "sha256": "ced1c4e77e491680471d082da56e03ebd36ae006c60563db62458e7d40da13a0",
+      "line_count": 2805
+    },
+    {
+      "path": "agent/process/tools.py",
+      "sha256": "6d2c75abb46748ce5daa394353be467770614d082a04196888ce5ab004bb24be",
+      "line_count": 261
+    },
+    {
+      "path": "agent/cli/actions.py",
+      "sha256": "a241df4ddb18c481a45cefa9c301c356e61934b337225b09d051fcb9c4f92e1d",
+      "line_count": 305
+    },
+    {
+      "path": "README.md",
+      "sha256": "e9536f61e9dfd0fcc96a836d71f648ddf86fb84330a11853430dcdcbed6657b6",
+      "line_count": 452
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "ffe57fe28fbf4b5aa269c6419e8a2b96ccf7daa46abde0b7ff983913ac830f6e",
+      "line_count": 63
+    }
+  ]
+}

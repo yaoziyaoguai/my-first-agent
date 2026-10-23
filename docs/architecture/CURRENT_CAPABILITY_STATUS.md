@@ -25,6 +25,20 @@ G8 之前 SubAgent 属于这种限制（HTTP adapter 无 honest hard-deadline）
 
 ## Current snapshot (2026-10-18)
 
+**2026-10-23 增补（consent-ux 实施中身份漂移）：** 工作树已叠加 2026-10-21 确认疲劳
+修复包的实施（有限外发许可/schema11/文件来源证明/CLI s/f/d），source identity 再次
+变化，下方"全部能力保持 implemented-candidate"的判断继续成立且更保守。当前身份的
+验证事实以 [RESULTS](../handoffs/2026-10-11-product-reliability-closure/RESULTS.md)
+2026-10-23 章节为准：consent 合同测试 24 项通过、ruff 全绿、**最终全库门 4078
+passed / 1 skipped / 0 failed（含全部 reference，无 ignore）**；E2/E3 真实层补跑因
+凭据无效记 BLOCKED_AUTHORIZATION；G 包新 wheel 安装验证见 RESULTS 当日章节。
+在真实层证据补齐前，不得引用本文件声称任何能力相对当前工作树为
+locally-verified 或更高。**2026-10-23 晚增补：** 同日完成真实模型 dogfood
+（DeepSeek/deepseek-flash，PTY 交互）——consent 会话许可（1 次 s 覆盖全程）、
+文件范围复用（3 次重写 1 次审批）、撤销重问与抗误用均实证生效；读/验证类
+输出的外发疲劳定量为 16 次/小任务（见 RESULTS 当日章节）。E2/E3 因上游退役
+deepseek-v4-flash 记 BLOCKED_UPSTREAM_MODEL_RETIRED。
+
 本节是唯一权威 current matrix；下方 Historical matrix 与时间线只作历史证据保留。所有 current claim
 均相对当前工作树这一 identity：当前工作树相对 016/017/018/019 的旧 seal/check 全部 drift（016
 manifest 期望 225、实际 508 entries；018 期望 309、实际 495；019 entry_count/root drift），

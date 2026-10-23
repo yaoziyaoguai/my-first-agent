@@ -24,6 +24,12 @@ W3 验收 driver 不催促不救场），旧身份数字不再描述当前工作
 样本（业务检查与产品终态均通过）；纠正/恢复样本在累计预算边界暂停、零改写样本未运行，
 因此完整真实验收仍未闭合。试用须准备项目依赖并独立检查结果，不能冒用旧身份的真实通过记录。
 
+2026-10-23：consent-ux 冻结合同已实施并通过全库门（4100 passed / 1 skipped / 0 failed）
+与真实模型 dogfood（1 次 `s` 覆盖全程常规发送；同一文件 3 次重写仅 1 次审批；读类输出
+的逐次披露为本轮合同接受的边界，实测小任务 16 次）；oracle 对抗审计两轮采纳的缺陷已
+全部修复。E2/E3 历史真实验收因上游退役 `deepseek-v4-flash` 与 anthropic 兼容端点而阻塞
+（详见 RESULTS）。
+
 **开箱即用边界**：Scheduler 安装入口返回 `needs_019_config`（无可用的 host composition，见下文
 Durable automations 节）；受治理浏览器（018）为 implemented-candidate 且未完成 D06 真实模型验收；
 `--strict-tools` 与含开放 object 的工具 schema 组合会在请求发送前 fail closed（见 HTTP Provider 节）。
@@ -34,6 +40,11 @@ Durable automations 节）；受治理浏览器（018）为 implemented-candidat
 ## 当前能力
 
 - 多轮文本对话
+- 会话级外发许可与文件复用快捷选择（2026-10-21 consent-ux 轮）：远端模型首次发送可选
+  `s`（本会话常规对话数据，32 次发送 / 60 分钟，`/revoke-provider-consent` 随时撤销）；
+  文件审批处可直接选 `f`（同文件/本任务复用，16 次 / 60 分钟）或 `d`（已声明目录复用），
+  均等价于既有 slash 范围命令；写结果的稳定来源在许可内静默复用。读/验证类输出
+  （目录列表、读文件、命令 stdout 等）不属于稳定来源，包含它们的每次发送仍会单独披露
 - 确定性、限额明确的上下文构建
 - 串行工具调用与精确审批；文件修改可由用户显式选择当前任务的精确目标复用授权
 - `read_file`、`list_files`、`write_file`、`edit_file`；缺失目录可经独立审批的

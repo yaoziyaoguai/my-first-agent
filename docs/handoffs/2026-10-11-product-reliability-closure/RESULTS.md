@@ -51,6 +51,63 @@
 - 每批均过 pre-commit ruff；提交内容与全库门 4100 绿的工作树逐字节一致；
   未创建 tag/release、未改 remote/可见性；未知 `result.phase.json` 未提交未改动。
 
+## 当前摘要（2026-10-23 深夜：全量审计循环 r3-r5——r4 全部收尾项已实现并验证；oracle 终审因 chatgpt.com 不可达记 BLOCKED_NETWORK）
+
+- **用户指令：** "用相关的技能审计和用 oracle web 技能审计所有可能架构/模块/代码/文档/实现
+  问题，循环修复审计直到审计不出任何问题"；会话中追加两条约束：本地审计必须使用用户
+  安装的专项技能；oracle-web 一律最高档（5/5 max，自 r5 起生效）。
+- **本地审计（加载 codebase-design / grilling / improve-codebase-architecture 三个技能
+  透镜 + 全量扫描）：** 发现并修复——① 三份用户文档（README/capabilities/daily-use）
+  对已交付 consent UX 零覆盖（违反合同交付说明要求）→ 已补齐 s/f/d、32/60 会话许可、
+  撤销与读类输出边界的完整文档；② routine 桥缺 receipt↔previous 绑定（与 exception
+  路径不对称）→ 已补；③ 打包卫生/架构引用/废弃标记/被跟踪日志全查（仅 oracle 归档
+  原始 log 为有意证据，tui/ 为用户未跟踪本地内容，均非缺陷）。
+- **oracle r3（consent-integration-audit-20261023，4/5）：** 4 项发现全部采纳修复
+  （Red→Green，`tests/consent_ux/test_consent_ux_r3_fixes.py`）——F1(P1) 单次 y 的
+  routine 桥曾覆盖任意常规类增长（SPEC S5 只豁免 control_receipts；conversation_history
+  等属 s 职责）→ 收紧为 growth⊆{control_receipts}；F2(P1) invalid 修复计数在混布停滞
+  序列欠计 → 透明停滞跳过（transient/no_progress facts 不打断链条）；F3(P2) digest
+  相等捷径绕过新用户消息判界 → 判界前移；F4(P2) 运输前重验不拒时钟回拨 → 补
+  not_yet_valid。r3 另确认 4 个方向 CLEAN（压缩 gate 顺序/charge 重验/到期拒绝/
+  瞬态累计）。r3 发现 1 与 SPEC 第175行的裁决：SPEC 只豁免例外 scope digest 的常规
+  涨落，不豁免单次票据的类别扩大——oracle 正确、实现过度一般化。
+- **oracle r4（consent-fix-confirm-20261023，4/5）：** F1/F3/F4 判 FIXED；F2 判
+  已修但要求 no_progress 焦点测试；新增 N1(P2) charge 未比对 mark_receipt_consumed、
+  N2(P3) 过时 docstring。全部实现：charge 改为完整 gate 等价（recomputed != gate）+
+  篡改 gate 负测；docstring 重写；no_progress-between-invalids 与 32 次/33 次焦点
+  测试补齐。已知残留（安全方向，记录）：被接受的 GoalProgress 落 ControlReceipt
+  而非 fact，重建在该边角过计（更严格，不扩边界）。
+- **oracle r5 终审（consent-final-verdict-20261023/-r2，max）：** 两次尝试均因
+  chatgpt.com 网络不可达失败（复制 profile 探测 `chrome-error://` + Failed to
+  fetch；本机 curl 亦 000）——**BLOCKED_NETWORK**，非登录/凭据问题；网络恢复后可用
+  同 slug 重跑一次终审。r4 的三个收尾条件（完整 gate 比对/docstring/no_progress
+  测试）已全部实现并验证，这是当前可达到的最强闭环。
+- **门状态：** consent 55 项全绿；kernel+provider+continuity+cli+recovery 1664 绿；
+  reference 572 绿（F1 收紧后重跑通过）；**全库门 4109 passed / 1 skipped /
+  0 failed（596s）**；ruff/diff-check 净。
+- **Git：** 本轮 r3-r5 修复与文档未 commit（约 7 处变更），待用户授权交付。
+
+## 当前摘要（2026-10-23 深夜二：审计循环 r6——本地扩展审计收敛，唯一发现已修；oracle 终审仍网络阻塞）
+
+- **用户指令：** "继续 循环 接着用相关技能审"。r6 将本地技能审计
+  （codebase-design 删除测试 / grilling 对抗追问 / 架构卫生扫描）扩展到此前
+  未覆盖面：main.py 组合根（凭据仅 composition root、无死代码）、CLI 转义
+  负控（N5 已有测试钉住事件字段与审批提示的控制字符逃逸）、KERNEL_ARCHITECTURE
+  引用、consent 常量单源性、provider_consent 浅模块残留。
+- **r6 唯一发现并修复：** `source_boundary_from_scope` 为零调用纯传递函数
+  （deletion test 失败）——已删除；受影响面（consent+kernel+provider+
+  continuity）1405 passed，ruff 净。
+- **门（r6 后重跑）：** 4108 passed / 1 skipped / 1 error——error 为
+  `tests/sandbox/test_packaged_policy_real.py` 本地 loopback（127.0.0.1,
+  timeout=1s）在满载下的超时抖动，单独复跑 0.23s 通过（与本轮删除无关，
+  与此前 managed_web 抖动同类）。
+- **oracle 终审：** chatgpt.com 持续不可达（本轮三次探测均 000），维持
+  BLOCKED_NETWORK；网络恢复后以 `consent-final-verdict-20261023-r2` 同参
+  重跑即可（5/5 max）。
+- **循环收敛判定：** r4 全部收尾项已实现验证；r5/r5b 仅网络阻塞；r6 本地
+  审计仅余琐碎发现并已清零——审计循环在本地维度收敛，待网络恢复补一次
+  oracle 终审即完全收口。
+
 ## 历史摘要（2026-10-23 r2 修复执行：oracle 采纳缺陷全部修复，全库门 4100 绿）
 
 - **用户指令：** "可以 开始吧"——执行 oracle r2 审计（§F 顺序）采纳的修复。全程

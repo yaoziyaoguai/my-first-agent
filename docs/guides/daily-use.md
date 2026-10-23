@@ -5,6 +5,18 @@
 > [唯一执行记录](../handoffs/2026-10-11-product-reliability-closure/RESULTS.md)。
 > 详细命令清单见 [COMMANDS.md](../handoffs/2026-10-10-reliable-daily-use/COMMANDS.md)。
 
+## 确认与许可速查（2026-10-23 consent-ux 起）
+
+- **远端模型发送提示（`Remote provider disclosure required`）**：`y` 只批这一次的精确范围；
+  `s` 授权本会话常规对话数据（32 次发送 / 60 分钟，提示会显示剩余额度与到期时间）；
+  `n`/回车不发送。选过 `s` 后普通对话不再逐次询问。`/revoke-provider-consent` 随时撤销。
+- **含新来源（读文件/列目录/命令输出等）的发送**：不属于常规范围，会单独询问，只能 `y`
+  单次批准——这是当前版本已知边界；写文件产生的结果属于稳定来源，在许可内不会反复问。
+- **文件/命令审批（`Execute this operation?`）**：`y` 只批本笔；提示中出现 `f` 时可选
+  同文件复用（16 次 / 60 分钟）、`d` 选已声明目录复用；`n` 拒绝。不适用时产品会明确说明
+  而不会降级。
+- **任务暂停窗口**：先 `/resume` 再回答挂起的确认。
+
 ## 环境
 
 - **macOS 专属**：沙箱使用 macOS Seatbelt（read-only 验证与 workspace-write）。

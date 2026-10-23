@@ -247,11 +247,20 @@ _INVALID_REPAIR_POLICY_CODES = frozenset(
 )
 
 
+# oracle r3 F2：这些停滞 facts 不是有效模型输出，不得打断"连续无效响应"
+# 链（invalid → transient → invalid 在运行中语义下是连续 2 次）。
+_STALL_TRANSPARENT_POLICY_CODES = frozenset(
+    {"provider_transient_retry", "no_progress_replan_required"}
+)
+
+
 def _run_invalid_repairs(state) -> int:
     """从本 run 已落盘的修复型 policy facts 重建连续无效响应额度。
 
-    只数尾部连续的修复 facts：有效模型输出会追加自己的 fact（answer/
-    calls/控制草案），打断链条，与计数器"连续无效响应"的运行中语义一致。
+    从尾部回扫：修复型 facts 计数；透明停滞 facts（瞬态重试/no-progress
+    修复）跳过；任何其他 fact（有效输出、用户/工具动作）打断链条。透明
+    跳过只影响链完整性，不会把被打断的历史修复计回来（欠计修复为安全
+    方向的反面——此处修复的是欠计）。
     """
 
     active = state.active_run
@@ -260,12 +269,13 @@ def _run_invalid_repairs(state) -> int:
     prefix = f"run:{active.run_id}:policy:"
     count = 0
     for fact in reversed(state.facts):
-        if (
-            fact.fact_id.startswith(prefix)
-            and fact.kind is FactKind.POLICY_RESULT
-            and fact.content.get("code") in _INVALID_REPAIR_POLICY_CODES
-        ):
+        if not (fact.fact_id.startswith(prefix) and fact.kind is FactKind.POLICY_RESULT):
+            break
+        code = fact.content.get("code")
+        if code in _INVALID_REPAIR_POLICY_CODES:
             count += 1
+        elif code in _STALL_TRANSPARENT_POLICY_CODES:
+            continue
         else:
             break
     return count

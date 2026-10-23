@@ -27,7 +27,6 @@ from agent.runtime.contracts import (
     ProviderDisclosureReceiptV2,
     ProviderDisclosureRequest,
     ProviderDisclosureRequestV2,
-    ProviderDisclosureSourceV1,
     ToolDefinition,
     canonical_json_digest,
 )
@@ -329,11 +328,14 @@ def _exact_receipt_matches(
         return False
     if receipt.request_digest != previous.request_digest:
         return False
+    # oracle r3 F3：新用户消息判界先于 digest 相等捷径——digest 不含消息
+    # 内容，相同 digest 不能成为绕过 S5 失配条件的理由。
+    if not _no_new_user_input_since(state, receipt):
+        return False
     if receipt.request_digest == candidate.request_digest:
         return True
     return (
         _same_pending_unit(candidate, previous)
-        and _no_new_user_input_since(state, receipt)
         and candidate.scope_digest == previous.scope_digest
         and candidate.sources == previous.sources
         and set(candidate.data_classes) - set(previous.data_classes)
@@ -352,10 +354,11 @@ def _exact_routine_receipt_covers(
 
     孤儿 resume 的 run_id 重标会改变 request_digest，但不改变用户看到的
     常规范围；单次票据仍只消费一次，不转成 grant，也不覆盖任何非常规来源。
-    SPEC S5：常规类别的无害涨落（如 ack 自身新增的 control_receipts、恢复后
-    加入的 conversation_history）不得使待发授权失配，否则授权回执会制造
-    无限重问；非常规来源仍由 sources 严格相等约束；新用户消息由
-    `_no_new_user_input_since` 判界，purpose/工具定义变化仍拒绝。
+    SPEC S5：单次 y 只豁免授权自身新增的 control_receipts 簿记；
+    conversation_history 等实质新常规内容属于 `s`（会话许可）的授权范围，
+    不得经本桥静默扩大（oracle r3 F1）。非常规来源仍由 sources 严格相等
+    约束；新用户消息由 `_no_new_user_input_since` 判界；purpose/工具定义
+    变化仍拒绝。
     """
 
     if not (
@@ -364,15 +367,21 @@ def _exact_routine_receipt_covers(
         and isinstance(previous, ProviderDisclosureRequestV2)
         and isinstance(receipt, ProviderDisclosureReceiptV2)
         and receipt.consumed_at is None
+        # r2 B2 同款纵深防御：receipt 必须绑定 previous 这份请求（状态层
+        # 构造不变量已拒绝错配对，此处防止绕过状态构造的直接调用）。
+        and receipt.request_digest == previous.request_digest
         and previous.scope_digest == candidate.scope_digest
         and previous.sources == candidate.sources
         and _same_pending_unit(candidate, previous)
         and _no_new_user_input_since(state, receipt)
     ):
         return False
-    return (
-        set(previous.data_classes) | set(candidate.data_classes)
-    ) <= ROUTINE_DATA_CLASS_SET
+    # oracle r3 F1 / SPEC S5：单次 y 只豁免授权自身的 control_receipts 簿记；
+    # conversation_history 等实质新常规内容必须重新决定——覆盖常规范围是
+    # `s`（会话许可）的职责，不允许经单次票据静默扩大。
+    return set(previous.data_classes) <= set(candidate.data_classes) <= (
+        set(previous.data_classes) | {"control_receipts"}
+    )
 
 
 def _exception_is_covered(
@@ -590,12 +599,9 @@ def charge_provider_dispatch(
         run_id=run_id,
         now=now,
     )
-    if (
-        not recomputed.admitted
-        or recomputed.grant_use != gate.grant_use
-        or recomputed.consume_receipt != gate.consume_receipt
-        or recomputed.reason != gate.reason
-    ):
+    # oracle r4 N1：比较完整决策（含 mark_receipt_consumed），防止调用方
+    # 传入与重算不一致的部分匹配 gate 绕过票据消费等副作用。
+    if not recomputed.admitted or recomputed != gate:
         raise ValueError(
             "provider dispatch gate is stale or unapproved for this dispatch"
         )
@@ -642,7 +648,11 @@ def final_dispatch_expiry_check(
     grant = state.provider_consent_grant
     if grant is None:
         return "grant_missing"
-    if parse_zoned_time(now) >= parse_zoned_time(grant.expires_at):
+    current = parse_zoned_time(now)
+    # SPEC S3：时间倒退早于 issued_at 同样拒绝；已扣的第 32 次不因此失效。
+    if current < parse_zoned_time(grant.issued_at):
+        return "not_yet_valid"
+    if current >= parse_zoned_time(grant.expires_at):
         return "expired"
     return None
 
@@ -711,9 +721,3 @@ def mint_provider_consent_grant(
 
 def no_workspace_identity(workspace_identity_digest: str | None) -> str:
     return workspace_identity_digest or NO_WORKSPACE_IDENTITY
-
-
-def source_boundary_from_scope(
-    scope: ProviderConsentScopeV1,
-) -> tuple[ProviderDisclosureSourceV1, ...]:
-    return scope.sources

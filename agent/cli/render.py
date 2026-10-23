@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from agent.runtime.contracts import (
     ActiveRunStatus,
@@ -11,6 +12,10 @@ from agent.runtime.contracts import (
     ConversationState,
     EgressClass,
     GoalStatus,
+    ProviderConsentGrantStatus,
+    ProviderConsentGrantV1,
+    ProviderDisclosureRequest,
+    ProviderDisclosureRequestV2,
     RecoveryRequest,
     RunResult,
     RunStatus,
@@ -147,9 +152,8 @@ class TerminalRenderer:
             assert request is not None
             self._write(
                 self._disclosure_message(
-                    destination=request.canonical_destination,
-                    model=request.model,
-                    data_classes=request.data_classes,
+                    request=request,
+                    grant=state.provider_consent_grant,
                 )
             )
             return
@@ -348,31 +352,34 @@ class TerminalRenderer:
                 "Approve generation now? [y/N] The generated file is not confirmed yet; "
                 "First Agent must show its current content for a separate confirmation."
             )
-        # R4：适用范围内展示无参数范围授权短命令与准确边界（16 次执行/60 分钟
-        # 是 Runtime 铸授权的固定 bound）；不适用时完全不出现。
+        # S2：f/d 就是既有 /approve-goal-target、/approve-goal-directory 的当前
+        # 提示内快捷方式；只展示 Runtime 当前确实可铸的范围，不猜父目录。
         file_scope, directory_scope = authorization_scopes
-        if file_scope is not None or directory_scope is not None:
-            lines.append(
-                "Scope authorization for the current task only (reusable; "
-                "revoke anytime with /revoke-goal-target):"
-            )
+        if artifact_path is None and (file_scope is not None or directory_scope is not None):
+            # S2：保留原有 [y/N] 与“yes 只批准这一笔”的含义，再增加 f/d
+            # 两个显式复用选项；不适用时不出现，也不猜父目录。
+            lines.append("Execute this operation? [y/N]")
+            lines.append("Choose one:")
+            lines.append("  y  This operation only")
             if file_scope is not None:
                 lines.append(
-                    f"/approve-goal-target — approve {terminal_text(tool_name)} for the "
-                    f"exact file {terminal_text(file_scope)} in this task "
-                    "(at most 16 executions, expires after 60 minutes, "
-                    "any goal change ends it)"
+                    f"  f  This file / this task / {terminal_text(tool_name)} — up to "
+                    "16 uses, 60 minutes "
+                    f"({terminal_text(file_scope)}; /approve-goal-target)"
                 )
             if directory_scope is not None:
                 lines.append(
-                    f"/approve-goal-directory — approve {terminal_text(tool_name)} for "
-                    f"regular files under the Goal directory "
-                    f"{terminal_text(directory_scope)} in this task "
-                    "(at most 16 executions, expires after 60 minutes, "
-                    "any goal change ends it)"
+                    f"  d  Declared task directory {terminal_text(directory_scope)} / "
+                    f"{terminal_text(tool_name)} — up to 16 uses, 60 minutes "
+                    "(/approve-goal-directory)"
                 )
+            lines.append("  n  Reject")
             lines.append("yes approves only this one operation.")
-        elif goal_scope_unavailable:
+            lines.append(
+                "Task changes or closure end the reusable permission. "
+                "Revoke: /revoke-goal-target"
+            )
+        elif artifact_path is None and goal_scope_unavailable:
             # E1-A（2026-10-16）：spec 驱动 Goal 的 targets 是散文时，写入复用
             # 授权静默不适用（实测 0/17）；如实说明，避免"已授权"误读。
             lines.append(
@@ -404,18 +411,103 @@ class TerminalRenderer:
         )
 
     @staticmethod
-    def _disclosure_message(*, destination: object, model: object, data_classes: object) -> str:
-        data_summary = (
-            ", ".join(str(item) for item in data_classes)
-            if isinstance(data_classes, (list, tuple))
-            else data_classes
-        )
-        return (
-            "Remote provider disclosure required\n"
-            f"destination: {terminal_text(destination)}\n"
-            f"model: {terminal_text(model)}\n"
-            f"data: {terminal_text(data_summary)}\n"
-            "Allow this information to be sent? [y/N]"
+    def _disclosure_message(
+        *,
+        request: ProviderDisclosureRequest | ProviderDisclosureRequestV2,
+        grant: ProviderConsentGrantV1 | None,
+    ) -> str:
+        data_summary = ", ".join(request.data_classes)
+        if isinstance(request, ProviderDisclosureRequest):
+            # Legacy request/receipt 语义保持原样，包括旧测试与旧 checkpoint。
+            return (
+                "Remote provider disclosure required\n"
+                f"destination: {terminal_text(request.canonical_destination)}\n"
+                f"model: {terminal_text(request.model)}\n"
+                f"data: {terminal_text(data_summary)}\n"
+                "Allow this information to be sent? [y/N]"
+            )
+
+        lines = [
+            "Remote provider disclosure required",
+            f"destination: {terminal_text(request.canonical_destination)}",
+            f"model: {terminal_text(request.model)}",
+            f"workspace: {terminal_text(request.workspace_identity_digest)}",
+            f"data: {terminal_text(data_summary)}",
+        ]
+        if request.sources:
+            lines.append("new or changed sources:")
+            for source in request.sources:
+                reuse = (
+                    "same source can reuse the current consent"
+                    if source.reusable
+                    else "this pending content only"
+                )
+                lines.append(
+                    f"- {terminal_text(source.label)} "
+                    f"({terminal_text(source.data_class)}; {reuse})"
+                )
+        lines.append("  y  Approve the exact scope shown above")
+        if request.grant_eligible:
+            lines.append(
+                "  s  Allow routine conversation data in this conversation — "
+                "up to 32 model sends, expires in 60 minutes"
+            )
+        else:
+            lines.append(
+                "  s  unavailable — this request includes a new or unverified source"
+            )
+        lines.append("  n  Do not send")
+        lines.append("Enter: do not send")
+        if request.grant_eligible:
+            lines.append(
+                "Routine scope: your messages, conversation/task records, system "
+                "policy, listed tool/control definitions, and summaries with verified "
+                "covered sources. Tool outputs and other new sources are disclosed "
+                "separately."
+            )
+        if isinstance(grant, ProviderConsentGrantV1):
+            reason = TerminalRenderer._consent_unavailable_reason(grant)
+            if reason is not None:
+                lines.append(
+                    f"Previous provider permission unavailable: {reason}. "
+                    "Choose s to start a new permission."
+                )
+        lines.append("Revoke: /revoke-provider-consent")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _consent_unavailable_reason(grant: ProviderConsentGrantV1) -> str | None:
+        if grant.status is ProviderConsentGrantStatus.REVOKED:
+            return "revoked"
+        if grant.status is ProviderConsentGrantStatus.INVALIDATED:
+            return "invalidated by a provider or workspace change"
+        if grant.uses_consumed >= grant.max_uses:
+            return "all 32 model sends used"
+        try:
+            expires = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return "expiry time is invalid"
+        if datetime.now(UTC) >= expires:
+            return f"expired at {grant.expires_at}"
+        return None
+
+    def render_provider_consent(self, state: ConversationState) -> None:
+        """授予/撤销后的短确认；不重复整段审批，也不声称可撤回已发请求。"""
+
+        grant = state.provider_consent_grant
+        if grant is None:
+            self._write("No provider consent is recorded for this conversation.")
+            return
+        if grant.status is ProviderConsentGrantStatus.REVOKED:
+            self._write(
+                "Provider consent revoked. New provider sends require a new decision."
+            )
+            return
+        left = max(grant.max_uses - grant.uses_consumed, 0)
+        self._write(
+            f"Provider consent active: routine conversation data, {left} of "
+            f"{grant.max_uses} model sends left, expires at {terminal_text(grant.expires_at)}. "
+            "Revoke: /revoke-provider-consent"
         )
 
     @staticmethod

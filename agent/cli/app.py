@@ -10,12 +10,14 @@ from agent.cli.actions import (
     build_cancel_browser_takeover,
     build_cancel_goal,
     build_complete_browser_takeover,
+    build_grant_provider_consent,
     build_pause_goal,
     build_recover_unknown_observation,
     build_resolve_approval,
     build_resume_goal,
     build_revoke_goal_target_authority,
     build_revoke_process_authority,
+    build_revoke_provider_consent,
     new_session_gate,
     parse_artifact_confirmation,
     utc_now_rfc3339,
@@ -30,10 +32,12 @@ from agent.runtime.contracts import (
     ConversationState,
     EgressClass,
     GoalStatus,
+    GrantProviderConsent,
     RecoveryRequest,
     RecoveryResolution,
     ResolveUnknownToolOutcome,
     Resume,
+    RevokeProviderConsent,
     RunResult,
     RunStatus,
     SubmitMessage,
@@ -75,6 +79,7 @@ _HELP_TEXT = """Commands:
   directory (without an ID it binds the prompt just shown)
 /approve-artifact <sha256> <workspace-relative-path> — approve an exact artifact
 /ack-provider <digest> — acknowledge an exact provider disclosure
+/revoke-provider-consent — revoke the current conversation provider permission
 /resolve-success <request-id>, /resolve-failed <request-id> — resolve an unknown effect
 /record-observation-unknown — continue after an unknown public observation
 /revoke <lease-id|all> — revoke process permission
@@ -219,6 +224,10 @@ def run_repl(
             )
             return 130
         renderer.render_result(result)
+        if isinstance(action, (GrantProviderConsent, RevokeProviderConsent)) and (
+            result.status not in {RunStatus.CONFLICT, RunStatus.FAILED_FATAL}
+        ):
+            renderer.render_provider_consent(result.state)
         if result.status is RunStatus.CONFLICT:
             return 2
         if result.status is RunStatus.FAILED_FATAL:
@@ -247,6 +256,20 @@ def _parse_action(
     # B（2026-10-18）：活跃与恢复形状共用唯一只读判定（views 谓词）；
     # render/yes/no/空白同源，Runtime 仍校验 action 合法性。
     disclosure_pending = pending_provider_disclosure_decision(state)
+    if disclosure_pending and normalized == "s":
+        if (
+            state.active_run is None
+            and goal is not None
+            and goal.status is GoalStatus.PAUSED
+        ):
+            return (
+                None,
+                "The task is paused; run /resume before answering the pending disclosure.",
+            )
+        try:
+            return build_grant_provider_consent(state), None
+        except ValueError as error:
+            return None, str(error)
     if disclosure_pending and normalized in _AFFIRMATIVE:
         assert disclosure is not None
         return (
@@ -267,15 +290,31 @@ def _parse_action(
         and state.active_run is None
         and goal is not None
         and goal.status is GoalStatus.PAUSED
-        and normalized in _AFFIRMATIVE | _NEGATIVE
+        and (normalized in _AFFIRMATIVE | _NEGATIVE or normalized == "s")
     ):
-        # 窄范围 PAUSED 保护：暂停窗口里的裸 yes/no 不产生业务消息，先 /resume。
+        # 窄范围 PAUSED 保护：暂停窗口里的裸 yes/no/s 不产生业务消息，先 /resume。
+        # S2：有 pending 但选项不适用时给明确错误、零模型/效果，不当作新业务消息。
         return (
             None,
             "The task is paused; run /resume before answering the pending disclosure.",
         )
 
     approval = _approval_request(state)
+    if approval is not None and normalized in {"f", "d"}:
+        if approval.artifact_confirmation_requirement is not None:
+            return (
+                None,
+                "Artifact generation keeps its separate content confirmation; "
+                "answer y to approve generation once.",
+            )
+        command_for_scope = (
+            "/approve-goal-target" if normalized == "f" else "/approve-goal-directory"
+        )
+        return _build_goal_scoped_approval(
+            state,
+            command_for_scope,
+            approval_time_factory=approval_time_factory,
+        )
     if approval is not None and normalized in _AFFIRMATIVE | _NEGATIVE:
         approved = normalized in _AFFIRMATIVE
         return (
@@ -382,17 +421,14 @@ def _parse_action(
         request = _approval_request(state)
         if request is None:
             return None, "No approval request is pending."
-        if command in {"/approve-goal-target", "/approve-goal-directory"} and (not separator):
-            # R4：文件审批提示不展示内部 request identity；无参数短命令绑定
-            # REPL 刚显示的同一 authoritative pending request（显示与解析共用
-            # 循环内同一 snapshot；输入期间漂移由 expected_revision CAS
-            # fail closed，不重绑新请求）。适用范围与 Runtime 铸授权共用
-            # 同一 scope 判定，不适用即拒绝，绝不静默降级为逐笔批准。
-            file_scope, directory_scope = project_goal_authorization_scopes(state)
-            applicable = file_scope if command == "/approve-goal-target" else directory_scope
-            if applicable is None:
-                return None, ("The pending approval has no matching Goal scope for this command.")
-        elif not separator or argument != request.request_id:
+        if command in {"/approve-goal-target", "/approve-goal-directory"}:
+            return _build_goal_scoped_approval(
+                state,
+                command,
+                request_id=(argument if separator else None),
+                approval_time_factory=approval_time_factory,
+            )
+        if not separator or argument != request.request_id:
             return None, "Use the exact pending request ID."
         return (
             build_resolve_approval(
@@ -402,14 +438,12 @@ def _parse_action(
                 approved=command != "/reject",
                 approved_at=(
                     approval_time_factory()
-                    if command in {"/approve", "/approve-goal-target", "/approve-goal-directory"}
+                    if command == "/approve"
                     else None
                 ),
                 defer_artifact_confirmation=(
                     command != "/reject" and request.artifact_confirmation_requirement is not None
                 ),
-                authorize_goal_target=command == "/approve-goal-target",
-                authorize_goal_directory=command == "/approve-goal-directory",
                 authorize_obligation_rebind=(
                     command == "/approve"
                     and project_obligation_rebind_disclosure(state) is not None
@@ -515,6 +549,14 @@ def _parse_action(
         except ValueError as error:
             return None, str(error)
 
+    if command == "/revoke-provider-consent":
+        if separator:
+            return None, "/revoke-provider-consent does not accept arguments."
+        try:
+            return build_revoke_provider_consent(state), None
+        except ValueError as error:
+            return None, str(error)
+
     if command.startswith("/"):
         return None, "Unknown command. Run /help to see available commands."
     if (
@@ -524,6 +566,41 @@ def _parse_action(
         status = state.active_run.status.value
         return None, f"A run is paused ({status}); use its matching reserved command."
     return SubmitMessage(**common, run_id=make_run_id(), message=raw), None
+
+
+def _build_goal_scoped_approval(
+    state: ConversationState,
+    command: str,
+    *,
+    request_id: str | None = None,
+    approval_time_factory: Callable[[], str] = utc_now_rfc3339,
+) -> tuple[Action | None, str | None]:
+    """文件 f/d 与既有无参数 slash 共用的唯一范围审批构造路径。"""
+
+    request = _approval_request(state)
+    if request is None:
+        return None, "No approval request is pending."
+    if request_id is not None and request_id != request.request_id:
+        return None, "Use the exact pending request ID."
+    file_scope, directory_scope = project_goal_authorization_scopes(state)
+    applicable = file_scope if command == "/approve-goal-target" else directory_scope
+    if applicable is None:
+        return None, "The pending approval has no matching Goal scope for this command."
+    return (
+        build_resolve_approval(
+            state,
+            request_id=request.request_id,
+            binding_digest=request.binding_digest,
+            approved=True,
+            approved_at=approval_time_factory(),
+            defer_artifact_confirmation=(
+                request.artifact_confirmation_requirement is not None
+            ),
+            authorize_goal_target=command == "/approve-goal-target",
+            authorize_goal_directory=command == "/approve-goal-directory",
+        ),
+        None,
+    )
 
 
 def _approval_request(state: ConversationState) -> ApprovalRequest | None:

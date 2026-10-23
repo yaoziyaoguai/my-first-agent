@@ -18,7 +18,9 @@ from agent.runtime.contracts import (
     CompleteBrowserTakeover,
     ConversationState,
     GoalStatus,
+    GrantProviderConsent,
     PauseGoal,
+    ProviderDisclosureRequestV2,
     RecoverUnknownObservation,
     RecoveryResolution,
     ResolveApproval,
@@ -27,6 +29,7 @@ from agent.runtime.contracts import (
     ResumeGoal,
     RevokeGoalTargetAuthority,
     RevokeProcessAuthority,
+    RevokeProviderConsent,
     SubmitMessage,
 )
 
@@ -98,6 +101,47 @@ def build_ack_provider(
         expected_revision=state.revision,
         request_digest=request.request_digest,
         acknowledged_at=acknowledged_at,
+    )
+
+
+def build_grant_provider_consent(
+    state: ConversationState,
+) -> GrantProviderConsent:
+    """把当前屏幕上的 v2 request 翻译为范围许可；reducer 仍独立重验。
+
+    CLI 只做可见性判断，不自行扩大 allowed set；action 绑定同一 snapshot 的
+    request/scope digest，输入期间的 CAS 漂移由 Runtime fail closed。
+    """
+
+    request = state.provider_disclosure_request
+    if not isinstance(request, ProviderDisclosureRequestV2):
+        raise ValueError("The pending disclosure has no reusable routine scope option.")
+    if not request.grant_eligible:
+        raise ValueError(
+            "A reusable routine scope is unavailable for this request because it "
+            "contains a new or unverified source. Answer y to approve this pending "
+            "content once."
+        )
+    if state.provider_disclosure_receipt is not None:
+        raise ValueError("The pending disclosure was already acknowledged.")
+    return GrantProviderConsent(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+        request_digest=request.request_digest,
+        scope_digest=request.scope_digest,
+    )
+
+
+def build_revoke_provider_consent(
+    state: ConversationState,
+) -> RevokeProviderConsent:
+    if state.provider_consent_grant is None:
+        raise ValueError("No provider consent is active.")
+    return RevokeProviderConsent(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
     )
 
 

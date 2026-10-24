@@ -6,7 +6,7 @@
   "real_dispatch_authorized": true,
   "model": {
     "provider": "openai_compatible",
-    "model_id": "deepseek-v4-flash",
+    "model_id": "deepseek-flash",
     "reasoning_mode": "disabled"
   },
   "window_budget": {

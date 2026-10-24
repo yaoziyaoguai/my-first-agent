@@ -88,11 +88,14 @@ class WorkspaceInspection:
 
 @dataclass(frozen=True, slots=True)
 class SessionArchivePreview:
-    """用户归档确认面：只暴露定位、状态和 checkpoint 版本。"""
+    """用户归档确认面：只暴露定位、状态和 checkpoint 版本。
+
+    goal_status/user_outcome 为 None 表示 r8 空闲 chat 会话（无 Goal）。
+    """
 
     conversation_id: str
-    goal_status: GoalStatus
-    user_outcome: str
+    goal_status: GoalStatus | None
+    user_outcome: str | None
     checkpoint_digest: str
     state_revision: int
 
@@ -171,11 +174,10 @@ def preview_workspace_archive(
     snapshot = _exact_snapshot(inspection.snapshots, conversation_id)
     _require_user_archive_eligible(snapshot.state)
     goal = snapshot.state.goal
-    assert goal is not None
     return SessionArchivePreview(
         conversation_id=conversation_id,
-        goal_status=goal.status,
-        user_outcome=goal.user_outcome,
+        goal_status=goal.status if goal is not None else None,
+        user_outcome=goal.user_outcome if goal is not None else None,
         checkpoint_digest=snapshot.token,
         state_revision=snapshot.state.revision,
     )
@@ -318,11 +320,10 @@ def preview_workspace_restore(
     if binding is None or binding.workspace_identity_digest != identity.identity_digest:
         raise ValueError("archived conversation workspace identity mismatch")
     goal = snapshot.state.goal
-    assert goal is not None
     return SessionArchivePreview(
         conversation_id=conversation_id,
-        goal_status=goal.status,
-        user_outcome=goal.user_outcome,
+        goal_status=goal.status if goal is not None else None,
+        user_outcome=goal.user_outcome if goal is not None else None,
         checkpoint_digest=snapshot.token,
         state_revision=snapshot.state.revision,
     )
@@ -807,7 +808,10 @@ def _exact_loaded(
 
 def _require_user_archive_eligible(state: ConversationState) -> None:
     goal = state.goal
-    if goal is None or goal.status not in _TERMINAL_GOAL_STATUSES:
+    # r8（2026-10-24 裁决 A）：无 Goal 的空闲 chat 也是可归档的已结束会话
+    # ——归档可逆（restore），永久 active 只造成容量墙与选择器摩擦。
+    # 有 Goal 的会话仍须终态；任何未收口工作的会话一律不可归档。
+    if goal is not None and goal.status not in _TERMINAL_GOAL_STATUSES:
         raise ValueError("only a terminal conversation can be archived")
     if (
         state.active_run is not None

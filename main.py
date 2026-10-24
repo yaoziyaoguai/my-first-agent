@@ -618,8 +618,9 @@ def _run_session_archive(
         write_fn(
             "Archive preview: conversation="
             f"{terminal_text(preview.conversation_id)}; status="
-            f"{terminal_text(preview.goal_status.value)}; revision="
-            f"{preview.state_revision}; task={terminal_text(preview.user_outcome[:160])}."
+            f"{terminal_text(_goal_status_label(preview.goal_status))}; revision="
+            f"{preview.state_revision}; "
+            f"task={terminal_text((preview.user_outcome or 'chat conversation')[:160])}."
         )
         if not args.yes:
             write_fn("Nothing changed. Re-run this exact command with --yes to archive it.")
@@ -659,8 +660,9 @@ def _run_session_restore(
         write_fn(
             "Restore preview: conversation="
             f"{terminal_text(preview.conversation_id)}; status="
-            f"{terminal_text(preview.goal_status.value)}; revision="
-            f"{preview.state_revision}; task={terminal_text(preview.user_outcome[:160])}."
+            f"{terminal_text(_goal_status_label(preview.goal_status))}; revision="
+            f"{preview.state_revision}; "
+            f"task={terminal_text((preview.user_outcome or 'chat conversation')[:160])}."
         )
         if not args.yes:
             write_fn("Nothing changed. Re-run this exact command with --yes to restore it.")
@@ -1330,7 +1332,20 @@ def main(
                     ActiveRunStatus.PAUSED_RETRYABLE,
                 }:
                     flags.append("paused")
-                    next_action = "open First Agent and run /resume or /cancel"
+                    # r14（2026-10-24 裁决 A′）：预算耗尽的暂停照持久化的
+                    # 原因给正确出路；其余暂停维持 /resume 建议。
+                    if (
+                        state.last_safe_result is not None
+                        and state.last_safe_result.error_code
+                        == "model_attempt_budget_exhausted"
+                    ):
+                        next_action = (
+                            "paused: model budget exhausted; restart with a "
+                            "higher --max-model-attempts on the same "
+                            "--transport-audit-ledger to continue"
+                        )
+                    else:
+                        next_action = "open First Agent and run /resume or /cancel"
             if state.browser_takeover_pending is not None:
                 flags.append("browser takeover pending")
                 next_action = "open First Agent to finish or cancel browser takeover"

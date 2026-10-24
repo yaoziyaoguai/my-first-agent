@@ -1350,3 +1350,78 @@ def test_state_failure_diagnostics_bounded_for_generic_errors(
     assert marker not in logged
     assert "code=checkpoint_OSError" in logged
     assert "OSError" in logged
+
+
+def test_status_names_budget_exhaustion_recovery_path_not_resume(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """r14（2026-10-24 裁决 A′）：预算耗尽暂停的会话在 --status 里不得推荐
+    注定失败的 /resume；正确出路是同 ledger 提高 --max-model-attempts。"""
+
+    from agent.continuity.sessions import open_workspace_session
+    from agent.runtime.contracts import (
+        ActiveRun,
+        ActiveRunStatus,
+        ContinuationPhase,
+        RecordedRunResult,
+        RunStatus,
+    )
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state-root"
+    conversation_id = "00000000-0000-4000-8000-000000000096"
+    opened = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: conversation_id,
+    )
+    assert opened.store is not None and opened.snapshot is not None
+    lease = opened.store.try_acquire(conversation_id)
+    assert lease is not None
+    try:
+        from dataclasses import replace
+
+        paused = replace(
+            opened.snapshot.state,
+            active_run=ActiveRun(
+                "run-1",
+                status=ActiveRunStatus.PAUSED_LIMIT,
+                phase=ContinuationPhase.MODEL,
+            ),
+            last_safe_result=RecordedRunResult(
+                status=RunStatus.LIMIT_REACHED,
+                run_id="run-1",
+                error_code="model_attempt_budget_exhausted",
+            ),
+        )
+        opened.store.compare_and_swap(opened.snapshot, paused)
+    finally:
+        lease.release()
+
+    monkeypatch.delenv("FIRST_AGENT_API_KEY", raising=False)
+    monkeypatch.setattr(
+        entrypoint,
+        "build_model_provider",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("status must not construct a provider")
+        ),
+    )
+    output: list[str] = []
+    exit_code = entrypoint.main(
+        [
+            "--workspace",
+            str(workspace),
+            "--state-root",
+            str(state_root),
+            "--status",
+        ],
+        write_fn=output.append,
+    )
+
+    assert exit_code == 0
+    line = output[1]
+    assert "paused" in line
+    assert "/resume" not in line
+    assert "--max-model-attempts" in line

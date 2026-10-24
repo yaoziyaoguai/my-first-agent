@@ -1463,10 +1463,10 @@ ROUTINE_DATA_CLASSES = (
 # proof-backed 的 workspace_excerpt——该类来源由 Runtime 持久化的
 # ProviderFileSourceProofV1 绑定 goal/revision/workspace/内容 digest 且
 # reusable=True；list/search 等通用 tool 输出（tool_results）与 summary
-# 类本身不随之扩（summary 无 Runtime boundary 证明时仍逐次披露）。已知
-# 边界（merge-gate P3-1，记调值轮）：summary 若经 Runtime summary_source_
-# boundary 继承了 workspace_excerpt 源，其继承类随 r 许可放行，且不按当前
-# goal_revision 重验（原始 excerpt 每次经 _valid_file_proof 重验）。
+# 类本身不随之扩（summary 无 Runtime boundary 证明时仍逐次披露）。P3-1
+# 已在 2026-10-24 调值轮修复：summary boundary 继承的 excerpt 在投影时
+# 按 proof store（boundary_digest 绑 goal_id+goal_revision）对当前 Goal
+# 重验，失配降 reusable=False（类别如实申报，退回逐次披露决策）。
 CONSENT_PROFILE_WORKSPACE_READ = "routine_workspace_read_v1"
 WORKSPACE_READ_DATA_CLASSES = (*ROUTINE_DATA_CLASSES, "workspace_excerpt")
 

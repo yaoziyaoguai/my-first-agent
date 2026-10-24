@@ -7,7 +7,9 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from agent.runtime.contracts import (
+    CONSENT_MAX_USES,
     CONSENT_PROFILE_WORKSPACE_READ,
+    CONSENT_TTL_SECONDS,
     ActiveRunStatus,
     ApprovalRequest,
     ConversationState,
@@ -521,7 +523,8 @@ class TerminalRenderer:
         if request.grant_eligible:
             lines.append(
                 "  s  Allow routine conversation data in this conversation — "
-                "up to 32 model sends, expires in 60 minutes"
+                f"up to {CONSENT_MAX_USES} model sends, "
+                f"expires in {CONSENT_TTL_SECONDS // 60} minutes"
             )
         else:
             lines.append(
@@ -533,7 +536,8 @@ class TerminalRenderer:
         ):
             lines.append(
                 "  r  Also allow verified workspace file excerpts in this "
-                "conversation — up to 32 model sends, expires in 60 minutes"
+                f"conversation — up to {CONSENT_MAX_USES} model sends, "
+                f"expires in {CONSENT_TTL_SECONDS // 60} minutes"
             )
         lines.append("  n  Do not send")
         lines.append("Enter: do not send")
@@ -582,7 +586,7 @@ class TerminalRenderer:
         if grant.status is ProviderConsentGrantStatus.INVALIDATED:
             return "invalidated by a provider or workspace change"
         if grant.uses_consumed >= grant.max_uses:
-            return "all 32 model sends used"
+            return f"all {grant.max_uses} model sends used"
         try:
             expires = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
         except ValueError:

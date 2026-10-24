@@ -133,3 +133,18 @@ PR #7（5 commits）merge 到 `main` @ **`e035450`**；完整门 4157 passed / 1
 - **门语义**：`workspace_read_classes_covered`（非常规部分恰为 workspace_excerpt 且全 reusable）+ `_grant_covers_structure`；routine scope 仍走 `grant_routine`；新出现 excerpt 源在许可内被覆盖（这正是疲劳来源——会话级语义本体）。
 
 **覆盖**：10 个新测试（gate 准入/拒绝、charge+通知文案、B3 烧票据、CLI parse、reducer 铸造+RUNNABLE 恢复、CLI 两类拒绝、offer 行可见性、数字钉、validator 钉、checkpoint 编解码往返）。**已知缝隙（记入调值轮）**：loop 层通知接线（6 行 reason 分支）无 journey 级测试——域内既有覆盖模式为 gate/reducer/CLI 层（journey 仅 routine 形状），r16 插值化轮补齐 journey 级 consent 测试时一并覆盖。
+
+## 第七轮（调值轮：backlog 四项闭合，2026-10-25）
+
+用户「授权」启动（对象为第六轮 closeout 列出的「未授权不启动」清单）。四项全部 Red→Green 交付：
+
+| 项 | 内容 | 状态 |
+| --- | --- | --- |
+| r16 插值化 | render.py 的 s/r offer 行与 exhausted 文案由 `CONSENT_MAX_USES`/`CONSENT_TTL_SECONDS` f-string 推导（此前字面量 32/60 只与常量恰好相等）；`_consent_unavailable_reason` 读 grant 自身 `max_uses`。两个 numeric-copy 测试注释从「插值化前的廉价护栏」改为「断言推导本身」（生产侧退回硬编码即红） | ✅ 40/40 |
+| 双 pending 绑定次序（PR #10 LOW） | `_admit_approved_process_receipt_criterion` 与 `_admit_approved_read_only_validation_criterion` 两处选择器按列表序取第一个未入场 TOOL_RECEIPT 提案——governed-tool 排前时 local-process/sandbox 批准错绑 MCP/SubAgent 义务。修复=抽公共 `_bindable_tool_receipt_proposal`（排除 governed-tool 前缀）+ `_GOVERNED_TOOL_OBLIGATION_PREFIX` 常量单源（5 处字面量收敛）；测试钉「跳过 governed-tool 绑 process 提案 / 仅 governed-tool 在场返回 None / 端到端 admitted 恰为 process 提案且 governed-tool 保持 pending」 | ✅ Red（摘除排除子句复现错绑）→Green |
+| B2a 后台隔离 + r 通知接线（journey 级） | 后台分支此前只有 loop.py 注释背书：两 profile（routine/read-scope）参数化测试钉「后台 send 停 AWAITING_DISCLOSURE 等 v1 精确 receipt、全程 uses_consumed=0、ACTIVE 保持」，并以对照探针证明同 grant 前台直接放行并扣 1 次（前提非虚）。通知接线：真实 Resume 旅程（W1 proof 态 + workspace 绑定 read-scope grant + BlockedClaim 终态）钉 `delivery_warnings` 恰含一条 `read-scope consent:` 通知、grant 恰扣 1 次 | ✅ Red（摘除 loop 接线块→0 通知）→Green |
+| P3-1 summary 继承 excerpt 重验 | `_summary_consent_sources` 原样返还 boundary 继承 source——goal 修订后旧 revision 摘录在 r 下仍被静默复用（活 TOOL_RESULT 路径每次过 `_valid_file_proof`，summary 路径不重验）。修复=投影时按 proof store 重验（proof `boundary_digest` 绑 goal_id+goal_revision；store 只增不删），失配降 `reusable=False`：类别如实申报 workspace_excerpt，退回逐次披露决策（r/routine 均不覆盖）。contracts.py P3-1 注释同步改为已修复 | ✅ Red（还原原样返还→reusable 保持 True）→Green |
+
+方法备注：三处 Red 均以「探针副本摘除修复」证实（`importlib` 挂载探针模块跑测试），非仅凭推理。`_result_fact` helper 加 `fact_id` 参数（Kernel `run:<run>:tool-result:<call>` 约定，`_valid_file_proof` 只认此形状；W1 短 id 仅服务转存断言）。
+
+**完整门：4178 passed / 0 失败 / 0 error / 1 skipped**（main 4173 → +5：绑定次序、B2a×2、通知接线、P3-1）。分支 `fix/2026-10-24-consent-tuning-round`。

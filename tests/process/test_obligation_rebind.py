@@ -945,3 +945,81 @@ def test_correction_replaced_obligation_admits_single_process_criterion() -> Non
     assert len(process_obligations) == 1
     assert process_obligations[0].criterion_id.startswith("criterion:required-local-process:")
     assert process_obligations[0].predicate["command_fingerprint"] == FP_NEW
+
+
+def test_governed_tool_proposal_never_blocks_or_binds_process_approval() -> None:
+    """PR #10 审计 LOW（2026-10-24 调值轮修复）：双 pending 的绑定次序。
+
+    governed-tool 提案排在 proposed_criteria 前面时，旧选择器按列表顺序取
+    第一个未入场 TOOL_RECEIPT 提案——local_process 批准会错绑 governed-tool
+    提案（拿 MCP/SubAgent 义务的 id 承载 process_v1 谓词，真实验证义务反而
+    留在 pending）。修复后 process/sandbox 两路共用
+    ``_bindable_tool_receipt_proposal``：governed-tool 永不被这两类批准收养，
+    由其自身审批路径入场。
+    """
+
+    from agent.runtime.contracts import ProposedCriterion
+    from agent.runtime.state import _bindable_tool_receipt_proposal
+
+    governed_tool = ProposedCriterion(
+        criterion_id="criterion:required-governed-tool:goal:1:1:call-mcp",
+        description="the approved mcp__demo call returns an exact Kernel-governed receipt",
+        oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+    )
+    process = ProposedCriterion(
+        criterion_id="criterion:required-local-process:goal:1:1:call-1",
+        description="run pytest -q to verify the change",
+        oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+    )
+    goal = GoalFrame(
+        goal_id="goal:1",
+        revision=1,
+        created_from_fact_ids=("fact:user:1",),
+        workspace_identity_digest="workspace:v1:" + "c" * 64,
+        user_outcome="完成 SPEC 并运行 pytest -q 验证",
+        beneficiary="owner",
+        targets=("retry_app/service.py",),
+        scope=("workspace",),
+        non_goals=(),
+        assumptions=(),
+        # governed-tool 排在前即旧缺陷的触发序。
+        proposed_criteria=(governed_tool, process),
+        admitted_criteria=(),
+        authority_snapshot="authority:v1:" + "d" * 64,
+        status=GoalStatus.EXECUTING,
+        created_at="2026-10-24T00:00:00Z",
+        updated_at="2026-10-24T00:00:00Z",
+    )
+    # 选择器：跳过 governed-tool 绑到 process 提案；仅 governed-tool 在场时
+    # 返回 None（per-call fallback 铸新，governed-tool 留给自身审批路径）。
+    assert _bindable_tool_receipt_proposal(goal) is process
+    only_governed = replace(goal, proposed_criteria=(governed_tool,))
+    assert _bindable_tool_receipt_proposal(only_governed) is None
+
+    state = ConversationState(
+        conversation_id="conversation:binding-order",
+        facts=(
+            ConversationFact(
+                fact_id="fact:user:1",
+                kind=FactKind.USER_MESSAGE,
+                content={"text": "完成 SPEC 并运行 pytest -q 验证"},
+            ),
+        ),
+        goal=goal,
+        active_run=ActiveRun(
+            run_id="run:2",
+            status=ActiveRunStatus.AWAITING_APPROVAL,
+            phase=ContinuationPhase.TOOL,
+            tool_calls=(_new_call("pytest", ["-q"]),),
+            pending_request=_approval(),
+        ),
+    )
+    result = _admit_approved_process_receipt_criterion(state, _approval(), action=_action())
+
+    admitted = result.goal.admitted_criteria
+    assert [item.criterion_id for item in admitted] == [process.criterion_id]
+    assert admitted[0].predicate["command_fingerprint"] == FP_NEW
+    # governed-tool 提案保持 pending，未被 process 批准入场。
+    assert governed_tool.criterion_id in {
+        item.criterion_id for item in result.goal.proposed_criteria
+    }

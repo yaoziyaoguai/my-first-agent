@@ -50,6 +50,8 @@ from agent.runtime.contracts import (
     ActiveRunStatus,
     ApprovalRequest,
     ArtifactConfirmationRequirementV1,
+    BackgroundOccurrenceBindingV1,
+    BlockedClaim,
     ContinuationPhase,
     ConversationFact,
     ConversationState,
@@ -74,6 +76,8 @@ from agent.runtime.contracts import (
     ProviderDisclosureRequestV2,
     ProviderDisclosureSourceV1,
     ProviderFileSourceProofV1,
+    ProviderSummarySourceBoundaryV1,
+    Resume,
     RevokeProviderConsent,
     RunStatus,
     SideEffectClass,
@@ -701,9 +705,14 @@ def _proof(
     )
 
 
-def _result_fact(proof: ProviderFileSourceProofV1, *, text: str = "ok") -> ConversationFact:
+def _result_fact(
+    proof: ProviderFileSourceProofV1,
+    *,
+    text: str = "ok",
+    fact_id: str = "tool-result-1",
+) -> ConversationFact:
     return ConversationFact(
-        fact_id="tool-result-1",
+        fact_id=fact_id,
         kind=FactKind.TOOL_RESULT,
         content={
             "tool_call_id": "tool-call-1",
@@ -1118,11 +1127,9 @@ def test_consent_ux_s2_render_provider_consent_reports_remaining_and_revoke() ->
 
 
 def test_consent_ux_r16_numeric_copy_tracks_the_constants() -> None:
-    # r16 失败信号（2026-10-24，插值化前的廉价护栏）：CONSENT_MAX_USES/
-    # CONSENT_TTL_SECONDS 是唯一权威值，渲染文案里的数字必须与之同步——
-    # 此前文案与测试断言各持 "32"/"60" 字面量，只改常量时两侧一起陈旧、
-    # 零失败信号。调值轮做插值化（文案由常量 f-string 推导）时，本测试
-    # 改为断言推导本身；在那之前它把漂移变成红灯。
+    # r16 失败信号（2026-10-24）：CONSENT_MAX_USES/CONSENT_TTL_SECONDS 是
+    # 唯一权威值。插值化已在同日调值轮完成（文案由常量 f-string 推导），
+    # 本测试断言推导本身——生产侧若退回硬编码数字（与常量失去同步）即红。
     state = ConversationState.new("conversation-1")
     now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     grant = mint_provider_consent_grant(
@@ -1399,9 +1406,10 @@ def test_consent_ux_r_offer_line_shows_only_for_covered_requests() -> None:
 
 
 def test_consent_ux_r_numeric_copy_tracks_the_constants() -> None:
-    # r16 同款护栏延伸到 r 文案：数字必须与权威常量同步，调值即红。
-    # 非 routine 覆盖请求上 s 行显示 "unavailable"（无数字），r 行是
-    # 唯一带数字的 offer 行——恰为 1 份即同步。
+    # r16 同款护栏延伸到 r 文案：数字由权威常量推导（插值化同轮完成），
+    # 生产侧退回硬编码即红。非 routine 覆盖请求上 s 行显示
+    # "unavailable"（无数字），r 行是唯一带数字的 offer 行——恰为 1 份
+    # 即同步。
     covered = _v2_request(scope=_excerpt_scope(_source("read_file app/main.py")))
     offer = TerminalRenderer._disclosure_message(request=covered, grant=None)
     assert offer.count(
@@ -1452,3 +1460,223 @@ def test_consent_ux_r_grant_roundtrips_through_checkpoint_codec(tmp_path) -> Non
         LocalCheckpointStore(path).load().state.provider_consent_grant
         == state.provider_consent_grant
     )
+
+
+def _background_binding() -> BackgroundOccurrenceBindingV1:
+    return BackgroundOccurrenceBindingV1.create(
+        automation_id="automation:nightly-report",
+        automation_revision=1,
+        occurrence_id="occurrence:0000",
+        occurrence_index=0,
+        scheduled_for_utc="2026-10-24T00:00:00Z",
+        definition_digest="1" * 64,
+        grant_digest="2" * 64,
+        claim_authority_digest="3" * 64,
+        claim_capability_digest="4" * 64,
+        checkpoint_identity_digest="5" * 64,
+        deadline_utc="2026-10-24T00:10:00Z",
+        model_call_limit=4,
+        tool_call_limit=8,
+        sandbox_command_limit=2,
+        browser_action_limit=3,
+        max_input_tokens=20_000,
+        max_output_tokens=4_000,
+    )
+
+
+@pytest.mark.parametrize(
+    "profile", [CONSENT_PROFILE_ROUTINE, CONSENT_PROFILE_WORKSPACE_READ]
+)
+def test_consent_ux_background_occurrence_never_consumes_session_grant(profile) -> None:
+    """调值轮 B2a（2026-10-24）：后台 occurrence 的授权隔离是结构性的。
+
+    loop 的后台分支只认 v1 精确 receipt（``_required_disclosure``），不进
+    v2 grant 机器——即使交互会话持有 ACTIVE 的 routine/read-scope grant 且
+    类别完全覆盖，后台 send 也必须停在 AWAITING_DISCLOSURE 等待独立的披露
+    确认，且全程不扣 grant 次数（uses_consumed 恒 0）。此前该性质只有
+    loop.py 的分支注释背书，无测试钉住。
+    """
+    base = ConversationState.new(
+        "conversation-background-consent",
+        background_occurrence_binding=_background_binding(),
+    )
+    grant = mint_provider_consent_grant(
+        state=base, request=_v2_request(), action_seq=1, now=_T0, profile=profile
+    )
+    runtime, store, provider = _runtime(
+        replace(base, provider_consent_grant=grant),
+        _descriptor(),
+        run_time_factory=lambda: _T0,
+    )
+
+    result = runtime.run_turn(
+        _submit(store.state, run_id="run:background"), store.load()
+    )
+
+    # 未借用 grant：停在 v1 披露等待，provider 零调用，次数零扣减。
+    assert result.status is RunStatus.AWAITING_DISCLOSURE
+    assert provider.calls == []
+    assert store.state.provider_consent_grant.uses_consumed == 0
+
+    request = store.state.provider_disclosure_request
+    assert request is not None
+    ack = AcknowledgeProviderDisclosure(
+        conversation_id=store.state.conversation_id,
+        action_seq=store.state.next_action_seq,
+        expected_revision=store.state.revision,
+        request_digest=request.request_digest,
+        acknowledged_at=_T0,
+    )
+    final = runtime.run_turn(ack, store.load())
+
+    # 精确 ack 后 send 发生，但 grant 次数仍然零扣减（后台有独立权威）。
+    assert final.status is RunStatus.COMPLETED
+    assert len(provider.calls) == 1
+    assert store.state.provider_consent_grant.uses_consumed == 0
+    assert store.state.provider_consent_grant.status is ProviderConsentGrantStatus.ACTIVE
+
+
+def test_consent_ux_r_dispatch_notice_wired_into_runtime_warnings() -> None:
+    """调值轮（2026-10-24）：r 许可放行的派发在 runtime 级逐次附带通知。
+
+    PR #11 只钉了 notice 文案本身（unit），loop 两个扣次点的接线
+    （reason == grant_workspace_read → warnings 追加）无测试覆盖。本旅程用
+    W1 同款 proof 态 + workspace 绑定的 read-scope grant 走真实 Resume 回合：
+    上下文含 proof-backed excerpt source，gate 以 grant_workspace_read 放行
+    并扣次，RunResult.delivery_warnings 必须带上逐次通知，grant 恰扣 1 次。
+    """
+    recorded = record_tool_result(
+        _executing_state(),
+        # fact_id 必须符合 Kernel 的 run:<run>:tool-result:<call> 约定，
+        # 否则 _valid_file_proof 不认（W1 的短 id 只服务于转存断言）。
+        _result_fact(_proof(), fact_id="run:run-1:tool-result:tool-call-1:3"),
+        intent_digest=_INTENT_DIGEST,
+    )
+    assert recorded.provider_source_proofs, "前提：proof-backed excerpt source 在场"
+    grant = mint_provider_consent_grant(
+        state=recorded,
+        request=_v2_request(scope=_scope(workspace="workspace-1", routine=False)),
+        action_seq=2,
+        now=_T0,
+        profile=CONSENT_PROFILE_WORKSPACE_READ,
+    )
+    state = replace(
+        recorded,
+        provider_consent_grant=grant,
+        active_run=ActiveRun("run-r-notice"),
+    )
+    # goal 未完成时裸文本不终态（会继续追拨耗尽脚本），用 BlockedClaim 控制
+    # 响应走可终结路径；旅程只关心扣次点的通知接线，不关心 goal 结局。
+    terminal = ModelResponse(
+        (),
+        control=BlockedClaim(
+            correlation_id="blocked-r-notice",
+            goal_id="goal-1",
+            goal_revision=1,
+            blocker="wiring journey only",
+            safe_attempts=("recorded the excerpt",),
+            resume_condition="n/a",
+        ),
+    )
+    runtime, store, provider = _runtime(
+        state, _descriptor(), (terminal,), run_time_factory=lambda: _T0
+    )
+
+    action = Resume(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+    )
+    result = runtime.run_turn(action, store.load())
+
+    assert result.status is RunStatus.COMPLETED
+    assert len(provider.calls) == 1
+    notices = [
+        item for item in result.delivery_warnings if item.startswith("read-scope consent:")
+    ]
+    assert len(notices) == 1
+    assert "1 workspace file excerpt(s)" in notices[0]
+    assert "31 of 32 model sends left" in notices[0]
+    final_grant = store.state.provider_consent_grant
+    assert final_grant is not None
+    assert final_grant.uses_consumed == 1
+
+
+def test_consent_ux_r_boundary_inherited_excerpt_revalidates_goal_revision() -> None:
+    """P3-1（2026-10-24 PR #11 审计，调值轮修复）：summary 继承的 excerpt 重验。
+
+    压缩边界继承的 workspace_excerpt source 此前原样进入 scope：活 TOOL_RESULT
+    的 excerpt 投影每次都按当前 goal 重验（proof 的 boundary_digest 绑定
+    goal_id+goal_revision，修订即降级），而 summary 路径不重验——goal 修订后
+    旧 revision 的摘录在 r 许可下仍被静默复用。修复后按 proof store 重验，
+    失配降 reusable=False（类别如实申报，退回逐次披露决策，r 不再覆盖）。
+    """
+
+    from agent.runtime.context import _summary_consent_sources
+
+    stale_proof = _proof()  # 绑定 goal-1 / revision 1
+    inherited = ProviderDisclosureSourceV1(
+        data_class="workspace_excerpt",
+        boundary_digest=stale_proof.boundary_digest,
+        label="write_file notes/a.txt",
+        reusable=True,
+    )
+    boundary = ProviderSummarySourceBoundaryV1.create(
+        summary_fact_id="summary-1",
+        data_classes=("conversation_summary", "system_policy", "workspace_excerpt"),
+        sources=(inherited,),
+        routine_compatible=False,
+    )
+    summary_fact = ConversationFact(
+        fact_id="summary-1",
+        kind=FactKind.CONTEXT_SUMMARY,
+        content={"objective": "write the note"},
+    )
+    goal_v1 = replace(_executing_state().goal, revision=1)  # type: ignore[union-attr]
+    goal_v2 = replace(goal_v1, revision=2)
+
+    # goal 已修订（revision 2）：继承 excerpt 的 proof 只绑 revision 1 → 降级。
+    revised = replace(
+        ConversationState.new("conversation-1"),  # proof 绑定本会话
+        goal=goal_v2,
+        facts=(summary_fact,),
+        provider_source_proofs=(stale_proof,),
+        summary_source_boundaries=(boundary,),
+    )
+    classes, sources = _summary_consent_sources(summary_fact, revised)
+    assert "workspace_excerpt" in classes  # 类别如实申报，不静默缩水
+    assert sources[0].reusable is False  # 不再可复用 → r 不覆盖
+
+    # 同一 proof 在其绑定的 revision 下（goal revision 1）保持可复用。
+    current = replace(
+        ConversationState.new("conversation-1"),
+        goal=goal_v1,
+        facts=(summary_fact,),
+        provider_source_proofs=(stale_proof,),
+        summary_source_boundaries=(boundary,),
+    )
+    _, still = _summary_consent_sources(summary_fact, current)
+    assert still[0].reusable is True
+
+    # 降级后的 scope 在 r 许可下回到逐次决策（不进 grant_workspace_read）。
+    demoted_scope = _scope(
+        data_classes=classes,
+        sources=sources,
+        routine=False,
+        goal_id=goal_v2.goal_id,
+        goal_revision=goal_v2.revision,
+    )
+    base = ConversationState.new("conversation-1")
+    grant = mint_provider_consent_grant(
+        state=base, request=_v2_request(), action_seq=1, now=_T0,
+        profile=CONSENT_PROFILE_WORKSPACE_READ,
+    )
+    gate = evaluate_provider_dispatch(
+        state=replace(base, provider_consent_grant=grant),
+        descriptor=_descriptor(),
+        scope=demoted_scope,
+        now=_T0,
+        purpose="runtime_progress",
+        run_id="run-1",
+    )
+    assert not gate.admitted and gate.reason == "decision_required"

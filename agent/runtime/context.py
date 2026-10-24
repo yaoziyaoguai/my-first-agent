@@ -320,6 +320,36 @@ def _valid_file_proof(
     return None
 
 
+def _revalidated_summary_sources(
+    sources: tuple[ProviderDisclosureSourceV1, ...],
+    state: ConversationState,
+) -> tuple[ProviderDisclosureSourceV1, ...]:
+    """P3-1（2026-10-24 审计）：summary 继承的 excerpt 按当前 Goal 重验。
+
+    活 TOOL_RESULT 的 excerpt 投影每次都过 ``_valid_file_proof``（proof 的
+    boundary_digest 绑定 goal_id+goal_revision，goal 修订即失效降级）；summary
+    boundary 此前原样返还继承 source，r 许可会静默复用旧 revision 的摘录。
+    失配（goal 修订/缺失或 proof 已不在 store）时降为 reusable=False：类别
+    仍如实申报 workspace_excerpt，但退回逐次披露决策，不再被会话许可覆盖。
+    """
+
+    goal = state.goal
+    if goal is None:
+        current: frozenset[str] = frozenset()
+    else:
+        current = frozenset(
+            proof.boundary_digest
+            for proof in state.provider_source_proofs
+            if proof.goal_id == goal.goal_id and proof.goal_revision == goal.revision
+        )
+    return tuple(
+        source
+        if source.data_class != "workspace_excerpt" or source.boundary_digest in current
+        else replace(source, reusable=False)
+        for source in sources
+    )
+
+
 def _summary_consent_sources(
     fact: ConversationFact,
     state: ConversationState,
@@ -329,7 +359,10 @@ def _summary_consent_sources(
 ]:
     for boundary in state.summary_source_boundaries:
         if boundary.summary_fact_id == fact.fact_id:
-            return boundary.data_classes, boundary.sources
+            return (
+                boundary.data_classes,
+                _revalidated_summary_sources(boundary.sources, state),
+            )
     # 旧 summary 没有 Runtime-owned 输入边界证明：按未知的一次性来源处理，
     # 不能因为文本看似普通历史就获得自动复用。
     digest = hashlib.sha256(

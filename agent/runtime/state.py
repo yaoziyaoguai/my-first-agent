@@ -636,7 +636,7 @@ def _uses_runtime_owned_obligation_id(criterion: ProposedCriterion) -> bool:
         (
             "criterion:required-public-web:",
             "criterion:required-local-process:",
-            "criterion:required-governed-tool:",
+            _GOVERNED_TOOL_OBLIGATION_PREFIX,
         )
     )
 
@@ -653,8 +653,29 @@ def _is_runtime_owned_obligation(criterion: ProposedCriterion) -> bool:
         )
         or (
             criterion.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
-            and criterion.criterion_id.startswith("criterion:required-governed-tool:")
+            and criterion.criterion_id.startswith(_GOVERNED_TOOL_OBLIGATION_PREFIX)
         )
+    )
+
+
+def _bindable_tool_receipt_proposal(goal: GoalFrame) -> ProposedCriterion | None:
+    """审批准入可选绑定的 TOOL_RECEIPT 提案（process 与 sandbox 两路共用）。
+
+    2026-10-24 绑定次序（PR #10 审计 LOW）：governed-tool 提案是另一类义务
+    （MCP/SubAgent receipt，由其自身的审批路径入场），local-process 与
+    read-only sandbox 批准都不得收养它——此前两处选择器按列表顺序取第一个
+    未入场 TOOL_RECEIPT 提案，governed-tool 排在前面时会错绑。
+    """
+    admitted_ids = {item.criterion_id for item in goal.admitted_criteria}
+    return next(
+        (
+            item
+            for item in goal.proposed_criteria
+            if item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+            and item.criterion_id not in admitted_ids
+            and not item.criterion_id.startswith(_GOVERNED_TOOL_OBLIGATION_PREFIX)
+        ),
+        None,
     )
 
 
@@ -675,6 +696,10 @@ _REQUIRED_RUNTIME_OBLIGATION_PREFIXES = {
     EvidenceOracleKind.WEB_SOURCE_RECEIPT: "criterion:required-public-web:",
     EvidenceOracleKind.TOOL_RECEIPT: "criterion:required-local-process:",
 }
+
+# governed-tool 义务前缀：单独的用户审批路径（MCP/SubAgent receipt），
+# 不属于 WITHDRAWABLE/REQUIRED 两张按 effect 类索引的表。
+_GOVERNED_TOOL_OBLIGATION_PREFIX = "criterion:required-governed-tool:"
 
 
 def _apply_correction_lower_bounds(
@@ -2778,16 +2803,7 @@ def _admit_approved_read_only_validation_criterion(
         or candidate.workspace_identity_digest != goal.workspace_identity_digest
     ):
         raise ValueError("sandbox candidate does not bind the current Goal")
-    admitted_ids = {item.criterion_id for item in goal.admitted_criteria}
-    proposed_requirement = next(
-        (
-            item
-            for item in goal.proposed_criteria
-            if item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
-            and item.criterion_id not in admitted_ids
-        ),
-        None,
-    )
+    proposed_requirement = _bindable_tool_receipt_proposal(goal)
     if proposed_requirement is not None and _is_runtime_owned_obligation(proposed_requirement):
         executable = call.arguments.get("executable") if isinstance(call.arguments, dict) else None
         if not isinstance(executable, str) or not process_entrypoint_matches_authority(
@@ -3778,16 +3794,7 @@ def _admit_approved_process_receipt_criterion(
         or candidate.workspace_identity_digest != goal.workspace_identity_digest
     ):
         raise ValueError("process candidate does not bind the current Goal")
-    admitted_ids = {item.criterion_id for item in goal.admitted_criteria}
-    proposed_requirement = next(
-        (
-            item
-            for item in goal.proposed_criteria
-            if item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
-            and item.criterion_id not in admitted_ids
-        ),
-        None,
-    )
+    proposed_requirement = _bindable_tool_receipt_proposal(goal)
     if proposed_requirement is not None and _is_runtime_owned_obligation(proposed_requirement):
         executable = call.arguments.get("executable") if call.name == "local_process" else None
         if not isinstance(executable, str):
@@ -3926,7 +3933,7 @@ def _add_approved_governed_tool_requirement(
     ):
         return state
     criterion_id = (
-        f"criterion:required-governed-tool:{goal.goal_id}:{goal.revision}:{call.tool_call_id}"
+        f"{_GOVERNED_TOOL_OBLIGATION_PREFIX}{goal.goal_id}:{goal.revision}:{call.tool_call_id}"
     )
     if any(
         item.criterion_id == criterion_id
@@ -4240,7 +4247,9 @@ def admit_governed_tool_receipt_criterion(
         or any(character not in "0123456789abcdef" for character in receipt_digest)
     ):
         return state
-    criterion_id = f"criterion:required-governed-tool:{goal.goal_id}:{goal.revision}:{tool_call_id}"
+    criterion_id = (
+        f"{_GOVERNED_TOOL_OBLIGATION_PREFIX}{goal.goal_id}:{goal.revision}:{tool_call_id}"
+    )
     requirement = next(
         (
             item

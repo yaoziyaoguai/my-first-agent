@@ -19,6 +19,7 @@ from agent.runtime.contracts import (
     ConversationState,
     GoalStatus,
     GrantProviderConsent,
+    GrantProviderWorkspaceReadConsent,
     PauseGoal,
     ProviderDisclosureRequestV2,
     RecoverUnknownObservation,
@@ -32,6 +33,7 @@ from agent.runtime.contracts import (
     RevokeProviderConsent,
     SubmitMessage,
 )
+from agent.runtime.provider_consent import workspace_read_classes_covered
 
 # /new(r19 小步 2)请求装配层重建 conversation 的 REPL 退出码。
 # 选择 79(NR_UNRESOLVABLE 之外的未占用私人区段)只是进程内信令,不是 errno 声明。
@@ -125,6 +127,40 @@ def build_grant_provider_consent(
     if state.provider_disclosure_receipt is not None:
         raise ValueError("The pending disclosure was already acknowledged.")
     return GrantProviderConsent(
+        conversation_id=state.conversation_id,
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+        request_digest=request.request_digest,
+        scope_digest=request.scope_digest,
+    )
+
+
+def build_grant_provider_workspace_read_consent(
+    state: ConversationState,
+) -> GrantProviderWorkspaceReadConsent:
+    """把当前 v2 request 铸成含工作区读摘录的范围许可；reducer 独立重验。
+
+    r 与 s 同一 CAS 形状；准入只看 request 自身类别（非常规部分恰为
+    proof-backed workspace_excerpt），CLI 不自行扩大 allowed set。
+    """
+
+    request = state.provider_disclosure_request
+    if not isinstance(request, ProviderDisclosureRequestV2):
+        raise ValueError("The pending disclosure has no workspace-read scope option.")
+    if request.grant_eligible:
+        raise ValueError(
+            "This request is already covered by the routine scope; answer s for "
+            "routine-only or y to approve this pending content once."
+        )
+    if not workspace_read_classes_covered(request.data_classes, request.sources):
+        raise ValueError(
+            "A workspace-read scope is unavailable for this request because it "
+            "includes a source beyond verified workspace file excerpts; answer y "
+            "to approve this pending content once."
+        )
+    if state.provider_disclosure_receipt is not None:
+        raise ValueError("The pending disclosure was already acknowledged.")
+    return GrantProviderWorkspaceReadConsent(
         conversation_id=state.conversation_id,
         action_seq=state.next_action_seq,
         expected_revision=state.revision,

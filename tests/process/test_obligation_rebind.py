@@ -295,8 +295,11 @@ def test_unrelated_approved_command_does_not_rebind() -> None:
 
     criteria = {c.criterion_id: c for c in result.goal.admitted_criteria}
     assert criteria[OBLIGATION_ID].predicate["command_fingerprint"] == FP_OLD
+    # E3 真实层（2026-10-24）：不同指纹的第二条强制 process 判据在 F1 保守
+    # 失效下构造性不可满足，per-call fallback 已停铸——无关命令只占用
+    # effect lease，不再产生自己的完成义务。
     per_call = [cid for cid in criteria if cid.startswith("criterion:process-receipt:")]
-    assert len(per_call) == 1
+    assert per_call == []
 
 
 def test_flag_variant_of_validator_does_not_rebind() -> None:

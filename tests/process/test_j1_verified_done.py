@@ -588,8 +588,13 @@ def test_015_compat_mint_skips_when_digest_free_obligation_covers_fingerprint() 
     ], "compat mint must not add a digest-pinned duplicate beside the obligation"
 
 
-def test_015_compat_mint_still_admits_uncovered_fingerprint() -> None:
-    """兼容路径负边界：不同指纹（未被 digest-free 义务覆盖）仍按原样铸造。"""
+def test_015_compat_mint_skips_when_any_process_obligation_exists() -> None:
+    """兼容路径负边界（2026-10-24 E3 真实层修正）：不同指纹也不得再铸。
+
+    原合同「未覆盖指纹仍按原样铸造」在 F1 保守失效下构造性不可满足：
+    任意第二次进程执行失效其前全部 receipt，两条不同指纹的强制 process
+    判据永不可同时成立（E3 真实层 24 连拒直到预算耗尽）。已有 process
+    义务时兼容路径一律不再追加。"""
 
     from agent.runtime.state import admit_process_receipt_criterion
 
@@ -622,8 +627,10 @@ def test_015_compat_mint_still_admits_uncovered_fingerprint() -> None:
         for c in result.goal.admitted_criteria
         if c.criterion_id == "criterion:process-receipt:goal:1:1:call-new"
     ]
-    assert len(minted) == 1
-    assert minted[0].predicate["receipt_digest"] == "cd" * 32
+    assert minted == []
+    assert [c.criterion_id for c in result.goal.admitted_criteria] == [
+        "criterion:required-local-process:goal:1"
+    ]
 
 
 def _state_with_single_obligation(obligation: AdmittedCriterion):

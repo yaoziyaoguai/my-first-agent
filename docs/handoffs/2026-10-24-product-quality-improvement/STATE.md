@@ -119,3 +119,17 @@ PR #7（5 commits）merge 到 `main` @ **`e035450`**；完整门 4157 passed / 1
 | F-C 修复 | `_REQUIRED_RUNTIME_OBLIGATION_PREFIXES` 同类前缀去重；governed-tool 不再挡铸 process 义务 | ✅ Red→Green（`test_process_correction_mints_obligation_even_with_pending_governed_tool`） |
 | LOW-1 | freeze 测试钉主/locked manifest model 同步 | ✅ |
 | item 1 测量 | 真实层旅程工具构成：读/验证类调用占 68-77%（E1 13/19、E2 19/28、E3 10/13，read_file 8/14/7 为主）；`workspace_excerpt`（file-proof、reusable=True、goal+workspace+digest 绑定）为最强分类；list/search 输出落 generic `tool_results` 类（reusable=False）。read-scope grant 定为只覆盖 proof-backed 的 `workspace_excerpt`（Option A），list/search 留后续 | ✅ 测量完成，设计定稿 |
+
+## 第六轮（item 1 实现：r 读域会话许可，2026-10-24 晚）
+
+**PR #10 交付**：merge-gate 审计 PASS（0×P0/P1/P2，2×LOW：双 pending 绑定次序为既有语义记 backlog；STATE.md 测量数字引用仓库外证据目录）→ merge `8a5fa0f`（分支已删）。
+
+**r 许可设计（用户裁决采纳的建议逐条落地）**：
+- **Option A 分类收窄**：grant 类别集 = `ROUTINE_DATA_CLASSES + ("workspace_excerpt",)`——只并入 proof-backed 的 excerpt 类（Runtime 持久化 file-source proof 绑定 goal/revision/workspace/内容 digest、reusable=True）；`tool_results` 等通用类与 summary 不随之扩，仍逐次披露。
+- **显式 opt-in**：独立键位 `r`（`GrantProviderWorkspaceReadConsent`），与 `s` 分开——routine 可授予的请求上 r 明确报错「already covered by the routine scope」，不静默升级；非常规部分超出 excerpt（含不可复用来源）时报「beyond verified workspace file excerpts」。
+- **硬上界与 s 完全一致**：同 `CONSENT_MAX_USES=32`/`CONSENT_TTL_SECONDS=3600`（validator 钉死 profile→类别集恰等 + max_uses 固定）；撤销/失效/身份漂移/扣次重算全部复用既有 grant 机制（`/revoke-provider-consent` 直接适用）。
+- **逐次非阻断通知**：`grant_workspace_read` 放行的每次派发在扣账后附带一行 warning（`workspace_read_dispatch_notice`：本次 N 份工作区摘录重发 + 剩余额度），不打断、不要求决策。
+- **B3 同款硬化**：r 许可放行时在场未消费的单次 y 一并烧掉（`mark_receipt_consumed`），防 grant 失效后 exact_receipt 额外放行一次。
+- **门语义**：`workspace_read_classes_covered`（非常规部分恰为 workspace_excerpt 且全 reusable）+ `_grant_covers_structure`；routine scope 仍走 `grant_routine`；新出现 excerpt 源在许可内被覆盖（这正是疲劳来源——会话级语义本体）。
+
+**覆盖**：10 个新测试（gate 准入/拒绝、charge+通知文案、B3 烧票据、CLI parse、reducer 铸造+RUNNABLE 恢复、CLI 两类拒绝、offer 行可见性、数字钉、validator 钉、checkpoint 编解码往返）。**已知缝隙（记入调值轮）**：loop 层通知接线（6 行 reason 分支）无 journey 级测试——域内既有覆盖模式为 gate/reducer/CLI 层（journey 仅 routine 形状），r16 插值化轮补齐 journey 级 consent 测试时一并覆盖。

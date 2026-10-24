@@ -662,6 +662,17 @@ _WITHDRAWABLE_RUNTIME_OBLIGATION_PREFIXES = {
     EvidenceOracleKind.TOOL_RECEIPT: "criterion:required-local-process:",
 }
 
+# correction 显式要求某 effect 类时，该类去重只认同类前缀：TOOL_RECEIPT 下
+# 只认 local-process——governed-tool 是另一类义务（MCP/SubAgent receipt，
+# 不受 F1 进程失效约束，与本地验证判据可同时满足）。2026-10-24 F-C：去重
+# 此前沿用 _is_runtime_owned_obligation（TOOL_RECEIPT 下同时匹配两个前缀），
+# governed-tool pending 时一条用户明示的 process correction 会静默不铸，
+# 用户明示的验证要求失去强制（与 E3 过铸死亡螺旋相反的欠铸失败模式）。
+_REQUIRED_RUNTIME_OBLIGATION_PREFIXES = {
+    EvidenceOracleKind.WEB_SOURCE_RECEIPT: "criterion:required-public-web:",
+    EvidenceOracleKind.TOOL_RECEIPT: "criterion:required-local-process:",
+}
+
 
 def _apply_correction_lower_bounds(
     goal: GoalFrame,
@@ -705,10 +716,12 @@ def _apply_correction_lower_bounds(
     if not required and criteria == goal.proposed_criteria:
         return goal
     for oracle_kind in required:
+        required_prefix = _REQUIRED_RUNTIME_OBLIGATION_PREFIXES[oracle_kind]
         runtime_owned = tuple(
             item
             for item in criteria
-            if item.oracle_kind is oracle_kind and _is_runtime_owned_obligation(item)
+            if item.oracle_kind is oracle_kind
+            and item.criterion_id.startswith(required_prefix)
         )
         criteria = tuple(
             item

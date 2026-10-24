@@ -851,3 +851,97 @@ def test_trial_closeout_real_runtime_binds_validation_scope(tmp_path, new_cwd) -
     finally:
         for close in reversed(composition.close_stack):
             close()
+
+
+def test_correction_replaced_obligation_admits_single_process_criterion() -> None:
+    """E3 P2-1 排查（2026-10-24）：correction 替换后的目标端到端只有一条义务。
+
+    merge-gate 审计场景：#1（approval-path，指纹 A）已入场 → 用户 process
+    correction「再运行一遍测试确认」→ 铸出 #2 → 模型跑不同指纹命令并获批准。
+    实测（探针 + 本测试）：correction 的 retained_ids 过滤先把 #1 从 admitted
+    移除，#2 经 proposed_requirement 绑定入场，最终只有一条强制 process 义务
+    （可满足），不构成 E3 死亡螺旋。锁定该端到端形状。
+    """
+
+    from agent.runtime.contracts import GoalStatus, ProposedCriterion
+    from agent.runtime.state import _apply_correction_lower_bounds
+
+    admitted_process = AdmittedCriterion(
+        criterion_id="criterion:process-receipt:goal:1:1:call-1",
+        description="approved local_process must produce the exact successful Kernel receipt",
+        source_fact_id="fact:user:1",
+        oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+        predicate={
+            "receipt_kind": "process_v1",
+            "command_fingerprint": FP_OLD,
+            "outcome": "exited",
+            "exit_code": 0,
+        },
+        required_evidence_class="process_receipt",
+        admission_digest="e" * 64,
+    )
+    goal = GoalFrame(
+        goal_id="goal:1",
+        revision=1,
+        created_from_fact_ids=("fact:user:1",),
+        workspace_identity_digest="workspace:v1:" + "c" * 64,
+        user_outcome="完成 SPEC 并运行 pytest -q 验证",
+        beneficiary="owner",
+        targets=("retry_app/service.py",),
+        scope=("workspace",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(
+            ProposedCriterion(
+                criterion_id="criterion:report-exists",
+                description="报告文件存在且内容匹配",
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path="retry_app/service.py",
+            ),
+        ),
+        admitted_criteria=(admitted_process,),
+        authority_snapshot="authority:v1:" + "d" * 64,
+        status=GoalStatus.EXECUTING,
+        created_at="2026-10-24T00:00:00Z",
+        updated_at="2026-10-24T00:00:00Z",
+    )
+    correction = ConversationFact(
+        fact_id="fact:user:2",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "再运行一遍测试确认。", "control": "goal_correction"},
+    )
+    corrected_goal = _apply_correction_lower_bounds(goal, correction)
+    assert any(
+        item.criterion_id.startswith("criterion:required-local-process:")
+        for item in corrected_goal.proposed_criteria
+    ), "the re-run correction mints its pending proposal"
+
+    state = ConversationState(
+        conversation_id="conversation:correction-replace-e2e",
+        facts=(
+            ConversationFact(
+                fact_id="fact:user:1",
+                kind=FactKind.USER_MESSAGE,
+                content={"text": "完成 SPEC 并运行 pytest -q 验证"},
+            ),
+            correction,
+        ),
+        goal=corrected_goal,
+        active_run=ActiveRun(
+            run_id="run:2",
+            status=ActiveRunStatus.AWAITING_APPROVAL,
+            phase=ContinuationPhase.TOOL,
+            tool_calls=(_new_call("pytest", ["-q"]),),
+            pending_request=_approval(),
+        ),
+    )
+    result = _admit_approved_process_receipt_criterion(state, _approval(), action=_action())
+
+    process_obligations = [
+        item
+        for item in result.goal.admitted_criteria
+        if item.predicate.get("receipt_kind") == "process_v1"
+    ]
+    assert len(process_obligations) == 1
+    assert process_obligations[0].criterion_id.startswith("criterion:required-local-process:")
+    assert process_obligations[0].predicate["command_fingerprint"] == FP_NEW

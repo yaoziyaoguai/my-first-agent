@@ -3715,6 +3715,23 @@ def _admit_approved_process_receipt_criterion(
     ):
         # per-call 去重；重绑定路径同 id 属预期（retained 替换），不作早退。
         return state
+    if (
+        rebindable is None
+        and proposed_requirement is None
+        and any(
+            item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+            and item.predicate.get("receipt_kind") == "process_v1"
+            for item in goal.admitted_criteria
+        )
+    ):
+        # E3r2（2026-10-24 真实层）：F1 保守失效使任意第二次进程执行失效其前
+        # 全部 receipt——两条不同指纹的强制 process 判据在构造上永不可同时
+        # 满足（任一时刻只有最后执行的进程的 receipt 能存活）。真实层
+        # deepseek-flash 的 E3 旅程（已正确文件 + 模型自发辅助验证命令）因此
+        # 连续 24 次 completion_not_verified 直到预算耗尽。已有 process 义务
+        # 时，per-call fallback 不得再铸第二条；重绑定（替换失败义务）不受
+        # 此限，runtime-owned proposed requirement 绑定也不受此限。
+        return state
     source = next(
         (
             fact
@@ -3958,6 +3975,18 @@ def admit_process_receipt_criterion(
         # receipt 满足）。此处再铸 digest-pinned per-call criterion 只会在
         # 该 receipt 因后续 workspace 变更失效后留下一条永不可满足的义务，
         # 把"写入后按指引重跑验证"的 Goal 永久卡在完成门外（2026-10-24 P1）。
+        return state
+    if any(
+        item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+        and item.predicate.get("receipt_kind") == "process_v1"
+        and item.criterion_id != criterion_id
+        for item in goal.admitted_criteria
+    ):
+        # E3r2（2026-10-24 真实层）：F1 保守失效使任意第二次进程执行失效
+        # 其前全部 receipt——两条不同指纹的强制 process 判据在构造上永不
+        # 可同时满足（任一时刻只有最后执行的进程的 receipt 能存活）。真实
+        # 层 deepseek-flash 的 E3 旅程因此连续 24 次 completion_not_verified
+        # 直到预算耗尽。已有 process 义务时，兼容路径不得再铸第二条。
         return state
     source = next(
         (

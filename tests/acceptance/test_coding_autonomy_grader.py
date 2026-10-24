@@ -94,12 +94,14 @@ def test_manifest_freezes_all_scenarios_and_separates_held_out_cases() -> None:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     # 授权状态是 owner 在 manifest 里的显式记录（2026-10-04 起授权 DeepSeek
-    # flash 真实 dogfood）；本断言随 owner 记录更新，门本身由门测试覆盖。
+    # flash 真实 dogfood；2026-10-24 owner 重绑 flash 档到现役名
+    # deepseek-flash——v4-flash 已退役导致准入 pin fail-closed）；本断言随
+    # owner 记录更新，门本身由门测试覆盖。
     assert manifest["real_dispatch_authorized"] is True
     assert manifest["window_budget"]["max_physical_requests"] > 0
     assert manifest["model"] == {
         "provider": "openai_compatible",
-        "model_id": "deepseek-v4-flash",
+        "model_id": "deepseek-flash",
         "reasoning_mode": "disabled",
     }
     assert [item["id"] for item in manifest["scenarios"]] == [

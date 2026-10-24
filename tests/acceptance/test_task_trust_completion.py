@@ -2107,6 +2107,176 @@ def test_write_after_validation_revalidation_completes_goal(tmp_path: Path) -> N
     )
 
 
+_E3R_TASK = "运行 python3 check.py 验证 app.py 的 greet() 已经返回 'howdy'"
+
+
+class _AuxProcessLoopProvider:
+    """第二指纹进程不得铸出永不可满足的强制判据（2026-10-24 E3 真实层）。
+
+    E3 死循环复刻：任务请求验证命令 A（批准铸 digest-free 义务 #1，指纹 A）；
+    模型另跑了一条辅助验证命令 B → J1 兼容钩子按 B 的指纹再铸 #2。F1 保守
+    失效下任意第二次进程执行失效其前全部 receipt——不同指纹的两条强制
+    process 判据在构造上永不可同时满足（任一时刻只有最后执行的进程的
+    receipt 存活）。真实层 deepseek-flash 因此连续 24 次
+    completion_not_verified 直到预算耗尽；重跑 A（E3 模型的自救动作）修不好
+    （救活的只有 #1，#2 反而被这次重跑失效）。修复=兼容铸造在已有 process
+    义务时不再追加第二条不同指纹的强制判据。
+    """
+
+    def __init__(self) -> None:
+        self.stage = "draft"
+        self.claims: list[str] = []
+
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN202
+        stage, self.stage = self.stage, "end"
+        if stage == "draft":
+            bootstrap = context.goal_bootstrap
+            assert bootstrap is not None
+            frame = GoalFrame(
+                goal_id="goal-e3r",
+                revision=1,
+                created_from_fact_ids=(bootstrap.source_fact_id,),
+                workspace_identity_digest=bootstrap.workspace_identity_digest,
+                user_outcome="check.py passes against the already-correct app.py",
+                beneficiary="user",
+                targets=("app.py",),
+                scope=("workspace",),
+                non_goals=(),
+                assumptions=(),
+                proposed_criteria=(
+                    ProposedCriterion(
+                        "criterion:app-py",
+                        "app.py contains greet() returning 'howdy'",
+                        oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                        artifact_path="app.py",
+                    ),
+                ),
+                admitted_criteria=(),
+                authority_snapshot=bootstrap.authority_snapshot,
+                status=GoalStatus.GOAL_READY,
+                created_at="2026-10-24T00:00:00Z",
+                updated_at="2026-10-24T00:00:00Z",
+            )
+            self.stage = "run-a"
+            return ModelResponse((), control=goal_draft_from_frame("e3r", frame))
+        if stage == "run-a":
+            self.stage = "run-b"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "run-a-1",
+                        "local_process",
+                        {
+                            "executable": "python3",
+                            "argv": ["check.py"],
+                            "cwd": ".",
+                            "profile": "short",
+                        },
+                    ),
+                )
+            )
+        if stage == "run-b":
+            # 模型自发的辅助验证（不同指纹，exit 0）——缺陷触发点。
+            self.stage = "rerun-a"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "run-b-1",
+                        "local_process",
+                        {
+                            "executable": "python3",
+                            "argv": ["-c", "print('aux sanity check')"],
+                            "cwd": ".",
+                            "profile": "short",
+                        },
+                    ),
+                )
+            )
+        if stage == "rerun-a":
+            # E3 模型的自救动作：重跑请求的验证命令 A。
+            self.stage = "confirm"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "run-a-2",
+                        "local_process",
+                        {
+                            "executable": "python3",
+                            "argv": ["check.py"],
+                            "cwd": ".",
+                            "profile": "short",
+                        },
+                    ),
+                )
+            )
+        if stage == "confirm":
+            # 已正确文件的合法准入路径：confirm_file 审批绑定当前内容 digest
+            # （真实 E3 中模型漏了这一步才撞上 artifact 准入门）。
+            self.stage = "claim"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "confirm-1",
+                        "confirm_file",
+                        {"path": "app.py"},
+                    ),
+                )
+            )
+        if stage == "claim":
+            self.claims.append("claim-1")
+            return ModelResponse((), control=_claim_for(context, "claim-1"))
+        return ModelResponse((ModelTextBlock("no further actions"),))
+
+
+def test_aux_process_must_not_mint_second_unsatisfiable_criterion(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / "app.py").write_text(
+        'def greet():\n    return "howdy"\n', encoding="utf-8"
+    )
+    (workspace / "check.py").write_text(
+        "import app\n"
+        "assert app.greet() == 'howdy', f\"greet() returned {app.greet()!r}\"\n"
+        "print('howdy OK')\n",
+        encoding="utf-8",
+    )
+
+    provider = _AuxProcessLoopProvider()
+    opened, composition = _open_and_drive(tmp_path, provider, ControlInbox())
+    state = opened.store.load().state
+    composition.runtime.run_turn(
+        _submit(state, "run-e3r", _E3R_TASK), opened.store.load()
+    )
+    _approve_pending(opened, composition)
+
+    final = LocalCheckpointStore(opened.checkpoint_path).load().state
+    goal = final.goal
+    assert goal is not None
+    assert provider.claims == ["claim-1"]
+    # 修复目标：单一 digest-free process 义务（指纹 A）被最后重跑的 A receipt
+    # 满足，Goal 到达 VERIFIED_DONE（修前：#2 已铸，claim 因「receipt 被
+    # later workspace activity 失效」被拒，Goal 卡 GOAL_READY）。
+    assert goal.status is GoalStatus.VERIFIED_DONE, goal.status
+    process_criteria = [
+        criterion
+        for criterion in goal.admitted_criteria
+        if criterion.predicate.get("receipt_kind") == "process_v1"
+    ]
+    assert len(process_criteria) == 1
+    assert "receipt_digest" not in process_criteria[0].predicate
+    # 死循环不得出现：无 invalidated 拒绝事实。
+    assert not [
+        fact
+        for fact in final.facts
+        if fact.kind is FactKind.POLICY_RESULT
+        and fact.content.get("code") == "completion_not_verified"
+        and "invalidated by later workspace activity"
+        in str(fact.content.get("text", ""))
+    ]
+
+
 # ---------------------------------------------------------------------------
 # S2（2026-10-24 双轨裁决）：跨层组合缺口的带反例确定性旅程。
 # P2-2 = W1 文件交付下界 × 上下文恢复（压缩）× 真实工具执行：prose 假完成

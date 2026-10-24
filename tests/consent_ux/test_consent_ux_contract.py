@@ -1107,3 +1107,36 @@ def test_consent_ux_s2_render_provider_consent_reports_remaining_and_revoke() ->
         )
     )
     assert "revoked" in output[-1].lower()
+
+
+def test_consent_ux_r16_numeric_copy_tracks_the_constants() -> None:
+    # r16 失败信号（2026-10-24，插值化前的廉价护栏）：CONSENT_MAX_USES/
+    # CONSENT_TTL_SECONDS 是唯一权威值，渲染文案里的数字必须与之同步——
+    # 此前文案与测试断言各持 "32"/"60" 字面量，只改常量时两侧一起陈旧、
+    # 零失败信号。调值轮做插值化（文案由常量 f-string 推导）时，本测试
+    # 改为断言推导本身；在那之前它把漂移变成红灯。
+    state = ConversationState.new("conversation-1")
+    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    grant = mint_provider_consent_grant(
+        state=state, request=_v2_request(), action_seq=1, now=now
+    )
+
+    # 铸造侧钉住：许可的额度与时长确实来自权威常量。
+    assert grant.max_uses == CONSENT_MAX_USES
+    issued = datetime.fromisoformat(grant.issued_at.replace("Z", "+00:00"))
+    expires = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
+    assert (expires - issued).total_seconds() == CONSENT_TTL_SECONDS
+
+    # 文案侧钉住：offer 与 exhausted 两个硬编码数字与常量一致。
+    offer = TerminalRenderer._disclosure_message(request=_v2_request(), grant=None)
+    assert (
+        f"up to {CONSENT_MAX_USES} model sends, "
+        f"expires in {CONSENT_TTL_SECONDS // 60} minutes" in offer
+    )
+    exhausted_grant = grant
+    for _ in range(grant.max_uses):
+        exhausted_grant = exhausted_grant.with_use()
+    assert (
+        TerminalRenderer._consent_unavailable_reason(exhausted_grant)
+        == f"all {CONSENT_MAX_USES} model sends used"
+    )

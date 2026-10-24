@@ -67,18 +67,38 @@
 
 ## 已知开放项（无新证据不重审）
 
-- E2/E3 真实层：BLOCKED_UPSTREAM_MODEL_RETIRED / 凭据 401（需用户提供有效 key 或换模型授权）。双裁决维持 BLOCKED。
-- 读/验证类输出发送逐次披露疲劳（实测 16 次/小任务）：item1C 已补额度/剩余/过期提示；扩大静默复用范围（会话级许可）仍需用户裁决。
+- E2/E3 真实层：凭据已解决（2026-10-24 key）；E1/E2 PASS、E3 缺陷已修复待复跑确认——以复跑结果为准更新 CURRENT_CAPABILITY_STATUS。
+- 读/验证类输出发送逐次披露疲劳：真实层量化=23 次/E3 旅程；会话级许可实现（item 1）为下一包，设计已定（有界 grant+逐次非阻断通知+分类收窄+硬边界）。
 - TUI 恢复外发确认显示缺口（TUI 非日用入口）；`/compact`、`/context` 未实现（已文档化）；Scheduler `needs_019_config`（设计内）。
 
 ## 决策队列（需要用户裁决）
 
-1. 读/验证类输出是否纳入会话级许可（降披露疲劳）——裁决 C+keep-open：保持逐次披露，文案已按建议补额度/剩余/过期提示（Q5）；是否扩展 `s` 静默复用范围需用户明示。
-2. E2/E3 真实层补跑：需有效凭据或新模型授权（候选 `deepseek-flash`/`deepseek-v4-pro`）。
+1. ~~读/验证类输出是否纳入会话级许可~~ 已裁决（2026-10-24 下午）：按建议方向实现（有界 grant+逐次非阻断通知+分类收窄+硬边界）；实现为下一包。
+2. ~~E2/E3 真实层补跑~~ 已授权并执行（2026-10-24 下午）：新 key + deepseek-flash；E1/E2 PASS、E3 缺陷已修复（复跑见第四轮表）。
 3. `result.phase.json`（仓库根、未跟踪、用户产物，本轮按授权保留未动）：终审提示疑似 harness 散落产物，若未来 commit 需先确认归属再清理。
 
 ## 下一步
 
-第二轮已交付：PR #7（5 commits）merge 到 `main` @ **`e035450`**；完整门 4157 passed / 1 skipped / 0 失败。merge gate 审计 PASS（无 P0/P1）。
+第四轮完整门：`git diff --check` ✅ + `ruff check .` ✅ + 全量 pytest **4159 passed / 1 skipped / 0 failed / 1 error**（error=`test_packaged_policy_real[read_package_file-allowed]` TimeoutError，全量负载下超时；隔离重跑 12/12 绿；改动无 sandbox 交互面，判定环境 flake）。真实层请求合计 110（修复前 56 + 修复后 54）。按既定模式交付后，会话级许可（item 1）为下一个工作包。
 
-**第三轮（merge-gate follow-up）已交付**：审计 P2-1——r12 渲染层标记与 evidence 层错误文案各持字面量（漂移会让重跑提示静默消失）。修复=`INVALIDATED_BY_LATER_WORKSPACE_ACTIVITY` 常量单源（evidence 定义、render 导入、值钉测试；生产者侧由 P1 旅程对真实 POLICY_RESULT 断言钉住）。顺带 LOW-1（quota 行 `expires_at` 过 `terminal_text`）与 LOW-2（旅程 docstring 回合数 5→6）。完整门 **4158 passed / 1 skipped / 0 失败**。审计 LOW-3（r8 测试命名略过度声明）与 LOW-4（r14 代理字段取舍，已文档化）不动。未授权不做的事不变：无真实 provider 调用、无凭据变更、无发布部署。E2/E3 与会话级许可扩展仍等待用户输入。
+## 第二轮交付记录（历史）
+
+PR #7（5 commits）merge 到 `main` @ **`e035450`**；完整门 4157 passed / 1 skipped / 0 失败；merge gate 审计 PASS（无 P0/P1）。
+
+**第三轮（merge-gate follow-up）已交付**：审计 P2-1——r12 渲染层标记与 evidence 层错误文案各持字面量（漂移会让重跑提示静默消失）。修复=`INVALIDATED_BY_LATER_WORKSPACE_ACTIVITY` 常量单源（evidence 定义、render 导入、值钉测试；生产者侧由 P1 旅程对真实 POLICY_RESULT 断言钉住）。顺带 LOW-1（quota 行 `expires_at` 过 `terminal_text`）与 LOW-2（旅程 docstring 回合数 5→6）。完整门 **4158 passed / 1 skipped / 0 失败**。审计 LOW-3（r8 测试命名略过度声明）与 LOW-4（r14 代理字段取舍，已文档化）不动。
+
+## 第四轮（用户裁决三项 + E3 真实层缺陷修复，2026-10-24 下午）
+
+用户裁决与授权：①会话级许可按我的建议方向（先测量后实现）；②E2/E3 真实层提供新 key + 模型 `deepseek_v4.1_flash`（API 实测该名不存在，支持列表为 `deepseek-flash`/`deepseek-v4-pro`，flash 档意图明确取 `deepseek-flash`；key 已存记忆不落仓库）；③r16 先补清单测试、插值化本体等调值轮。
+
+| 项 | 内容 | 状态 |
+| --- | --- | --- |
+| manifest 重绑 | `TASK-MANIFEST.json` model_id `deepseek-v4-flash`→`deepseek-flash`（退役模型导致准入 pin fail-closed 拒绝派发；上轮同型重绑先例） | ✅ 已改（随本轮 PR 交付） |
+| E1 normal | 新预览（main@3ea6af1 wheel 非可编辑安装，origin=site-packages）+ deepseek-flash。修复前 10 请求/20s PASS；**修复后复跑 19 请求/37s 再 PASS**（守卫无回归） | ✅ **PASS** ×2，typed VERIFIED_DONE，业务+补充全 true |
+| E2 staged | 同上。修复前 26 请求/52s PASS（correction 注入/durable/消费/新 PID resume 全链证据成立，**E2 历史上首次真实层全过**）；**修复后复跑 22 请求/51s 再 PASS** | ✅ **PASS** ×2 |
+| E3 already-correct | 修复前两跑（cap 20/40）均 INCOMPLETE_CLOSURE：零写合同保持、业务全对，但 goal 卡 `goal_ready`，stop=`limit_pause_requires_user`。**修复后复跑**：13 请求即达 typed VERIFIED_DONE（修复有效性直接证明），但 deepseek-flash 改写了 `tests/test_retry_service.py`（1 次 effect）→ 判定 FAIL_ALREADY_CORRECT_WRITE——零写门正确拦截；该失败为**模型语义层**（v4-flash 2026-10-18 曾零写过 E3），非产品缺陷 | ✅ 产品缺陷已修复验证；E3 真实层终判=FAIL(模型语义)，如实记录 |
+| E3 缺陷（真实层钉死） | 根因：goal 已有 digest-free process 义务（#1，请求命令指纹）时，模型自发第二条不同指纹验证命令的**批准路径 per-call fallback**（state.py:3708）再铸 #2——F1 保守失效下任意第二次进程执行失效其前全部 receipt，两条不同指纹强制 process 判据**构造上永不可同时满足**（任一时刻只有最后执行进程的 receipt 存活）。真实层表现：24 次连续 `completion_not_verified`(invalidated) 直到预算耗尽，模型重跑请求命令也救不活（救活 #1 的同时杀死 #2）。修复=per-call fallback 在已有 process 义务时不再铸造（rebind 替换失败义务与 runtime-owned 绑定不受限）；兼容钩子 `admit_process_receipt_criterion` 同理加防御。Red→Green 合成旅程 `test_aux_process_must_not_mint_second_unsatisfiable_criterion`（撤修复复现卡死）。**合同演进**：两个钉住「不同指纹照铸」旧合同的测试随 E3 证据更新（`test_015_compat_mint_skips_when_any_process_obligation_exists`、`test_unrelated_approved_command_does_not_rebind` 的 per-call 期望；rebind 保护断言原样保留） | ✅ 修复+旅程 Green；kernel 421/acceptance 18/process 47 passed；真实层复跑见上 |
+| r16 清单测试 | `test_consent_ux_r16_numeric_copy_tracks_the_constants`：常量→文案一致性（铸造侧 max_uses/TTL + offer/exhausted 文案数字）；只改常量不改文案立刻红。插值化本体（文案 f-string 推导）等调值轮 | ✅ consent_ux 58 passed |
+| 会话级许可（item 1） | 方向已定（有界例行许可+逐次非阻断通知）；真实层测量数据点：单次 E3 旅程 23 次披露决定；源构成分类与 grant 类别实现为下一包 | ⏳ 设计已定，实现待做 |
+
+真实层证据目录：`~/.local/share/first-agent/previews/quality-20261024/real-validation-2026-10-24{,b}/`（b=修复后复跑）。复现探针：`/Users/jinkun.wang/.cache/mfa-e3r/`。未授权不做的事不变：无真实 provider 调用、无凭据变更、无发布部署。E2/E3 与会话级许可扩展仍等待用户输入。

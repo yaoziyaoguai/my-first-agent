@@ -1913,3 +1913,192 @@ def test_w2_prose_target_full_reuse_journey_with_checkpoint_reopen(
     assert (workspace / "SPEC.md").read_text(encoding="utf-8") == original_spec
     # 终态关闭租约（既有合同）；旅程内只铸造过这一条文件租约。
     assert final.goal_authorizations == ()
+
+
+_BWAV_TASK = "修改 app.py 的 greet() 让它返回 'howdy'，并运行 python3 check.py 验证"
+
+
+class _WriteAfterValidationProvider:
+    """写入后重验旅程：验证成功→再写入→按修复指引重跑同一验证→应能完成。
+
+    复现 2026-10-24 P1：J1 兼容钩子在批准路径已铸 digest-free 义务时仍追加
+    digest-pinned per-call criterion；写入使首份 receipt 失效后该 pinned 义务
+    永不可满足，Goal 卡死在 GOAL_READY（brick 实测三次 exit-0 重验全被拒）。
+    """
+
+    def __init__(self) -> None:
+        self.stage = "draft"
+        self.claims: list[str] = []
+
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN202
+        stage, self.stage = self.stage, "end"
+        if stage == "draft":
+            bootstrap = context.goal_bootstrap
+            assert bootstrap is not None
+            frame = GoalFrame(
+                goal_id="goal-bwav",
+                revision=1,
+                created_from_fact_ids=(bootstrap.source_fact_id,),
+                workspace_identity_digest=bootstrap.workspace_identity_digest,
+                user_outcome="app.py greet() returns 'howdy' and check.py passes",
+                beneficiary="user",
+                targets=("app.py",),
+                scope=("workspace",),
+                non_goals=(),
+                assumptions=(),
+                proposed_criteria=(
+                    ProposedCriterion(
+                        "criterion:app-py",
+                        "app.py contains greet() returning 'howdy'",
+                        oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                        artifact_path="app.py",
+                    ),
+                ),
+                admitted_criteria=(),
+                authority_snapshot=bootstrap.authority_snapshot,
+                status=GoalStatus.GOAL_READY,
+                created_at="2026-10-24T00:00:00Z",
+                updated_at="2026-10-24T00:00:00Z",
+            )
+            self.stage = "edit1"
+            return ModelResponse((), control=goal_draft_from_frame("bwav", frame))
+        if stage == "edit1":
+            self.stage = "check1"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "edit-1",
+                        "edit_file",
+                        {
+                            "path": "app.py",
+                            "old_text": 'return "hello"',
+                            "new_text": 'return "howdy"',
+                        },
+                    ),
+                )
+            )
+        if stage == "check1":
+            self.stage = "edit2"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "check-1",
+                        "local_process",
+                        {
+                            "executable": "python3",
+                            "argv": ["check.py"],
+                            "cwd": ".",
+                            "profile": "short",
+                        },
+                    ),
+                )
+            )
+        if stage == "edit2":
+            # 验证成功后的二次写入：按失效合同使首份 process receipt 失效。
+            self.stage = "claim1"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "edit-2",
+                        "edit_file",
+                        {
+                            "path": "app.py",
+                            "old_text": 'return "howdy"',
+                            "new_text": 'return "howdy"  # final',
+                        },
+                    ),
+                )
+            )
+        if stage in {"claim1", "claim2"}:
+            # claim1 应被拒（receipt 已失效）；拒绝指引要求重跑同一验证命令。
+            # 重跑经既有 lease 静默复用（不再逐笔审批）后，claim2 必须可通过。
+            self.stage = "check2" if stage == "claim1" else "read2"
+            self.claims.append(stage)
+            return ModelResponse((), control=_claim_for(context, f"claim-{stage}"))
+        if stage == "check2":
+            self.stage = "read2"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "check-2",
+                        "local_process",
+                        {
+                            "executable": "python3",
+                            "argv": ["check.py"],
+                            "cwd": ".",
+                            "profile": "short",
+                        },
+                    ),
+                )
+            )
+        if stage == "read2":
+            self.stage = "claim2"
+            return ModelResponse(
+                (ModelToolCall("read-2", "read_file", {"path": "app.py"}),)
+            )
+        return ModelResponse((ModelTextBlock("no further actions"),))
+
+
+def test_write_after_validation_revalidation_completes_goal(tmp_path: Path) -> None:
+    """写入后按修复指引重跑验证必须能完成 Goal（2026-10-24 P1 回归）。
+
+    失效合同保持：写入后不重验的直接 claim 仍被拒（claim1 被拒留痕）；
+    修复点在铸造侧——同指纹 digest-free 义务已在批准时铸出时，J1 兼容
+    钩子不得再追加 digest-pinned per-call criterion（否则永不可满足）。
+    """
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / "app.py").write_text(
+        'def greet():\n    return "hello"\n', encoding="utf-8"
+    )
+    (workspace / "check.py").write_text(
+        "import app\n"
+        "assert app.greet() == 'howdy', f\"greet() returned {app.greet()!r}\"\n"
+        "print('howdy OK')\n",
+        encoding="utf-8",
+    )
+
+    provider = _WriteAfterValidationProvider()
+    opened, composition = _open_and_drive(tmp_path, provider, ControlInbox())
+    state = opened.store.load().state
+    composition.runtime.run_turn(
+        _submit(state, "run-bwav", _BWAV_TASK), opened.store.load()
+    )
+    _approve_pending(opened, composition)
+
+    final = LocalCheckpointStore(opened.checkpoint_path).load().state
+    goal = final.goal
+    assert goal is not None
+    # 修复目标：重验后第二次 claim 必须到达 VERIFIED_DONE（修前卡 GOAL_READY）。
+    assert goal.status is GoalStatus.VERIFIED_DONE, goal.status
+    assert provider.claims == ["claim1", "claim2"]
+    # 失效合同未被放松：claim1 的拒绝（写入使 receipt 失效）留有 policy 痕迹。
+    rejections = [
+        fact
+        for fact in final.facts
+        if fact.kind is FactKind.POLICY_RESULT
+        and "invalidated by later workspace activity"
+        in str(fact.content.get("text", ""))
+    ]
+    assert rejections, "claim1 must be rejected for the invalidated receipt"
+    # 两次真实验证：check-1 首验、check-2 失效后按指引重跑（lease 复用）。
+    receipts = [
+        fact.content["metadata"]["process_receipt"]["use_ordinal"]
+        for fact in final.facts
+        if fact.kind is FactKind.TOOL_RESULT
+        and isinstance(fact.content.get("metadata"), dict)
+        and fact.content["metadata"].get("process_receipt")
+        and fact.content["metadata"]["process_receipt"].get("exit_code") == 0
+    ]
+    assert receipts == [1, 2]
+    # 修复不变量：goal 内不得残留 digest-pinned 的 per-call process 义务
+    # （digest-free 义务由批准路径铸造，可被任何未失效的同指纹 receipt 满足）。
+    assert all(
+        "receipt_digest" not in criterion.predicate
+        for criterion in goal.admitted_criteria
+        if criterion.predicate.get("receipt_kind") == "process_v1"
+    )
+    assert (workspace / "app.py").read_text(encoding="utf-8") == (
+        'def greet():\n    return "howdy"  # final\n'
+    )

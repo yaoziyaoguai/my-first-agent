@@ -288,7 +288,15 @@ _DELIVERABLE_QUESTION_CLAUSE = re.compile(
 _DELIVERABLE_EXPLANATION_CLAUSE = re.compile(r"\bexplain\b", re.IGNORECASE)
 _DELIVERABLE_VERB_PATTERN = re.compile(
     r"(?:创建|新建|生成|写入|修改|更新|编辑|添加|新增|实现|重构|"
-    r"\b(?:create|generate|write|update|modify|edit|implement|add|refactor)\b)",
+    # 非编码文件交付动词（2026-10-24 P2；审计 D-1 收窄）：必须带目的地
+    # 标记（成/到/为，允许短宾语间隔）——裸「总结/整理 failures.log」是
+    # 读引用（口头总结），不得铸成强制文件交付义务（会确定性卡死 W1 完成门）。
+    r"整理成|整理到|总结到|汇总到|写成|保存为|保存到|输出到|记录到|归档为"
+    r"|(?:整理|总结|汇总|保存|输出|记录|归档).{0,24}(?:成|到|为)|"
+    r"\b(?:create|generate|write|update|modify|edit|implement|add|refactor)\b|"
+    # 英文 save/summarize/organize 同理：必须 into/to/as 指向文件名；
+    # 匹配在标记处结束，24 字符窗口只覆盖目的地文件，不覆盖直接宾语。
+    r"\b(?:save|summarize|organize)\b.{0,60}\b(?:into|to|as)\b)",
     re.IGNORECASE,
 )
 _DELIVERABLE_READING_VERB_PATTERN = re.compile(
@@ -3939,6 +3947,18 @@ def admit_process_receipt_criterion(
         for item in goal.admitted_criteria
     ):
         return state
+    if any(
+        item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+        and item.predicate.get("receipt_kind") == "process_v1"
+        and item.predicate.get("command_fingerprint") == command_fingerprint
+        and "receipt_digest" not in item.predicate
+        for item in goal.admitted_criteria
+    ):
+        # 批准路径已铸同指纹的 digest-free 义务（可被任何未失效的同指纹
+        # receipt 满足）。此处再铸 digest-pinned per-call criterion 只会在
+        # 该 receipt 因后续 workspace 变更失效后留下一条永不可满足的义务，
+        # 把"写入后按指引重跑验证"的 Goal 永久卡在完成门外（2026-10-24 P1）。
+        return state
     source = next(
         (
             fact
@@ -4007,6 +4027,16 @@ def admit_sandbox_receipt_criterion(
         item.criterion_id == criterion_id and item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
         for item in goal.admitted_criteria
     ):
+        return state
+    if any(
+        item.oracle_kind is EvidenceOracleKind.TOOL_RECEIPT
+        and item.predicate.get("receipt_kind") == "native_sandbox_v1"
+        and item.predicate.get("command_fingerprint") == command_fingerprint
+        and "receipt_digest" not in item.predicate
+        for item in goal.admitted_criteria
+    ):
+        # 与 process 路径同一根因（2026-10-24 P1）：批准路径已铸同指纹
+        # digest-free 义务时，兼容铸造不得再追加 digest-pinned 副本。
         return state
     source = next(
         (

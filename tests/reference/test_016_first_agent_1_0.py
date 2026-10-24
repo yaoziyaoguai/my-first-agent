@@ -197,6 +197,13 @@ def test_intent_contract_uses_one_prose_only_test_for_mixed_tasks() -> None:
         "调用 MCP 会向外发送数据吗？",
         "委派给子 Agent 会产生额外费用吗？",
         "记住这条信息需要批准吗？",
+        # 2026-10-24 P6：礼貌/语气问句释放缺口（trigger 与 release 词表不对称）。
+        "Could you check what version of Python this project uses?",
+        "删除这个文件可以吗？",
+        "测试一下，这个配置对不对？",
+        "帮我修改 app.py 可以吗？",
+        # 2026-10-24 P2 守卫：新交付动词的问句形式仍可释放回直接回答。
+        "整理成 notes.md 可以吗？",
     )
     for index, message in enumerate(explanation_questions, start=1):
         verb_question_state = ConversationState.new(
@@ -221,6 +228,13 @@ def test_intent_contract_uses_one_prose_only_test_for_mixed_tasks() -> None:
         "看看这个项目再修改 greet.py。",
         "结合这份 CSV 和公开资料，整理一页说明到 report.md，然后运行项目里的校验器确认格式。",
         "Can you run the tests?",
+        # 2026-10-24 P2：把/将句式接受礼貌前缀；修了 与 修好 同为交付动词。
+        "帮我把这个 bug 修了。",
+        "Summarize these files into summary.md.",
+        # 2026-10-24 审计 E-1：礼貌 check 问句 + 第二祈使 = 复合任务请求，
+        # 问句前缀不得把交付语义降级为纯文字回答。
+        "Could you check why the build fails, then fix the bug in app.py?",
+        "Could you check why the tests fail and update parser.py?",
     )
     for index, message in enumerate(explicit_requests, start=1):
         request_state = ConversationState.new(
@@ -270,6 +284,10 @@ def test_artifact_validation_separates_existing_and_process_created_files() -> N
         "调用 MCP echo 返回 SABLE-27。",
         "委派给子 Agent 总结两点结论。",
         "请记住：本项目的测试代号是 SABLE-27。",
+        # 2026-10-24 P2：非编码文件交付措辞不得经 bare prose 收尾（零文件交付）。
+        "把目录内容整理成 notes.md。",
+        "阅读 a.md、b.md、c.md，把要点写成 summary.md。",
+        "Summarize these files into summary.md.",
     ),
 )
 def test_explicit_non_prose_outcome_cannot_complete_through_bare_text(

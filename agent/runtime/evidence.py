@@ -36,6 +36,12 @@ from agent.runtime.state import (
     normalize_process_entrypoint,
 )
 
+# r12（2026-10-24 merge-gate P2-1）：失效标记是跨层合同——CLI 渲染层
+# （render._invalidation_rerun_note）依赖此子串识别「验证失效后已重跑」的
+# completion_not_verified 事实。改写错误消息不得移除该标记；渲染层从本模块
+# 导入同一常量，禁止各自维护字面量。
+INVALIDATED_BY_LATER_WORKSPACE_ACTIVITY = "invalidated by later workspace activity"
+
 
 def sandbox_receipt_projection(receipt: SandboxReceiptV1) -> dict[str, str | int]:
     """receipt → fact metadata 的统一投影（evidence 与 loop 抑制折叠共用）。"""
@@ -1473,7 +1479,7 @@ class ClosedEvidenceRegistry:
             # timeout journey）——只有前者把 blocked_claim 判为可修缺口。
             raise EvidenceVerificationError(
                 "the process receipt that proved the criterion was "
-                "invalidated by later workspace activity"
+                f"{INVALIDATED_BY_LATER_WORKSPACE_ACTIVITY}"
                 if invalidated_match
                 else "no exact process receipt proves the criterion"
             )

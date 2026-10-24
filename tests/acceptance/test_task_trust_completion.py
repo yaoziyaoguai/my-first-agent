@@ -2175,7 +2175,7 @@ class _S2ChatProvider:
 class _S2RecoveryProseProvider:
     """S2 P2-2 任务回合 provider：真实自动压缩 + 正反例同回合。
 
-    前置的 5 个 chat 回合 + 小输入预算让生产 plan_compaction 以真实
+    前置的 6 个 chat 回合 + 小输入预算让生产 plan_compaction 以真实
     TOKEN_PRESSURE 触发；summary 批次（tools==() 的 context_summary_input
     pack）按合同回写两个 digest。普通批次：draft → 真实写入 progress.md →
     prose 假完成（完整 coverage、notes.md 从未写）→ 被拒后真实写入

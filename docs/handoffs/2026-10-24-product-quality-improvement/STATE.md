@@ -79,4 +79,6 @@
 
 ## 下一步
 
-第二轮（双裁决修复轮 Q1-Q7）已完成。完整门：`git diff --check` ✅ + `ruff check .` ✅ + 全量 pytest **4157 passed / 1 skipped**（0 失败；较第一轮终态 4146+1F 净增 11 项全绿）。`graphify update .` 已于终版代码后执行（16582 节点 / 74123 边）。按既定模式交付（commit→push→PR→merge gate）。未授权不做的事不变：无真实 provider 调用、无凭据变更、无发布部署。E2/E3 与会话级许可扩展仍等待用户输入。
+第二轮已交付：PR #7（5 commits）merge 到 `main` @ **`e035450`**；完整门 4157 passed / 1 skipped / 0 失败。merge gate 审计 PASS（无 P0/P1）。
+
+**第三轮（merge-gate follow-up）已交付**：审计 P2-1——r12 渲染层标记与 evidence 层错误文案各持字面量（漂移会让重跑提示静默消失）。修复=`INVALIDATED_BY_LATER_WORKSPACE_ACTIVITY` 常量单源（evidence 定义、render 导入、值钉测试；生产者侧由 P1 旅程对真实 POLICY_RESULT 断言钉住）。顺带 LOW-1（quota 行 `expires_at` 过 `terminal_text`）与 LOW-2（旅程 docstring 回合数 5→6）。完整门 **4158 passed / 1 skipped / 0 失败**。审计 LOW-3（r8 测试命名略过度声明）与 LOW-4（r14 代理字段取舍，已文档化）不动。未授权不做的事不变：无真实 provider 调用、无凭据变更、无发布部署。E2/E3 与会话级许可扩展仍等待用户输入。

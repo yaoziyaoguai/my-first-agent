@@ -1413,9 +1413,13 @@ def main(
                     session.disposition
                     is StartupDisposition.HISTORY_CAPACITY_EXCEEDED
                 ):
+                    # P8（2026-10-24 r13）：给出真实出路而不只陈述停止；
+                    # 措辞与 archive 完成后的 restore 提示同风格。
                     write_fn(
                         "Startup stopped: history_capacity_exceeded; existing history "
-                        "was preserved and no new conversation was created."
+                        "was preserved and no new conversation was created. "
+                        "List conversations with first-agent --status, then release "
+                        "capacity with first-agent archive <conversation-id>."
                     )
                     return 2
                 if session.disposition is StartupDisposition.SELECT_REQUIRED:

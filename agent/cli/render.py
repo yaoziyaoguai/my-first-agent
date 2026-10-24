@@ -23,6 +23,7 @@ from agent.runtime.contracts import (
     RuntimeEvent,
     RuntimeEventKind,
 )
+from agent.runtime.evidence import INVALIDATED_BY_LATER_WORKSPACE_ACTIVITY
 from agent.runtime.views import (
     SourceView,
     delivery_summary_message,
@@ -270,7 +271,7 @@ class TerminalRenderer:
         invalidated = any(
             fact.kind is FactKind.POLICY_RESULT
             and fact.content.get("code") == "completion_not_verified"
-            and "invalidated by later workspace activity"
+            and INVALIDATED_BY_LATER_WORKSPACE_ACTIVITY
             in str(fact.content.get("text", ""))
             for fact in state.facts
         )
@@ -548,7 +549,7 @@ class TerminalRenderer:
                     f"Active routine permission: "
                     f"{grant.max_uses - grant.uses_consumed} of "
                     f"{grant.max_uses} model sends left, "
-                    f"expires {grant.expires_at}."
+                    f"expires {terminal_text(grant.expires_at)}."
                 )
                 if any(not source.reusable for source in request.sources):
                     quota += (

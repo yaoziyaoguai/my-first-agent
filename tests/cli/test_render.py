@@ -182,6 +182,20 @@ def test_completed_goal_without_invalidation_has_no_rerun_note() -> None:
     assert all("re-run" not in line for line in output)
 
 
+def test_rerun_note_marker_is_single_sourced_with_evidence_layer() -> None:
+    # merge-gate P2-1（2026-10-24）：渲染层识别「验证失效后已重跑」的子串
+    # 与 evidence 层错误消息共用同一常量（render 导入该常量，不再各持字面量）。
+    # 此处钉常量值不变；真实生产者侧由 P1 旅程
+    # test_write_after_validation_revalidation_completes_goal 对真实
+    # POLICY_RESULT 事实断言同一子串，两侧任一漂移都有测试失败信号。
+    from agent.runtime.evidence import INVALIDATED_BY_LATER_WORKSPACE_ACTIVITY
+
+    assert (
+        INVALIDATED_BY_LATER_WORKSPACE_ACTIVITY
+        == "invalidated by later workspace activity"
+    )
+
+
 def test_completed_goal_renders_authoritative_verification_scope() -> None:
     output: list[str] = []
     renderer = TerminalRenderer(output.append)

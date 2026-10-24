@@ -7,11 +7,21 @@ import hashlib
 from agent.tools.path_safety import WorkspaceBoundary, WorkspaceSecurityError
 
 
+class EditContentConflictError(WorkspaceSecurityError):
+    """old_text 与当前文件内容不精确匹配（文件在模型上次读取后已变化）。
+
+    与路径/权限类拒绝不同：目标路径本身合法，恢复方式是重读文件后基于
+    当前内容重新构造编辑，而不是换路径。
+    """
+
+
 def _updated_content(current: bytes, old_text: str, new_text: str) -> bytes:
     text = current.decode("utf-8", errors="strict")
     count = text.count(old_text)
     if count != 1:
-        raise WorkspaceSecurityError("old_text must occur exactly once")
+        raise EditContentConflictError(
+            "old_text must occur exactly once in the current file content"
+        )
     return text.replace(old_text, new_text, 1).encode("utf-8")
 
 

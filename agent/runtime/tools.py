@@ -339,6 +339,17 @@ class KernelToolRuntime:
                         "was created."
                     ),
                 )
+            if binding.get("reason") == "edit_content_conflict":
+                return self._error(
+                    call.tool_call_id,
+                    "edit_content_conflict",
+                    (
+                        "The file changed since it was last read: old_text does not occur "
+                        "exactly once in the current content. Re-read the file, then re-edit "
+                        "from the current content; nothing was changed. Do not retry the "
+                        "same old_text."
+                    ),
+                )
             if binding.get("reason") == "workspace_file_policy":
                 return self._error(
                     call.tool_call_id,

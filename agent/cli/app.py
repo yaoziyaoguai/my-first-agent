@@ -65,6 +65,11 @@ _PENDING_DISCLOSURE_REFUSAL = (
 _RECOVERY_SUCCEEDED = frozenset({"已成功", "成功", "succeeded", "success"})
 _RECOVERY_FAILED = frozenset({"未成功", "失败", "failed", "failure"})
 _RECOVERY_STOP = frozenset({"先停止", "停止", "stop"})
+# 2026-10-24 P3：这些 CONFLICT 是"当前输入不可受理"而非本地 state 漂移——
+# 未知效果待分类、另一进程持锁。REPL 存活并按 render 的指引继续，不退出。
+_SURVIVABLE_CONFLICT_CODES = frozenset(
+    {"unknown_effect_recovery_required", "conversation_busy"}
+)
 _OBSERVATION_CONTINUE = frozenset({"继续", "continue", "record unknown"})
 _HELP_TEXT = """Commands:
 /new — start a new conversation when no decision is pending
@@ -72,7 +77,8 @@ _HELP_TEXT = """Commands:
 /leases [--advanced] — show active process permissions
 /browser-profiles [list|create|revoke|clear] — manage browser profiles
 /pause, /resume, /cancel — control the current task or run
-/approve <request-id>, /reject <request-id> — resolve an exact approval
+/approve [request-id], /reject [request-id] — resolve an exact approval (without
+  an ID it binds the prompt just shown)
 /approve-goal-target [request-id] — approve the exact file target for the current
   task (without an ID it binds the prompt just shown)
 /approve-goal-directory [request-id] — approve files under an explicit Goal
@@ -80,7 +86,8 @@ _HELP_TEXT = """Commands:
 /approve-artifact <sha256> <workspace-relative-path> — approve an exact artifact
 /ack-provider <digest> — acknowledge an exact provider disclosure
 /revoke-provider-consent — revoke the current conversation provider permission
-/resolve-success <request-id>, /resolve-failed <request-id> — resolve an unknown effect
+/resolve-success [request-id], /resolve-failed [request-id] — resolve an unknown
+  effect (without an ID it binds the prompt just shown)
 /record-observation-unknown — continue after an unknown public observation
 /revoke <lease-id|all> — revoke process permission
 /revoke-goal-target — revoke all current-task file permissions
@@ -229,6 +236,12 @@ def run_repl(
         ):
             renderer.render_provider_consent(result.state)
         if result.status is RunStatus.CONFLICT:
+            # 2026-10-24 P3：恢复边界的合法状态拒绝与另一进程持锁不终止会话
+            # ——本地 state 未漂移，pending 决策仍在；继续循环让用户按指引作答
+            # 或 /exit 干净退出。其余 CONFLICT（CAS 失配、event 重入等）保持
+            # 退出码 2 的 fail-closed 语义。
+            if result.error_code in _SURVIVABLE_CONFLICT_CODES:
+                continue
             return 2
         if result.status is RunStatus.FAILED_FATAL:
             return 1
@@ -428,7 +441,9 @@ def _parse_action(
                 request_id=(argument if separator else None),
                 approval_time_factory=approval_time_factory,
             )
-        if not separator or argument != request.request_id:
+        # P5（2026-10-24）：无参数时绑定刚显示的 pending（与 /approve-goal-target
+        # 的无参语义对齐）；带参数仍必须精确匹配——错误 ID 不许静默重绑。
+        if separator and argument != request.request_id:
             return None, "Use the exact pending request ID."
         return (
             build_resolve_approval(
@@ -458,7 +473,8 @@ def _parse_action(
             return None, "No recovery request is pending."
         if _is_public_observation_recovery(state):
             return None, "Public observation recovery cannot be guessed as success or failure."
-        if not separator or argument != request.request_id:
+        # P5（2026-10-24）：无参数绑定 pending recovery；带参数仍须精确匹配。
+        if separator and argument != request.request_id:
             return None, "Use the exact pending request ID."
         return (
             ResolveUnknownToolOutcome(
@@ -563,6 +579,13 @@ def _parse_action(
         state.active_run is not None
         and state.active_run.status is not ActiveRunStatus.AWAITING_APPROVAL
     ):
+        # P5（2026-10-24）：披露挂起时裸文本既不是业务消息也不是保留命令；
+        # 指明提示实际接受的三个选项，不用"reserved command"误导。
+        if disclosure_pending:
+            return None, (
+                "The pending disclosure expects 'y' (allow once), 's' (allow "
+                "this task's routine scope), or 'n' (do not send)."
+            )
         status = state.active_run.status.value
         return None, f"A run is paused ({status}); use its matching reserved command."
     return SubmitMessage(**common, run_id=make_run_id(), message=raw), None

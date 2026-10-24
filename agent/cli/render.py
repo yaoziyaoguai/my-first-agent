@@ -323,6 +323,23 @@ class TerminalRenderer:
                 return f"{base} ({summary})"
             return base
         if result.status is RunStatus.CONFLICT:
+            # 2026-10-24 P3：CONFLICT 不是同一种失败。恢复边界的状态拒绝与
+            # 另一进程持锁有真实出路，照实指明；其余（CAS 失配、event 重入
+            # 等）保持 fail-closed 的重启指引，由调用方以退出码 2 结束会话。
+            if result.error_code == "unknown_effect_recovery_required":
+                # LOW-2（2026-10-24 审计）：不同恢复子形接受的答复不同
+                #（工具结果 success/failed/stop；公共观察 continue/stop），
+                # 由下方重印的 pending 提示给出权威选项，这里只指路。
+                return (
+                    "That command is not available while an operation outcome is "
+                    "unclassified.\n"
+                    "Answer the pending recovery prompt below to resolve it first."
+                )
+            if result.error_code == "conversation_busy":
+                return (
+                    "Another process is using this conversation; it must finish or "
+                    "exit before commands here can run."
+                )
             return "State conflict: restart or reload this CLI before continuing."
         return None
 
@@ -357,8 +374,8 @@ class TerminalRenderer:
         file_scope, directory_scope = authorization_scopes
         if artifact_path is None and (file_scope is not None or directory_scope is not None):
             # S2：保留原有 [y/N] 与“yes 只批准这一笔”的含义，再增加 f/d
-            # 两个显式复用选项；不适用时不出现，也不猜父目录。
-            lines.append("Execute this operation? [y/N]")
+            # 两个显式复用选项；不适用时不出现，也不猜父目录。问句行已由
+            # 上面的 artifact 分支给出，这里只追加选项，不再重复问句。
             lines.append("Choose one:")
             lines.append("  y  This operation only")
             if file_scope is not None:

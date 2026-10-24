@@ -270,7 +270,8 @@ def test_help_does_not_resolve_or_replace_a_pending_approval() -> None:
     assert exit_code == 0
     assert runtime.actions == []
     assert any("write fixture.txt" in item for item in output)
-    assert any("/approve <request-id>" in item for item in output)
+    # P5（2026-10-24）：无参 /approve 绑定 pending，ID 变为可选（[request-id]）。
+    assert any("/approve [request-id]" in item for item in output)
 
 
 def test_provider_wait_interrupt_exits_cleanly_and_keeps_saved_state() -> None:

@@ -1492,6 +1492,146 @@ def test_user_correction_adds_runtime_obligation_when_model_omits_it(
     assert correction.fact_id in updated.goal.created_from_fact_ids
 
 
+def test_process_correction_mints_obligation_even_with_pending_governed_tool() -> None:
+    """F-C（2026-10-24）：governed-tool 是另一类义务，不得替 process correction 挡铸。
+
+    去重此前按 ``_is_runtime_owned_obligation`` 在 TOOL_RECEIPT 下同时匹配
+    local-process 与 governed-tool 两个前缀：pending governed-tool 义务在场时，
+    用户明示的本地验证要求被静默丢弃——目标可在从未运行任何本地进程的情况
+    下完成（与 E3 过铸死亡螺旋相反方向的欠铸失败模式）。governed-tool receipt
+    不受 F1 进程失效约束，两类判据可同时满足，本就无需互斥去重。
+    """
+
+    correction = ConversationFact(
+        fact_id="fact:user:2",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "另外运行 ./check-report。", "control": "goal_correction"},
+    )
+    goal = _goal(
+        proposed_criteria=(
+            ProposedCriterion(
+                "criterion:file",
+                "reports/final.md contains the requested result",
+                oracle_kind=EvidenceOracleKind.FILESYSTEM_DIGEST,
+                artifact_path="reports/final.md",
+            ),
+            ProposedCriterion(
+                criterion_id="criterion:required-governed-tool:goal:1:1:call-mcp",
+                description="the approved mcp__demo call returns an exact Kernel-governed receipt",
+                oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+            ),
+        ),
+    )
+    state = ConversationState(
+        conversation_id="conversation:correction-governed-tool",
+        facts=(
+            ConversationFact(
+                fact_id="fact:user:1",
+                kind=FactKind.USER_MESSAGE,
+                content={"text": "write reports/final.md"},
+            ),
+            correction,
+        ),
+        goal=goal,
+    )
+    updated = accept_goal_delta_proposal(
+        state,
+        GoalDeltaProposal(
+            correlation_id="delta-governed-tool",
+            delta=GoalDelta(
+                goal_id=state.goal.goal_id,
+                expected_revision=state.goal.revision,
+                reason="apply the user's additional requirement",
+                updates={"targets": list(state.goal.targets)},
+            ),
+        ),
+    )
+
+    assert updated.goal is not None
+    assert any(
+        item.criterion_id.startswith("criterion:required-local-process:")
+        for item in updated.goal.proposed_criteria
+    ), "the user's explicit local-process requirement must be minted"
+    assert any(
+        item.criterion_id == "criterion:required-governed-tool:goal:1:1:call-mcp"
+        for item in updated.goal.proposed_criteria
+    ), "the governed-tool obligation is a different class and must survive"
+
+
+def test_correction_replaces_admitted_process_obligation_without_minting_a_second() -> None:
+    """E3 不变量在第三处铸币点（correction 路径）的锁定（2026-10-24 P2-1 排查）。
+
+    merge-gate 审计担心 correction 去重只扫 proposed 侧、approval-path 已入场
+    义务（id 只存在于 admitted）被绕过而铸出第二条强制 process 判据。实测：
+    correction 的 retained_ids 过滤先把 approval-path 义务 #1 从 admitted 移除
+    （替换语义——「再跑一遍」要求新证据；F1 下旧 receipt 本就可能已被后续
+    写入失效），再铸 pending 提案 #2；端到端批准后目标始终只有一条 process
+    义务（见 test_obligation_rebind 的端到端锁定）。此处锁定 correction 后的
+    中间形状：不得出现两条并存的强制 process 义务（E3 死亡螺旋形状）。
+    """
+
+    correction = ConversationFact(
+        fact_id="fact:user:2",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "再运行一遍测试确认。", "control": "goal_correction"},
+    )
+    admitted_process = AdmittedCriterion(
+        criterion_id="criterion:process-receipt:goal:1:1:call-1",
+        description="approved local_process must produce the exact successful Kernel receipt",
+        source_fact_id="fact:user:1",
+        oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+        predicate={
+            "receipt_kind": "process_v1",
+            "command_fingerprint": "9e" * 32,
+            "outcome": "exited",
+            "exit_code": 0,
+        },
+        required_evidence_class="process_receipt",
+        admission_digest="e" * 64,
+    )
+    state = ConversationState(
+        conversation_id="conversation:correction-process-replace",
+        facts=(
+            ConversationFact(
+                fact_id="fact:user:1",
+                kind=FactKind.USER_MESSAGE,
+                content={"text": "write reports/final.md"},
+            ),
+            correction,
+        ),
+        goal=_goal(admitted_criteria=(_criterion(), admitted_process)),
+    )
+    updated = accept_goal_delta_proposal(
+        state,
+        GoalDeltaProposal(
+            correlation_id="delta-process-replace",
+            delta=GoalDelta(
+                goal_id=state.goal.goal_id,
+                expected_revision=state.goal.revision,
+                reason="apply the user's re-run requirement",
+                updates={"targets": list(state.goal.targets)},
+            ),
+        ),
+    )
+
+    assert updated.goal is not None
+    admitted_process_now = tuple(
+        item
+        for item in updated.goal.admitted_criteria
+        if item.predicate.get("receipt_kind") == "process_v1"
+    )
+    pending_process_now = tuple(
+        item
+        for item in updated.goal.proposed_criteria
+        if item.criterion_id.startswith("criterion:required-local-process:")
+    )
+    assert len(pending_process_now) == 1, "the re-run requirement mints exactly one proposal"
+    assert admitted_process_now == (), "the superseded approval-path obligation is replaced"
+    assert (
+        len(admitted_process_now) + len(pending_process_now) == 1
+    ), "never two coexisting mandatory process obligations (E3 death-spiral shape)"
+
+
 @pytest.mark.parametrize(
     ("correction_text", "oracle_kind", "criterion_prefix"),
     (

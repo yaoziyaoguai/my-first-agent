@@ -123,6 +123,7 @@ from agent.runtime.provider_consent import (
     evaluate_provider_dispatch,
     final_dispatch_expiry_check,
     invalidate_provider_consent,
+    workspace_read_dispatch_notice,
 )
 from agent.runtime.resource_lifecycle import managed_process_receipts
 from agent.runtime.state import (
@@ -1754,6 +1755,18 @@ class AgentRuntime:
                             input_tokens=context.budget.estimated_input_tokens,
                         ),
                     )
+                    if (
+                        disclosure_gate is not None
+                        and disclosure_gate.reason == "grant_workspace_read"
+                    ):
+                        grant_now = attempted.provider_consent_grant
+                        if grant_now is not None:
+                            warnings.append(
+                                workspace_read_dispatch_notice(
+                                    grant_now,
+                                    context.consent_scope,
+                                )
+                            )
                     # S6：校验后跨过到期点，transport 前最后重验；过期即重新
                     # 要求决策，不因已扣次继续发送。
                     expired = final_dispatch_expiry_check(
@@ -2083,6 +2096,19 @@ class AgentRuntime:
                             input_tokens=context.budget.estimated_input_tokens,
                         ),
                     )
+                    if (
+                        disclosure_gate is not None
+                        and disclosure_gate.reason == "grant_workspace_read"
+                    ):
+                        # item 1：r 许可放行的派发逐次附带非阻断审计通知。
+                        grant_now = attempted.provider_consent_grant
+                        if grant_now is not None:
+                            warnings.append(
+                                workspace_read_dispatch_notice(
+                                    grant_now,
+                                    context.consent_scope,
+                                )
+                            )
                     if disclosure_gate is not None:
                         # S6：校验后跨过到期点，transport 前最后重验。
                         expired = final_dispatch_expiry_check(

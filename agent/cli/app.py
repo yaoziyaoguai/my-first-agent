@@ -11,6 +11,7 @@ from agent.cli.actions import (
     build_cancel_goal,
     build_complete_browser_takeover,
     build_grant_provider_consent,
+    build_grant_provider_workspace_read_consent,
     build_pause_goal,
     build_recover_unknown_observation,
     build_resolve_approval,
@@ -283,6 +284,22 @@ def _parse_action(
             return build_grant_provider_consent(state), None
         except ValueError as error:
             return None, str(error)
+    if disclosure_pending and normalized == "r":
+        # item 1（2026-10-24）：读/验证类输出的显式会话许可——常规范围之上
+        # 并入 proof-backed workspace_excerpt；与 s 分开键位，不静默升级。
+        if (
+            state.active_run is None
+            and goal is not None
+            and goal.status is GoalStatus.PAUSED
+        ):
+            return (
+                None,
+                "The task is paused; run /resume before answering the pending disclosure.",
+            )
+        try:
+            return build_grant_provider_workspace_read_consent(state), None
+        except ValueError as error:
+            return None, str(error)
     if disclosure_pending and normalized in _AFFIRMATIVE:
         assert disclosure is not None
         return (
@@ -303,7 +320,7 @@ def _parse_action(
         and state.active_run is None
         and goal is not None
         and goal.status is GoalStatus.PAUSED
-        and (normalized in _AFFIRMATIVE | _NEGATIVE or normalized == "s")
+        and (normalized in _AFFIRMATIVE | _NEGATIVE or normalized in {"s", "r"})
     ):
         # 窄范围 PAUSED 保护：暂停窗口里的裸 yes/no/s 不产生业务消息，先 /resume。
         # S2：有 pending 但选项不适用时给明确错误、零模型/效果，不当作新业务消息。

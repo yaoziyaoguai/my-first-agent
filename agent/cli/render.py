@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from agent.runtime.contracts import (
+    CONSENT_PROFILE_WORKSPACE_READ,
     ActiveRunStatus,
     ApprovalRequest,
     ConversationState,
@@ -24,6 +25,7 @@ from agent.runtime.contracts import (
     RuntimeEventKind,
 )
 from agent.runtime.evidence import INVALIDATED_BY_LATER_WORKSPACE_ACTIVITY
+from agent.runtime.provider_consent import workspace_read_classes_covered
 from agent.runtime.views import (
     SourceView,
     delivery_summary_message,
@@ -525,6 +527,14 @@ class TerminalRenderer:
             lines.append(
                 "  s  unavailable — this request includes a new or unverified source"
             )
+        if (
+            not request.grant_eligible
+            and workspace_read_classes_covered(request.data_classes, request.sources)
+        ):
+            lines.append(
+                "  r  Also allow verified workspace file excerpts in this "
+                "conversation — up to 32 model sends, expires in 60 minutes"
+            )
         lines.append("  n  Do not send")
         lines.append("Enter: do not send")
         if request.grant_eligible:
@@ -545,8 +555,13 @@ class TerminalRenderer:
                 # 决策队列 1（2026-10-24 裁决 C）：逐次披露保留，但活动许可
                 # 在场时明示剩余额度与到期——读/验证类新源反复触发披露时，
                 # 用户能看到常规许可还剩多少、这次为何仍要单独批准。
+                scope_label = (
+                    "read-scope"
+                    if grant.profile == CONSENT_PROFILE_WORKSPACE_READ
+                    else "routine"
+                )
                 quota = (
-                    f"Active routine permission: "
+                    f"Active {scope_label} permission: "
                     f"{grant.max_uses - grant.uses_consumed} of "
                     f"{grant.max_uses} model sends left, "
                     f"expires {terminal_text(grant.expires_at)}."
@@ -589,8 +604,13 @@ class TerminalRenderer:
             )
             return
         left = max(grant.max_uses - grant.uses_consumed, 0)
+        scope_label = (
+            "routine conversation data and verified workspace file excerpts"
+            if grant.profile == CONSENT_PROFILE_WORKSPACE_READ
+            else "routine conversation data"
+        )
         self._write(
-            f"Provider consent active: routine conversation data, {left} of "
+            f"Provider consent active: {scope_label}, {left} of "
             f"{grant.max_uses} model sends left, expires at {terminal_text(grant.expires_at)}. "
             "Revoke: /revoke-provider-consent"
         )

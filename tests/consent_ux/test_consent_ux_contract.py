@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from functools import reduce
 
@@ -38,9 +38,14 @@ from agent.runtime.checkpoint import (
 from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     CONSENT_MAX_USES,
+    CONSENT_PROFILE_ROUTINE,
+    CONSENT_PROFILE_WORKSPACE_READ,
     CONSENT_TTL_SECONDS,
     NO_WORKSPACE_IDENTITY,
+    ROUTINE_DATA_CLASSES,
+    WORKSPACE_READ_DATA_CLASSES,
     AcknowledgeProviderDisclosure,
+    ActionDisposition,
     ActiveRun,
     ActiveRunStatus,
     ApprovalRequest,
@@ -55,11 +60,13 @@ from agent.runtime.contracts import (
     GoalFrame,
     GoalStatus,
     GrantProviderConsent,
+    GrantProviderWorkspaceReadConsent,
     ModelResponse,
     ModelTextBlock,
     ProcessAuthorityCandidateV1,
     ProposedCriterion,
     ProviderConsentGrantStatus,
+    ProviderConsentGrantV1,
     ProviderConsentScopeV1,
     ProviderDescriptor,
     ProviderDisclosureReceiptV2,
@@ -82,6 +89,7 @@ from agent.runtime.provider_consent import (
     grant_availability,
     grant_identity_matches,
     mint_provider_consent_grant,
+    workspace_read_dispatch_notice,
 )
 from agent.runtime.state import (
     accept_action,
@@ -1139,4 +1147,308 @@ def test_consent_ux_r16_numeric_copy_tracks_the_constants() -> None:
     assert (
         TerminalRenderer._consent_unavailable_reason(exhausted_grant)
         == f"all {CONSENT_MAX_USES} model sends used"
+    )
+
+
+# ── item 1（r）：读/验证类输出的会话许可（2026-10-24 用户裁决采纳）──────
+
+
+def _excerpt_scope(
+    *sources: ProviderDisclosureSourceV1,
+    data_classes: tuple[str, ...] | None = None,
+) -> ProviderConsentScopeV1:
+    return _scope(
+        data_classes=data_classes
+        or ("system_policy", "user_messages", "workspace_excerpt"),
+        # scope 合同要求 sources 按 (data_class, boundary_digest, label) 有序。
+        sources=tuple(
+            sorted(
+                sources,
+                key=lambda source: (source.data_class, source.boundary_digest, source.label),
+            )
+        ),
+        routine=False,
+        goal_id="goal-1",
+        goal_revision=1,
+    )
+
+
+def _read_grant(state: ConversationState):
+    return mint_provider_consent_grant(
+        state=state,
+        request=_v2_request(),
+        action_seq=1,
+        now=_T0,
+        profile=CONSENT_PROFILE_WORKSPACE_READ,
+    )
+
+
+def test_consent_ux_r_grant_admits_excerpt_scopes_including_new_sources() -> None:
+    descriptor = _descriptor()
+    base = ConversationState.new("conversation-r")
+    state = replace(base, provider_consent_grant=_read_grant(base))
+
+    def gate(scope, *, run_id="run-1"):
+        return evaluate_provider_dispatch(
+            state=state,
+            descriptor=descriptor,
+            scope=scope,
+            now=_T0,
+            purpose="runtime_progress",
+            run_id=run_id,
+        )
+
+    first = gate(_excerpt_scope(_source("read_file app/main.py")))
+    assert first.admitted and first.grant_use
+    assert first.reason == "grant_workspace_read"
+
+    # 会话级语义本体：同一许可内**新出现**的 excerpt 源也覆盖——这正是
+    # 披露疲劳的来源（真实层 E3 旅程 16-23 次决策的主驱动）。
+    fresh = gate(_excerpt_scope(_source("read_file lib/util.py")), run_id="run-2")
+    assert fresh.admitted and fresh.reason == "grant_workspace_read"
+
+    # 常规 scope 不经 r 分支（通知与语义都按 routine 报告）。
+    assert gate(_scope()).reason == "grant_routine"
+
+
+def test_consent_ux_r_grant_blocks_nonexcerpt_and_nonreusable_classes() -> None:
+    descriptor = _descriptor()
+    base = ConversationState.new("conversation-r")
+    state = replace(base, provider_consent_grant=_read_grant(base))
+
+    def gate(scope):
+        return evaluate_provider_dispatch(
+            state=state,
+            descriptor=descriptor,
+            scope=scope,
+            now=_T0,
+            purpose="runtime_progress",
+            run_id="run-1",
+        )
+
+    # 混入通用 tool_results 类：超出 r 覆盖，回到逐次披露。
+    mixed = _excerpt_scope(
+        _source("read_file app/main.py"),
+        ProviderDisclosureSourceV1(
+            data_class="tool_results",
+            boundary_digest="f" * 64,
+            label="list_files output",
+            reusable=False,
+        ),
+        data_classes=(
+            "system_policy",
+            "tool_results",
+            "user_messages",
+            "workspace_excerpt",
+        ),
+    )
+    mixed_gate = gate(mixed)
+    assert not mixed_gate.admitted and mixed_gate.reason == "decision_required"
+
+    # 不可复用的 workspace_excerpt（无有效 file proof 的形状）同样不覆盖。
+    nonreusable = gate(
+        _excerpt_scope(_source("read_file secret.env", reusable=False))
+    )
+    assert not nonreusable.admitted and nonreusable.reason == "decision_required"
+
+
+def test_consent_ux_r_charge_increments_and_notice_reports_quota() -> None:
+    base = ConversationState.new("conversation-r")
+    state = replace(base, provider_consent_grant=_read_grant(base))
+    scope = _excerpt_scope(_source("read_file app/main.py"), _source("read_file lib/util.py"))
+    gate = evaluate_provider_dispatch(
+        state=state,
+        descriptor=_descriptor(),
+        scope=scope,
+        now=_T0,
+        purpose="runtime_progress",
+        run_id="run-1",
+    )
+    assert gate.admitted
+
+    charged = charge_provider_dispatch(
+        state,
+        gate,
+        descriptor=_descriptor(),
+        scope=scope,
+        purpose="runtime_progress",
+        run_id="run-1",
+        now=_T0,
+    )
+
+    grant = charged.provider_consent_grant
+    assert grant is not None and grant.uses_consumed == 1
+    notice = workspace_read_dispatch_notice(grant, scope)
+    assert "2 workspace file excerpt(s)" in notice
+    assert "31 of 32 model sends left" in notice
+
+
+def test_consent_ux_r_grant_use_burns_pending_exact_receipt() -> None:
+    # r2 B3 同款硬化：r 许可放行时，在场未消费的单次 y 一并烧掉，防 grant
+    # 失效后 exact_receipt 额外放行一次。
+    base = ConversationState.new("conversation-r")
+    scope = _excerpt_scope(_source("read_file app/main.py"))
+    request = _v2_request(scope=scope)
+    state = replace(
+        base,
+        provider_consent_grant=_read_grant(base),
+        provider_disclosure_request=request,
+        provider_disclosure_receipt=ProviderDisclosureReceiptV2(
+            receipt_id="receipt-r",
+            request_digest=request.request_digest,
+            acknowledged_action_seq=2,
+            acknowledged_at=_T0,
+            consumed_at=None,
+        ),
+    )
+    gate = evaluate_provider_dispatch(
+        state=state,
+        descriptor=_descriptor(),
+        scope=scope,
+        now=_T0,
+        purpose="runtime_progress",
+        run_id="run-1",
+    )
+    assert gate.admitted and gate.mark_receipt_consumed
+
+    charged = charge_provider_dispatch(
+        state,
+        gate,
+        descriptor=_descriptor(),
+        scope=scope,
+        purpose="runtime_progress",
+        run_id="run-1",
+        now=_T0,
+    )
+    receipt = charged.provider_disclosure_receipt
+    assert receipt is not None and receipt.consumed_at == _T0
+
+
+def _r_pending_state() -> ConversationState:
+    request = _v2_request(scope=_excerpt_scope(_source("read_file app/main.py")))
+    return replace(
+        ConversationState.new("conversation-r"),
+        active_run=ActiveRun("run-1", status=ActiveRunStatus.AWAITING_DISCLOSURE),
+        provider_disclosure_request=request,
+    )
+
+
+def test_consent_ux_r_cli_parses_and_reducer_mints_workspace_read_grant() -> None:
+    state = _r_pending_state()
+    request = state.provider_disclosure_request
+    assert isinstance(request, ProviderDisclosureRequestV2)
+    assert request.grant_eligible is False
+
+    action, error = _parse_action("r", state, lambda: "run-x")
+    assert error is None
+    assert isinstance(action, GrantProviderWorkspaceReadConsent)
+    assert action.request_digest == request.request_digest
+    assert action.scope_digest == request.scope_digest
+
+    transition = accept_action(state, action, now=_T0)
+    assert transition.disposition is ActionDisposition.ACCEPTED
+    granted = transition.state.provider_consent_grant
+    assert granted is not None
+    assert granted.profile == CONSENT_PROFILE_WORKSPACE_READ
+    assert granted.allowed_data_classes == WORKSPACE_READ_DATA_CLASSES
+    assert granted.max_uses == CONSENT_MAX_USES
+    assert granted.status is ProviderConsentGrantStatus.ACTIVE
+    # 与 s 同一状态形状：pending 披露清空、run 恢复 RUNNABLE。
+    assert transition.state.provider_disclosure_request is None
+    assert transition.state.active_run is not None
+    assert transition.state.active_run.status is ActiveRunStatus.RUNNABLE
+
+
+def test_consent_ux_r_cli_rejects_routine_and_beyond_excerpt_requests() -> None:
+    # 常规可授予的请求上 r 不适用：s 已覆盖，不静默升级。
+    routine_state = _v2_pending_state()
+    action, error = _parse_action("r", routine_state, lambda: "run-x")
+    assert action is None
+    assert error is not None and "already covered by the routine scope" in error
+
+    # 混入不可复用来源的请求上 r 不适用。
+    nonreusable_request = _v2_request(
+        scope=_excerpt_scope(_source("shell stdout", reusable=False))
+    )
+    mixed_state = replace(
+        ConversationState.new("conversation-r"),
+        active_run=ActiveRun("run-1", status=ActiveRunStatus.AWAITING_DISCLOSURE),
+        provider_disclosure_request=nonreusable_request,
+    )
+    action, error = _parse_action("r", mixed_state, lambda: "run-x")
+    assert action is None
+    assert error is not None and "beyond verified workspace file excerpts" in error
+
+
+def test_consent_ux_r_offer_line_shows_only_for_covered_requests() -> None:
+    covered = _v2_request(scope=_excerpt_scope(_source("read_file app/main.py")))
+    offer = TerminalRenderer._disclosure_message(request=covered, grant=None)
+    assert "  r  Also allow verified workspace file excerpts" in offer
+
+    routine = _v2_request()
+    assert "  r  Also allow" not in TerminalRenderer._disclosure_message(
+        request=routine, grant=None
+    )
+
+    nonreusable = _v2_request(
+        scope=_excerpt_scope(_source("shell stdout", reusable=False))
+    )
+    assert "  r  Also allow" not in TerminalRenderer._disclosure_message(
+        request=nonreusable, grant=None
+    )
+
+
+def test_consent_ux_r_numeric_copy_tracks_the_constants() -> None:
+    # r16 同款护栏延伸到 r 文案：数字必须与权威常量同步，调值即红。
+    # 非 routine 覆盖请求上 s 行显示 "unavailable"（无数字），r 行是
+    # 唯一带数字的 offer 行——恰为 1 份即同步。
+    covered = _v2_request(scope=_excerpt_scope(_source("read_file app/main.py")))
+    offer = TerminalRenderer._disclosure_message(request=covered, grant=None)
+    assert offer.count(
+        f"up to {CONSENT_MAX_USES} model sends, "
+        f"expires in {CONSENT_TTL_SECONDS // 60} minutes"
+    ) == 1
+    assert "  r  Also allow verified workspace file excerpts" in offer
+
+
+def test_consent_ux_r_grant_contract_pins_classes_and_rejects_drift() -> None:
+    base = ConversationState.new("conversation-r")
+    grant = _read_grant(base)
+    # profile 与类别集必须恰为 WORKSPACE_READ_DATA_CLASSES（含全部 routine 类）。
+    assert grant.allowed_data_classes == WORKSPACE_READ_DATA_CLASSES
+    assert "workspace_excerpt" in grant.allowed_data_classes
+    issued = datetime.fromisoformat(grant.issued_at.replace("Z", "+00:00"))
+    expires = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
+    assert (expires - issued).total_seconds() == CONSENT_TTL_SECONDS
+
+    # 旧不变量保持：routine grant 不得夹带 workspace_excerpt。
+    payload = asdict(grant)
+    payload["allowed_data_classes"] = list(WORKSPACE_READ_DATA_CLASSES)
+    payload["profile"] = CONSENT_PROFILE_ROUTINE
+    with pytest.raises(ValueError, match="exceed the routine scope"):
+        ProviderConsentGrantV1(**{**payload, "grant_digest": "0" * 64})
+
+    # workspace-read profile 的类别集不接受增删。
+    payload = asdict(grant)
+    payload["allowed_data_classes"] = list(ROUTINE_DATA_CLASSES)
+    with pytest.raises(ValueError, match="must match the workspace-read scope"):
+        ProviderConsentGrantV1(**{**payload, "grant_digest": "0" * 64})
+
+
+def test_consent_ux_r_grant_roundtrips_through_checkpoint_codec(tmp_path) -> None:
+    # schema11 编解码对 r 许可（新 profile + workspace_excerpt 类）保持往返
+    # 相等——旧 checkpoint 的 routine 许可不受影响由 n12 既有覆盖。
+    base = ConversationState.new("conversation-r")
+    state = replace(base, provider_consent_grant=_read_grant(base))
+
+    document = json.loads(_encode_state(state).decode("utf-8"))
+    assert (
+        document["state"]["provider_consent_grant"]["profile"]
+        == CONSENT_PROFILE_WORKSPACE_READ
+    )
+    path = tmp_path / "conversation.json"
+    _write_state(path, state)
+    assert (
+        LocalCheckpointStore(path).load().state.provider_consent_grant
+        == state.provider_consent_grant
     )

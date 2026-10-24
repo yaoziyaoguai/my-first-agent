@@ -13,9 +13,11 @@ from datetime import UTC, datetime, timedelta
 from agent.runtime.contracts import (
     CONSENT_MAX_USES,
     CONSENT_PROFILE_ROUTINE,
+    CONSENT_PROFILE_WORKSPACE_READ,
     CONSENT_TTL_SECONDS,
     NO_WORKSPACE_IDENTITY,
     ROUTINE_DATA_CLASSES,
+    WORKSPACE_READ_DATA_CLASSES,
     ConversationState,
     FactKind,
     ProviderConsentGrantStatus,
@@ -27,6 +29,7 @@ from agent.runtime.contracts import (
     ProviderDisclosureReceiptV2,
     ProviderDisclosureRequest,
     ProviderDisclosureRequestV2,
+    ProviderDisclosureSourceV1,
     ToolDefinition,
     canonical_json_digest,
 )
@@ -42,6 +45,25 @@ CONTROL_SCHEMA_STRUCTURE_DIGEST = canonical_json_digest(
 )
 
 ROUTINE_DATA_CLASS_SET = frozenset(ROUTINE_DATA_CLASSES)
+
+
+def workspace_read_classes_covered(
+    data_classes: tuple[str, ...],
+    sources: tuple[ProviderDisclosureSourceV1, ...],
+) -> bool:
+    """read-scope 许可的准入判据：非常规部分恰为 proof-backed workspace_excerpt。
+
+    只认 reusable 来源（workspace_excerpt 类由 Runtime 持久化 file-source
+    proof 铸造，绑定 goal/revision/workspace/内容 digest）；混入任何其他
+    非常规类（tool_results 等）或不可复用来源都退回逐次披露。
+    """
+
+    nonroutine = set(data_classes) - ROUTINE_DATA_CLASS_SET
+    return (
+        bool(sources)
+        and nonroutine == {"workspace_excerpt"}
+        and all(source.reusable for source in sources)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -500,6 +522,28 @@ def evaluate_provider_dispatch(
                 consume_receipt=False,
                 reason="grant_routine",
             )
+        if (
+            grant.profile == CONSENT_PROFILE_WORKSPACE_READ
+            and workspace_read_classes_covered(scope.data_classes, scope.sources)
+            and _grant_covers_structure(grant, scope)
+        ):
+            # item 1（2026-10-24）：r 许可只放行非常规部分恰为 proof-backed
+            # workspace_excerpt 的 scope；结构（类别/工具绑定）由 grant 覆盖。
+            # 逐次非阻断通知由 Runtime 在扣账后附带（reason 即判别信号）。
+            # 同 r2 B3 硬化：在场未消费的单次 y 随 grant 首用一并烧掉，
+            # 防 grant 失效后 exact_receipt 额外放行一次。
+            pending_receipt = state.provider_disclosure_receipt
+            return ProviderDispatchGateV1(
+                request=candidate,
+                admitted=True,
+                grant_use=True,
+                consume_receipt=False,
+                reason="grant_workspace_read",
+                mark_receipt_consumed=(
+                    isinstance(pending_receipt, ProviderDisclosureReceiptV2)
+                    and pending_receipt.consumed_at is None
+                ),
+            )
         if isinstance(candidate, ProviderDisclosureRequestV2) and _exception_is_covered(
             candidate=candidate,
             state=state,
@@ -671,15 +715,44 @@ def invalidate_provider_consent(state: ConversationState) -> ConversationState:
     )
 
 
+def workspace_read_dispatch_notice(
+    grant: ProviderConsentGrantV1,
+    scope: ProviderConsentScopeV1,
+) -> str:
+    """r 许可放行一次派发后的逐次非阻断审计通知文案。
+
+    裁决 C（2026-10-24）：静默复用必须伴随逐次可见性——每次放行都告诉
+    用户本次重发了多少工作区摘录、额度还剩多少；不打断、不要求决策。
+    """
+
+    excerpt_count = sum(
+        1 for source in scope.sources if source.data_class == "workspace_excerpt"
+    )
+    left = max(grant.max_uses - grant.uses_consumed, 0)
+    return (
+        f"read-scope consent: {excerpt_count} workspace file excerpt(s) "
+        f"re-sent to the provider this send; {left} of {grant.max_uses} "
+        "model sends left"
+    )
+
+
 def mint_provider_consent_grant(
     *,
     state: ConversationState,
     request: ProviderDisclosureRequestV2,
     action_seq: int,
     now: str,
+    profile: str = CONSENT_PROFILE_ROUTINE,
 ) -> ProviderConsentGrantV1:
     """从已显示的 v2 request 铸造许可；调用方已校验 action/CAS。"""
 
+    if profile not in (CONSENT_PROFILE_ROUTINE, CONSENT_PROFILE_WORKSPACE_READ):
+        raise ValueError("provider consent grant profile is unsupported")
+    allowed_classes = (
+        WORKSPACE_READ_DATA_CLASSES
+        if profile == CONSENT_PROFILE_WORKSPACE_READ
+        else ROUTINE_DATA_CLASSES
+    )
     issued = parse_zoned_time(now)
     expires = (issued + timedelta(seconds=CONSENT_TTL_SECONDS)).isoformat().replace(
         "+00:00",
@@ -693,8 +766,8 @@ def mint_provider_consent_grant(
         "provider_descriptor_digest": request.provider_descriptor_digest,
         "canonical_destination": request.canonical_destination,
         "model": request.model,
-        "profile": CONSENT_PROFILE_ROUTINE,
-        "allowed_data_classes": list(ROUTINE_DATA_CLASSES),
+        "profile": profile,
+        "allowed_data_classes": list(allowed_classes),
         "control_schema_digest": request.control_schema_digest,
         "disclosure_request_digest": request.request_digest,
         "scope_digest": request.scope_digest,

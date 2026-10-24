@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 from agent.runtime.compaction_rules import validate_compaction_removal
 from agent.runtime.contracts import (
+    CONSENT_PROFILE_WORKSPACE_READ,
     GOAL_TARGET_AUTHORIZATION_EXPIRY_MINUTES,
     SANDBOX_EXPIRY_MINUTES,
     AbandonUnknownModelOutcome,
@@ -65,6 +66,7 @@ from agent.runtime.contracts import (
     GoalProposal,
     GoalStatus,
     GrantProviderConsent,
+    GrantProviderWorkspaceReadConsent,
     InteractionState,
     InvocationOrigin,
     PauseGoal,
@@ -106,6 +108,7 @@ from agent.runtime.contracts import (
 )
 from agent.runtime.provider_consent import (
     mint_provider_consent_grant,
+    workspace_read_classes_covered,
 )
 from agent.runtime.resource_lifecycle import active_task_resources
 
@@ -1824,6 +1827,64 @@ def grant_provider_consent(
     )
 
 
+def grant_provider_workspace_read_consent(
+    state: ConversationState,
+    action: GrantProviderWorkspaceReadConsent,
+    *,
+    now: str,
+) -> ConversationState:
+    """用户显式选择 r：把当前 v2 request 铸成含工作区读摘录的有限许可。
+
+    与 s 同一 CAS 形状（绑定同一条已显示 request）；差异只在准入判据——
+    request 的非常规部分必须恰为 proof-backed workspace_excerpt——与铸造
+    profile。硬上界/撤销/失效语义与 s 完全一致。
+    """
+
+    request = state.provider_disclosure_request
+    active = state.active_run
+    if (
+        not isinstance(request, ProviderDisclosureRequestV2)
+        or request.request_digest != action.request_digest
+        or request.scope_digest != action.scope_digest
+        or request.grant_eligible
+        or not workspace_read_classes_covered(request.data_classes, request.sources)
+        or state.provider_disclosure_receipt is not None
+    ):
+        raise ValueError(
+            "provider workspace-read consent grant does not match the pending request"
+        )
+    goal = state.goal
+    if active is None:
+        if goal is None or goal.status is not GoalStatus.GOAL_READY:
+            raise ValueError(
+                "provider workspace-read consent grant does not match the pending request"
+            )
+        active_run = ActiveRun(run_id=f"resume-{action.action_seq}")
+    elif active.status is ActiveRunStatus.AWAITING_DISCLOSURE:
+        if goal is not None and goal.status is GoalStatus.NEEDS_AUTHORITY:
+            goal = replace(goal, status=GoalStatus.GOAL_READY)
+        active_run = replace(active, status=ActiveRunStatus.RUNNABLE)
+    else:
+        raise ValueError(
+            "provider workspace-read consent grant does not match the pending request"
+        )
+    grant = mint_provider_consent_grant(
+        state=state,
+        request=request,
+        action_seq=action.action_seq,
+        now=now,
+        profile=CONSENT_PROFILE_WORKSPACE_READ,
+    )
+    return replace(
+        state,
+        goal=goal,
+        active_run=active_run,
+        provider_consent_grant=grant,
+        provider_disclosure_request=None,
+        provider_disclosure_receipt=None,
+    )
+
+
 def revoke_provider_consent(
     state: ConversationState,
     action: RevokeProviderConsent,
@@ -2275,6 +2336,33 @@ def _action_is_legal(state: ConversationState, action: Action) -> tuple[bool, st
             or request.request_digest != action.request_digest
             or request.scope_digest != action.scope_digest
             or not request.grant_eligible
+            or state.provider_disclosure_receipt is not None
+        ):
+            return False, "provider_consent_mismatch"
+        live_match = (
+            active is not None
+            and active.status is ActiveRunStatus.AWAITING_DISCLOSURE
+        )
+        resumable_orphan = (
+            active is None
+            and goal is not None
+            and goal.status is GoalStatus.GOAL_READY
+        )
+        if not (live_match or resumable_orphan):
+            return False, "provider_consent_mismatch"
+        return True, None
+
+    if isinstance(action, GrantProviderWorkspaceReadConsent):
+        request = state.provider_disclosure_request
+        goal = state.goal
+        if _has_unknown_effect(state):
+            return False, "unknown_effect_recovery_required"
+        if (
+            not isinstance(request, ProviderDisclosureRequestV2)
+            or request.request_digest != action.request_digest
+            or request.scope_digest != action.scope_digest
+            or request.grant_eligible
+            or not workspace_read_classes_covered(request.data_classes, request.sources)
             or state.provider_disclosure_receipt is not None
         ):
             return False, "provider_consent_mismatch"
@@ -2838,6 +2926,12 @@ def _apply_action(
         return acknowledge_provider_disclosure(state, action, now=now)
     if isinstance(action, GrantProviderConsent):
         return grant_provider_consent(
+            state,
+            action,
+            now=now or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        )
+    if isinstance(action, GrantProviderWorkspaceReadConsent):
+        return grant_provider_workspace_read_consent(
             state,
             action,
             now=now or datetime.now(UTC).isoformat().replace("+00:00", "Z"),

@@ -1459,6 +1459,14 @@ ROUTINE_DATA_CLASSES = (
     "user_messages",
 )
 
+# item 1（2026-10-24 用户裁决采纳）：读/验证类输出的会话级许可。只并入
+# proof-backed 的 workspace_excerpt——该类来源由 Runtime 持久化的
+# ProviderFileSourceProofV1 绑定 goal/revision/workspace/内容 digest 且
+# reusable=True；list/search 等通用 tool 输出（tool_results）与 summary
+# 类不随之扩，仍逐次披露。
+CONSENT_PROFILE_WORKSPACE_READ = "routine_workspace_read_v1"
+WORKSPACE_READ_DATA_CLASSES = (*ROUTINE_DATA_CLASSES, "workspace_excerpt")
+
 
 class ProviderConsentGrantStatus(StrEnum):
     ACTIVE = "active"
@@ -2150,12 +2158,17 @@ class ProviderConsentGrantV1:
         ):
             if not getattr(self, name):
                 raise ValueError(f"provider consent grant {name} must not be empty")
-        if self.profile != CONSENT_PROFILE_ROUTINE:
+        if self.profile not in (CONSENT_PROFILE_ROUTINE, CONSENT_PROFILE_WORKSPACE_READ):
             raise ValueError("provider consent grant profile is unsupported")
         object.__setattr__(self, "allowed_data_classes", tuple(self.allowed_data_classes))
         if tuple(sorted(set(self.allowed_data_classes))) != self.allowed_data_classes:
             raise ValueError("provider consent grant classes must be sorted and unique")
-        if not set(self.allowed_data_classes).issubset(ROUTINE_DATA_CLASSES):
+        if self.profile == CONSENT_PROFILE_WORKSPACE_READ:
+            if self.allowed_data_classes != WORKSPACE_READ_DATA_CLASSES:
+                raise ValueError(
+                    "provider consent grant classes must match the workspace-read scope"
+                )
+        elif not set(self.allowed_data_classes).issubset(ROUTINE_DATA_CLASSES):
             raise ValueError("provider consent grant classes exceed the routine scope")
         object.__setattr__(self, "tool_bindings", tuple(self.tool_bindings))
         tool_names = tuple(binding.name for binding in self.tool_bindings)
@@ -5488,6 +5501,24 @@ class GrantProviderConsent(RuntimeAction):
     def __post_init__(self) -> None:
         if not self.request_digest or not self.scope_digest:
             raise ValueError("provider consent grant action must bind request and scope")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GrantProviderWorkspaceReadConsent(RuntimeAction):
+    """用户显式选择 r：常规范围之上并入 proof-backed 工作区读摘录。
+
+    与 s 的区别只在覆盖类别（workspace_excerpt）；硬上界（次数/TTL）、
+    撤销与失效语义与 s 完全一致。不扩 tool_results 等通用类，不跨会话。
+    """
+
+    request_digest: str
+    scope_digest: str
+
+    def __post_init__(self) -> None:
+        if not self.request_digest or not self.scope_digest:
+            raise ValueError(
+                "provider workspace-read consent action must bind request and scope"
+            )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

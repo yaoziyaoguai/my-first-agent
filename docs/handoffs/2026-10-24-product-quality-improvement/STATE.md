@@ -102,3 +102,20 @@ PR #7（5 commits）merge 到 `main` @ **`e035450`**；完整门 4157 passed / 1
 | 会话级许可（item 1） | 方向已定（有界例行许可+逐次非阻断通知）；真实层测量数据点：单次 E3 旅程 23 次披露决定；源构成分类与 grant 类别实现为下一包 | ⏳ 设计已定，实现待做 |
 
 真实层证据目录：`~/.local/share/first-agent/previews/quality-20261024/real-validation-2026-10-24{,b}/`（b=修复后复跑）。复现探针：`/Users/jinkun.wang/.cache/mfa-e3r/`。未授权不做的事不变：无真实 provider 调用、无凭据变更、无发布部署。E2/E3 与会话级许可扩展仍等待用户输入。
+
+## 第五轮（PR #9 merge + 审计 P2-1 复核 + F-C 修复，2026-10-24 晚）
+
+**PR #9 交付**：merge-gate 审计 PASS（无 P0/P1；1×P2 follow-up + 2×LOW）→ merge `2cc22ca`（分支已删）。
+
+**P2-1 复核（探针实测，结论与审计不符）**：审计称 correction 路径仍可铸出第二条不同指纹强制 process 判据重现死亡螺旋。实测（`probe_p21.py` 端到端）：correction 的 `retained_ids` 过滤会**先**把 approval-path 已入场义务 #1（id 只存在于 admitted）从 admitted 移除（替换语义——「再跑一遍」要求新证据），再铸 pending 提案 #2；批准不同指纹命令后最终**只有一条** process 义务（可满足）。死亡螺旋形状在 correction 路径构造上不可达（#1 幸存 retained_ids 过滤 ⟺ #1 ∈ proposed ⟹ 去重命中 ⟹ 不铸 #2）。已用两个测试锁定该不变量（中间形状 + 端到端），防未来回归。
+
+**F-C（复核中发现的真实缺陷，已修复）**：correction required 去重沿 `_is_runtime_owned_obligation` 在 TOOL_RECEIPT 下同时匹配 `required-local-process` 与 `required-governed-tool` 两个前缀——pending governed-tool 义务在场时，用户明示的 process correction **静默不铸**（`probe_fc.py` 证实），验证要求失去强制（与 E3 过铸死亡螺旋相反方向的欠铸失败模式）。governed-tool receipt 不受 F1 进程失效约束，两类判据本可同时满足，无需互斥去重。修复=新增 `_REQUIRED_RUNTIME_OBLIGATION_PREFIXES`（按 effect 类取同类前缀，TOOL_RECEIPT 下只认 local-process）。
+
+**LOW-1（已修）**：主 manifest 与 locked 镜像的 `model` 同步此前无测试钉住（漂移只会在真实派发准入 pin 处 fail-closed）；freeze 测试补 `locked["model"] == manifest["model"]` 断言。
+
+| 项 | 内容 | 状态 |
+| --- | --- | --- |
+| P2-1 复核 | 探针实测推翻审计机制（retained_ids 先 drop #1，终态单义务）；测试锁定 correction 路径的 E3 不变量（`test_correction_replaces_admitted_process_obligation_without_minting_a_second` + `test_correction_replaced_obligation_admits_single_process_criterion`） | ✅ 复核+锁定 |
+| F-C 修复 | `_REQUIRED_RUNTIME_OBLIGATION_PREFIXES` 同类前缀去重；governed-tool 不再挡铸 process 义务 | ✅ Red→Green（`test_process_correction_mints_obligation_even_with_pending_governed_tool`） |
+| LOW-1 | freeze 测试钉主/locked manifest model 同步 | ✅ |
+| item 1 测量 | 真实层旅程工具构成：读/验证类调用占 68-77%（E1 13/19、E2 19/28、E3 10/13，read_file 8/14/7 为主）；`workspace_excerpt`（file-proof、reusable=True、goal+workspace+digest 绑定）为最强分类；list/search 输出落 generic `tool_results` 类（reusable=False）。read-scope grant 定为只覆盖 proof-backed 的 `workspace_excerpt`（Option A），list/search 留后续 | ✅ 测量完成，设计定稿 |

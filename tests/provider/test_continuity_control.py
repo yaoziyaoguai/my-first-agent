@@ -2528,6 +2528,124 @@ def test_c2_strict_rejection_prefix_healed_history_projects_paired() -> None:
     assert "superseded" in tool_messages[1]["content"]
 
 
+def test_c2_healed_orphan_survives_disk_reopen_and_projects_paired_wire(
+    tmp_path: Path,
+) -> None:
+    """C2 跨层（P2-3）：孤儿严格拒绝 prefix 落盘后投影 fail closed，
+    accept_action 自愈经真实 CAS 持久化、新 store 实例重开后 wire 精确成对。
+
+    与 in-memory 版（test_c2_strict_rejection_prefix_…）的区别：本旅程证明
+    自愈结果跨过 checkpoint 编码/落盘/reopen 边界后依然成立——这是重启、
+    crash-recovery 场景实际走的路径。
+    """
+
+    from agent.runtime.checkpoint import LocalCheckpointStore
+    from agent.runtime.contracts import ActionDisposition
+    from agent.runtime.state import accept_action
+    from tests.kernel.fakes import conversation_with_active_goal
+
+    seed = conversation_with_active_goal()
+    batch = ConversationFact(
+        fact_id="run:run-disk:tool-batch:10",
+        kind=FactKind.TOOL_CALLS,
+        content={
+            "calls": [
+                {"tool_call_id": "wire-call-1", "name": "write_fixture", "arguments": {}},
+                {"tool_call_id": "wire-call-2", "name": "write_fixture", "arguments": {}},
+            ]
+        },
+    )
+    strict_rejection = ConversationFact(
+        fact_id="run:run-disk:tool-result:wire-call-1:11",
+        kind=FactKind.TOOL_RESULT,
+        content={
+            "tool_call_id": "wire-call-1",
+            "text": "User rejected the requested tool action.",
+            "is_error": True,
+            "executed": False,
+            "rejected": True,
+        },
+    )
+    orphan = replace(seed, facts=(*seed.facts, batch, strict_rejection))
+
+    def _build_and_project(state: ConversationState, run_id: str) -> list[dict]:
+        context = KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=20_000, output_reserve=500),
+        ).build(
+            state,
+            SubmitMessage(
+                conversation_id=state.conversation_id,
+                action_seq=state.next_action_seq,
+                expected_revision=state.revision,
+                run_id=run_id,
+                message="继续",
+            ),
+            (),
+        )
+        return context_to_openai_messages(context)
+
+    def _persist(path: Path, state: ConversationState) -> None:
+        """真实落盘：首建 initialize，更新用既有 store；lease → CAS → close。"""
+        if path.exists():
+            store = LocalCheckpointStore(path)
+        else:
+            store = LocalCheckpointStore.initialize(path, state)
+        lease = store.try_acquire(state.conversation_id)
+        assert lease is not None
+        try:
+            store.compare_and_swap(store.load(), state)
+        finally:
+            lease.release()
+
+    path = tmp_path / "state" / "checkpoint.json"
+
+    # 负例：未自愈的孤儿状态落盘重开后，真实投影 fail closed。
+    _persist(path, orphan)
+    reopened_orphan = LocalCheckpointStore(path).load().state
+    with pytest.raises(
+        ProviderProtocolError, match="invalid_tool_message_continuity"
+    ):
+        _build_and_project(reopened_orphan, "run-disk-neg")
+
+    # 自愈：严格拒绝 prefix 的孤儿 call 补上同 CAS 闭合的 superseded suffix。
+    healed = accept_action(
+        reopened_orphan,
+        SubmitMessage(
+            conversation_id=reopened_orphan.conversation_id,
+            action_seq=reopened_orphan.next_action_seq,
+            expected_revision=reopened_orphan.revision,
+            run_id="run-disk-next",
+            message="继续",
+        ),
+    )
+    assert healed.disposition is ActionDisposition.ACCEPTED
+    healed_suffix = [
+        fact.content["tool_call_id"]
+        for fact in healed.state.facts
+        if fact.content.get("superseded") is True
+    ]
+    assert healed_suffix == ["wire-call-2"]
+
+    # 自愈结果经真实 CAS 持久化后，由新的 store 实例重开（非同进程缓存）。
+    _persist(path, healed.state)
+    reopened_healed = LocalCheckpointStore(path).load().state
+
+    messages = _build_and_project(reopened_healed, "run-disk-after")
+    assistant = next(message for message in messages if message.get("tool_calls"))
+    assert [call["id"] for call in assistant["tool_calls"]] == [
+        "wire-call-1",
+        "wire-call-2",
+    ]
+    tool_messages = [message for message in messages if message.get("role") == "tool"]
+    assert [message["tool_call_id"] for message in tool_messages] == [
+        "wire-call-1",
+        "wire-call-2",
+    ]
+    assert tool_messages[0]["content"] == "User rejected the requested tool action."
+    assert "superseded" in tool_messages[1]["content"]
+
+
 def test_c2_missing_or_duplicate_results_are_rejected_by_the_real_projection() -> None:
     """C2 负例：缺失或重复结果被真实 OpenAI 投影 fail closed，绝不发上游。"""
 

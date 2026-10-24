@@ -151,6 +151,28 @@ def test_archive_rejects_active_or_stale_conversation_without_removal(
         state_root=state_root,
         conversation_id_factory=lambda: active_id,
     )
+    # r8（2026-10-24）：空闲 chat 本身可归档了；负例改用非终态 Goal 会话
+    # ——有未完成任务的会话仍必须拒绝归档。
+    assert active.store is not None and active.snapshot is not None
+    active_lease = active.store.try_acquire(active_id)
+    assert active_lease is not None
+    try:
+        source = ConversationFact(
+            fact_id=f"user:{active_id}",
+            kind=FactKind.USER_MESSAGE,
+            content={"text": "unfinished task"},
+        )
+        with_goal = create_goal(
+            replace(active.snapshot.state, facts=(source,)),
+            _goal(
+                goal_id=f"goal:{active_id}",
+                workspace_identity_digest=active.workspace_identity.identity_digest,
+                created_from_fact_ids=(source.fact_id,),
+            ),
+        )
+        active.store.compare_and_swap(active.snapshot, with_goal)
+    finally:
+        active_lease.release()
     with pytest.raises(ValueError, match="terminal"):
         preview_workspace_archive(
             workspace,
@@ -284,3 +306,69 @@ def test_restore_rejects_corrupt_archive_without_recreating_checkpoint(
         )
 
     assert not opened.checkpoint_path.exists()
+
+
+def test_idle_bound_chat_is_archivable_releases_capacity_and_restores(
+    tmp_path: Path,
+) -> None:
+    """r8（2026-10-24 双轨裁决 A）：无 Goal 的空闲 chat 是可归档的已结束会话。
+
+    归档可逆（restore）；"永久 active 不可归档"只造成 256 容量墙与
+    选择器摩擦。边界不变：仍持有未收口工作（active run/pending 决策/
+    租约/授权）的会话不可归档。
+    """
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state"
+    chat_id = "00000000-0000-4000-8000-000000000201"
+    opened = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: chat_id,
+        max_history_checkpoints=2,
+        max_candidates=2,
+        force_new=True,
+    )
+    assert opened.store is not None and opened.snapshot is not None
+    assert opened.snapshot.state.goal is None
+    chat_snapshot = opened.snapshot
+
+    preview = preview_workspace_archive(
+        workspace,
+        conversation_id=chat_id,
+        state_root=state_root,
+        max_history_checkpoints=2,
+    )
+    assert preview.goal_status is None
+    assert preview.user_outcome is None
+    record = archive_workspace_session(
+        workspace,
+        conversation_id=chat_id,
+        expected_checkpoint_digest=preview.checkpoint_digest,
+        state_root=state_root,
+        max_history_checkpoints=2,
+    )
+    assert record.source_checkpoint_digest == chat_snapshot.token
+
+    # 容量真实释放：归档后可再开新会话（此前该 chat 永久占据容量墙）。
+    created = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        force_new=True,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000202",
+        max_history_checkpoints=2,
+        max_candidates=2,
+    )
+    assert created.disposition is StartupDisposition.CREATED
+
+    # 归档可逆：chat 会话原样恢复。
+    restored = restore_workspace_session(
+        workspace,
+        conversation_id=chat_id,
+        source_checkpoint_digest=record.source_checkpoint_digest,
+        state_root=state_root,
+        max_history_checkpoints=2,
+    )
+    assert restored.snapshot is not None
+    assert restored.snapshot.state.goal is None

@@ -10,15 +10,18 @@ from agent.runtime.contracts import (
     ApprovalRequest,
     ArtifactConfirmationRequirementV1,
     ContinuationPhase,
+    ConversationFact,
     ConversationState,
     ExecutingIntentRecord,
     ExecutionAuthorityClass,
+    FactKind,
     GoalFrame,
     GoalStatus,
     ProcessAuthorityCandidateV1,
     ProposedCriterion,
     ProviderDisclosureReceipt,
     ProviderDisclosureRequest,
+    RecordedRunResult,
     RecoveryRequest,
     RunResult,
     RunStatus,
@@ -27,7 +30,10 @@ from agent.runtime.contracts import (
     SideEffectClass,
     ToolCall,
 )
-from tests.kernel.fakes import conversation_with_terminal_goal
+from tests.kernel.fakes import (
+    conversation_with_active_goal,
+    conversation_with_terminal_goal,
+)
 
 
 def _event(kind: RuntimeEventKind, *, event_id: str = "event-1", payload=None):
@@ -120,6 +126,60 @@ def test_verification_scope_message_does_not_overclaim_semantic_correctness() ->
     assert "exact current bytes of report.csv" in message
     assert "approved local process exited with code 0" in message
     assert "does not independently establish numerical or semantic correctness" in message
+
+
+def test_completed_goal_notes_invalidation_rerun_once() -> None:
+    # r12（2026-10-24）：「写→验证→再写→重验」此前对用户完全不可见。
+    # 验证被后续 workspace 变更失效过（completion_not_verified + invalidation
+    # 文案的事实在场）且最终 VERIFIED_DONE 时，向用户明示发生过重跑；
+    # 无失效事实的普通完成不得出现该提示；同一 goal 只提示一次。
+    invalidated = replace(
+        conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE),
+        facts=(
+            *conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE).facts,
+            ConversationFact(
+                fact_id="run:run-1:policy:9",
+                kind=FactKind.POLICY_RESULT,
+                content={
+                    "code": "completion_not_verified",
+                    "text": (
+                        "the process receipt that proved the criterion was "
+                        "invalidated by later workspace activity"
+                    ),
+                },
+            ),
+        ),
+        revision=9,
+    )
+    output: list[str] = []
+    renderer = TerminalRenderer(output.append)
+    renderer.render_result(
+        RunResult(RunStatus.COMPLETED, invalidated, message="The report is ready.")
+    )
+    rerun_lines = [line for line in output if "re-run" in line]
+    assert len(rerun_lines) == 1
+    assert "invalidated by later workspace changes" in rerun_lines[0]
+
+    # 后续同 goal 的追问回合不重复提示。
+    renderer.render_result(
+        RunResult(RunStatus.COMPLETED, invalidated, message="Follow-up answer.")
+    )
+    assert [line for line in output if "re-run" in line] == rerun_lines
+
+
+def test_completed_goal_without_invalidation_has_no_rerun_note() -> None:
+    output: list[str] = []
+    renderer = TerminalRenderer(output.append)
+
+    renderer.render_result(
+        RunResult(
+            RunStatus.COMPLETED,
+            conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE),
+            message="The report is ready.",
+        )
+    )
+
+    assert all("re-run" not in line for line in output)
 
 
 def test_completed_goal_renders_authoritative_verification_scope() -> None:
@@ -783,3 +843,30 @@ def test_render_pending_scoped_approval_prints_question_once() -> None:
 
     prompt = output[0]
     assert prompt.count("Execute this operation? [y/N]") == 1
+
+
+def test_pending_limit_prompt_keeps_budget_exhaustion_guidance_across_restart() -> None:
+    """r14（2026-10-24 双轨裁决 A′）：预算耗尽暂停的原因随 checkpoint 持久化
+    在 last_safe_result.error_code；重启后的 pending 提示必须沿用同会话的
+    正确出路（提高 --max-model-attempts），不得退回误导性的 /resume。
+    """
+
+    state = replace(
+        conversation_with_active_goal("conversation-budget"),
+        active_run=ActiveRun(
+            "run-1",
+            status=ActiveRunStatus.PAUSED_LIMIT,
+            phase=ContinuationPhase.MODEL,
+        ),
+        last_safe_result=RecordedRunResult(
+            status=RunStatus.LIMIT_REACHED,
+            run_id="run-1",
+            error_code="model_attempt_budget_exhausted",
+        ),
+    )
+    output: list[str] = []
+    TerminalRenderer(output.append).render_pending(state)
+
+    prompt = output[0]
+    assert "--max-model-attempts" in prompt
+    assert "/resume cannot send new model requests" in prompt

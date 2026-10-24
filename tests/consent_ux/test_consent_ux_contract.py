@@ -1049,6 +1049,43 @@ def test_consent_ux_s2_disclosure_render_shows_options_and_legacy_stays_plain() 
     assert "Allow routine conversation data" not in legacy_message
 
 
+def test_consent_ux_s2_disclosure_with_active_grant_shows_remaining_quota() -> None:
+    # 决策队列 1（2026-10-24 双轨裁决 C）：保持逐次披露，不扩大静默授权；
+    # 活动许可在场时披露文案必须带剩余额度与到期时间——读/验证类新源
+    # 逐次披露的场景下，用户能看到常规许可还剩多少、为何这次仍要问。
+    state = ConversationState.new("conversation-1")
+    # 真实当前时间铸造：_disclosure_message 的可用性判定用真实时钟，
+    # 固定 _T0 会把许可判成已过期（走 unavailable 分支）。
+    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    grant = mint_provider_consent_grant(
+        state=state, request=_v2_request(), action_seq=1, now=now
+    )
+    partially_used = grant
+    for _ in range(17):
+        partially_used = partially_used.with_use()
+
+    message = TerminalRenderer._disclosure_message(
+        request=_v2_request(
+            scope=_scope(sources=(_source("test output", reusable=False),))
+        ),
+        grant=partially_used,
+    )
+
+    assert "15 of 32 model sends left" in message
+    assert partially_used.expires_at in message
+    assert "not covered" in message
+
+    exhausted_grant = grant
+    for _ in range(grant.max_uses):
+        exhausted_grant = exhausted_grant.with_use()
+    exhausted = TerminalRenderer._disclosure_message(
+        request=_v2_request(),
+        grant=exhausted_grant,
+    )
+    assert "all 32 model sends used" in exhausted
+    assert "model sends left" not in exhausted
+
+
 def test_consent_ux_s2_render_provider_consent_reports_remaining_and_revoke() -> None:
     state = ConversationState.new("conversation-1")
     grant = mint_provider_consent_grant(

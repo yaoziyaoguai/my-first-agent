@@ -37,14 +37,28 @@
 | P8 | r6+r1(README)+r13 | A文档+B文案 | 指引错误小集：README wheel 构建无 build/ 残留防呆（已删模块仍打进 wheel，RESULTS 已实证机制）；README `--state-root /tmp/...` 示例在 macOS 必败（symlink 合同拒绝）；history_capacity_exceeded 文案不给 --status/archive 解法 | ✅ 已完成：README wheel 块加 `rm -rf build first_agent.egg-info` 防呆+成因注释；`--state-root` 示例改 `$HOME/first-agent-dev-state` 并注明 /tmp symlink fail-closed 原因；capacity 文案追加 `--status` 列表 + `archive <id>` 释放路径（与 restore 提示同风格）。验证：ruff + continuity 20 passed + main import OK；消息文本无测试钉死（disposition 测试不钉文案），test_016 打包清理测试为可选项未做（需在测试里调 pip wheel，成本不成比例） |
 
 不实施、留记录/决策：
-- r8（chat 会话永久 active 不可归档→重启选择器摩擦+256 容量墙）→ 决策队列：涉及 retire 语义/选择器 new 出口设计取舍，推荐方向=空闲 chat 视为非 active 或放开空闲归档，需用户选向。
-- r10（edit 冲突失败误导为路径卫生问题）→ 候补（P 系列如有余力再做）。
-- r12（验证失效重跑对用户不可见，与 P1 复合）→ 候补；P1 修复后仍有透明度缺口。
-- r14（预算耗尽暂停原因未落盘，重启后仍推荐注定失败的 /resume）→ 决策队列：修复需 ActiveRun schema 变更（触碰持久化兼容边界）。
-- r16（consent/lease 数值 10+ 同步点无失败信号）→ 决策队列附注：调值（已排期）时同步实施插值化。
+- r16（consent/lease 数值 10+ 同步点无失败信号）→ 裁决 B 维持延后：调值（已排期）时同步实施插值化。
 - S3（8 个子包 __init__ 再导出约 56 名零消费者）→ 低价值，不动，仅记录。
 
-关键复现产物：`/tmp/mfa-improve/j4/drive_j4_brick.py`（P1 场景）、`/tmp/mfa-improve/j3/probe_prose_escape.py`（P2）、`/tmp/mfa-improve/verify/`（复核探针）。
+第一轮复现产物：`/tmp/mfa-improve/j4/drive_j4_brick.py`（P1 场景）、`/tmp/mfa-improve/j3/probe_prose_escape.py`（P2）、`/tmp/mfa-improve/verify/`（复核探针）。
+
+## 第二轮（合并后双裁决修复轮，2026-10-24）
+
+- 第一轮 18 文件改动经 PR #6（7 commits）merge 到 `main` @ **`f084c9c`**。
+- 双裁决（oracle_web 位置 4/5，9m33s + 本地独立收敛）对第一轮全部开放决策逐项裁决，收敛结果：披露疲劳 → **C+keep-open**（改善额度提示，会话级许可扩展仍需用户明示）；r8 空闲 chat 归档 / r14 预算暂停出路 / r10 edit 冲突误导 / r12 重跑不可见 → **全部 A 修复**（r14 取渲染层路线，无 schema 变更）；r16 插值化 → **B 延后**；E2/E3 真实层 → **维持 BLOCKED**；追加 S1（STATE.md 记录 merge SHA）与 S2（P2-2/P2-3 跨层测试）。
+- 修复队列（Q1→Q7）全部完成：
+
+| 项 | 裁决 | 内容（根因） | 状态 |
+| --- | --- | --- | --- |
+| Q1 r8 | A | 无 Goal 的空闲 chat 会话永久 active 不可归档（`_require_user_archive_eligible` 要求 goal 非 None 且终态）→ 256 容量墙+选择器摩擦。修复=无 Goal 也视为已结束（归档可逆；有 Goal 仍须终态）；`SessionArchivePreview.goal_status/user_outcome` 放开为 `None`；CLI 预览显示 "chat conversation" | ✅ Red（空闲 chat 归档被拒）→Green；continuity+cli 套件绿 |
+| Q2 r14 | A | 预算耗尽暂停在 `--status` 仍推荐注定失败的 /resume。渲染层读取已持久化的 `last_safe_result.error_code == "model_attempt_budget_exhausted"` 分派出路（同 ledger 提高 `--max-model-attempts` 重启）；无 schema 变更、不触持久化兼容边界 | ✅ cli 套件绿 |
+| Q3 r10 | A | edit old_text 失配被归类为路径卫生拒绝（workspace_file_denied），恢复指引误导（换路径而非重读文件）。修复=新 `EditContentConflictError`（继承 WorkspaceSecurityError）经 safe_binding 单独归类 `edit_content_conflict`，dispatch 文案改为「文件已变化：重读后基于当前内容重编辑；勿重试同一 old_text」 | ✅ Red（冲突文案含 "absolute"/路径卫生误导）→Green；tools 64 passed |
+| Q4 r12 | A | 验证失效后自动重跑对用户不可见（与 P1 复合的透明度缺口）。修复=render 层 `_invalidation_rerun_note`：状态流中存在 "invalidated by later workspace activity" 的 completion_not_verified POLICY_RESULT 时，VERIFIED_DONE 渲染一次性补注「先前验证被后续工作区变更失效并已重跑」（按 goal_id+revision 去重） | ✅ Red→Green ×2（有/无失效无错注）；cli 套件绿 |
+| Q5 item1C | C | 活跃 routine 许可剩余额度在披露文案中不可见。修复=grant 可用（未过期）时披露消息显示 "N of M model sends left, expires …"；含 this-pending-content-only 源时追加不受覆盖提示；耗尽显示 "all M model sends used"。会话级许可范围扩展仍 keep-open | ✅ consent_ux 套件绿（17 次 with_use 链真实铸造） |
+| Q6 S2 | — | P2-2：W1 文件交付 × 自动压缩恢复旅程——6 轮长 chat（触发真实 TOKEN_PRESSURE 压缩+CONTEXT_SUMMARY 事实）后提交文件任务，恢复后 prose 假完成在控制门被拒（artifact criterion must be admitted），notes.md 未落盘，义务存活；批准后真实写入+读回+claim → VERIFIED_DONE。关键机制事实：全部读回必须晚于最后一次写入（晚写使早读失效）。P2-3：healed fact × 磁盘重开 × wire 投影——孤儿严格拒绝 prefix 落盘重开后真实投影 fail closed（invalid_tool_message_continuity），accept_action 自愈经真实 CAS 持久化、新 store 实例重开后 wire 精确成对（闭合 in-memory 版未覆盖的重启路径） | ✅ acceptance 17 passed；continuity_control 146 passed |
+| Q7 S1 | — | 本节：记录 merge SHA `f084c9c` 与第二轮全量证据 | ✅ 本文件 |
+
+关键复现产物：`/tmp/mfa-improve/s2/`（S2 旅程探针集，~15 个：run 终止矩阵、压缩触发、pinned 成本测量、证据失效序）。
 
 ## 已完成（本轮）
 
@@ -53,17 +67,16 @@
 
 ## 已知开放项（无新证据不重审）
 
-- E2/E3 真实层：BLOCKED_UPSTREAM_MODEL_RETIRED / 凭据 401（需用户提供有效 key 或换模型授权）。
-- 读/验证类输出发送逐次披露疲劳（实测 16 次/小任务）：2026-10-23 consent 合同接受的边界；扩大静默复用范围需用户裁决。
-- P2-2/P2-3 覆盖缺口（W1 复验×wire continuity、healed fact×投影链路）。
+- E2/E3 真实层：BLOCKED_UPSTREAM_MODEL_RETIRED / 凭据 401（需用户提供有效 key 或换模型授权）。双裁决维持 BLOCKED。
+- 读/验证类输出发送逐次披露疲劳（实测 16 次/小任务）：item1C 已补额度/剩余/过期提示；扩大静默复用范围（会话级许可）仍需用户裁决。
 - TUI 恢复外发确认显示缺口（TUI 非日用入口）；`/compact`、`/context` 未实现（已文档化）；Scheduler `needs_019_config`（设计内）。
 
 ## 决策队列（需要用户裁决）
 
-1. 读/验证类输出是否纳入会话级许可（降 16 次/任务披露疲劳）——涉及数据外发范围扩大，建议方向：保持逐次披露但改善文案中的额度/剩余提示；是否扩展 `s` 范围需用户明示。
+1. 读/验证类输出是否纳入会话级许可（降披露疲劳）——裁决 C+keep-open：保持逐次披露，文案已按建议补额度/剩余/过期提示（Q5）；是否扩展 `s` 静默复用范围需用户明示。
 2. E2/E3 真实层补跑：需有效凭据或新模型授权（候选 `deepseek-flash`/`deepseek-v4-pro`）。
 3. `result.phase.json`（仓库根、未跟踪、用户产物，本轮按授权保留未动）：终审提示疑似 harness 散落产物，若未来 commit 需先确认归属再清理。
 
 ## 下一步
 
-**无待办。** 活动按第九节标准完成：核心旅程/链路覆盖（P1-P8 对应全部 4-6 旅程的审计与修复）、授权内高价值问题全部处理、最终候选完整验证（两轮全量门）、遗留取舍/决策队列/未验证范围如实交接。工作树 18 文件改动 + 本目录记录未 commit（未授权），待用户处置：审阅 diff → 自行 commit 或指示后续。
+第二轮（双裁决修复轮 Q1-Q7）已完成。完整门：`git diff --check` ✅ + `ruff check .` ✅ + 全量 pytest **4157 passed / 1 skipped**（0 失败；较第一轮终态 4146+1F 净增 11 项全绿）。`graphify update .` 已于终版代码后执行（16582 节点 / 74123 边）。按既定模式交付（commit→push→PR→merge gate）。未授权不做的事不变：无真实 provider 调用、无凭据变更、无发布部署。E2/E3 与会话级许可扩展仍等待用户输入。

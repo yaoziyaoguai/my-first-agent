@@ -11,6 +11,7 @@ from agent.runtime.contracts import (
     ApprovalRequest,
     ConversationState,
     EgressClass,
+    FactKind,
     GoalStatus,
     ProviderConsentGrantStatus,
     ProviderConsentGrantV1,
@@ -60,6 +61,8 @@ class TerminalRenderer:
         self._streamed_answer = ""
         self._stream_identity: tuple[str, str | None, int, str] | None = None
         self._terminal_hints: set[tuple[str, int, str]] = set()
+        # r12：失效重跑提示只对每个 (goal, revision) 打一次。
+        self._rerun_hint_keys: set[tuple[str, int]] = set()
         # S1-C：progress 线程与 REPL 主线程并发的窄锁。
         self._lock = threading.Lock()
 
@@ -105,6 +108,7 @@ class TerminalRenderer:
         if message is not None:
             self._write(terminal_text(message, allow_newlines=True))
         goal_view = project_goal_view(result.state)
+        rerun_note = self._invalidation_rerun_note(result.state)
         if goal_view.status == GoalStatus.VERIFIED_DONE.value:
             self._write(
                 terminal_text(
@@ -112,6 +116,17 @@ class TerminalRenderer:
                     allow_newlines=True,
                 )
             )
+            if (
+                rerun_note is not None
+                and goal_view.goal_id is not None
+                and goal_view.goal_revision is not None
+                and (goal_view.goal_id, goal_view.goal_revision)
+                not in self._rerun_hint_keys
+            ):
+                self._rerun_hint_keys.add(
+                    (goal_view.goal_id, goal_view.goal_revision)
+                )
+                self._write(rerun_note)
         sources = goal_view.sources
         if sources:
             self._write(self._sources_message(sources))
@@ -192,9 +207,24 @@ class TerminalRenderer:
             )
             return
         if active.status is ActiveRunStatus.PAUSED_LIMIT:
-            self._write(self._result_message_for_limit())
+            # r14（2026-10-24 裁决 A′）：暂停原因随 checkpoint 持久化在
+            # last_safe_result.error_code——重启后的 pending 提示必须沿用
+            # 同会话的正确出路（预算耗尽的 /resume 是误导循环）。
+            self._write(
+                self._result_message_for_limit(
+                    state.last_safe_result.error_code
+                    if state.last_safe_result is not None
+                    else None
+                )
+            )
         elif active.status is ActiveRunStatus.PAUSED_RETRYABLE:
-            self._write(self._result_message_for_retryable())
+            self._write(
+                self._result_message_for_retryable(
+                    state.last_safe_result.error_code
+                    if state.last_safe_result is not None
+                    else None
+                )
+            )
 
     def render_working(self) -> None:
         """在同步 Runtime 调用前确认输入已接收，不猜测内部阶段或进度。"""
@@ -229,6 +259,27 @@ class TerminalRenderer:
             )
         lines.append("Revoke with /revoke <lease_id> or /revoke all (ids via --advanced).")
         self._write("\n".join(lines))
+
+    @staticmethod
+    def _invalidation_rerun_note(state: ConversationState) -> str | None:
+        """r12（2026-10-24）：验证被后续 workspace 变更失效过、且最终验证通过
+        （仅 VERIFIED_DONE 分支调用）时，向用户明示发生过失效重跑——否则
+        「写→验证→再写→重验」在终端上完全不可见。事实源是 loop 落盘的
+        completion_not_verified policy 结果；无该事实的普通完成不显示。
+        """
+        invalidated = any(
+            fact.kind is FactKind.POLICY_RESULT
+            and fact.content.get("code") == "completion_not_verified"
+            and "invalidated by later workspace activity"
+            in str(fact.content.get("text", ""))
+            for fact in state.facts
+        )
+        if not invalidated:
+            return None
+        return (
+            "Note: a previous validation was invalidated by later workspace "
+            "changes and re-run before this completion."
+        )
 
     @staticmethod
     def _event_message(event: RuntimeEvent) -> str | None:
@@ -489,6 +540,22 @@ class TerminalRenderer:
                     f"Previous provider permission unavailable: {reason}. "
                     "Choose s to start a new permission."
                 )
+            else:
+                # 决策队列 1（2026-10-24 裁决 C）：逐次披露保留，但活动许可
+                # 在场时明示剩余额度与到期——读/验证类新源反复触发披露时，
+                # 用户能看到常规许可还剩多少、这次为何仍要单独批准。
+                quota = (
+                    f"Active routine permission: "
+                    f"{grant.max_uses - grant.uses_consumed} of "
+                    f"{grant.max_uses} model sends left, "
+                    f"expires {grant.expires_at}."
+                )
+                if any(not source.reusable for source in request.sources):
+                    quota += (
+                        " Sources marked 'this pending content only' are "
+                        "not covered by it."
+                    )
+                lines.append(quota)
         lines.append("Revoke: /revoke-provider-consent")
         return "\n".join(lines)
 

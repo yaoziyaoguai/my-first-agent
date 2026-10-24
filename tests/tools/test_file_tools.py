@@ -324,6 +324,59 @@ def test_control_characters_in_paths_fail_before_approval(tmp_path: Path) -> Non
     assert not (workspace / "note\n\x1b[2J.txt").exists()
 
 
+def test_edit_content_conflict_points_to_reread_not_path_hygiene(
+    tmp_path: Path,
+) -> None:
+    # r10（2026-10-24）：文件在模型上次读取后已变化时，old_text 不再精确匹配。
+    # 这类失败必须按“内容冲突”给出重读指引，而不是路径卫生建议——
+    # 否则模型在正确的路径上反复重试同一份过期 old_text。
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    log = workspace / "log.md"
+    log.write_text("v2 content that already moved on\n", encoding="utf-8")
+    runtime = build_file_tool_runtime(workspace)
+
+    denied = runtime.prepare(
+        ToolCall(
+            "edit-stale",
+            "edit_file",
+            {
+                "path": "log.md",
+                "old_text": "v1 content the model last read",
+                "new_text": "v1 content the model last read (edited)",
+            },
+        ),
+        _context(),
+    )
+
+    assert isinstance(denied, ToolResult) and denied.is_error
+    assert denied.metadata["code"] == "edit_content_conflict"
+    assert "changed since" in denied.content
+    assert "Re-read" in denied.content
+    assert "current content" in denied.content
+    assert "absolute" not in denied.content
+    assert log.read_text(encoding="utf-8").startswith("v2 content")
+
+
+def test_edit_path_hygiene_denial_keeps_path_guidance(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = build_file_tool_runtime(workspace)
+
+    denied = runtime.prepare(
+        ToolCall(
+            "edit-abs",
+            "edit_file",
+            {"path": "/etc/passwd", "old_text": "x", "new_text": "y"},
+        ),
+        _context(),
+    )
+
+    assert isinstance(denied, ToolResult) and denied.is_error
+    assert denied.metadata["code"] == "workspace_file_denied"
+    assert "exact workspace-relative path" in denied.content
+
+
 def test_write_to_missing_parent_explains_the_safe_next_step(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

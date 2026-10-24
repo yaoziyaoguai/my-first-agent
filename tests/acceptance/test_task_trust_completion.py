@@ -24,12 +24,15 @@ from agent.composition import (
     build_sandbox_resources,
     build_tool_registrations,
 )
+from agent.continuity.archive import LocalConversationArchive
 from agent.continuity.sessions import open_workspace_session
 from agent.runtime.checkpoint import LocalCheckpointStore
 from agent.runtime.context import ContextLimits
 from agent.runtime.contracts import (
     BlockedClaim,
     CompletionClaim,
+    ConversationSummaryV1,
+    DirectResponse,
     EvidenceOracleKind,
     FactKind,
     GoalDelta,
@@ -2102,3 +2105,368 @@ def test_write_after_validation_revalidation_completes_goal(tmp_path: Path) -> N
     assert (workspace / "app.py").read_text(encoding="utf-8") == (
         'def greet():\n    return "howdy"  # final\n'
     )
+
+
+# ---------------------------------------------------------------------------
+# S2（2026-10-24 双轨裁决）：跨层组合缺口的带反例确定性旅程。
+# P2-2 = W1 文件交付下界 × 上下文恢复（压缩）× 真实工具执行：prose 假完成
+# 不得绕过文件交付；正例与反例在同一旅程闭合。
+# ---------------------------------------------------------------------------
+
+S2_TASK = "把今天的失败要点整理成 notes.md，只保留根因。"
+S2_NOTES = "root cause: digest-pinned obligations were never satisfiable\n"
+S2_PROSE = "我已经把失败要点整理成 notes.md，任务完成。"
+S2_CHAT_TURNS = (
+    (
+        "run-s2-chat-a",
+        "今天排查了一个线上告警，从监控面板一路追到发布记录，"
+        "先把来龙去脉跟你讲一遍，你听着就好，暂时不用做事。",
+        "辛苦了，我在听。",
+    ),
+    (
+        "run-s2-chat-b",
+        "告警的根因是一个过期缓存键：上线时清了缓存，但灰度实例没有清，"
+        "导致新旧实例对同一条配置的读数不一致，延迟了大约十分钟才收敛。",
+        "灰度实例漏清确实隐蔽。",
+    ),
+    (
+        "run-s2-chat-c",
+        "复盘的时候我们意识到根因出在义务铸造时机：digest 在批准时刻就被钉死，"
+        "后续任何重跑都无法满足旧义务，只能重新走一遍批准链路。",
+        "听起来这是流程设计问题，不是实现问题。",
+    ),
+    (
+        "run-s2-chat-d",
+        "对，影响面大约三条链路，都不致命，但每一条都会多一次无谓的重试，"
+        "累积起来就是十分钟的可感知延迟。",
+        "明白了。",
+    ),
+    (
+        "run-s2-chat-e",
+        "明天我会写一份复盘文档，把时间线、根因、修复和防回归四段写清楚，"
+        "先跟你打个招呼。",
+        "好的。",
+    ),
+    (
+        "run-s2-chat-f",
+        "复盘要点我到时候口述给你，你帮我排一下结构就好，今天先到这里。",
+        "好，随时叫我。",
+    ),
+)
+
+
+class _S2ChatProvider:
+    """S2 前置 chat 回合：无活动 Goal，DirectResponse 是正当终态。"""
+
+    def __init__(self, correlation: str, reply: str) -> None:
+        self.correlation = correlation
+        self.reply = reply
+        self.served = False
+
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN202
+        assert not self.served
+        self.served = True
+        return ModelResponse(
+            (),
+            control=DirectResponse(correlation_id=self.correlation, text=self.reply),
+        )
+
+
+class _S2RecoveryProseProvider:
+    """S2 P2-2 任务回合 provider：真实自动压缩 + 正反例同回合。
+
+    前置的 5 个 chat 回合 + 小输入预算让生产 plan_compaction 以真实
+    TOKEN_PRESSURE 触发；summary 批次（tools==() 的 context_summary_input
+    pack）按合同回写两个 digest。普通批次：draft → 真实写入 progress.md →
+    prose 假完成（完整 coverage、notes.md 从未写）→ 被拒后真实写入
+    notes.md → 读回 → 显式 claim。两次写入审批之间的暂停点是反例断言点。
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.stage = "draft"
+        self.summary_calls = 0
+        self.task_visible_after_recovery = False
+        self.prose_stage_reached = False
+
+    def generate(self, context, *, delta_observer=None):  # noqa: ANN001, ANN202
+        self.calls += 1
+        if (
+            context.tools == ()
+            and context.messages
+            and isinstance(context.messages[0].content[0], dict)
+            and context.messages[0].content[0].get("type") == "context_summary_input"
+        ):
+            self.summary_calls += 1
+            return _s2_summary_response(context)
+        if self.stage == "draft":
+            bootstrap = context.goal_bootstrap
+            assert bootstrap is not None
+            frame = GoalFrame(
+                goal_id="goal-s2-p2-2",
+                revision=1,
+                created_from_fact_ids=(bootstrap.source_fact_id,),
+                workspace_identity_digest=bootstrap.workspace_identity_digest,
+                user_outcome="notes.md 收录当日失败要点根因",
+                beneficiary="user",
+                targets=("notes.md",),
+                scope=("workspace",),
+                non_goals=(),
+                assumptions=(),
+                proposed_criteria=(
+                    ProposedCriterion(
+                        "criterion:s2-notes",
+                        "notes.md exists with the failure root causes",
+                        EvidenceOracleKind.FILESYSTEM_DIGEST,
+                        artifact_path="notes.md",
+                    ),
+                ),
+                admitted_criteria=(),
+                authority_snapshot=bootstrap.authority_snapshot,
+                status=GoalStatus.GOAL_READY,
+                created_at="2026-10-24T00:00:00Z",
+                updated_at="2026-10-24T00:00:00Z",
+            )
+            self.stage = "write-progress"
+            return ModelResponse(
+                (), control=goal_draft_from_frame("proposal-s2-p2-2", frame)
+            )
+        if self.stage == "write-progress":
+            self.stage = "read-progress"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "s2-progress",
+                        "write_file",
+                        {"path": "progress.md", "content": "scratch\n"},
+                    ),
+                )
+            )
+        if self.stage == "read-progress":
+            # progress.md 的批准写入铸出 admitted criterion；读回使其可被
+            # derive 证明——反例的拒绝必须落在 notes.md 交付下界上，而不是
+            # progress.md 的读回技术上。
+            self.stage = "prose-claim"
+            return ModelResponse(
+                (ModelToolCall("s2-read-progress", "read_file", {"path": "progress.md"}),)
+            )
+        if self.stage == "prose-claim":
+            # 压缩恢复之后的普通批次：原始权威任务文本必须仍可见，W1 下界
+            # 义务才能继续绑定（否则反例将因义务丢失而"通过"）。
+            self.task_visible_after_recovery = S2_TASK in _context_text(context)
+            assert self.task_visible_after_recovery, (
+                "the authoritative task text must survive context recovery"
+            )
+            self.prose_stage_reached = True
+            self.stage = "write-notes"
+            return ModelResponse(
+                (ModelTextBlock(S2_PROSE),),
+                control=_claim_for(context, "s2-prose"),
+            )
+        if self.stage == "write-notes":
+            self.stage = "reread-progress"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "s2-write",
+                        "write_file",
+                        {"path": "notes.md", "content": S2_NOTES},
+                    ),
+                )
+            )
+        if self.stage == "reread-progress":
+            # 晚写使早读失效：全部读回放在最后一次写入之后（含 progress.md）。
+            self.stage = "read-notes"
+            return ModelResponse(
+                (
+                    ModelToolCall(
+                        "s2-reread-progress", "read_file", {"path": "progress.md"}
+                    ),
+                )
+            )
+        if self.stage == "read-notes":
+            self.stage = "claim"
+            return ModelResponse(
+                (ModelToolCall("s2-read", "read_file", {"path": "notes.md"}),)
+            )
+        if self.stage == "claim":
+            return ModelResponse((), control=_claim_for(context, "s2-final"))
+        raise AssertionError(f"unexpected stage {self.stage}")
+
+
+def _s2_summary_response(context) -> ModelResponse:  # noqa: ANN001
+    """合规 compaction provider callback：回写 pack 唯一 block 携带的 digest。"""
+
+    (message,) = context.messages
+    (block,) = message.content
+    assert isinstance(block, dict) and block.get("type") == "context_summary_input"
+    summary = ConversationSummaryV1(
+        objective="Earlier chat turns summarized for the failure-notes task.",
+        constraints=(),
+        decisions=(),
+        completed=(),
+        open_items=(),
+        key_references=(),
+        source_checkpoint_digest=block["source_checkpoint_digest"],
+        source_fact_ids_digest=block["source_fact_ids_digest"],
+    )
+    return ModelResponse((ModelTextBlock(text=summary.to_json()),), stop_reason="stop")
+
+
+def _s2_open_and_drive(tmp_path: Path, provider):
+    """S2 专用 composition：真实 TOKEN_PRESSURE 触发 + 真实本地 archive。
+
+    与 ``_open_and_drive`` 的差异仅两处：更小的输入预算（生产 compaction
+    以真实 token 压力触发，而非测试注入）；注入 ``LocalConversationArchive``
+    （020 合同：compaction 需要 archive-before-CAS）。provider 固化在
+    AgentRuntime 里，因此每个 provider 变更都重建 composition。
+    """
+
+    opened = open_workspace_session(
+        tmp_path / "workspace",
+        state_root=tmp_path / "state",
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-0000000000b2",
+    )
+    return opened, _s2_compose(tmp_path, opened, provider)
+
+
+def _s2_compose(tmp_path: Path, opened, provider):  # noqa: ANN001
+    binding = opened.workspace_binding
+    registrations = tuple(
+        build_tool_registrations(
+            workspace=tmp_path / "workspace",
+            protected_paths=(opened.checkpoint_path,),
+            max_tool_result_chars=50_000,
+        )
+    )
+    return build_composition(
+        provider=provider,
+        checkpoint_store=opened.store,
+        tool_registrations=registrations,
+        event_sink=CollectingSink(),
+        control_inbox=ControlInbox(),
+        system_policy="Complete the task with exact evidence.",
+        context_limits=ContextLimits(max_input_tokens=4_800, output_reserve=300),
+        invocation_limits=InvocationLimits(),
+        workspace_identity_digest=binding.workspace_identity_digest,
+        context_scope_digest=binding.workspace_scope_digest,
+        workspace_binding=binding,
+        conversation_archive=LocalConversationArchive(tmp_path / "state"),
+    )
+
+
+def _approve_once(opened, composition, run_id: str):
+    """只消费当前这一个 pending 决策并恢复 run（S2 断言点之间用）。"""
+
+    from agent.cli.app import _parse_action as _parse
+
+    state = LocalCheckpointStore(opened.checkpoint_path).load().state
+    active = state.active_run
+    assert active is not None and active.pending_request is not None
+    approve, error = _parse(
+        f"/approve {active.pending_request.request_id}",
+        state,
+        lambda: run_id,
+        approval_time_factory=_approval_now,
+    )
+    assert error is None and approve is not None
+    return composition.runtime.run_turn(approve, opened.store.load())
+
+
+def test_s2_file_deliverable_survives_recovery_and_rejects_prose_completion(
+    tmp_path: Path,
+) -> None:
+    """S2 P2-2（2026-10-24 双轨裁决）：W1 文件交付下界 × 真实上下文恢复。
+
+    旅程前置 5 个已完成 chat 回合 + 小输入预算，使生产 ``plan_compaction``
+    以真实 TOKEN_PRESSURE 在任务回合内先于 draft 触发（summary 批次 +
+    reducer + archive-before-CAS 全真实）。之后：真实工具执行（progress.md
+    写入）→ 最强 prose 假完成（完整 coverage、notes.md 从未写）→ 完成门
+    拒绝并点名 notes.md →（第二次写入审批暂停点断言反例中间态）→ 真实
+    写入交付物 + 读回 + claim → VERIFIED_DONE。
+    """
+
+    _make_workspace(tmp_path)
+    workspace = tmp_path / "workspace"
+    provider = _S2RecoveryProseProvider()
+    opened, composition = _s2_open_and_drive(tmp_path, provider)
+
+    # ---- 前置：5 个已完成 chat 回合（真实压缩的可选 span）。----
+    for run_id, msg, reply in S2_CHAT_TURNS:
+        composition = _s2_compose(
+            tmp_path, opened, _S2ChatProvider(f"chat-{run_id}", reply)
+        )
+        state = LocalCheckpointStore(opened.checkpoint_path).load().state
+        result = composition.runtime.run_turn(
+            _submit(state, run_id, msg), opened.store.load()
+        )
+        assert result.status is RunStatus.COMPLETED, result.status
+    composition = _s2_compose(tmp_path, opened, provider)
+
+    # ---- 任务回合：真实压缩 → draft → 真实写入 → prose 假完成 → 拒绝。----
+    state = LocalCheckpointStore(opened.checkpoint_path).load().state
+    result = composition.runtime.run_turn(
+        _submit(state, "run-s2-task", S2_TASK), opened.store.load()
+    )
+    assert result.status is RunStatus.AWAITING_APPROVAL, result.status
+
+    resumed = _approve_once(opened, composition, "run-s2-task")
+    # prose claim 已被处理、notes.md 写入在等审批：反例断言点。
+    assert resumed.status is RunStatus.AWAITING_APPROVAL, resumed.status
+
+    counterexample = LocalCheckpointStore(opened.checkpoint_path).load().state
+    # 真实恢复发生过：CONTEXT_SUMMARY 在场且 provider 服务过 summary 批次。
+    assert any(fact.kind is FactKind.CONTEXT_SUMMARY for fact in counterexample.facts)
+    assert provider.summary_calls >= 1
+    # 真实工具执行发生过：progress.md 已在盘上。
+    assert (workspace / "progress.md").exists()
+    # 反例主体：goal 未验证、交付物未写、完成门拒绝留痕且要求补真实证据。
+    goal = counterexample.goal
+    assert goal is not None and goal.status is not GoalStatus.VERIFIED_DONE
+    assert not (workspace / "notes.md").exists()
+    rejection = next(
+        str(fact.content.get("text", ""))
+        for fact in counterexample.facts
+        if fact.kind is FactKind.POLICY_RESULT
+        and fact.content.get("code")
+        in {"invalid_model_control", "completion_not_verified"}
+        and (
+            "artifact criterion must be admitted" in str(fact.content.get("text", ""))
+            or "completion_claim" in str(fact.content.get("text", ""))
+        )
+    )
+    assert rejection
+    # notes.md 义务仍是未满足的 mandatory 下界：proposed 中的 filesystem
+    # criterion 尚未获准（从未写入），claim 的 coverage 是空头支票。
+    notes_criterion = next(
+        criterion
+        for criterion in goal.proposed_criteria
+        if criterion.criterion_id == "criterion:s2-notes"
+    )
+    assert notes_criterion.artifact_path == "notes.md"
+    assert not any(
+        criterion.predicate.get("path") == "notes.md"
+        for criterion in goal.admitted_criteria
+    )
+    # W1 下界跨恢复存活：任务 source fact 受保护，交付义务仍在。
+    assert authoritative_deliverable_file_paths(counterexample) == frozenset(
+        {"notes.md"}
+    )
+    assert provider.task_visible_after_recovery
+
+    # ---- 正例：真实写入交付物 + 读回 + claim → VERIFIED_DONE。----
+    final_result = None
+    while True:
+        state = LocalCheckpointStore(opened.checkpoint_path).load().state
+        active = state.active_run
+        if active is None:
+            break
+        if active.pending_request is None:
+            break
+        final_result = _approve_once(opened, composition, "run-s2-task")
+    assert final_result is not None and final_result.status is RunStatus.COMPLETED
+
+    final = LocalCheckpointStore(opened.checkpoint_path).load().state
+    goal = final.goal
+    assert goal is not None and goal.status is GoalStatus.VERIFIED_DONE
+    assert (workspace / "notes.md").read_text(encoding="utf-8") == S2_NOTES

@@ -17,7 +17,11 @@ from agent.runtime.contracts import (
 )
 from agent.runtime.tools import DefaultToolPolicy, KernelToolRuntime, RegisteredTool
 from agent.tools.directory import make_directory, prepare_directory_binding
-from agent.tools.edit import edit_file, prepare_edit_binding
+from agent.tools.edit import (
+    EditContentConflictError,
+    edit_file,
+    prepare_edit_binding,
+)
 from agent.tools.path_safety import (
     MissingParentDirectoryError,
     TraversalLimits,
@@ -115,6 +119,10 @@ def build_file_tool_registrations(
                         else "workspace_file_policy"
                     ),
                 }
+            except EditContentConflictError:
+                # 内容冲突不是路径/策略问题：路径合法，只是文件已变化。
+                # 单独归类让 dispatch 层给出“重读后重编辑”的恢复指引。
+                return {"denied": True, "reason": "edit_content_conflict"}
             except (OSError, UnicodeError, ValueError, WorkspaceSecurityError):
                 return {"denied": True, "reason": "workspace_file_policy"}
 

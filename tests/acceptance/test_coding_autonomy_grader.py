@@ -27,6 +27,7 @@ MANIFEST = (
     / "2026-09-13-coding-autonomy-repair"
     / "TASK-MANIFEST.json"
 )
+LOCKED_MANIFEST = MANIFEST.with_name(MANIFEST.name + ".locked.json")
 D01_FIXTURE = ROOT / "tests" / "acceptance" / "fixtures" / "d01_csv_export"
 D02_FIXTURE = ROOT / "tests" / "acceptance" / "fixtures" / "d02_format_pipeline"
 D03_FIXTURE = ROOT / "tests" / "acceptance" / "fixtures" / "d03_parser_refactor"
@@ -104,6 +105,10 @@ def test_manifest_freezes_all_scenarios_and_separates_held_out_cases() -> None:
         "model_id": "deepseek-flash",
         "reasoning_mode": "disabled",
     }
+    # LOW-1（2026-10-24 审计）：主 manifest 与 locked 镜像的 model 必须同步；
+    # 漂移此前无测试钉住，只会在真实派发准入 pin 处 fail-closed。
+    locked = json.loads(LOCKED_MANIFEST.read_text(encoding="utf-8"))
+    assert locked["model"] == manifest["model"]
     assert [item["id"] for item in manifest["scenarios"]] == [
         f"D{index:02d}" for index in range(1, 13)
     ]

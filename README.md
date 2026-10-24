@@ -95,6 +95,8 @@ Graphify 和 Understand Anything 是 Coding Agent 理解本仓库时可使用的
 credential value，也不会发送模型请求：
 
 ```bash
+# 先清理旧构建产物：残留的 build/、egg-info 会让 pip wheel 把已删除的旧模块打进新 wheel
+rm -rf build first_agent.egg-info
 python -m pip wheel --no-deps --wheel-dir dist .
 python -m pip install dist/first_agent-1.0.0-py3-none-any.whl
 first-agent setup
@@ -176,12 +178,13 @@ first-agent --workspace "$PWD" restore CONVERSATION_ID SOURCE_CHECKPOINT_DIGEST 
 ```bash
 first-agent \
   --workspace "$PWD" \
-  --state-root /tmp/first-agent-state \
+  --state-root "$HOME/first-agent-dev-state" \
   --provider fake
 ```
 
 需要隔离真实配置时，在 setup 和日常启动两边使用同一个显式 `--state-root`；它必须位于 workspace
-之外。
+之外。不要用 `/tmp/...`：macOS 上 `/tmp` 是指向 `/private/tmp` 的符号链接，state-root 的
+symlink 合同会 fail-closed 拒绝启动。
 
 旧的 `--state` / `--resume` 手动 checkpoint 工作流已按 012 合同移除；旧 v1 state 文件
 不再被加载（strict schema v2 fail closed，不做静默迁移）。

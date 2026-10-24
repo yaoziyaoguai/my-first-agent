@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import main as entrypoint
-from agent.cli.app import run_repl
+from agent.cli.app import _parse_action, run_repl
 from agent.continuity.sessions import open_workspace_session
 from agent.runtime.checkpoint import LocalCheckpointStore
 from agent.runtime.contracts import (
@@ -1235,3 +1235,171 @@ def test_no_argument_scope_command_reaches_real_runtime_and_reuses_scope() -> No
     assert binding.normalized_target == "note.txt"
     assert binding.uses_consumed == 2
     assert binding.remaining_uses == 14
+
+
+class _FixedConflictRuntime:
+    """run_turn 恒返回指定 error_code 的 CONFLICT（2026-10-24 P3 呈现层）。"""
+
+    def __init__(self, error_code: str) -> None:
+        self.error_code = error_code
+        self.actions: list[object] = []
+
+    def run_turn(self, action, snapshot):  # noqa: ANN001
+        self.actions.append(action)
+        return RunResult(
+            RunStatus.CONFLICT,
+            snapshot.state,
+            error_code=self.error_code,
+        )
+
+
+def _unknown_effect_boundary_state() -> ConversationState:
+    """带 GOAL_READY Goal 的 AWAITING_RECOVERY：/pause 解析为 PauseGoal 并
+    真的命中 reducer 的 unknown_effect_recovery_required（state.py 的
+    PauseGoal/ResumeGoal/CancelGoal 守卫），即 P3 审计 J5 的真实形状。"""
+    state, _ = _recovery_state()
+    return replace(
+        state,
+        goal=GoalFrame(
+            goal_id="goal-1",
+            revision=1,
+            created_from_fact_ids=("action:1:user",),
+            workspace_identity_digest="workspace-digest-1",
+            user_outcome="Recover the fixture write",
+            beneficiary="user",
+            targets=("workspace",),
+            scope=("workspace/fixtures",),
+            non_goals=(),
+            assumptions=(),
+            proposed_criteria=(
+                ProposedCriterion("criterion-1", "fixture note exists"),
+            ),
+            admitted_criteria=(),
+            authority_snapshot="authority-1",
+            status=GoalStatus.GOAL_READY,
+            created_at="2026-10-24T00:00:00Z",
+            updated_at="2026-10-24T00:00:00Z",
+        ),
+    )
+
+
+def _run_conflict_repl(error_code: str, state: ConversationState, *inputs: str):
+    runtime = _FixedConflictRuntime(error_code)
+    values = iter(inputs)
+    output: list[str] = []
+    exit_code = run_repl(
+        runtime,
+        StaticStore(state),
+        input_fn=lambda _: next(values),
+        write_fn=output.append,
+        run_id_factory=lambda: "run-new",
+    )
+    return runtime, output, exit_code
+
+
+def test_repl_survives_unknown_effect_conflict_with_recovery_guidance() -> None:
+    """2026-10-24 P3：恢复边界的 /pause、/cancel、/resume 不被通用冲突文案踢出。
+
+    unknown_effect_recovery_required 是"先分类未知效果"的合法状态拒绝：
+    REPL 必须存活并指明真正的出路（success/failed/stop），state 不变。
+    """
+
+    runtime, output, exit_code = _run_conflict_repl(
+        "unknown_effect_recovery_required",
+        _unknown_effect_boundary_state(),
+        "/pause",
+        "/exit",
+    )
+    assert exit_code == 0, "REPL must stay alive instead of exiting with code 2"
+    assert len(runtime.actions) == 1, "the /exit after the conflict must be reached"
+    rendered = " ".join(output)
+    assert "unclassified" in rendered
+    for word in ("success", "failed", "stop"):
+        assert word in rendered
+    assert not any("restart or reload" in line for line in output)
+
+
+def test_repl_survives_conversation_busy_conflict_without_restart_advice() -> None:
+    """conversation_busy 是另一进程持锁：重启建议是事实性错误指引。"""
+
+    runtime, output, exit_code = _run_conflict_repl(
+        "conversation_busy", ConversationState.new("conversation-conflict"), "hello", "/exit"
+    )
+    assert exit_code == 0
+    assert len(runtime.actions) == 1
+    joined = " ".join(output)
+    assert "Another process" in joined
+    assert not any("restart or reload" in line for line in output)
+
+
+def test_repl_keeps_exit_for_cas_conflicts() -> None:
+    """CAS 类冲突（如 action_in_progress）保持既有退出码 2 的重启语义。"""
+
+    runtime, output, exit_code = _run_conflict_repl(
+        "action_in_progress", ConversationState.new("conversation-conflict"), "hello"
+    )
+    assert exit_code == 2
+    assert len(runtime.actions) == 1
+    assert any("restart or reload" in line for line in output)
+
+
+# ---- P5（2026-10-24 审计 r11）：决策点死路 —— 无参绑定与披露兜底文案 ----
+
+
+def test_bare_approve_and_reject_bind_single_pending_approval() -> None:
+    """/approve、/reject 无参数时绑定刚显示的 pending（与 /approve-goal-target
+    的既有无参语义对齐，/help 里的习惯输入不再是死路）；带错误 ID 仍拒绝。"""
+
+    state, request = _approval_state()
+    action, error = _parse_action("/approve", state, lambda: "run-2")
+
+    assert error is None
+    assert isinstance(action, ResolveApproval)
+    assert action.request_id == request.request_id
+    assert action.approved is True
+    assert action.binding_digest == request.binding_digest
+
+    reject, reject_error = _parse_action("/reject", state, lambda: "run-2")
+    assert reject_error is None
+    assert isinstance(reject, ResolveApproval)
+    assert reject.approved is False
+
+    wrong, wrong_error = _parse_action("/approve other-id", state, lambda: "run-2")
+    assert wrong is None
+    assert wrong_error == "Use the exact pending request ID."
+
+
+def test_bare_resolve_success_and_failed_bind_single_pending_recovery() -> None:
+    """/resolve-success、/resolve-failed 无参数时绑定 pending recovery；
+    公共观察恢复仍不得猜测（既有保护顺序不变）。"""
+
+    state, request = _recovery_state()
+    success, error = _parse_action("/resolve-success", state, lambda: "run-2")
+
+    assert error is None
+    assert isinstance(success, ResolveUnknownToolOutcome)
+    assert success.request_id == request.request_id
+    assert success.resolution is RecoveryResolution.MARK_SUCCEEDED
+
+    failed, failed_error = _parse_action("/resolve-failed", state, lambda: "run-2")
+    assert failed_error is None
+    assert failed.resolution is RecoveryResolution.MARK_FAILED
+
+    observation = _public_observation_recovery_state()
+    guess, guess_error = _parse_action("/resolve-success", observation, lambda: "run-2")
+    assert guess is None
+    assert guess_error == "Public observation recovery cannot be guessed as success or failure."
+
+
+def test_disclosure_pending_unknown_input_names_three_options() -> None:
+    """披露挂起时输入 y/s/n 之外的裸文本：指明三个真实选项，
+    不再误导为"matching reserved command"。"""
+
+    state = _disclosure_state()
+    action, error = _parse_action("hello", state, lambda: "run-2")
+
+    assert action is None
+    assert error is not None
+    for token in ("'y'", "'s'", "'n'"):
+        assert token in error
+    assert "reserved command" not in error

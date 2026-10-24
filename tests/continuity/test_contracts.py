@@ -2867,6 +2867,56 @@ _RELEASE_A_FROZEN_INPUTS = (
         "修改 app/config.py?x=1",
         frozenset(),
     ),
+    (
+        "非编码交付动词 整理成（2026-10-24 P2）",
+        "把目录内容整理成 notes.md",
+        frozenset({"notes.md"}),
+    ),
+    (
+        "非编码交付动词 总结到",
+        "总结要点到 summary.md",
+        frozenset({"summary.md"}),
+    ),
+    (
+        "非编码交付动词 写成压过阅读动词",
+        "阅读 a.md、b.md，把要点写成 meeting-notes.md",
+        frozenset({"meeting-notes.md"}),
+    ),
+    (
+        "非编码交付动词 保存到",
+        "把要点保存到 notes.md",
+        frozenset({"notes.md"}),
+    ),
+    (
+        "英文 summarize into 文件",
+        "Summarize this into summary.md",
+        frozenset({"summary.md"}),
+    ),
+    (
+        "英文 organize into 文件",
+        "Organize these into notes/report.md",
+        frozenset({"notes/report.md"}),
+    ),
+    (
+        "裸总结+路径=读引用不铸义务（审计 D-1 负例）",
+        "运行测试，然后总结 failures.log 里的失败原因",
+        frozenset(),
+    ),
+    (
+        "裸整理+路径=读引用（审计 D-1 负例）",
+        "整理 inbox.md 里的待办并直接回复我",
+        frozenset(),
+    ),
+    (
+        "前句阅读救不了后句裸总结（审计 D-1 负例）",
+        "先看看代码，然后总结 main.py 的核心逻辑",
+        frozenset(),
+    ),
+    (
+        "英文裸 summarize 直接宾语=读引用（审计 D-1 负例）",
+        "Run the tests and summarize failures.log for me",
+        frozenset(),
+    ),
 )
 
 

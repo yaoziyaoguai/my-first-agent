@@ -14,6 +14,7 @@ from agent.runtime.contracts import (
     SubmitMessage,
     ToolCall,
     canonical_action_digest,
+    safe_goal_authorization_target,
 )
 
 
@@ -229,3 +230,42 @@ def test_015_process_authority_contracts_are_closed_immutable_and_secret_free() 
     assert "process_authority_candidate" in request_fields, (
         "ApprovalRequest must persist the full closed process candidate"
     )
+
+
+# ---- P7（2026-10-24 审计 r15）：goal 授权敏感名单与 path_safety 同源 ----
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "backup/id_rsa",
+        "backup/id_ed25519",
+        "config/credentials.json",
+        "home/.netrc",
+        "registry/.npmrc",
+        "registry/.pypirc",
+        "vcs/.git-credentials",
+        "local/.config",
+        "runtime/.docker",
+        "runtime/.opencode",
+        "cache/node_modules",
+        "settings/config.local",
+        "settings/config.local.json",
+    ],
+)
+def test_goal_authorization_target_rejects_path_safety_sensitive_names(
+    target: str,
+) -> None:
+    """P7/r15：path_safety 里 intrinsic 敏感的名称在 goal 授权同样拒绝。
+
+    KERNEL_ARCHITECTURE.md 声称目录授权不能覆盖凭据/密钥类路径；修前
+    id_rsa、credentials.json、.netrc 等 11+ 名漂移放行（两套名单手工
+    同步）。收紧方向：此前可授权者不受影响。
+    """
+    assert safe_goal_authorization_target(target) is False
+
+
+def test_goal_authorization_target_keeps_normal_targets_authorizable() -> None:
+    """收紧不误伤：普通项目路径仍可授权。"""
+    assert safe_goal_authorization_target("notes/idea.md") is True
+    assert safe_goal_authorization_target("src/app.py") is True

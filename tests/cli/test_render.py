@@ -771,3 +771,15 @@ def test_render_pending_hides_short_commands_without_matching_goal_scope() -> No
     assert "[y/N]" in prompt
     assert "/approve-goal-target" not in prompt
     assert "/approve-goal-directory" not in prompt
+
+
+def test_render_pending_scoped_approval_prints_question_once() -> None:
+    """P5/r9（2026-10-24）：f/d 快捷方式分支不得重复追加 [y/N] 问句（c64cb5b 回归）。"""
+
+    output: list[str] = []
+    renderer = TerminalRenderer(output.append)
+
+    renderer.render_pending(_goal_scoped_approval_state())
+
+    prompt = output[0]
+    assert prompt.count("Execute this operation? [y/N]") == 1

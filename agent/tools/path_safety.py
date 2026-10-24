@@ -21,53 +21,15 @@ class MissingParentDirectoryError(WorkspaceSecurityError):
     """目标的某一级父目录不存在；与 symlink/权限拒绝保持不同分类。"""
 
 
-_SENSITIVE_EXACT = frozenset(
-    {
-        ".env",
-        ".git-credentials",
-        ".netrc",
-        ".npmrc",
-        ".pypirc",
-        "credentials",
-        "credentials.json",
-        "id_rsa",
-        "id_ed25519",
-    }
+# P7（2026-10-24）：敏感名单与判定上移到 contracts 的唯一权威源；
+# 此处保留私有别名，模块内既有调用点不变。
+from agent.runtime.contracts import (  # noqa: E402
+    is_intrinsically_sensitive_component as _is_intrinsically_sensitive_component,
 )
-_SENSITIVE_COMPONENTS = frozenset(
-    {
-        ".aws",
-        ".claude",
-        ".codex",
-        ".config",
-        ".docker",
-        ".git",
-        ".gnupg",
-        ".kube",
-        ".opencode",
-        ".ssh",
-        ".ua",
-        "graphify-out",
-        "node_modules",
-    }
-)
-_SENSITIVE_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
+
 PROJECT_PATH_EXCEPTION_ROOTS = frozenset(
     {"config", "workspace", "memory", "skills", "pytest.ini", "claude.md"}
 )
-
-
-def _is_intrinsically_sensitive_component(folded: str) -> bool:
-    """这些名称始终拒绝，不能由普通项目路径例外放行。"""
-
-    return (
-        folded in _SENSITIVE_COMPONENTS
-        or folded in _SENSITIVE_EXACT
-        or folded.startswith(".env")
-        or folded.endswith(_SENSITIVE_SUFFIXES)
-        or folded == "config.local"
-        or folded.startswith("config.local.")
-    )
 
 
 def validate_project_paths(project_paths: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:

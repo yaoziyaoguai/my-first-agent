@@ -80,11 +80,16 @@ _EXPLICIT_NON_PROSE_OUTCOME_PATTERNS = (
         r"^\s*(?:(?:请(?:你)?|麻烦(?:你)?|帮我|替我|给我|你能(?:帮我)?|"
         r"能否(?:帮我)?|可否(?:帮我)?)\s*)?"
         r"(?:创建|新建|写入|保存|修改|编辑|修复|删除|移动|复制|运行|执行|"
-        r"测试|构建|校验|验证)"
+        r"测试|构建|校验|验证|"
+        # 非编码文件交付动词（2026-10-24 P2）：复合形式自带交付宾语标记，
+        # 与裸 summarize 不同，不把只读分析误伤成任务。
+        r"整理成|整理到|总结到|汇总到|写成|保存为|输出到|记录到|归档为)"
     ),
     re.compile(
-        r"^\s*(?:把|将).{0,160}(?:写入|写到|保存|修改|编辑|修复|修好|删除|"
-        r"移动|复制|运行|执行|测试|构建|校验|验证)"
+        r"^\s*(?:(?:请(?:你)?|麻烦(?:你)?|帮我|替我|给我)\s*)?(?:把|将).{0,160}"
+        r"(?:写入|写到|保存|修改|编辑|修复|修好|修了|删除|"
+        r"移动|复制|运行|执行|测试|构建|校验|验证|"
+        r"整理成|整理到|总结到|汇总到|写成|输出到|记录到|保存为|归档为)"
     ),
     re.compile(
         r"^\s*为.{0,160}(?:写(?:一|个|份|入|到)|创建|新建|保存|修改|编辑|"
@@ -101,12 +106,21 @@ _EXPLICIT_NON_PROSE_OUTCOME_PATTERNS = (
     re.compile(
         r"^\s*(?:看看|看一下|阅读|查看|分析|了解|结合).{0,240}"
         r"(?:创建|新建|写入|写到|保存|生成|修改|编辑|修复|修好|删除|移动|"
-        r"复制|运行|执行|测试|构建|校验|验证)"
+        r"复制|运行|执行|测试|构建|校验|验证|写成|整理成|总结到|汇总到)"
     ),
     re.compile(
         r"^\s*(?:(?:please|kindly)\s+|(?:can|could|would)\s+you\s+)?"
         r"(?:create|write|edit|save|fix|delete|move|copy|run|test|build|"
         r"validate|check|execute)\b",
+        re.IGNORECASE,
+    ),
+    # 英文文件交付（2026-10-24 P2）：summarize/organize 单独成句多为只读
+    # 分析（保持 direct response）；只有叠加 into/to/as + 明确文件名才是
+    # 非文字交付。
+    re.compile(
+        r"^\s*(?:(?:please|kindly)\s+|(?:can|could|would)\s+you\s+)?"
+        r"(?:summarize|organize)\b.{0,120}\b(?:into|to|as)\s+"
+        r"[A-Za-z0-9_][\w./-]*\.(?:md|txt|csv|json|rst|html|py)\b",
         re.IGNORECASE,
     ),
     re.compile(
@@ -136,14 +150,19 @@ _ACTION_EXPLANATION_QUESTION_PATTERNS = (
         r"哪些|什么|多久|多少|哪里|哪种).{0,80}[吗么嘛呢?？]\s*$"
     ),
     re.compile(
-        r"^\s*(?:创建|新建|写入|保存|修改|编辑|修复|删除|移动|复制|运行|执行|"
-        r"测试|构建|校验|验证).{0,160}(?:是什么意思|(?:会|能|要|需要|需不需要)"
-        r".{0,80}[吗么嘛呢]|是否|是不是|为何|为什么|如何|怎么|哪些|什么|多久|"
-        r"多少|哪里|哪种).*[?？]?\s*$"
+        r"^\s*(?:(?:请(?:你)?|麻烦(?:你)?|帮我|替我|给我)\s*)?"
+        r"(?:创建|新建|写入|保存|修改|编辑|修复|删除|移动|复制|运行|执行|"
+        r"测试|构建|校验|验证|"
+        r"整理成|整理到|总结到|汇总到|写成|保存为|输出到|记录到|归档为)"
+        r".{0,160}(?:是什么意思|(?:会|能|要|需要|需不需要|"
+        r"可以|对不对|行不行|好不好).{0,80}[吗么嘛呢]|是否|是不是|为何|为什么|"
+        r"如何|怎么|哪些|什么|多久|多少|哪里|哪种|可以吗|对不对|行不行|好不好)"
+        r".*[?？]?\s*$"
     ),
     re.compile(
         r"^\s*(?:create|write|edit|save|fix|delete|move|copy|run|test|build|"
-        r"validate|check|execute|call|invoke|use|delegate|remember)\b.{0,160}"
+        r"validate|check|execute|summarize|organize|call|invoke|use|delegate|"
+        r"remember)\b.{0,160}"
         r"(?:[—–,:;\-]\s*(?:will|would|does|"
         r"do|is|are|can|could|should)\b|\b(?:what|why|how|which|when|where)\b)"
         r".*\?\s*$",
@@ -156,6 +175,23 @@ _ACTION_EXPLANATION_QUESTION_PATTERNS = (
     ),
 )
 
+# 礼貌只读检查问句（2026-10-24 P6；审计 E-1 改条件释放）：trigger 侧
+# 允许 can/could/would-you 前缀 + check，此处对称释放；但同句还带第二个
+# 祈使（then/and + fix/update…）时是复合任务请求，问句前缀不得把交付
+# 语义降级为纯文字回答。限定 check 因为 run/test/build 等是 effect 动词；
+# 不强制句尾问号。
+_POLITE_CHECK_QUESTION_PATTERN = re.compile(
+    r"^\s*(?:can|could|would)\s+you\s+check\b.{0,160}"
+    r"\b(?:what|why|how|which|when|where)\b",
+    re.IGNORECASE,
+)
+_SECOND_EFFECT_IMPERATIVE_PATTERN = re.compile(
+    r"\b(?:then|and)\s+"
+    r"(?:fix|update|modify|edit|change|write|create|delete|remove|add|"
+    r"implement|refactor|save|install|run|test|build|validate|execute)\b",
+    re.IGNORECASE,
+)
+
 
 def _explicit_non_prose_outcome_requested(state: ConversationState) -> bool:
     source = next(
@@ -165,15 +201,23 @@ def _explicit_non_prose_outcome_requested(state: ConversationState) -> bool:
     text = source.content.get("text") if source is not None else None
     if not isinstance(text, str):
         return False
+    triggered = any(
+        pattern.search(text) is not None
+        for pattern in _EXPLICIT_NON_PROSE_OUTCOME_PATTERNS
+    )
     if any(
         pattern.search(text) is not None
         for pattern in _ACTION_EXPLANATION_QUESTION_PATTERNS
     ):
         return False
-    return any(
-        pattern.search(text) is not None
-        for pattern in _EXPLICIT_NON_PROSE_OUTCOME_PATTERNS
-    )
+    # E-1（2026-10-24 审计）：礼貌 check 问句只在纯问句时释放；同句还有
+    # 第二祈使（then/and + fix/update…）的是复合任务请求，交付语义优先。
+    if (
+        _POLITE_CHECK_QUESTION_PATTERN.search(text) is not None
+        and _SECOND_EFFECT_IMPERATIVE_PATTERN.search(text) is None
+    ):
+        return False
+    return triggered
 
 
 def _configured_capability_categories(

@@ -781,20 +781,55 @@ class GoalDelta:
 
 GOAL_TARGET_AUTHORIZATION_MAX_USES = 16
 GOAL_TARGET_AUTHORIZATION_EXPIRY_MINUTES = 60
-_GOAL_AUTHORIZATION_SENSITIVE_COMPONENTS = frozenset(
+# P7（2026-10-24）：路径敏感名的唯一权威源（原 path_safety 私有名单上移到
+# 最底层 contracts，避免 contracts→tools 反向依赖）。intrinsic 敏感 = 永远
+# 拒绝、不可被项目路径例外或可复用授权放行；goal 授权的 target 判定与
+# 工具层 path_safety 共用同一谓词，杜绝两套名单手工同步漂移（修前
+# id_rsa/credentials.json/.netrc 等 11+ 名只被 path_safety 拒绝）。
+_INTRINSICALLY_SENSITIVE_EXACT = frozenset(
+    {
+        ".env",
+        ".git-credentials",
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+        "credentials",
+        "credentials.json",
+        "id_rsa",
+        "id_ed25519",
+    }
+)
+_INTRINSICALLY_SENSITIVE_COMPONENTS = frozenset(
     {
         ".aws",
         ".claude",
         ".codex",
+        ".config",
+        ".docker",
         ".git",
         ".gnupg",
         ".kube",
+        ".opencode",
         ".ssh",
         ".ua",
-        "credentials",
         "graphify-out",
+        "node_modules",
     }
 )
+_INTRINSICALLY_SENSITIVE_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
+
+
+def is_intrinsically_sensitive_component(folded: str) -> bool:
+    """这些名称始终拒绝，不能由普通项目路径例外放行。"""
+
+    return (
+        folded in _INTRINSICALLY_SENSITIVE_COMPONENTS
+        or folded in _INTRINSICALLY_SENSITIVE_EXACT
+        or folded.startswith(".env")
+        or folded.endswith(_INTRINSICALLY_SENSITIVE_SUFFIXES)
+        or folded == "config.local"
+        or folded.startswith("config.local.")
+    )
 
 
 def safe_goal_authorization_target(target: str) -> bool:
@@ -803,9 +838,7 @@ def safe_goal_authorization_target(target: str) -> bool:
     parts = target.split("/")
     return bool(parts) and all(
         part not in {"", ".", ".."}
-        and part.casefold() not in _GOAL_AUTHORIZATION_SENSITIVE_COMPONENTS
-        and not part.casefold().startswith(".env")
-        and not part.casefold().endswith((".pem", ".key", ".p12", ".pfx"))
+        and not is_intrinsically_sensitive_component(part.casefold())
         for part in parts
     )
 

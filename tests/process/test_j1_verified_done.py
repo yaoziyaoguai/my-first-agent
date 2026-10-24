@@ -548,3 +548,111 @@ def test_015_exit_zero_wrong_artifact_digest_blocks_verified_done() -> None:
             evidence_id="evidence-wrong",
             observed_at="2026-08-09T00:00:00Z",
         )
+
+
+def test_015_compat_mint_skips_when_digest_free_obligation_covers_fingerprint() -> None:
+    """2026-10-24 P1：同指纹 digest-free 义务在场时，兼容铸造不得再加 pinned 副本。
+
+    digest-pinned per-call criterion 在其 receipt 因后续 workspace 变更失效后
+    永不可满足；批准路径铸出的 digest-free 义务已覆盖同一命令的重验需求。
+    """
+
+    from agent.runtime.state import admit_process_receipt_criterion
+
+    obligation = AdmittedCriterion(
+        criterion_id="criterion:required-local-process:goal:1",
+        description="the explicitly requested local validation process exits successfully",
+        source_fact_id="fact:user:1",
+        oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+        predicate={
+            "receipt_kind": "process_v1",
+            "command_fingerprint": "9e" * 32,
+            "outcome": "exited",
+            "exit_code": 0,
+        },
+        required_evidence_class="process_receipt",
+        admission_digest="m" * 64,
+        mandatory=True,
+    )
+    state = _state_with_single_obligation(obligation)
+    result = admit_process_receipt_criterion(
+        state,
+        tool_call_id="call-old",
+        receipt_digest="ab" * 32,
+        command_fingerprint="9e" * 32,
+        action_seq=3,
+    )
+    assert result.goal is not None
+    assert [c.criterion_id for c in result.goal.admitted_criteria] == [
+        obligation.criterion_id
+    ], "compat mint must not add a digest-pinned duplicate beside the obligation"
+
+
+def test_015_compat_mint_still_admits_uncovered_fingerprint() -> None:
+    """兼容路径负边界：不同指纹（未被 digest-free 义务覆盖）仍按原样铸造。"""
+
+    from agent.runtime.state import admit_process_receipt_criterion
+
+    obligation = AdmittedCriterion(
+        criterion_id="criterion:required-local-process:goal:1",
+        description="the explicitly requested local validation process exits successfully",
+        source_fact_id="fact:user:1",
+        oracle_kind=EvidenceOracleKind.TOOL_RECEIPT,
+        predicate={
+            "receipt_kind": "process_v1",
+            "command_fingerprint": "9e" * 32,
+            "outcome": "exited",
+            "exit_code": 0,
+        },
+        required_evidence_class="process_receipt",
+        admission_digest="m" * 64,
+        mandatory=True,
+    )
+    state = _state_with_single_obligation(obligation)
+    result = admit_process_receipt_criterion(
+        state,
+        tool_call_id="call-new",
+        receipt_digest="cd" * 32,
+        command_fingerprint="d9" * 32,
+        action_seq=4,
+    )
+    assert result.goal is not None
+    minted = [
+        c
+        for c in result.goal.admitted_criteria
+        if c.criterion_id == "criterion:process-receipt:goal:1:1:call-new"
+    ]
+    assert len(minted) == 1
+    assert minted[0].predicate["receipt_digest"] == "cd" * 32
+
+
+def _state_with_single_obligation(obligation: AdmittedCriterion):
+    from agent.runtime.contracts import ConversationState, GoalFrame, GoalStatus
+
+    user = ConversationFact(
+        fact_id="fact:user:1",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "完成修改并运行 python3 check.py 验证"},
+    )
+    return ConversationState(
+        conversation_id="conversation:1",
+        goal=GoalFrame(
+            goal_id="goal:1",
+            revision=1,
+            created_from_fact_ids=("fact:user:1",),
+            workspace_identity_digest="workspace:v1:" + "c" * 64,
+            user_outcome="修改完成且验证通过",
+            beneficiary="owner",
+            targets=("app.py",),
+            scope=("workspace",),
+            non_goals=(),
+            assumptions=(),
+            proposed_criteria=(),
+            admitted_criteria=(obligation,),
+            authority_snapshot="authority:v1:" + "d" * 64,
+            status=GoalStatus.GOAL_READY,
+            created_at="2026-10-24T00:00:00Z",
+            updated_at="2026-10-24T00:00:00Z",
+        ),
+        facts=(user,),
+    )

@@ -1726,15 +1726,27 @@ class AgentRuntime:
                     # compaction 也是一次真实模型尝试：必须与普通调用一样在
                     # 发送前持久化扣账。失败不退款，Resume 也不会重置。
                     compaction_source = current
-                    attempted = charge_provider_dispatch(
-                        current.state,
-                        disclosure_gate,
-                        descriptor=self._provider_descriptor,
-                        scope=context.consent_scope,
-                        purpose="compaction",
-                        run_id=gate_run_id,
-                        now=self._run_time_factory(),
-                    )
+                    try:
+                        attempted = charge_provider_dispatch(
+                            current.state,
+                            disclosure_gate,
+                            descriptor=self._provider_descriptor,
+                            scope=context.consent_scope,
+                            purpose="compaction",
+                            run_id=gate_run_id,
+                            now=self._run_time_factory(),
+                        )
+                    except ValueError:
+                        # P4（2026-10-24）：扣次重算发现 gate 已陈旧；state
+                        # 未被扣改，重新要求披露决策而非致命失败。
+                        return self._pause_for_disclosure_recheck(
+                            current,
+                            action,
+                            warnings,
+                            context,
+                            purpose="compaction",
+                            run_id=gate_run_id,
+                        )
                     current = self._save(
                         current,
                         record_foreground_model_attempt(
@@ -1750,35 +1762,13 @@ class AgentRuntime:
                         now=self._run_time_factory(),
                     )
                     if expired is not None:
-                        refreshed = evaluate_provider_dispatch(
-                            state=current.state,
-                            descriptor=self._provider_descriptor,
-                            scope=context.consent_scope,
-                            purpose="compaction",
-                            run_id=gate_run_id,
-                            now=self._run_time_factory(),
-                        )
-                        if refreshed.request is None:
-                            return self._finish(
-                                current,
-                                action,
-                                status=RunStatus.FAILED_FATAL,
-                                warnings=warnings,
-                                event_kind=RuntimeEventKind.FAILED,
-                                error_code="consent_scope_missing",
-                                outcome_state=current.state,
-                            )
-                        paused = pause_for_provider_disclosure(
-                            current.state, refreshed.request
-                        )
-                        return self._finish(
+                        return self._pause_for_disclosure_recheck(
                             current,
                             action,
-                            status=RunStatus.AWAITING_DISCLOSURE,
-                            warnings=warnings,
-                            event_kind=RuntimeEventKind.DISCLOSURE_REQUESTED,
-                            message="remote provider disclosure acknowledgement required",
-                            outcome_state=paused,
+                            warnings,
+                            context,
+                            purpose="compaction",
+                            run_id=gate_run_id,
                         )
                     model_calls += 1
                     input_tokens += context.budget.estimated_input_tokens
@@ -2064,15 +2054,28 @@ class AgentRuntime:
                     if disclosure_gate is not None:
                         # 许可扣次与 attempt record 必须在同一 durable
                         # transition 落盘；失败不退款，恢复也不再扣。
-                        attempted = charge_provider_dispatch(
-                            attempted,
-                            disclosure_gate,
-                            descriptor=self._provider_descriptor,
-                            scope=context.consent_scope,
-                            purpose="runtime_progress",
-                            run_id=active.run_id,
-                            now=self._run_time_factory(),
-                        )
+                        try:
+                            attempted = charge_provider_dispatch(
+                                attempted,
+                                disclosure_gate,
+                                descriptor=self._provider_descriptor,
+                                scope=context.consent_scope,
+                                purpose="runtime_progress",
+                                run_id=active.run_id,
+                                now=self._run_time_factory(),
+                            )
+                        except ValueError:
+                            # P4（2026-10-24）：扣次重算发现 gate 已陈旧
+                            #（跨过到期点等）。state 未被扣改，与 transport
+                            # 前最后重验同路：重新要求披露决策，不致命。
+                            return self._pause_for_disclosure_recheck(
+                                current,
+                                action,
+                                warnings,
+                                context,
+                                purpose="runtime_progress",
+                                run_id=active.run_id,
+                            )
                     current = self._save(
                         current,
                         record_foreground_model_attempt(
@@ -2088,35 +2091,13 @@ class AgentRuntime:
                             now=self._run_time_factory(),
                         )
                         if expired is not None:
-                            refreshed = evaluate_provider_dispatch(
-                                state=current.state,
-                                descriptor=self._provider_descriptor,
-                                scope=context.consent_scope,
-                                purpose="runtime_progress",
-                                run_id=active.run_id,
-                                now=self._run_time_factory(),
-                            )
-                            if refreshed.request is None:
-                                return self._finish(
-                                    current,
-                                    action,
-                                    status=RunStatus.FAILED_FATAL,
-                                    warnings=warnings,
-                                    event_kind=RuntimeEventKind.FAILED,
-                                    error_code="consent_scope_missing",
-                                    outcome_state=current.state,
-                                )
-                            paused = pause_for_provider_disclosure(
-                                current.state, refreshed.request
-                            )
-                            return self._finish(
+                            return self._pause_for_disclosure_recheck(
                                 current,
                                 action,
-                                status=RunStatus.AWAITING_DISCLOSURE,
-                                warnings=warnings,
-                                event_kind=RuntimeEventKind.DISCLOSURE_REQUESTED,
-                                message="remote provider disclosure acknowledgement required",
-                                outcome_state=paused,
+                                warnings,
+                                context,
+                                purpose="runtime_progress",
+                                run_id=active.run_id,
                             )
             progress_reporter = None
             try:
@@ -4592,6 +4573,52 @@ class AgentRuntime:
             definition.name == tool_name
             and definition.execution_authority is ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS
             for definition in self._tool_runtime.definitions()
+        )
+
+    def _pause_for_disclosure_recheck(
+        self,
+        current: LoadedSnapshot,
+        action: Action,
+        warnings: list[str],
+        context: ContextPack,
+        *,
+        purpose: str,
+        run_id: str,
+    ) -> RunResult:
+        """S6 失效重验的统一出口：重算 gate，有新请求→暂停重问，无→致命。
+
+        扣次被拒（gate 在扣次重算时已陈旧，2026-10-24 P4）与 transport 前
+        最后重验过期同属一个窗口：合同出路都是零 provider 调用地重新要求
+        披露决策；只有重算后连候选请求都不存在才按 consent_scope_missing
+        致命收场。
+        """
+        refreshed = evaluate_provider_dispatch(
+            state=current.state,
+            descriptor=self._provider_descriptor,
+            scope=context.consent_scope,
+            purpose=purpose,
+            run_id=run_id,
+            now=self._run_time_factory(),
+        )
+        if refreshed.request is None:
+            return self._finish(
+                current,
+                action,
+                status=RunStatus.FAILED_FATAL,
+                warnings=warnings,
+                event_kind=RuntimeEventKind.FAILED,
+                error_code="consent_scope_missing",
+                outcome_state=current.state,
+            )
+        paused = pause_for_provider_disclosure(current.state, refreshed.request)
+        return self._finish(
+            current,
+            action,
+            status=RunStatus.AWAITING_DISCLOSURE,
+            warnings=warnings,
+            event_kind=RuntimeEventKind.DISCLOSURE_REQUESTED,
+            message="remote provider disclosure acknowledgement required",
+            outcome_state=paused,
         )
 
     def _provider_gate(

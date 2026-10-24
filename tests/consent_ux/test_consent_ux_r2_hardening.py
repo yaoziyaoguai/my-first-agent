@@ -435,3 +435,70 @@ def test_consent_ux_r2_pre_transport_expiry_recheck_zero_sends() -> None:
     # 扣次可以发生（失败不退款），但到期后不得再发送。
     assert result.status is RunStatus.AWAITING_DISCLOSURE
     assert provider.calls == []
+
+
+# ── P4（2026-10-24 审计 r5）：gate→charge 毫秒窗口 ────────────────────
+
+
+def test_consent_ux_p4_gate_charge_window_routes_to_disclosure_not_fatal() -> None:
+    """gate 通过后、扣次前跨过到期点（2026-10-24 P4/r5）。
+
+    charge_provider_dispatch 对陈旧 gate 抛 ValueError；S6 合同要求与
+    transport 前最后重验同路——重新要求披露决策（零 provider 调用、
+    零扣次），而不是 FAILED_FATAL runtime_failure。
+    """
+
+    clock = {"n": 0}
+
+    def time_factory() -> str:
+        clock["n"] += 1
+        if clock["n"] <= 5:
+            return _T0
+        # gate（第 5 个时钟调用）用 T0 通过；第 6 个调用是扣次重算，已跨过
+        # 60 分钟 grant TTL（探针 /tmp/mfa-improve/p4/probe_charge_index.py
+        # 实测本窗口修前 failed_fatal runtime_failure，零 provider 调用）。
+        return (
+            datetime.fromisoformat(_T0.replace("Z", "+00:00")) + timedelta(minutes=61)
+        ).astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+    state = ConversationState.new("conversation-1")
+    store = InMemoryCheckpointStore(state)
+    provider = ScriptedProvider(_DONE)
+    runtime = AgentRuntime(
+        provider=provider,
+        provider_descriptor=_descriptor(),
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=2_000, output_reserve=200),
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "inv-p4-window",
+        run_time_factory=time_factory,
+    )
+    submit = SubmitMessage(
+        conversation_id="conversation-1",
+        action_seq=state.next_action_seq,
+        expected_revision=state.revision,
+        run_id="run-1",
+        message="hello",
+    )
+    runtime.run_turn(submit, store.load())
+    request = store.state.provider_disclosure_request
+    assert isinstance(request, ProviderDisclosureRequestV2)
+    grant_action = GrantProviderConsent(
+        conversation_id="conversation-1",
+        action_seq=store.state.next_action_seq,
+        expected_revision=store.state.revision,
+        request_digest=request.request_digest,
+        scope_digest=request.scope_digest,
+    )
+    result = runtime.run_turn(grant_action, store.load())
+    # 陈旧 gate 在扣次处被拦：出路是重新决策，不是致命失败。
+    assert result.status is RunStatus.AWAITING_DISCLOSURE
+    assert provider.calls == []
+    grant = store.state.provider_consent_grant
+    assert grant is not None
+    assert grant.uses_consumed == 0, "charge 前被拦下，不得产生许可消耗"

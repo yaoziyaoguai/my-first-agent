@@ -70,6 +70,7 @@ from agent.runtime.contracts import (
     ProviderConsentGrantStatus,
     ProviderConsentGrantV1,
     ProviderConsentScopeV1,
+    ProviderConsentToolBindingV1,
     ProviderDescriptor,
     ProviderDisclosureReceiptV2,
     ProviderDisclosureRequest,
@@ -1390,7 +1391,7 @@ def test_consent_ux_r_cli_rejects_routine_and_beyond_excerpt_requests() -> None:
 def test_consent_ux_r_offer_line_shows_only_for_covered_requests() -> None:
     covered = _v2_request(scope=_excerpt_scope(_source("read_file app/main.py")))
     offer = TerminalRenderer._disclosure_message(request=covered, grant=None)
-    assert "  r  Also allow verified workspace file excerpts" in offer
+    assert "  r  Also allow routine conversation data and verified workspace reads" in offer
 
     routine = _v2_request()
     assert "  r  Also allow" not in TerminalRenderer._disclosure_message(
@@ -1416,7 +1417,7 @@ def test_consent_ux_r_numeric_copy_tracks_the_constants() -> None:
         f"up to {CONSENT_MAX_USES} model sends, "
         f"expires in {CONSENT_TTL_SECONDS // 60} minutes"
     ) == 1
-    assert "  r  Also allow verified workspace file excerpts" in offer
+    assert "  r  Also allow routine conversation data and verified workspace reads" in offer
 
 
 def test_consent_ux_r_grant_contract_pins_classes_and_rejects_drift() -> None:
@@ -1680,3 +1681,68 @@ def test_consent_ux_r_boundary_inherited_excerpt_revalidates_goal_revision() -> 
         run_id="run-1",
     )
     assert not gate.admitted and gate.reason == "decision_required"
+
+
+def test_consent_ux_active_grant_structure_drift_explains_re_prompt() -> None:
+    """C1（2026-10-25 旅程实证，安装物复现）：goal 任务的 bootstrap 发送上
+    授予 s 后，goal 准入改变 control_schema_digest/tool_bindings（grant 钉死
+    铸造时结构），同一 turn 的下一次发送必然重新披露。渲染必须解释"活动
+    许可为何不覆盖本请求"——否则提示自相矛盾：一边显示剩余额度、一边
+    无说明地再次询问，用户会认为 s 失效或产品失灵。
+    """
+    base = ConversationState.new("conversation-1")
+    # 渲染层用真实墙钟判定 grant 可用性，铸造时间必须取当前时刻。
+    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    grant = mint_provider_consent_grant(
+        state=base, request=_v2_request(), action_seq=1, now=now,
+    )
+    state = replace(base, provider_consent_grant=grant)
+
+    # 结构漂移：goal 准入后 control schema 改变 + 产品工具绑定出现。
+    drifted_scope = replace(
+        _scope(
+            data_classes=(
+                "control_receipts",
+                "goal",
+                "system_policy",
+                "tool_schemas",
+                "user_messages",
+            ),
+            goal_id="goal-1",
+            goal_revision=1,
+        ),
+        control_schema_digest="a" * 64,
+        tool_bindings=(
+            ProviderConsentToolBindingV1(
+                name="write_file",
+                identity_digest="b" * 64,
+            ),
+        ),
+    )
+    drifted_request = _v2_request(scope=drifted_scope, grant=grant)
+    assert drifted_request.grant_eligible is True
+    gate = evaluate_provider_dispatch(
+        state=state,
+        descriptor=_descriptor(),
+        scope=drifted_scope,
+        now=_T0,
+        purpose="runtime_progress",
+        run_id="run-1",
+    )
+    # 前置事实钉死：结构漂移时 gate 确实不放行（安全语义保持）。
+    assert not gate.admitted
+
+    message = TerminalRenderer._disclosure_message(
+        request=drifted_request, grant=grant
+    )
+    assert "structure changed since the permission was granted" in message
+    assert "Choose s to renew" in message
+
+    # 反例：结构与 grant 一致时不加该行（此时若有提示，原因是别处已解释
+    # 的新源，不得误导成结构漂移）。
+    same_request = _v2_request(scope=_scope(), grant=grant)
+    same_message = TerminalRenderer._disclosure_message(
+        request=same_request, grant=grant
+    )
+    assert "structure changed" not in same_message
+    assert "model sends left" in same_message

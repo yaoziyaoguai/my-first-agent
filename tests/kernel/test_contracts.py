@@ -320,7 +320,7 @@ def test_file_source_proof_goal_binding_must_be_paired_or_goalless() -> None:
         _proof(goal_id=None)
     with pytest.raises(ValueError, match="paired"):
         _proof(goal_revision=None)
-    with pytest.raises(ValueError, match="must not be empty"):
+    with pytest.raises(ValueError, match="must be a non-empty string"):
         _proof(goal_id="")
     with pytest.raises(ValueError, match="must be positive"):
         _proof(goal_revision=0)
@@ -352,9 +352,9 @@ def test_file_source_proof_goal_id_must_be_a_string_when_bound() -> None:
             result_content_digest=hashlib.sha256(b"hello").hexdigest(),
         )
 
-    with pytest.raises(ValueError, match="goal_id must not be empty"):
-        _proof(123)
-    with pytest.raises(ValueError, match="goal_id must not be empty"):
+    with pytest.raises(ValueError, match="must be a non-empty string"):
+        _proof(goal_id=123)
+    with pytest.raises(ValueError, match="must be a non-empty string"):
         _proof(True)
 
 

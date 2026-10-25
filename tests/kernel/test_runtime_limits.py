@@ -352,6 +352,52 @@ def test_conversation_capacity_stops_before_provider_effect() -> None:
     assert store.state.active_run is None
 
 
+def test_context_core_limit_message_reaches_the_terminal_result() -> None:
+    # PR #22 gate P3-1：_finish_context_limit 的 end_run 落 FAILED_FATAL 态
+    # last_safe_result、终态却是 CONVERSATION_LIMIT_REACHED——传播守卫按
+    # status 匹配不会命中，必须显式传 message，否则诊断文本丢失。
+    from dataclasses import replace
+
+    from agent.runtime.contracts import ConversationFact, FactKind
+
+    big_fact = ConversationFact(
+        fact_id="fact:user:1",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "x" * 40_000},
+    )
+    state = replace(ConversationState.new("conversation-1"), facts=(big_fact,))
+    provider = ScriptedProvider(ModelResponse((ModelTextBlock("ok"),)))
+    store = InMemoryCheckpointStore(state)
+    runtime = AgentRuntime(
+        provider=provider,
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=300, output_reserve=30),
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-1",
+    )
+
+    result = runtime.run_turn(
+        SubmitMessage(
+            conversation_id="conversation-1",
+            action_seq=1,
+            expected_revision=0,
+            run_id="run-1",
+            message="hello",
+        ),
+        store.load(),
+    )
+
+    assert result.status is RunStatus.CONVERSATION_LIMIT_REACHED
+    assert result.error_code == "context_core_too_large"
+    assert result.message is not None and result.message.strip()
+    assert result.message == store.state.last_safe_result.message
+
+
 def test_tool_call_limit_pauses_before_the_next_callable() -> None:
     calls = 0
 

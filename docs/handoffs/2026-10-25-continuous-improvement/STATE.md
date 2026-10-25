@@ -134,4 +134,43 @@
 - 完整门（follow-up 轮）：`git diff --check` 通过；`.venv/bin/ruff check .` 通过；
   `.venv/bin/python -m pytest -q -rx` **4189 passed, 1 skipped, 0 failed**
   （+1 = LOW-3 tripwire）。
-- 活动关闭（主体+follow-up 均已落地）。
+- follow-up 已落地：PR #14（单源结构判定 + 注释精确化 + 进程 proof tripwire）。
+
+## 双审计交叉验证轮（2026-10-25，用户「自审计 + oracle_web 审计 → 交叉验证后修复」）
+
+- **审计来源**：① 自审计（本会话：/help 收录、空输入语义、fatal 退出路径、
+  终态摘要、恢复文案、preflight、命令拒绝文案逐项核码）；② Oracle Web
+  （skill oracle-web，档位 4/5 extra-high 已验证，slug
+  `mfa-usability-audit-20261025`，4m13s，4 文件 ~20k tokens：daily-use/
+  capabilities/CAPABILITY_STATUS/本 STATE）。
+- **交叉验证结论**（Oracle 7 项 + 自审计 1 项 → 确认 3、证伪/已实现 4）：
+
+  | 项 | 裁决 | 依据 |
+  | --- | --- | --- |
+  | 致命失败无恢复指引（自审计 × Oracle#4/#5） | **确认→F1** | FAILED_FATAL 基础分支只打错误码即 `return 1`（app.py:251），用户不知 state 已保存可重启续作；对比 LIMIT_RECOVERY 有指引 |
+  | 文档漂移（Oracle#1/#7） | **确认→F2** | capabilities.md:26 仍断言"读/验证类……仍单独披露（16 次）"（P5 前旧事实）；daily-use 试用入口=机器特定 2026-10-18 路径、Provider 配置=`deepseek-v4-flash`（10-24 实测 API 列表已无此名） |
+  | 无 r 选项时无解释（Oracle#3 有界部分） | **确认→F3** | goal-less 读逐次披露时 r 从不出现且不说原因；s-unavailable 有同式先例；Oracle 建议的"显示许可余额"部分已实现（quota 行+/status）decline |
+  | VERIFIED_DONE 语义透明（Oracle#2） | **证伪/已实现** | `delivery_summary_message`（views.py:78）已含 Required evidence N/M + "User acceptance: not established"；verification scope 句实测在 r 旅程输出中 |
+  | 启动 preflight（Oracle#1 功能部分） | **decline（已部分存在）** | main.py 主门 ExitStack 前已有 credential pre-flight 快败；模型有效性探测需真实调用（非默认授权）；可行动切片=F2 文档 |
+  | 模型侧修复引导再加码（Oracle#4 模型侧） | **decline（无新证据）** | 2026-10-18 发现 1 轮已给 gap-repair 分型+completion_claim 指引；再加码属猜测性提示词工程 |
+  | 状态特定恢复指引全面重构（Oracle#5 全量） | **decline（超出有界切片）** | Ctrl-C 分支/未知效果 pending/恢复边界 CONFLICT 均已有状态特定文案与出路；缺口即 F1 |
+  | 上下文命令建议（Oracle#6） | **decline（大部已实现）** | pending 决策自带选项渲染自述；/help 全量；new_session_gate 拒绝文案状态特定（actions.py:55）；再加每状态建议属噪音换收益 |
+
+- **修复（分支 fix/2026-10-25-dual-audit-usability）**：
+  - **F1** render.py FAILED_FATAL 基础分支追加恢复句（"Saved state was kept —
+    …run first-agent again…or /cancel after restarting"）；Red→Green
+    `test_fatal_result_carries_recovery_guidance`（含 auth 分支不重复追加反例）；
+    既有摘要界断言 400→600（含恢复句，截断证明仍有效）。
+  - **F3** render.py 无 r 选项且发送含未覆盖来源时追加 "r unavailable — …
+    verified workspace reads under an active task" 解释行（s-unavailable 同式）；
+    Red→Green `test_consent_ux_r_unavailable_explains_why_when_sources_not_covered`
+    （含覆盖成立提供 r 选项正例）。
+  - **F2** 文档：capabilities.md 外发许可行改写为 P5 现状（r 覆盖 proof-backed
+    读含新文件；命令输出与无任务读仍逐次；旧 16 次断言标注被取代）；daily-use.md
+    试用入口标注历史记录并指向自行安装、Provider 配置改 `deepseek-flash`（附
+    10-24 实测支持列表说明）、支持矩阵行更正模型名。
+- 验证：cli+consent_ux 338 passed；完整门见下。
+- 完整门（双审计轮）：`git diff --check` 通过；`.venv/bin/ruff check .` 通过；
+  `.venv/bin/python -m pytest -q -rx` **4191 passed, 1 skipped, 0 failed**
+  （+2 = F1/F3 Red→Green）。
+- 活动关闭（主体+follow-up+双审计轮均已落地）。

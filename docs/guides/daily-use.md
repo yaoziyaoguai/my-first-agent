@@ -34,7 +34,11 @@
 
 ## 安装
 
-### 本机固定试用入口（2026-10-18）
+### 本机固定试用入口（2026-10-18，历史记录——当前请用下方「自行安装」）
+
+> 2026-10-25 更新：本节是 2026-10-18 试用轮的固定入口记录，保留作历史证据；
+> 其中 `deepseek-v4-flash` 模型名已过期（见下方「Provider 配置」与「支持矩阵」
+> 的更正）。日常使用从「自行安装」一节开始。
 
 已使用独立、非 editable 的 base wheel 安装，不依赖开发仓库的未提交文件：
 
@@ -97,12 +101,15 @@ python3 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
 ```bash
 export DEEPSEEK_API_KEY=sk-...        # 只在当前 shell 注入；不要写进任何文件
 first-agent setup \
-  --provider openai_compatible --model deepseek-v4-flash \
+  --provider openai_compatible --model deepseek-flash \
   --base-url https://api.deepseek.com --credential-env DEEPSEEK_API_KEY \
   --thinking-mode disabled
 ```
 
 （源码开发启动时把 `first-agent` 换成 `.venv/bin/python main.py`。）
+2026-10-24 实测 API 支持列表为 `deepseek-flash` / `deepseek-v4-pro`；旧文档中的
+`deepseek-v4-flash` 名称已不在列表，两轮真实层验证（2026-10-24/25）均使用
+`deepseek-flash`。
 
 `setup` 把**非秘密**配置保存到 owner-only 的 owner-preferences（此后免参启动）；
 密钥永远只从环境变量注入，不会被保存、打印或写入 checkpoint。
@@ -170,7 +177,7 @@ Task: change greet() in app.py to return 'howdy' and verify by running python3 c
 
 | 对象 | 状态 |
 |---|---|
-| DeepSeek Flash `deepseek-v4-flash`（api.deepseek.com，openai_compatible，thinking disabled） | 本轮新 key 实际调用有效，新 wheel 普通编码样本完整 PASS；纠正/恢复样本额度暂停，零改写样本未运行。历史“完成但业务错误”不能据普通样本通过就算闭合；证据见唯一 RESULTS。官方模型列表本轮只列 `deepseek-flash` / `deepseek-v4-pro`，原授权名称仍可实际调用，未擅自换模型 |
+| DeepSeek Flash `deepseek-flash`（api.deepseek.com，openai_compatible，thinking disabled） | 2026-10-24/25 真实层验证所用模型（E1/E2 全链 PASS、r 读域许可真实旅程 PASS）。**更正（2026-10-25）**：下表原记录的 `deepseek-v4-flash` 名称已不在官方支持列表（2026-10-24 实测仅 `deepseek-flash` / `deepseek-v4-pro`），不要再按旧名配置 |
 | 仓库内其它 adapter（anthropic_compatible 等） | 仅有离线测试证据；**未经真实调用验证** |
 | 其它"OpenAI 兼容"服务 | 未验证；协议名相近不等于支持 |
 | 非 macOS 平台 | 不支持（Seatbelt 专属） |

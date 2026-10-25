@@ -425,6 +425,15 @@ class TerminalRenderer:
                     "The provider response was incompatible. Check the configured model "
                     "and endpoint, then run first-agent again."
                 )
+            # 双审计交叉验证（2026-10-25：自审计 × Oracle #4/#5）：致命失败后
+            # REPL 以退出码 1 结束，只打错误码会让用户以为一切丢失。state、
+            # 已验证证据与已记录效果都已持久化——如实指明同 workspace 重启
+            # 可续作（与 app.py KeyboardInterrupt 分支同一措辞风格）。
+            recovery = (
+                " Saved state was kept — verified evidence and recorded "
+                "effects are preserved; run first-agent again in this "
+                "workspace to continue the task, or /cancel it after restarting."
+            )
             base = f"Run failed: {result.error_code or 'fatal_error'}"
             if result.message:
                 # 016 真实 E3(第 19/24 轮 J8):runtime_failure 的异常细节只在
@@ -432,8 +441,8 @@ class TerminalRenderer:
                 # 退出码 1 结束且无 traceback)。摘要压平空白并截断;凭据按设计
                 # 从不进入异常消息,E3 的 secret-free 扫描仍是兜底。
                 summary = " ".join(result.message.split())[:240]
-                return f"{base} ({summary})"
-            return base
+                return f"{base} ({summary}){recovery}"
+            return base + recovery
         if result.status is RunStatus.CONFLICT:
             # 2026-10-24 P3：CONFLICT 不是同一种失败。恢复边界的状态拒绝与
             # 另一进程持锁有真实出路，照实指明；其余（CAS 失配、event 重入
@@ -597,6 +606,15 @@ class TerminalRenderer:
                 "directory listings, and search results; "
                 f"up to {CONSENT_MAX_USES} model sends, "
                 f"expires in {CONSENT_TTL_SECONDS // 60} minutes"
+            )
+        elif not request.grant_eligible and request.sources:
+            # 双审计交叉验证（2026-10-25：Oracle #3）：goal-less 探索式读等
+            # 场景 r 从不出现且无解释，用户不知道为何仍逐次问。与 s-unavailable
+            # 同式明示原因与 r 的可用条件；s 已全覆盖的发送不加（避免噪音）。
+            lines.append(
+                "  r  unavailable — this request includes sources beyond "
+                "verified workspace reads under an active task; those are "
+                "approved for this send only"
             )
         lines.append("  n  Do not send")
         lines.append("Enter: do not send")

@@ -96,7 +96,12 @@ from agent.runtime.contracts import (
     canonical_json_digest,
     context_pack_digest,
 )
-from agent.runtime.control import ControlBinding, ControlInbox, ControlRequestKind
+from agent.runtime.control import (
+    ControlBinding,
+    ControlInbox,
+    ControlInboxRequest,
+    ControlRequestKind,
+)
 from agent.runtime.evidence import (
     WORKSPACE_WRITE_TOOLS,
     WRITABLE_PROCESS_TOOLS,
@@ -3595,6 +3600,36 @@ class AgentRuntime:
                 message=final_text,
                 outcome_state=completed,
             )
+
+    def request_active_cancel(self, conversation_id: str) -> bool:
+        """向当前活跃 invocation 投递协作取消请求（process-local，不改 durable state）。
+
+        供界面（CLI SIGINT、TUI 控件）在 run_turn 阻塞期间调用：请求在
+        provider/tool 返回后的安全边界由 _poll_control 消费并写入 CANCELLED
+        终态。无 control inbox，或该 conversation 没有接受控制的活跃 binding
+        （goal-less 会话、run 尚未 open binding）时返回 False，调用方退化
+        到各自的 fail-closed 路径。
+        """
+
+        if self._control_inbox is None:
+            return False
+        binding = self._control_inbox.current(conversation_id)
+        if binding is None:
+            return False
+        request = ControlInboxRequest(
+            request_id=f"cli-cancel:{uuid4()}",
+            kind=ControlRequestKind.CANCEL,
+            conversation_id=binding.conversation_id,
+            goal_id=binding.goal_id,
+            goal_revision=binding.goal_revision,
+            invocation_id=binding.invocation_id,
+        )
+        try:
+            self._control_inbox.submit(request)
+        except ValueError:
+            # binding 已被替换/关闭（run 收尾竞态）——无可投递对象。
+            return False
+        return True
 
     def _open_control_binding(self, state: ConversationState) -> None:
         if self._control_inbox is None or state.goal is None or state.active_run is None:

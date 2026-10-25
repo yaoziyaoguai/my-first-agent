@@ -589,5 +589,7 @@ def test_provider_max_tokens_stop_is_not_reported_completed() -> None:
 
     assert result.status is RunStatus.FAILED_FATAL
     assert result.error_code == "provider_output_truncated"
-    assert result.message is None
+    # followup 轮：fail_run 消息由 _finish 传播（此前被 message=None 的
+    # finalize 记录覆写丢失）；终态保留有界诊断文本。
+    assert result.message == "Provider stopped because its output limit was reached."
     assert store.state.active_run is None

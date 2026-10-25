@@ -324,3 +324,72 @@ def test_file_source_proof_goal_binding_must_be_paired_or_goalless() -> None:
         _proof(goal_id="")
     with pytest.raises(ValueError, match="must be positive"):
         _proof(goal_revision=0)
+
+
+def test_file_source_proof_goal_id_must_be_a_string_when_bound() -> None:
+    # PR #21 merge gate P3：goal_bound 分支不得只查 truthiness——非 str
+    # 标量（123/True）必须被拒，契约形状不因 Optional 化而放松。
+    import hashlib
+
+    from agent.runtime.contracts import ProviderFileSourceProofV1
+
+    def _proof(goal_id):
+        return ProviderFileSourceProofV1.create(
+            conversation_id="conversation-1",
+            run_id="run-1",
+            workspace_identity_digest="workspace-1",
+            tool_call_id="call-read",
+            tool_name="read_file",
+            tool_identity_digest="0" * 64,
+            policy_identity="policy-1",
+            execution_authority="in_process",
+            operation="read_file",
+            normalized_target="notes/a.md",
+            target_digest=hashlib.sha256(b"notes/a.md").hexdigest(),
+            goal_id=goal_id,
+            goal_revision=1,
+            intent_digest="1" * 64,
+            result_content_digest=hashlib.sha256(b"hello").hexdigest(),
+        )
+
+    with pytest.raises(ValueError, match="goal_id must not be empty"):
+        _proof(123)
+    with pytest.raises(ValueError, match="goal_id must not be empty"):
+        _proof(True)
+
+
+def test_execution_intent_goal_binding_pair_is_enforced_independently() -> None:
+    # PR #21 merge gate LOW-3：ExecutionIntent 的 goal 对成对规则是
+    # ToolPrepareContext 同规则的第二份拷贝，独立钉住防两份漂移。
+    from agent.runtime.contracts import (
+        ExecutionAuthorityClass,
+        ExecutionIntent,
+        InvocationOrigin,
+        SideEffectClass,
+    )
+
+    def _intent(**overrides):
+        payload = dict(
+            tool_call_id="call-1",
+            tool_name="read_file",
+            tool_identity="read-file-v1",
+            arguments={"path": "a.txt"},
+            arguments_digest="1" * 64,
+            intent_digest="1" * 64,
+            idempotency_key="conversation-1:run-1:call-1",
+            policy_identity="policy-1",
+            conversation_id="conversation-1",
+            run_id="run-1",
+            side_effect=SideEffectClass.READ_ONLY,
+            invocation_origin=InvocationOrigin.MODEL,
+            execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        )
+        payload.update(overrides)
+        return ExecutionIntent(**payload)
+
+    with pytest.raises(ValueError, match="goal identity must be complete"):
+        _intent(goal_id="goal-1", goal_revision=None)
+    with pytest.raises(ValueError, match="goal identity must be complete"):
+        _intent(goal_id=None, goal_revision=1)
+    with pytest.raises(ValueError, match="goal identity must be complete"):
+        _intent(goal_id="goal-1", goal_revision=1, workspace_identity_digest=None)

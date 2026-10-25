@@ -372,3 +372,34 @@
   395+16=**411**。key 仅环境变量注入，产物防御性抹除。
 - **完整门**：`git diff --check` + ruff + 全量 pytest = **4201 passed /
   1 skipped / 0 failed / 0 errors**（646.02s）。graphify update 已单独补跑。
+- **升级注意**：本轮起 goal-less 会话 checkpoint 含 `goal_id: null` 的
+  file-source proof——回退到 round-10 之前的 build 会因旧 str 校验拒载该
+  checkpoint（与 PR #13 在途审批 fail-closed 同类取舍，单版本内自洽）。
+- **Merge（PR #21）**：commit 3ba36d8（10 文件 +370/-42）经
+  project-auditor merge gate **PASS（0 P0/P1/P2，1 P3+5 LOW）**——G1
+  安全属性（互斥/fail-closed/无 workspace 不铸）三层核验全过、互斥双向
+  测试确认、goal 会话既有语义逐字节未动、旧 checkpoint 等价接受；
+  `gh pr merge 21 --merge` → main = 811f820。P3+LOW 处置见下节。
+
+### 残余跟进轮（PR #21 gate 建议 + 修复中发现）
+
+PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
+发现问题直接修）：
+
+- **P3**：`ProviderFileSourceProofV1` goal_bound 分支补
+  `isinstance(goal_id, str)`（goal_id 移出共享 str 环后只剩 truthiness，
+  非标量 123/True 可过校验；生产不可达、下游 fail-closed，纯契约形状
+  加固）+ 负例×2。
+- **修复中发现（真缺陷，超出 gate 发现）**：G2 的 fail_run 消息实际
+  到不了终态——`_finish`→`finalize_action` 会用 message=None 的 recorded
+  结果覆写 `last_safe_result`，fail_run 的诊断文本全部丢失（这正是
+  016/2026-10-25 两轮 E3 "未记录 kind" 的根因）。单点根治：`_finish`
+  在 message 缺省且 outcome_state 携带同 code 同 status 的 fatal 消息时
+  传播之——~20 个 fail 位点一并修复；一处既有测试钉住的是丢失行为
+  （provider_output_truncated message is None），改为钉新语义。
+- **LOW×4**：ExecutionIntent 半对独立负例×3（防与 ToolPrepareContext
+  两份规则漂移）；invalid_model_control 消息钉 "'completion_claim'"
+  （经终态 last_safe_result）；EOF 分支同句指引钉住；loop.py workspace
+  回退注释精确化（无 binding 会话=不铸，fail-closed）。
+- **完整门**：**4203 passed / 1 skipped / 0 failed / 0 errors**
+  （567.18s）。graphify update 已单独补跑。

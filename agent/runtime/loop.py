@@ -1185,8 +1185,10 @@ class AgentRuntime:
                             if current.state.goal is not None
                             else (
                                 # goal-less（BeginAnswer 问答）没有 goal 可绑；
-                                # workspace 身份回退到会话级真相（runtime 在
-                                # run 起点已强制 state.workspace_binding）。
+                                # workspace 身份回退到会话级真相（composition
+                                # 携带 binding 时 runtime 在 run 起点已强制
+                                # state.workspace_binding 对齐；无 binding 的
+                                # 会话此处为 None → 铸造闸不铸，fail-closed）。
                                 current.state.workspace_binding.workspace_identity_digest
                                 if current.state.workspace_binding is not None
                                 else None
@@ -2456,17 +2458,20 @@ class AgentRuntime:
                         )
                         continue
                     if invalid_repairs >= self._limits.max_invalid_repairs:
+                        # kind 是 _control_kind 的固定字面量，可安全入 bounded
+                        # FAIL_DETAIL。消息必须同时传给 _finish：finalize_action
+                        # 会用 _finish 的 recorded 结果覆写 last_safe_result，
+                        # 只进 fail_run 的话终态消息丢失（016/2026-10-25 两轮
+                        # E3 失败"未记录 kind"的根因）。
+                        fatal_message = (
+                            f"Provider repeatedly used the control kind "
+                            f"{control_kind!r} that was not available in "
+                            "the current model context."
+                        )
                         failed = fail_run(
                             current.state,
                             code="invalid_model_control",
-                            message=(
-                                # kind 是 _control_kind 的固定字面量，可安全
-                                # 入 bounded FAIL_DETAIL（016 与 2026-10-25
-                                # E3 两轮失败均因缺它无法定位模型误用面）。
-                                f"Provider repeatedly used the control kind "
-                                f"{control_kind!r} that was not available in "
-                                "the current model context."
-                            ),
+                            message=fatal_message,
                         )
                         return self._finish(
                             current,
@@ -2475,6 +2480,7 @@ class AgentRuntime:
                             warnings=warnings,
                             event_kind=RuntimeEventKind.FAILED,
                             error_code="invalid_model_control",
+                            message=fatal_message,
                             outcome_state=failed,
                         )
                     invalid_repairs += 1
@@ -2529,13 +2535,14 @@ class AgentRuntime:
                 # F3:暂停的 Goal 不接受任何 goal 控制(进度/修订/完成/阻塞),
                 # 任务推进必须先显式 ResumeGoal;交互级澄清不受影响。
                 if invalid_repairs >= self._limits.max_invalid_repairs:
+                    fatal_message = (
+                        f"Provider repeated the goal control {control_kind!r} "
+                        "while the Goal is paused."
+                    )
                     failed = fail_run(
                         current.state,
                         code="invalid_model_control",
-                        message=(
-                            f"Provider repeated the goal control {control_kind!r} "
-                            "while the Goal is paused."
-                        ),
+                        message=fatal_message,
                     )
                     return self._finish(
                         current,
@@ -2544,6 +2551,7 @@ class AgentRuntime:
                         warnings=warnings,
                         event_kind=RuntimeEventKind.FAILED,
                         error_code="invalid_model_control",
+                        message=fatal_message,
                         outcome_state=failed,
                     )
                 invalid_repairs += 1
@@ -4419,6 +4427,18 @@ class AgentRuntime:
         usage_active: ActiveRun | None = None,
     ) -> RunResult:
         state = outcome_state if outcome_state is not None else current.state
+        if message is None and outcome_state is not None:
+            # fail_run/end_run 的消息落在 outcome_state.last_safe_result；不
+            # 传播的话 finalize_action 会用 message=None 的 recorded 结果覆写
+            # 它，终态消息即丢失（invalid_model_control "未记录 kind" 根因）。
+            prior = outcome_state.last_safe_result
+            if (
+                prior is not None
+                and prior.message
+                and prior.status is status
+                and prior.error_code == error_code
+            ):
+                message = prior.message
         # terminal reducer 会清空 active_run；用 reducer 前的 current 保留本次 run 用量。
         # RC-03（2026-10-11）：apply_control_request 先清空 active_run，两边都
         # None → 控制终态用量丢失；调用方在 reducer 前捕获并显式传入。

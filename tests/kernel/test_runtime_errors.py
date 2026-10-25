@@ -477,6 +477,12 @@ def test_repeated_invalid_completion_control_exhausts_shared_repair_budget() -> 
         for fact in store.state.facts
         if fact.content.get("code") == "invalid_model_control"
     ] == ["invalid_model_control"]
+    # PR #21 G2：bounded FAIL_DETAIL 必须点名被拒 kind（016/2026-10-25 两轮
+    # E3 失败均因缺它无法定位模型误用面）。fail_run 的消息落在终态
+    # last_safe_result，而非 _finish 的透传 message。
+    assert "'completion_claim'" in (
+        result.state.last_safe_result.message or ""
+    )
 
 
 def test_reused_blocked_claim_correlation_is_bounded_repair_not_crash() -> None:

@@ -163,22 +163,42 @@ def grant_availability(
     return None
 
 
+def _grant_structure_pinned(
+    grant: ProviderConsentGrantV1,
+    *,
+    control_schema_digest: str,
+    tool_bindings: tuple[ProviderConsentToolBindingV1, ...],
+) -> bool:
+    """结构钉死面单源判定：control schema digest 与全部工具绑定都在 grant
+    批准集内才视为未漂移。gate 放行（``_grant_covers_structure``）与渲染
+    解释（``grant_structure_drifted``）共用此规则，两侧不得再各持一份公式
+    （2026-10-25 merge gate LOW-1）。"""
+
+    approved = {
+        binding.name: binding.identity_digest for binding in grant.tool_bindings
+    }
+    if any(
+        approved.get(binding.name) != binding.identity_digest
+        for binding in tool_bindings
+    ):
+        return False
+    return control_schema_digest == grant.control_schema_digest
+
+
 def grant_structure_drifted(
     grant: ProviderConsentGrantV1,
     request: ProviderDisclosureRequestV2,
 ) -> bool:
     """活动 grant 的结构钉死面与请求结构是否漂移（渲染解释的单源谓词）。
 
-    与 `_grant_covers_structure` 的结构子集同一规则：control schema digest
-    或任一请求工具绑定不在 grant 批准集内即漂移。gate 用它决定放行，
-    渲染用它解释"活动许可为何不覆盖本请求"——两处不得各持一份判定。
+    判定核心在 ``_grant_structure_pinned``：control schema digest 或任一请求
+    工具绑定不在 grant 批准集内即漂移。gate 用同一核心决定放行，渲染用它
+    解释"活动许可为何不覆盖本请求"——两处不得各持一份判定。
     """
-    approved = {
-        binding.name: binding.identity_digest for binding in grant.tool_bindings
-    }
-    return request.control_schema_digest != grant.control_schema_digest or any(
-        approved.get(binding.name) != binding.identity_digest
-        for binding in request.tool_bindings
+    return not _grant_structure_pinned(
+        grant,
+        control_schema_digest=request.control_schema_digest,
+        tool_bindings=request.tool_bindings,
     )
 
 
@@ -188,19 +208,14 @@ def _grant_covers_structure(
     *,
     exception_classes: frozenset[str] = frozenset(),
 ) -> bool:
-    approved = {
-        binding.name: binding.identity_digest for binding in grant.tool_bindings
-    }
-    if any(
-        approved.get(binding.name) != binding.identity_digest
-        for binding in scope.tool_bindings
+    if not _grant_structure_pinned(
+        grant,
+        control_schema_digest=scope.control_schema_digest,
+        tool_bindings=scope.tool_bindings,
     ):
         return False
-    return (
-        scope.control_schema_digest == grant.control_schema_digest
-        and (set(scope.data_classes) - exception_classes).issubset(
-            grant.allowed_data_classes
-        )
+    return (set(scope.data_classes) - exception_classes).issubset(
+        grant.allowed_data_classes
     )
 
 

@@ -638,10 +638,11 @@ class TerminalRenderer:
                     )
                 # C1（2026-10-25 旅程实证）：grant 钉死铸造时的 control
                 # schema 与工具绑定；goal 准入/修订会改变两者，此时活动
-                # 许可不覆盖本请求。剩余原因只有结构漂移（新源已由上方
-                # sources 段解释），必须明示，否则"剩余额度 + 再次询问"
-                # 并存自相矛盾，用户会认为 s 失效。判定单源在
-                # grant_structure_drifted（与 gate 同一规则）。
+                # 许可不覆盖本请求。结构漂移是唯一需要专门解释行的剩余
+                # 原因（新源由上方 sources 段解释；类级差异由选项句自述），
+                # 必须明示，否则"剩余额度 + 再次询问"并存自相矛盾，用户
+                # 会认为 s 失效。判定单源在 grant_structure_drifted（与
+                # gate 同一规则）。
                 if grant_structure_drifted(grant, request):
                     quota += (
                         " This request is not covered by it: the task's "

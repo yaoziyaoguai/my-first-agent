@@ -1218,12 +1218,13 @@ def _close_session_resources(
     close_stack: contextlib.ExitStack,
     write_fn: Callable[[str], None],
 ) -> bool:
-    """/new、/switch 重装配前关闭当前 conversation 持有的可关闭资源（含 checkpoint flock）。"""
+    """/new、/switch 重装配前关闭当前 conversation 持有的可关闭资源。"""
+
     try:
         close_stack.close()
     except Exception as error:  # noqa: BLE001 - composition root 必须屏蔽资源细节
         write_fn(
-            "New session failed: resource cleanup failed: "
+            "Switching sessions failed: resource cleanup failed: "
             f"{type(error).__name__}"
         )
         return False

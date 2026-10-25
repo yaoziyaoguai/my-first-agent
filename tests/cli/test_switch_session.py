@@ -221,8 +221,9 @@ def test_main_switch_forces_selector_reentry_over_saved_conversations(
         for line in output
     )
     assert selector_count == 2, output
-    # 两个 conversation checkpoint 都仍在磁盘上。
-    assert (state_root / "workspaces").exists()
+    # 两个 conversation checkpoint 都原样保留在磁盘上（切换不清除历史）。
+    assert first.checkpoint_path is not None and first.checkpoint_path.exists()
+    assert second.checkpoint_path is not None and second.checkpoint_path.exists()
 
 
 def test_main_switch_to_single_candidate_does_not_auto_resume(

@@ -181,7 +181,7 @@ def run_repl(
             return NEW_SESSION_REQUESTED
         if stripped == "/switch":
             # Oracle gap2 #1(2026-10-26):任务切换入口。同一装配循环里关掉当前
-            # conversation 的资源(含 checkpoint flock)后强制重走会话选择器;
+            # conversation 持有的可关闭资源后强制重走会话选择器;
             # 切换不执行任何 action、不转移 pending 决策与授权,各 conversation
             # 的 checkpoint 原样保留为 startup 候选。
             refusal = switch_session_gate(snapshot.state)

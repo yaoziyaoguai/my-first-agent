@@ -1144,7 +1144,7 @@ def test_new_session_cleanup_failure_stops_before_reopening(
     assert code == 2
     assert builds == 1
     assert output[-1] == (
-        "New session failed: resource cleanup failed: RuntimeError"
+        "Switching sessions failed: resource cleanup failed: RuntimeError"
     )
     assert "private resource detail" not in "\n".join(output)
 

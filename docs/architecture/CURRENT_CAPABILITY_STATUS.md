@@ -39,6 +39,18 @@ locally-verified 或更高。**2026-10-23 晚增补：** 同日完成真实模�
 输出的外发疲劳定量为 16 次/小任务（见 RESULTS 当日章节）。E2/E3 因上游退役
 deepseek-v4-flash 记 BLOCKED_UPSTREAM_MODEL_RETIRED。
 
+**2026-10-25 增补（P5 读域许可构建的真实层复跑）：** 工作树叠加 P5（读/列/搜/
+chunk/confirm 铸 `ProviderFileSourceProofV1`，r 会话许可类级覆盖读类发送）后，
+经用户授权完成 E1/E2/E3 真实层复跑（deepseek-flash，wheel 安装物 origin=site-packages
+过门）：**E1 PASS（15 请求）**、**E2 staged 全链 PASS（29 请求，注入→消费→pause→
+新 PID resume→VERIFIED_DONE）**、E3 already-correct **零写契约首次成立**（字节级
+不变、effects=0）但闭合败于 `invalid_model_control`（模型语义层 fail-loud，非产品
+回归）。P5 真实层 r 旅程判据全 PASS：答 r 一次后读类（含新文件）**零再披露**，
+仅非阻断余额通知。goal-less 对话读类仍逐次（proof 绑定 goal 的刻意语义，有真实层
+对照实证）。证据与预算（71 请求，累计 395）见
+[2026-10-25 活动状态](../handoffs/2026-10-25-continuous-improvement/STATE.md)；
+本轮全部改动仍未提交，不构成任何能力 promotion。
+
 本节是唯一权威 current matrix；下方 Historical matrix 与时间线只作历史证据保留。所有 current claim
 均相对当前工作树这一 identity：当前工作树相对 016/017/018/019 的旧 seal/check 全部 drift（016
 manifest 期望 225、实际 508 entries；018 期望 309、实际 495；019 entry_count/root drift），

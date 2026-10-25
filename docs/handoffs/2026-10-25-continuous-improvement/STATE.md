@@ -113,4 +113,25 @@
   **4188 passed, 1 skipped, 0 failed**（P5 累计新增 7 测试：tools 3 + kernel 4）。
 - E2/E3 真实层复跑轮收尾（见上节）：E1/E2 PASS、E3 零写成立+闭合败于模型语义、
   P5 真实层 r 旅程判据全 PASS。决策队列清空。
-- 活动关闭（未 commit/push，工作树 13 改动文件 + 本 handoff 目录待用户处置）。
+- **主体已 merge**：用户授权 commit+push 后，4 commit 经 PR #13 merge 到 main
+  （`8d8c697`）；merge gate 审计 PASS（无 P0/P1/P2；P3-1 在途 confirm_file 审批
+  升级后 fail-closed 需重批一次=正确行为，已附 PR 描述为升级注意事项）。
+
+## 审计 follow-up 轮（2026-10-25，用户「把审计出来的问题都修复」）
+
+- **LOW-1（修）**：`grant_structure_drifted` 与 `_grant_covers_structure` 的
+  平行结构判定提取为单源 `_grant_structure_pinned`（provider_consent.py），
+  gate 放行与渲染解释共用同一核心；gate 语义逐字等价（绑定覆盖→digest→类别）。
+- **LOW-2（修）**：render.py C1 注释措辞精确化——结构漂移是"唯一需要专门解释行
+  的剩余原因"（新源由 sources 段解释、类级差异由选项句自述），不再断言"只有"。
+- **LOW-3（修）**：tripwire 测试 `test_local_process_stdout_never_mints_a_file_source_proof`
+  （kernel/process_draft_bounds）——注册级断言 `result_source_kind is None` +
+  runtime 级 goal 绑定在场断言 `result_source_proof is None`；未来给进程工具加
+  kind 属扩权，必然显式变红。
+- **P3-1（不改码）**：fail-closed 是刻意安全属性，已文档化为升级注意事项。
+- 验证：ruff 绿；聚焦 108 passed（tripwire+consent_ux+file tools）；kernel+cli
+  689 passed；完整门见下。
+- 完整门（follow-up 轮）：`git diff --check` 通过；`.venv/bin/ruff check .` 通过；
+  `.venv/bin/python -m pytest -q -rx` **4189 passed, 1 skipped, 0 failed**
+  （+1 = LOW-3 tripwire）。
+- 活动关闭（主体+follow-up 均已落地）。

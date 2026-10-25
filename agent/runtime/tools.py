@@ -898,7 +898,9 @@ class KernelToolRuntime:
         """成功执行的稳定来源证明；条件不全时返回 None（降级逐次披露）。
 
         W1/P5 共用：WORKSPACE_FILE_EFFECT（写/改的读回）与 WORKSPACE_READ
-        （读/列/搜）都绑定 goal/revision/workspace 与结果内容 digest。
+        （读/列/搜）都绑定 workspace 与结果内容 digest；goal 会话额外绑定
+        goal/revision，goal-less 会话（BeginAnswer 问答）成对留 None——
+        覆盖失效语义由会话许可的 TTL/次数/撤销与逐次 fact 重验承担。
         """
 
         normalized_target = current_binding.get("consent_target")
@@ -907,8 +909,7 @@ class KernelToolRuntime:
             isinstance(normalized_target, str)
             and normalized_target
             and isinstance(target_digest, str)
-            and intent.goal_id
-            and intent.goal_revision is not None
+            and (intent.goal_id is not None) == (intent.goal_revision is not None)
             and intent.workspace_identity_digest
         ):
             return None

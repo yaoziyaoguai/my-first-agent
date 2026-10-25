@@ -503,11 +503,19 @@ def test_status_without_goal_shows_no_active_task() -> None:
 
 def test_exact_match_commands_tolerate_trailing_whitespace() -> None:
     # 第九轮审计 R2：/help 列表内的命令带尾随空格不应被判 Unknown command
-    # （"/exit " 甚至无法退出）；与 /help 的既有 strip 处理对齐。
+    # （"/exit " 甚至无法退出）；与 /help 的既有 strip 处理对齐。strip 判等
+    # 的自然结果=前导空格同样被接受（PR #19 gate LOW），与本 runtime 层
+    # casefold 归一一致——在此钉住，防回归为单侧容错。
     runtime, output, exit_code = _run_once(ConversationState.new("conversation-1"), "/status ")
     assert "Unknown command" not in "\n".join(output)
     assert any("no active task" in line for line in output)
     # /status 真实渲染（不是拒绝文案）
+
+    runtime_lead, output_lead, _ = _run_once(
+        ConversationState.new("conversation-1"), " /status"
+    )
+    assert "Unknown command" not in "\n".join(output_lead)
+    assert any("no active task" in line for line in output_lead)
 
     runtime2 = RecordingRuntime()
     inputs = iter(("/exit ",))

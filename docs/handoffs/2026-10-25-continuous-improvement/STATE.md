@@ -307,3 +307,68 @@
   语义可辩护、strip 判等顺带接受前导空格=与既有归一一致）不阻断。
   `gh pr merge 19 --merge`（分支保留）→ main = 3f673ea。
   2026-10-25 持续改善活动九轮全闭合并入 main。
+
+## 残余解决轮（第十轮，2026-10-25，用户「先把残余解决吧」）
+
+四项残余全处置；裁决项 1 的扩权授权=用户本指令对残余清单（明确标注
+「扩权项」）的直接裁决。
+
+### G1 goal-less 对话读类会话级覆盖（原决策队列 1 剩余子项，扩权裁决落地）
+
+- **语义**：goal-less（BeginAnswer 问答）读类发送获得与 goal 会话对称的
+  r 会话许可覆盖。失效语义不再依赖 goal 修订（无 goal 可修），由许可
+  TTL/次数/撤销 + workspace 绑定 + 逐次 fact 内容重验承担——与 s 在
+  goal-less 的既有会话级语义对称。
+- **实现（5 处，最小契约 widening）**：
+  1. `ProviderFileSourceProofV1`：goal_id/goal_revision 放开为
+     `str | None`/`int | None`，成对一致性校验（goal 会话=非空+正数；
+     goal-less=双 None；半侧/零 revision 一律拒绝）。编码与
+     ExecutionIntent/ControlReceipt/SourceReceipt 既有 None 约定一致；
+     记录侧 `_validated_recorded_source_proof` 本就按 None 镜像校验
+     （原为死代码预期形状）。
+  2. `ToolPrepareContext`/`ExecutionIntent` 三元完整性规则解耦：goal 对
+     成对（可双 None），workspace 独立可单带（goal-less 工作区会话）；
+     goal 对在场必须带 workspace（保持既有约束）。
+  3. `tools.py _file_source_proof`：goal-less + workspace 绑定即铸造
+     None-pair proof（原来直接不铸）。
+  4. `loop.py` ToolPrepareContext 构造：goal-less 时 workspace 身份回退
+     会话级 `state.workspace_binding`（runtime 已强制注入）。
+  5. `context.py _valid_file_proof`/`_revalidated_summary_sources`：
+     goal 绑定按会话形状镜像判定——**两形状互斥**，goal 建立/取消即
+     跨形状全部失效重决策（fail-closed，不静默覆盖）。
+- **互斥安全属性（新测试钉住）**：goal-less 时代 proof 在 goal 建立后
+  立即失效（反之亦然）；grant 侧（state.py 准入谓词与 grant 函数）
+  本就 goal-less live_match 可用（`_r_pending_state` 夹具即 goal-less），
+  无需改动。
+- **测试**：contracts 成对负例×4 + wire 往返；tools goal-less 铸造 +
+  无 workspace/半对 fail-closed（半对在契约层即拒）；context goal-less
+  reusable 投影 + 双向互斥；既有 goal 路径 1966 广域全绿（无回归）。
+- **真实层（deepseek-flash，工作树 wheel 装入 preview venv）**：
+  goalless 读旅程 r10 = **PASS**——r 选项 1 次（修复前 0）、答 r 后
+  0 再披露（修复前 4 请求 4 披露逐次）、a/b/c 行数全报、5/12 请求、
+  7.2s。证据 `previews/quality-20261025/real-read-journey-2026-10-25-goalless-r10/`。
+
+### G2 E3 already-correct 闭合（模型语义层残余）
+
+- **观测性修复**：`invalid_model_control` 两处 fail_run 消息带上被拒
+  control kind（固定字面量，可安全入 bounded FAIL_DETAIL）——016 与
+  2026-10-25 两轮 E3 失败均因缺它无法定位模型误用面。
+- **真实层复跑（deepseek-flash）**：E3 r10 = **PASS**——typed terminal、
+  零写契约成立（files_unchanged=true、effects=0）、业务双 true、七补充
+  全 true、11/20 请求、24.7s。上次闭合失败未复发（模型行为方差）；
+  观测性修复保证未来复发可定位。证据
+  `previews/quality-20261025/real-validation-e3-r10/`。
+
+### G3/G4 PR #19 merge gate LOW×2
+
+- G3：main.py 选择器 EOF/Interrupt 分支文案与 invalid 分支对齐（同句
+  "Run first-agent again to choose."）。
+- G4：strip 判等接受前导空格=自然结果，测试钉住（" /status" 渲染非
+  Unknown），防回归为单侧容错。
+
+### 验证与预算
+
+- 真实层新增物理请求 16（goalless r10 5 + E3 r10 11）；历史累计
+  395+16=**411**。key 仅环境变量注入，产物防御性抹除。
+- **完整门**：`git diff --check` + ruff + 全量 pytest = **4201 passed /
+  1 skipped / 0 failed / 0 errors**（646.02s）。graphify update 已单独补跑。

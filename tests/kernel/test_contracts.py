@@ -278,3 +278,49 @@ def test_consent_ttl_is_a_whole_number_of_minutes() -> None:
     # "61 minutes" 而实际有效期 61.7 分钟，且测试与生产同表达式重算不会
     # 报警。在常量层直接钉整除，让这种调值在 CI 即红。
     assert CONSENT_TTL_SECONDS % 60 == 0
+
+
+def test_file_source_proof_goal_binding_must_be_paired_or_goalless() -> None:
+    """proof 的 goal 绑定只接受两种形状：goal 会话（非空 goal_id + 正数
+    revision）或 goal-less 会话（双 None）。半侧形状与零 revision 一律
+    拒绝——goal-less 读不能冒充 goal 绑定（反之亦然）。"""
+
+    import hashlib
+
+    from agent.runtime.contracts import ProviderFileSourceProofV1
+
+    def _proof(**overrides):
+        payload = dict(
+            conversation_id="conversation-1",
+            run_id="run-1",
+            workspace_identity_digest="workspace-1",
+            tool_call_id="call-read",
+            tool_name="read_file",
+            tool_identity_digest="0" * 64,
+            policy_identity="policy-1",
+            execution_authority="in_process",
+            operation="read_file",
+            normalized_target="notes/a.md",
+            target_digest=hashlib.sha256(b"notes/a.md").hexdigest(),
+            goal_id="goal-1",
+            goal_revision=1,
+            intent_digest="1" * 64,
+            result_content_digest=hashlib.sha256(b"hello").hexdigest(),
+        )
+        payload.update(overrides)
+        return ProviderFileSourceProofV1.create(**payload)
+
+    goalless = _proof(goal_id=None, goal_revision=None)
+    assert goalless.goal_id is None and goalless.goal_revision is None
+    # wire 往返保持形状与 digest 完整性。
+    roundtrip = ProviderFileSourceProofV1.from_dict(goalless.to_dict())
+    assert roundtrip == goalless
+
+    with pytest.raises(ValueError, match="paired"):
+        _proof(goal_id=None)
+    with pytest.raises(ValueError, match="paired"):
+        _proof(goal_revision=None)
+    with pytest.raises(ValueError, match="must not be empty"):
+        _proof(goal_id="")
+    with pytest.raises(ValueError, match="must be positive"):
+        _proof(goal_revision=0)

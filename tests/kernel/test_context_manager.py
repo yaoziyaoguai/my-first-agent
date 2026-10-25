@@ -1214,7 +1214,8 @@ def _read_proof(
     *,
     tool_name: str = "read_file",
     content: str = "hello workspace",
-    goal_revision: int = 1,
+    goal_id: str | None = "goal-1",
+    goal_revision: int | None = 1,
 ) -> ProviderFileSourceProofV1:
     return ProviderFileSourceProofV1.create(
         conversation_id="conversation-1",
@@ -1228,7 +1229,7 @@ def _read_proof(
         operation=tool_name,
         normalized_target="notes/a.md",
         target_digest=hashlib.sha256(b"notes/a.md").hexdigest(),
-        goal_id="goal-1",
+        goal_id=goal_id,
         goal_revision=goal_revision,
         intent_digest="1" * 64,
         result_content_digest=hashlib.sha256(content.encode("utf-8")).hexdigest(),
@@ -1280,6 +1281,110 @@ def test_proof_backed_read_result_projects_reusable_excerpt_source() -> None:
     assert excerpt_sources, "proof-backed read must project a consent source"
     assert all(source.reusable for source in excerpt_sources)
     assert excerpt_sources[0].label == "read_file notes/a.md"
+
+
+def test_goalless_proof_backed_read_projects_reusable_source() -> None:
+    """goal-less（BeginAnswer 问答）读的 None-pair proof 在 goal-less 会话
+    投影为 reusable workspace_excerpt 来源——r 许可的读域覆盖由此延伸到
+    goal-less 对话（2026-10-25 残余裁决项）。失效语义不再依赖 goal 修订，
+    由许可 TTL/次数/撤销与逐次 fact 重验承担。"""
+
+    state = replace(
+        ConversationState.new("conversation-1"),
+        active_run=ActiveRun("run-current"),
+        interaction_state=InteractionState.ANSWERING,
+        provider_source_proofs=(_read_proof(goal_id=None, goal_revision=None),),
+        facts=(
+            _fact("user-1", FactKind.USER_MESSAGE, text="read the notes"),
+            _fact(
+                "run:run-1:tool-result:call-read:2",
+                FactKind.TOOL_RESULT,
+                tool_call_id="call-read",
+                text="hello workspace",
+                is_error=False,
+                executed=True,
+                metadata={
+                    "data_classes": ["workspace_excerpt"],
+                    "source_receipts": [],
+                    "source_refs": [],
+                    "truncated": False,
+                },
+            ),
+        ),
+    )
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=8_000, output_reserve=500),
+        workspace_identity_digest="workspace-1",
+    )
+
+    pack = manager.build(state, _action("summarize"), ())
+
+    excerpt_sources = [
+        source
+        for source in pack.consent_scope.sources
+        if source.data_class == "workspace_excerpt"
+    ]
+    assert excerpt_sources, "goal-less proof-backed read must project a source"
+    assert all(source.reusable for source in excerpt_sources)
+
+
+def test_proof_goal_binding_is_mutually_exclusive_across_conversation_shapes() -> None:
+    """goal 绑定两个方向互斥：goal-less 时代的 proof 在 goal 建立后失效
+    （反之亦然）——跨形状不静默覆盖，读域许可换形状即重新决策。"""
+
+    goalless_proof = _read_proof(goal_id=None, goal_revision=None)
+    goal_state = replace(
+        ConversationState.new("conversation-1"),
+        goal=_read_goal(),
+        active_run=ActiveRun("run-current"),
+        provider_source_proofs=(goalless_proof,),
+        facts=(
+            _fact("user-1", FactKind.USER_MESSAGE, text="read the notes"),
+            _fact(
+                "run:run-1:tool-result:call-read:2",
+                FactKind.TOOL_RESULT,
+                tool_call_id="call-read",
+                text="hello workspace",
+                is_error=False,
+                executed=True,
+                metadata={
+                    "data_classes": ["workspace_excerpt"],
+                    "source_receipts": [],
+                    "source_refs": [],
+                    "truncated": False,
+                },
+            ),
+        ),
+    )
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=8_000, output_reserve=500),
+        workspace_identity_digest="workspace-1",
+    )
+
+    pack = manager.build(goal_state, _action("summarize"), ())
+
+    # goal-less proof 在 goal 会话不再可复用：摘录来源要么缺失要么退回
+    # generic 非复用投影，读域许可不能静默跨形状覆盖。
+    assert not any(
+        source.reusable and source.data_class == "workspace_excerpt"
+        for source in pack.consent_scope.sources
+    )
+
+    goal_bound_proof = _read_proof()
+    goalless_state = replace(
+        ConversationState.new("conversation-1"),
+        active_run=ActiveRun("run-current"),
+        interaction_state=InteractionState.ANSWERING,
+        provider_source_proofs=(goal_bound_proof,),
+        facts=goal_state.facts,
+    )
+    pack = manager.build(goalless_state, _action("summarize"), ())
+    assert not any(
+        source.reusable and source.data_class == "workspace_excerpt"
+        for source in pack.consent_scope.sources
+    )
 
 
 def test_unproofed_read_result_stays_nonreusable_per_send_source() -> None:

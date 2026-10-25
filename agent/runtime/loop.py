@@ -1183,7 +1183,14 @@ class AgentRuntime:
                         workspace_identity_digest=(
                             current.state.goal.workspace_identity_digest
                             if current.state.goal is not None
-                            else None
+                            else (
+                                # goal-less（BeginAnswer 问答）没有 goal 可绑；
+                                # workspace 身份回退到会话级真相（runtime 在
+                                # run 起点已强制 state.workspace_binding）。
+                                current.state.workspace_binding.workspace_identity_digest
+                                if current.state.workspace_binding is not None
+                                else None
+                            )
                         ),
                         goal_authorization=self._goal_authorization_for(
                             current.state,
@@ -2453,8 +2460,12 @@ class AgentRuntime:
                             current.state,
                             code="invalid_model_control",
                             message=(
-                                "Provider repeatedly used a control kind that was not "
-                                "available in the current model context."
+                                # kind 是 _control_kind 的固定字面量，可安全
+                                # 入 bounded FAIL_DETAIL（016 与 2026-10-25
+                                # E3 两轮失败均因缺它无法定位模型误用面）。
+                                f"Provider repeatedly used the control kind "
+                                f"{control_kind!r} that was not available in "
+                                "the current model context."
                             ),
                         )
                         return self._finish(
@@ -2521,7 +2532,10 @@ class AgentRuntime:
                     failed = fail_run(
                         current.state,
                         code="invalid_model_control",
-                        message=("Provider repeated goal controls while the Goal is paused."),
+                        message=(
+                            f"Provider repeated the goal control {control_kind!r} "
+                            "while the Goal is paused."
+                        ),
                     )
                     return self._finish(
                         current,

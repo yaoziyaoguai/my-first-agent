@@ -10,6 +10,7 @@ from agent.runtime.contracts import (
     CONSENT_MAX_USES,
     CONSENT_PROFILE_WORKSPACE_READ,
     CONSENT_TTL_SECONDS,
+    TERMINAL_GOAL_STATUSES,
     ActiveRunStatus,
     ApprovalRequest,
     ConversationState,
@@ -429,11 +430,26 @@ class TerminalRenderer:
             # REPL 以退出码 1 结束，只打错误码会让用户以为一切丢失。state、
             # 已验证证据与已记录效果都已持久化——如实指明同 workspace 重启
             # 可续作（与 app.py KeyboardInterrupt 分支同一措辞风格）。
-            recovery = (
-                " Saved state was kept — verified evidence and recorded "
-                "effects are preserved; run first-agent again in this "
-                "workspace to continue the task, or /cancel it after restarting."
+            # LOW 跟进②（2026-10-25 PR #15 审计）：/cancel 只对非终态 goal
+            # 有效（state.py 对终态拒绝；对抗验证另指出 unknown-effect 落盘
+            # 失败窗口 /cancel 暂拒——先答恢复提示即可解除，非死路），goal-less
+            # 纯对话没有可取消的任务——出路按 goal 状态如实分支。
+            goal = result.state.goal
+            cancellable = (
+                goal is not None and goal.status not in TERMINAL_GOAL_STATUSES
             )
+            if cancellable:
+                recovery = (
+                    " Saved state was kept — verified evidence and recorded "
+                    "effects are preserved; run first-agent again in this "
+                    "workspace to continue the task, or /cancel it after restarting."
+                )
+            else:
+                recovery = (
+                    " Saved state was kept — verified evidence and recorded "
+                    "effects are preserved; run first-agent again in this "
+                    "workspace to continue this conversation."
+                )
             base = f"Run failed: {result.error_code or 'fatal_error'}"
             if result.message:
                 # 016 真实 E3(第 19/24 轮 J8):runtime_failure 的异常细节只在

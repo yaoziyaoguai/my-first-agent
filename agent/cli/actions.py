@@ -11,13 +11,13 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from agent.runtime.contracts import (
+    TERMINAL_GOAL_STATUSES,
     AcknowledgeProviderDisclosure,
     CancelBrowserTakeover,
     CancelGoal,
     CancelRun,
     CompleteBrowserTakeover,
     ConversationState,
-    GoalStatus,
     GrantProviderConsent,
     GrantProviderWorkspaceReadConsent,
     PauseGoal,
@@ -39,8 +39,6 @@ from agent.runtime.provider_consent import workspace_read_classes_covered
 # 选择 79(NR_UNRESOLVABLE 之外的未占用私人区段)只是进程内信令,不是 errno 声明。
 NEW_SESSION_REQUESTED = 79
 
-_TERMINAL_GOAL_STATUSES = frozenset({GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED})
-
 
 def new_session_gate(state: ConversationState) -> str | None:
     """/new 的共享合法性判断(CLI 与 TUI 同一语义)。
@@ -54,7 +52,7 @@ def new_session_gate(state: ConversationState) -> str | None:
     if active is not None:
         return "Resolve the pending run or recovery state before starting a new task."
     goal = state.goal
-    if goal is not None and goal.status not in _TERMINAL_GOAL_STATUSES:
+    if goal is not None and goal.status not in TERMINAL_GOAL_STATUSES:
         return "The current goal is still active; finish or cancel it before /new."
     return None
 

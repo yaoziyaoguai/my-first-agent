@@ -258,6 +258,14 @@ class GoalStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+# 终态 goal 集合的单源（LOW 跟进轮 2026-10-25：此前 actions/sessions/render
+# 各自内联同一集合，漂移风险由对抗验证指出）。cancel_goal/new_session_gate/
+# archived 汇总/FAILED_FATAL 恢复句共用同一语义。
+TERMINAL_GOAL_STATUSES = frozenset(
+    {GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED}
+)
+
+
 class InteractionState(StrEnum):
     IDLE = "idle"
     ANSWERING = "answering"

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from agent.cli.actions import (
     NEW_SESSION_REQUESTED,
+    SWITCH_SESSION_REQUESTED,
     build_cancel_browser_takeover,
     build_cancel_goal,
     build_complete_browser_takeover,
@@ -21,6 +22,7 @@ from agent.cli.actions import (
     build_revoke_provider_consent,
     new_session_gate,
     parse_artifact_confirmation,
+    switch_session_gate,
     utc_now_rfc3339,
 )
 from agent.cli.interrupt import RunInterruptGuard
@@ -74,7 +76,10 @@ _SURVIVABLE_CONFLICT_CODES = frozenset(
 )
 _OBSERVATION_CONTINUE = frozenset({"继续", "continue", "record unknown"})
 _HELP_TEXT = """Commands:
-/new — start a new conversation when no decision is pending
+/new — start a new conversation when no decision is pending (park the current
+  task with /pause first)
+/switch — choose another saved conversation in this workspace (the current
+  conversation is kept and can be selected again later)
 /status — show the current task status, progress, and permission balances
 /sources [--advanced] — show recorded sources
 /leases [--advanced] — show active process permissions
@@ -174,6 +179,20 @@ def run_repl(
                 continue
             write_fn("Starting a new task in this workspace (previous task kept).")
             return NEW_SESSION_REQUESTED
+        if stripped == "/switch":
+            # Oracle gap2 #1(2026-10-26):任务切换入口。同一装配循环里关掉当前
+            # conversation 的资源(含 checkpoint flock)后强制重走会话选择器;
+            # 切换不执行任何 action、不转移 pending 决策与授权,各 conversation
+            # 的 checkpoint 原样保留为 startup 候选。
+            refusal = switch_session_gate(snapshot.state)
+            if refusal is not None:
+                write_fn(refusal)
+                continue
+            write_fn(
+                "Switching to another saved conversation in this workspace "
+                "(current task kept)."
+            )
+            return SWITCH_SESSION_REQUESTED
         if stripped == "/help":
             write_fn(_HELP_TEXT)
             continue

@@ -18,6 +18,7 @@ from agent.runtime.contracts import (
     CancelRun,
     CompleteBrowserTakeover,
     ConversationState,
+    GoalStatus,
     GrantProviderConsent,
     GrantProviderWorkspaceReadConsent,
     PauseGoal,
@@ -38,6 +39,9 @@ from agent.runtime.provider_consent import workspace_read_classes_covered
 # /new(r19 小步 2)请求装配层重建 conversation 的 REPL 退出码。
 # 选择 79(NR_UNRESOLVABLE 之外的未占用私人区段)只是进程内信令,不是 errno 声明。
 NEW_SESSION_REQUESTED = 79
+# /switch(Oracle gap2 #1,2026-10-26)请求装配层重开会话选择器的 REPL 退出码;
+# 与 79 同一私人区段,只作进程内信令。
+SWITCH_SESSION_REQUESTED = 78
 
 
 def new_session_gate(state: ConversationState) -> str | None:
@@ -45,15 +49,37 @@ def new_session_gate(state: ConversationState) -> str | None:
 
     返回 None 允许显式开始新任务;返回拒绝原因字符串时不得切换。
     - active run(pending approval / takeover / EXECUTING / unknown effect)必须先处置;
-    - 活跃(非终态)Goal 必须先完成或取消——/new 不清空、不重开旧 Goal;
-    - Goal 终态或无 Goal 时允许;旧 checkpoint 与 evidence 由装配层原样保留。
+    - 活跃(非终态、非暂停)Goal 必须先显式 park(/pause)或完成/取消——/new 不清空、
+      不重开旧 Goal;PAUSED Goal 已在持久安全边界(leases 已撤销),允许离开;
+    - Goal 终态、PAUSED 或无 Goal 时允许;旧 checkpoint 与 evidence 由装配层原样保留。
     """
     active = state.active_run
     if active is not None:
         return "Resolve the pending run or recovery state before starting a new task."
     goal = state.goal
-    if goal is not None and goal.status not in TERMINAL_GOAL_STATUSES:
-        return "The current goal is still active; finish or cancel it before /new."
+    if (
+        goal is not None
+        and goal.status not in TERMINAL_GOAL_STATUSES
+        and goal.status is not GoalStatus.PAUSED
+    ):
+        return (
+            "The current goal is still active; pause it with /pause to park it, or "
+            "finish or cancel it before /new."
+        )
+    return None
+
+
+def switch_session_gate(state: ConversationState) -> str | None:
+    """/switch 的合法性判断(当前为 CLI 命令;TUI 采纳时共享同一判断)。
+
+    切换只在持久安全边界发生:active run(pending approval / takeover /
+    EXECUTING / unknown effect)必须先处置。Goal 任意状态都允许——切换不清空、
+    不重开、不转移任何 Goal 的 pending 决策与授权,conversation 原样保留为
+    startup 候选;回切后由各自 conversation 的既有命令(/resume-goal 等)继续。
+    """
+    active = state.active_run
+    if active is not None:
+        return "Resolve the pending run or recovery state before switching tasks."
     return None
 
 

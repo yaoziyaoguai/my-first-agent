@@ -85,9 +85,14 @@ identity 成立——各能力保持 `implemented-candidate`。2026-09-09 r18 �
   （`agent/cli/app.py` 无对应命令，typed `CompactConversation` action 不存在）；自动压缩经
   Runtime 安全边界生效。README 能力列表只声称已核对代码的真实实现。
   **r19 后续（2026-09-10，产品化小步 2）**：`/new` 已实现——CLI 与 TUI 共享
-  `new_session_gate` 合法性判断（active run/pending 决策/活跃 Goal 拒绝；终态或无 Goal
-  允许），以 `NEW_SESSION_REQUESTED` 信令在同一进程内经 `open_workspace_session(force_new=True)`
-  重建 conversation，旧 checkpoint 与 evidence 原样保留；`/compact`、`/context` 仍未实现。
+  `new_session_gate` 合法性判断（active run/pending 决策拒绝；Goal 活跃需先 `/pause`
+  park，PAUSED/终态或无 Goal 允许），以 `NEW_SESSION_REQUESTED` 信令在同一进程内经
+  `open_workspace_session(force_new=True)` 重建 conversation，旧 checkpoint 与 evidence
+  原样保留；`/compact`、`/context` 仍未实现。
+  **2026-10-26（Oracle gap2 #1）**：任务切换闭环——`/switch` 以
+  `SWITCH_SESSION_REQUESTED` 信令经 `open_workspace_session(select_required=True)`
+  强制重开会话选择器（单个非终态候选也不自动 resume）；park=`/pause`（持久安全边界，
+  leases 已撤销）+`/new`，回切后 `/resume` 继续。TUI 暂无 `/switch` 命令（CLI-only）。
   **r19 后续（2026-09-10，产品化小步 3）**：anthropic_compatible adapter 改为 SSE 流式
   （`ModelDeltaObserver` 窄观察合同，`MODEL_TEXT_DELTA` advisory 事件直写 EventSink 绕过
   invocation 缓冲）；最终响应仍由流结束后的完整重建走唯一 normalize 路径，断流不铸造响应、

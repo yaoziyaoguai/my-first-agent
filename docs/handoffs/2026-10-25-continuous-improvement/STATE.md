@@ -179,3 +179,59 @@
   并入）：①message-form 恢复句补一行显式断言；②goal-less fatal 时 "/cancel"
   措辞不普适（无害）；③capabilities.md 可恢复"写文件结果稳定来源静默复用"注记。
 - 活动关闭（主体+follow-up+双审计轮均已落地，main @ d1d63f5）。
+
+## LOW 跟进轮（2026-10-25，用户「把剩余的问题都改完」）
+
+- 范围：上述 LOW×3 + PR #14 审计遗留 LOW（tripwire 注释"唯一开关"表述对进程
+  路径略强）+ 2026-10-24 调值轮 backlog 的 managed_web 就绪窗口 flake，共五项。
+- **①（修）**：`test_fatal_result_carries_bounded_exception_summary` 补两条
+  显式断言——message-form（含摘要）与长消息截断形态的输出都带恢复句
+  （此前只有裸错误码形态被断言）。
+- **②（修）**：render.py FAILED_FATAL 恢复句按 goal 状态分支——非终态 goal
+  （GOAL_READY/EXECUTING/NEEDS_AUTHORITY/PAUSED/BLOCKED）保留 "/cancel it after
+  restarting" 出路；goal-less（纯对话）与终态 goal（VERIFIED_DONE/CANCELLED，
+  `cancel_goal` 明确拒绝）改为 "continue this conversation"，不再给落空的
+  /cancel 指引。测试重写为三态钉住（goal-less 无 /cancel、active goal 有
+  /cancel、VERIFIED_DONE 无 /cancel）+ auth 反例。
+- **③（修）**：capabilities.md 外发许可边界列恢复注记"写/编辑文件结果的
+  稳定来源在许可内静默复用"——核实 write_file/edit 注册
+  `result_source_kind=WORKSPACE_FILE_EFFECT`（file_ops.py:282/306），与
+  WORKSPACE_READ 走同一 `_file_source_proof` 铸造（tools.py:900 docstring
+  明示 W1/P5 共用），注记与代码事实一致。
+- **④（修）**：process tripwire 测试 docstring 精确化——两闸结构：进程 draft
+  走 `_process_outcome` 结构性早退（tools.py:761）到不了铸造点；即便重构直落
+  通用路径，两个铸造点也都要求注册携带 kind（source-governance 分支只接受
+  WORKSPACE_READ）。不再断言"唯一开关"。
+- **⑤（修，根因比记录更深）**：tests/process/test_managed_web.py 满负载
+  flake 家族三处一次修齐。首次整门实录 `reaps_descendants` 在 getpgid 处
+  ProcessLookupError（1/12 轮空载也复现）——真根因：监督者在 direct child
+  退出的下一次 poll（≤0.1s）即回收整组（managed_web_child.py supervise 循环），
+  测试要在 pid 文件出现后的亚 0.1s 窗口完成观察，本质竞态。修法=launcher
+  发布 pid 后等 release 文件才退出，把「观察后代在组内存活」与「子退出触发
+  回收」解开（被测属性不变）；lifetime 回 30s 只作逃逸上界。同族两处顺带：
+  两处 fixture 就绪窗口 5s/1.5s→30s；三处 finally killpg 加
+  suppress(ProcessLookupError)（poll→killpg TOCTOU 会用清理异常掩盖首发
+  失败）；两处 proc.wait(5)→30（满负载退出延迟）。压力验证：空载 12 连跑
+  + 满负载 4×yes 3 轮，0 失败（修复前空载 1/5、1/9 复现）。
+- 验证：聚焦 52 passed（cli render + kernel process draft + managed web）；
+  完整门见下。
+- **对抗验证轮**（ultracode workflow，6 agent：每修复一个反驳者 + 完整性
+  critic）：五项全部未被推翻；critic 确认无遗漏、无意外文件。三项可执行
+  追加修复：
+  - **⑥ lifetime 起算点**（反驳者实证）：test 2 `enforces_lifetime` 的
+    lifetime 从 spawn 起算——满负载启动 >2.0s 时 server 在 bind 前被杀，
+    30s 就绪窗无效（实际容错仅 lifetime）。lifetime 2.0→8.0，被测属性不变。
+  - **⑦ 终态集合单源**：render 内联 {VERIFIED_DONE, CANCELLED} 是第三份
+    拷贝（actions.py 与 continuity/sessions.py 各有一份模块私有同名集合）。
+    单源化为 contracts.py `TERMINAL_GOAL_STATUSES`（GoalStatus 旁，公开
+    常量），三处消费点统一导入。
+  - **⑧ 注释时间指代**：test 2 就绪窗注释"本轮 flake 记录"改为明确
+    指向 2026-10-24 轮。
+  - 记录不修：FAILED_FATAL 恢复句在 unknown-effect 落盘失败窗口（loop.py
+    `_finish_unknown_effect_persistence_failure`，极窄可达）显示 /cancel 但
+    暂被拒——先答恢复提示即解除、REPL 存活，非死路（反驳者定性 + 模拟实证）；
+    render.py:152 既有 .value 级内联（非本轮引入，不顺手扩权改写）。
+- 验证（追加修复后）：managed_web 文件空载多连跑 + 满负载 3 轮 0 失败；
+  完整门见下。
+- 未纳入：goal-less 对话读类会话级覆盖（权限边界扩大，仍需用户裁决）；
+  E3 闭合失败（模型语义层，非产品缺陷）。

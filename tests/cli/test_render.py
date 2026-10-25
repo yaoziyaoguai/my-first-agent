@@ -550,6 +550,10 @@ def test_fatal_result_carries_bounded_exception_summary() -> None:
     assert "revision 7 != 6" in output[0]
     # 界含 240 字符摘要 + 恢复指引句（2026-10-25 起）；无截断时约 1.4 万字符。
     assert len(output[1]) < 600
+    # LOW 跟进①（2026-10-25 PR #15 审计）：message-form（含摘要/截断）同样
+    # 追加恢复句——此前只有裸错误码形态被显式断言，这里钉住两种 message 形态。
+    assert "Saved state was kept" in output[0]
+    assert "Saved state was kept" in output[1]
 
 
 def test_fatal_result_carries_recovery_guidance() -> None:
@@ -557,32 +561,57 @@ def test_fatal_result_carries_recovery_guidance() -> None:
     # 此前只打错误码+摘要就退出 REPL（app.py return 1），用户不知道 state 已保存、
     # 重启可继续。恢复指引必须如实：证据/效果已持久化、同 workspace 重启续作。
     # 已有自带指引的分支（provider_auth_error）不得重复追加。
-    output: list[str] = []
-    renderer = TerminalRenderer(output.append)
-    state = ConversationState.new("conversation-1")
-
-    renderer.render_result(
+    # LOW 跟进②（2026-10-25 PR #15 审计）：/cancel 出路只对非终态 goal 成立
+    # （state.py 对 VERIFIED_DONE/CANCELLED 拒绝取消）；goal-less 纯对话与
+    # 终态 goal 的恢复句不得给落空的 /cancel 指引。
+    goalless: list[str] = []
+    TerminalRenderer(goalless.append).render_result(
         RunResult(
             RunStatus.FAILED_FATAL,
-            state,
+            ConversationState.new("conversation-1"),
             error_code="invalid_model_control",
         )
     )
-    renderer.render_result(
+    assert "Run failed: invalid_model_control" in goalless[0]
+    assert "Saved state was kept" in goalless[0]
+    assert "run first-agent again" in goalless[0]
+    # goal-less：没有可取消的任务，不提 /cancel。
+    assert "/cancel" not in goalless[0]
+
+    active_goal: list[str] = []
+    TerminalRenderer(active_goal.append).render_result(
         RunResult(
             RunStatus.FAILED_FATAL,
-            state,
+            conversation_with_active_goal("conversation-active"),
+            error_code="invalid_model_control",
+        )
+    )
+    assert "Saved state was kept" in active_goal[0]
+    assert "/cancel" in active_goal[0]
+
+    terminal_goal: list[str] = []
+    TerminalRenderer(terminal_goal.append).render_result(
+        RunResult(
+            RunStatus.FAILED_FATAL,
+            conversation_with_terminal_goal(GoalStatus.VERIFIED_DONE),
+            error_code="invalid_model_control",
+        )
+    )
+    assert "Saved state was kept" in terminal_goal[0]
+    # 已验证完成的 goal 不可再取消（cancel_goal 拒绝），不提 /cancel。
+    assert "/cancel" not in terminal_goal[0]
+
+    auth_branch: list[str] = []
+    TerminalRenderer(auth_branch.append).render_result(
+        RunResult(
+            RunStatus.FAILED_FATAL,
+            ConversationState.new("conversation-1"),
             error_code="provider_auth_error",
         )
     )
-
-    assert "Run failed: invalid_model_control" in output[0]
-    assert "Saved state was kept" in output[0]
-    assert "run first-agent again" in output[0]
-    assert "/cancel" in output[0]
     # auth 分支自带 "run first-agent again" 指引，不叠加恢复句。
-    assert "Saved state was kept" not in output[1]
-    assert output[1].count("run first-agent again") == 1
+    assert "Saved state was kept" not in auth_branch[0]
+    assert auth_branch[0].count("run first-agent again") == 1
 
 
 def _disclosure_pending_state() -> ConversationState:

@@ -169,10 +169,13 @@ def test_015_valid_draft_still_mints_receipt(tmp_path) -> None:
 
 def test_local_process_stdout_never_mints_a_file_source_proof(tmp_path) -> None:
     """LOW-3（2026-10-25 merge gate 审计）tripwire：进程 stdout 不是
-    workspace 派生的读来源，goal 绑定在场也不铸 file-source proof——
-    铸造的唯一开关是注册上的 result_source_kind（tools.py 两个铸造分支
-    都要求非 None），local_process 注册刻意不带。未来给进程工具加 kind
-    属扩权，需新裁决；本测试让那种改动必然显式变红。"""
+    workspace 派生的读来源，goal 绑定在场也不铸 file-source proof。这里
+    有两层相互独立的闸：进程 draft 在 invoke 走 _process_outcome 结构性
+    早退（tools.py ProcessExecutionDraftV1 分支），到不了任何铸造点；即便
+    未来重构让进程结果直落通用路径，两个铸造点也都要求注册携带
+    result_source_kind（source-governance 分支更只接受 WORKSPACE_READ），
+    而 local_process 注册刻意不带。给进程工具加 kind 属扩权，需新裁决；
+    本测试让那种改动必然显式变红。"""
 
     registration = build_local_process_registration(
         workspace=tmp_path, captured_path="/usr/bin:/bin"

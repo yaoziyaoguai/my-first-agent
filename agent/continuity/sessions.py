@@ -18,6 +18,7 @@ from agent.continuity.archive import LocalConversationArchive
 from agent.continuity.identity import WorkspaceIdentityV1
 from agent.runtime.checkpoint import CheckpointConflictError, LocalCheckpointStore
 from agent.runtime.contracts import (
+    TERMINAL_GOAL_STATUSES,
     ActiveRunStatus,
     ArchivedConversation,
     ContinuationPhase,
@@ -31,7 +32,6 @@ from agent.runtime.contracts import (
 _CONVERSATION_FILE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$"
 )
-_TERMINAL_GOAL_STATUSES = {GoalStatus.VERIFIED_DONE, GoalStatus.CANCELLED}
 DEFAULT_ACTIVE_CANDIDATE_LIMIT = 16
 WORKSPACE_HISTORY_CAPACITY = 256
 
@@ -757,7 +757,7 @@ def load_workspace_checkpoints(
 
 
 def _is_nonterminal(state: ConversationState) -> bool:
-    return state.goal is None or state.goal.status not in _TERMINAL_GOAL_STATUSES
+    return state.goal is None or state.goal.status not in TERMINAL_GOAL_STATUSES
 
 
 def _has_unknown_effect(state: ConversationState) -> bool:
@@ -811,7 +811,7 @@ def _require_user_archive_eligible(state: ConversationState) -> None:
     # r8（2026-10-24 裁决 A）：无 Goal 的空闲 chat 也是可归档的已结束会话
     # ——归档可逆（restore），永久 active 只造成容量墙与选择器摩擦。
     # 有 Goal 的会话仍须终态；任何未收口工作的会话一律不可归档。
-    if goal is not None and goal.status not in _TERMINAL_GOAL_STATUSES:
+    if goal is not None and goal.status not in TERMINAL_GOAL_STATUSES:
         raise ValueError("only a terminal conversation can be archived")
     if (
         state.active_run is not None

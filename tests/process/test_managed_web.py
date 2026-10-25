@@ -415,7 +415,9 @@ def test_managed_web_supervisor_closes_service_when_parent_pipe_disappears(
     )
     os.close(read_fd)
     try:
-        deadline = time.monotonic() + 5
+        # 就绪窗口须按满负载整门运行放宽（2026-10-24 轮记录的 flake）：
+        # 本机正常 <100ms 就绪，但整机高负载下进程启动可被延迟数秒。
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             try:
                 with socket.create_connection(("127.0.0.1", port), timeout=0.1):
@@ -427,7 +429,8 @@ def test_managed_web_supervisor_closes_service_when_parent_pipe_disappears(
 
         os.close(write_fd)
         write_fd = -1
-        proc.wait(timeout=5)
+        # pipe 消失后监督者的退出在满负载下可超 5s；30 是失败上界不是等待成本。
+        proc.wait(timeout=30)
         with socket.socket() as probe:
             probe.settimeout(0.2)
             assert probe.connect_ex(("127.0.0.1", port)) != 0
@@ -435,7 +438,10 @@ def test_managed_web_supervisor_closes_service_when_parent_pipe_disappears(
         if write_fd >= 0:
             os.close(write_fd)
         if proc.poll() is None:
-            os.killpg(proc.pid, 9)
+            # poll 与 killpg 之间进程恰好退出时组已消失；清理竞态不得
+            # 用 ProcessLookupError 掩盖首发失败（2026-10-25 整门满负载实录）。
+            with suppress(ProcessLookupError):
+                os.killpg(proc.pid, 9)
             proc.wait(timeout=5)
 
 
@@ -458,7 +464,7 @@ def test_managed_web_supervisor_enforces_lifetime_with_parent_alive(
             "--control-fd",
             str(read_fd),
             "--lifetime-seconds",
-            "2.0",
+            "8.0",
             "--",
             str(workspace / executable.removeprefix("./")),
             str(port),
@@ -471,7 +477,11 @@ def test_managed_web_supervisor_enforces_lifetime_with_parent_alive(
     )
     os.close(read_fd)
     try:
-        deadline = time.monotonic() + 1.5
+        # 就绪窗按满负载整门放宽（该轮 2026-10-24 flake 记录）；但 lifetime
+        # 从 spawn 起算（对抗验证指出），启动预算实际由 lifetime 决定——
+        # 8.0s 给解释器启动+bind 真实余量，被测属性（父在场时寿命到点服务
+        # 必须消失）不变。
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             try:
                 with socket.create_connection(("127.0.0.1", port), timeout=0.1):
@@ -480,14 +490,17 @@ def test_managed_web_supervisor_enforces_lifetime_with_parent_alive(
                 time.sleep(0.05)
         else:
             raise AssertionError("fixture server did not become ready")
-        proc.wait(timeout=5)
+        # 监督者 8.0s 寿命到点自退；满负载下退出可被延迟，30 是失败上界。
+        proc.wait(timeout=30)
         with socket.socket() as probe:
             probe.settimeout(0.2)
             assert probe.connect_ex(("127.0.0.1", port)) != 0
     finally:
         os.close(write_fd)
         if proc.poll() is None:
-            os.killpg(proc.pid, 9)
+            # 同上：清理竞态不得掩盖首发失败。
+            with suppress(ProcessLookupError):
+                os.killpg(proc.pid, 9)
             proc.wait(timeout=5)
 
 
@@ -499,16 +512,20 @@ def test_managed_web_supervisor_reaps_descendants_when_direct_child_exits(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     descendant_pid_path = workspace / "descendant.pid"
+    release_path = workspace / "launcher-release"
     launcher = workspace / "launcher.py"
     launcher.write_text(
         f"#!{sys.executable}\n"
         "import pathlib\n"
         "import subprocess\n"
         "import sys\n"
+        "import time\n"
         "child = subprocess.Popen([sys.executable, '-c', "
         "'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-        "time.sleep(30)'])\n"
-        f"pathlib.Path({str(descendant_pid_path)!r}).write_text(str(child.pid))\n",
+        "time.sleep(60)'])\n"
+        f"pathlib.Path({str(descendant_pid_path)!r}).write_text(str(child.pid))\n"
+        f"while not pathlib.Path({str(release_path)!r}).exists():\n"
+        "    time.sleep(0.02)\n",
         encoding="utf-8",
     )
     launcher.chmod(0o700)
@@ -524,7 +541,7 @@ def test_managed_web_supervisor_reaps_descendants_when_direct_child_exits(
             "--control-fd",
             str(read_fd),
             "--lifetime-seconds",
-            "0.5",
+            "30",
             "--",
             sys.executable,
             str(launcher),
@@ -538,15 +555,21 @@ def test_managed_web_supervisor_reaps_descendants_when_direct_child_exits(
     os.close(read_fd)
     descendant_pid: int | None = None
     try:
-        deadline = time.monotonic() + 3
+        # 满负载观察竞态（2026-10-25 整门实录）：监督者在 direct child 退出的
+        # 下一次 poll（≤0.1s）就回收整组，pid 文件出现到组回收的窗口在负载下
+        # 常被错过（getpgid → ProcessLookupError）。改为 launcher 发布 pid 后
+        # 等 release 文件才退出，把「观察后代在组内存活」与「子退出触发回收」
+        # 解开；被测属性不变（子退出 → 组内后代有界回收）。
+        deadline = time.monotonic() + 10
         while time.monotonic() < deadline and not descendant_pid_path.exists():
             time.sleep(0.02)
         assert descendant_pid_path.exists(), "launcher did not publish descendant pid"
         descendant_pid = int(descendant_pid_path.read_text())
         assert os.getpgid(descendant_pid) == proc.pid
+        release_path.touch()
 
-        proc.wait(timeout=4)
-        deadline = time.monotonic() + 2
+        proc.wait(timeout=12)
+        deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             try:
                 os.kill(descendant_pid, 0)
@@ -558,7 +581,9 @@ def test_managed_web_supervisor_reaps_descendants_when_direct_child_exits(
     finally:
         os.close(write_fd)
         if proc.poll() is None:
-            os.killpg(proc.pid, 9)
+            # 同前两测：清理竞态不得掩盖首发失败。
+            with suppress(ProcessLookupError):
+                os.killpg(proc.pid, 9)
             proc.wait(timeout=5)
         elif descendant_pid is not None:
             with suppress(ProcessLookupError):

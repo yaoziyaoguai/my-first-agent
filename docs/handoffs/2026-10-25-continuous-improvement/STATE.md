@@ -434,3 +434,62 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
 - **残余解决活动全闭合（2026-10-25）**：四项残余（goal-less 读覆盖/
   E3 闭合/EOF 文案/前导空格）+ 两轮 gate 建议 10 项，PR #21/#22/#23
   三连 merge；无未处置阻断项。
+
+### 第十一轮：Oracle 5/5 能力缺口审计 + CLI 运行中协作取消（PR #25，2026-10-25）
+
+- **Oracle 审计（用户「继续用oracle_web审计…还缺少亟需的能力，然后你来实现」
+  +「用最高档重新审计」）**：slug `mfa-capability-gap-20261025-p5`，档位
+  5/5 max（"Power, item 5 of 5 (slider ARIA)" 证据），证据文件
+  CURRENT_CAPABILITY_STATUS/README/daily-use，答案 6m14s。提交证据：新对话
+  URL + 137 行 transcript；收尾核验 chromePid 81482/controller 81204 已退
+  出、临时 profile 目录已删、status=completed。
+- **Top 5 交叉验证裁决表（全部经代码级核对）**：
+  1. 批准任务后命令输出仍逐次披露 → **确认（扩权项，待用户裁决）**：
+     P5 WORKSPACE_READ proof 明确排除命令 stdout；exec 走精确审批+lease。
+     属 egress 契约变更（命令输出复用授权），与 G1 同类，不自行落地。
+  2. 无消费者安装路径（clone+venv+wheel）→ **确认（发布决策，待用户
+     裁决）**：发布/分发不在 campaign 授权内。附带核查：Oracle 称 README
+     仍用过期模型名——**不成立**，daily-use/README 现状已由 F2 轮修正
+     （deepseek-v4-flash 仅存于历史叙述）。
+  3. 项目环境准备（interpreter 选择/--project-path 会话内授权）→
+     **确认（UX/实现类，下一轮候选）**：config/pytest.ini 默认隐藏属实；
+     daily-use 记录过 PATH/interpreter 失败。
+  4. 运行中停止/纠正不可用 → **确认（UX/实现类，本轮落地）**：CLI
+     run_turn 阻塞期 Ctrl-C = exit 130 杀整个会话（app.py 239-245），
+     而 TUI 已有同通道协作取消（README:423）——不对称成立。
+  5. 用户 URL 非一等 Web 源 → **确认（扩权项，待用户裁决）**：
+     README:236 Extract 只收 Search receipt 授权的 URL，属实；属
+     source-admission 变更。
+- **实现（Oracle #4，PR #25 → main f5400c0）**：
+  - `AgentRuntime.request_active_cancel`（loop.py）：公开 process-local
+    CANCEL 投递入口，与 TUI request_control 同一 ControlInbox 通道；无
+    inbox/无活跃 binding（goal-less、run 未开）返回 False → 调用方
+    fail-closed 退化。零 durable 写入（binding 四字段全取自
+    inbox.current，调用方无法伪造 goal/invocation 绑定）。
+  - `agent/cli/interrupt.py RunInterruptGuard`：run_turn 阻塞期安装
+    SIGINT handler（只翻布尔标志，信号安全）；daemon 投递线程重试投递
+    （1.5s 窗口覆盖 run 早期 binding 未 open 竞态）。已投递/确认不可用
+    后再次 Ctrl-C → default_int_handler → 既有 exit 130 fail-closed
+    路径（文案不变）。非主线程 signal.signal ValueError → no-op。
+  - app.run_repl 接线：CANCELLED 正常渲染（"Run cancelled."），REPL
+    存活（goal 终态后 /new 可用）。
+  - 文档：README Ctrl-C 语义 + TUI「已知限制」漂移修正（/pause→/resume
+    重显形状第九轮 S1 已修，README 仍宣称不重显）+ daily-use 同步。
+- **Merge gate（PR #25）**：project-auditor **PASS（0 P0-P2，2 P3+3 LOW）**；
+  五维核实：信号安全（handler 无锁无 I/O 属实、ControlInbox 短临界区无
+  死锁窗口、真实 SIGINT 集成 10 轮零 flake）、状态机边界、权限边界
+  （零 durable 写、无跨 invocation 滥用、与 TUI 语义一致）、测试质量
+  （钉行为非实现）、白名单完整。**P3×2+LOW-3 即时处置**：`__exit__`
+  suppress(KeyboardInterrupt)+finally 保证 handler 恢复必达（P3-1）；
+  README/daily-use 二次 Ctrl-C 生效时机精确化（P3-2）；存活用例补
+  "Run cancelled." 权威渲染断言（LOW-3）。LOW×2（Thread.start 失败
+  理论泄漏、投递提示不经 renderer 锁）记录不修。
+- **完整门**：**4214 passed / 1 skipped / 0 failed**（597s，无并行负载；
+  P3 修复后复跑）。新增 10 测试：kernel 投递契约 ×3（含端到端
+  provider 调用中投递→CANCELLED 终态+durable goal CANCELLED）+ CLI
+  状态机 ×5 + 真实 SIGINT 集成 ×2（存活路径 exit 0+handler 恢复；
+  goal-less 不可用→二次 Ctrl-C→130 保底）。
+- **能力矩阵不动**：本 PR 验证为合成+真实信号层（未跑真实 provider 旅程），
+  按矩阵纪律留待真实层验证后再扩主张。
+- **待用户裁决（下一轮输入）**：#1 命令输出复用授权（扩权）、#5 用户
+  URL 直读（扩权）、#2 发布安装物（发布决策）、#3 项目环境准备（候选）。

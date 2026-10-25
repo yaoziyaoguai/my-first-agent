@@ -1055,6 +1055,41 @@ def test_consent_ux_s2_disclosure_render_shows_options_and_legacy_stays_plain() 
     )
     assert "s  unavailable" in ineligible
 
+
+def test_consent_ux_r_unavailable_explains_why_when_sources_not_covered() -> None:
+    # 双审计交叉验证（2026-10-25：Oracle #3）：无任务绑定的探索式读逐次披露时
+    # r 从不出现，用户不知道 r 为什么不可用、怎样才会可用。与 s-unavailable
+    # 同式：覆盖不了时明示原因（r 只覆盖活跃任务下 proof-backed 的读），
+    # 而不是静默缺行；覆盖成立时必须提供 r 选项本身。
+    goalless_read = TerminalRenderer._disclosure_message(
+        request=_v2_request(
+            scope=_scope(
+                data_classes=("system_policy", "user_messages", "workspace_excerpt"),
+                sources=(_source("notes/a.md", reusable=False),),
+                routine=False,
+            )
+        ),
+        grant=None,
+    )
+    assert "r  unavailable" in goalless_read
+    assert "verified workspace reads" in goalless_read
+
+    covered = TerminalRenderer._disclosure_message(
+        request=_v2_request(
+            scope=_scope(
+                data_classes=("system_policy", "user_messages", "workspace_excerpt"),
+                sources=(_source("notes/a.md", reusable=True),),
+                routine=False,
+            )
+        ),
+        grant=None,
+    )
+    assert (
+        "r  Also allow routine conversation data and verified workspace reads"
+        in covered
+    )
+    assert "r  unavailable" not in covered
+
     legacy = ProviderDisclosureRequest.create(
         disclosure_id="disclosure-legacy",
         provider_descriptor_digest=_descriptor().identity_digest,

@@ -173,4 +173,9 @@
 - 完整门（双审计轮）：`git diff --check` 通过；`.venv/bin/ruff check .` 通过；
   `.venv/bin/python -m pytest -q -rx` **4191 passed, 1 skipped, 0 failed**
   （+2 = F1/F3 Red→Green）。
-- 活动关闭（主体+follow-up+双审计轮均已落地）。
+- 双审计轮已 merge：PR #15（`d1d63f5`）；merge gate 审计 PASS（F1 恢复句对全部
+  27 个可达 fatal error_code 逐一核验无误导；F3 elif 触发条件与 reusable 铸造
+  点语义精确对应；文档与 contracts/代码一致）。跟进 LOW×3（审计建议下一轮随手
+  并入）：①message-form 恢复句补一行显式断言；②goal-less fatal 时 "/cancel"
+  措辞不普适（无害）；③capabilities.md 可恢复"写文件结果稳定来源静默复用"注记。
+- 活动关闭（主体+follow-up+双审计轮均已落地，main @ d1d63f5）。

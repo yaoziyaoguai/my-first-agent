@@ -592,7 +592,10 @@ class AgentRuntime:
                         "goal cancelled at a safe boundary"
                         if cancelled
                         else (
-                            "goal paused at a safe boundary"
+                            # 第九轮审计 S3：与 LIMIT_REACHED/重启横幅同式的
+                            # 恢复指引——/pause 后屏幕上不留无出路的静默。
+                            "goal paused at a safe boundary — "
+                            "run /resume to continue or /cancel"
                             if isinstance(action, PauseGoal)
                             else (
                                 "goal resumed"

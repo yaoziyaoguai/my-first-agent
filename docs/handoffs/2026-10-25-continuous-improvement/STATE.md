@@ -247,3 +247,54 @@
   探针 12/12 绿、lastfailed 中测试名在本树不存在）；无负载复跑
   **4191 passed / 0 failed**（662s）为权威结果。教训：完整门期间不并行
   跑 graphify update / CPU 重任务。
+
+## 可用性再审计轮（第九轮，2026-10-25，用户「继续吧」）
+
+- **审计方式**：ultracode workflow 4 角度（新用户文档旅程 / REPL 交互面 /
+  consent 文案与常量一致性 / status 与恢复体验），全部只读、逐条给
+  file:line 证据；另显式裁决 2026-10-24 PR #12 审计两个遗失细节的 LOW
+  嫌疑。产出 11 项发现（1×P2、6×P3、4×LOW），全部不扩权。
+- **遗留嫌疑裁决**：workspace 不对称=无缺陷（s/r 的 grant 同绑
+  workspace_identity_digest，失配双双 INVALIDATED 且共用解释行）；
+  TTL 整除=真实小缺口（f/d 硬编码 + s/r 整除下取无护栏，均已修）。
+- **修复清单**（含 PR #17 审计 LOW-1 顺手项共 12 处）：
+
+| 项 | 级别 | 内容 |
+| --- | --- | --- |
+| D1 | P2 | daily-use.md 推荐安装路径引用的 `dist/*.whl` 不存在且未给构建命令——入口文档第一步即断（构建命令只在 README） |
+| D2 | LOW | 安装节用绝对路径、后文用裸 `first-agent` 且无 PATH 替换提示 |
+| R1 | P3→修正裁决 | 多会话启动选择器无效输入退出且提示无下一步。首选修复（完整重问）被整门否决：撞 013 轮刻意契约（无效选择零效果、不猜测、fail-closed exit 2，有测试钉住），且对恒返无效输入的非交互 input_fn 是无限循环+无界输出增长（整门 2.5GB 被 jetsam 杀，两次 27% 同点位 SIGKILL 实测）。落地审计备选修复=维持 fail-fast、文案补 "Run first-agent again to choose."；测试改钉 fail-closed+指引+失败可重入（有效输入仍正常选择） |
+| R2 | LOW | 精确匹配命令带尾随空格被判 Unknown command（"/exit " 无法退出）——统一 strip 后判等（与 /help 既有做法对齐） |
+| R3 | LOW | 引导式 setup 输错 provider 报开发者术语且不列合法值——报错列出两个合法 provider 类型 |
+| R4 | LOW | /browser-profiles 无 --browser 时拒绝无出路——补 "(restart with --browser to enable browser features)" |
+| C1 | P3 | r 覆盖成立时 s-unavailable 把已验证可复用读误述为 "new or unverified source"（与同屏 r 行/sources 段矛盾的虚假陈述）——按 workspace_read_classes_covered 分支：覆盖成立改述类别原因并指向 r |
+| C2 | P3 | f/d 选项句 "16 uses, 60 minutes" 硬编码、零推导护栏（s/r 侧已插值化）——改从 GOAL_TARGET_AUTHORIZATION_* 常量插值，测试同步推导断言；附带 CONSENT_TTL_SECONDS % 60==0 常量级护栏（非整分调值 CI 即红） |
+| S1 | P3 | TUI 在「/pause 落在 pending 披露」的孤儿形状不显示披露表单、ack 键静默无效（capabilities.md 记录的 TUI 已知缺口精确位置）——project() 用 pending_provider_disclosure_decision 覆盖孤儿形状，与 AWAITING_DISCLOSURE 同一投影 |
+| S2 | P3 | run 暂停于安全上限时 /status 显示 "executing" 与同屏 pending 提示矛盾——render_status 增查 active_run，PAUSED_LIMIT/RETRYABLE 追加 "Run:" 真实行（含预算耗尽的真实出路文案） |
+| S3 | LOW | /pause 回应无 /resume 指引（其他暂停出口都有）——完成消息追加 "— run /resume to continue or /cancel" |
+| L1 | 顺手 | render.py:152 `.value` 级终态集合内联统一到 TERMINAL_GOAL_STATUSES（PR #17 审计 LOW-1） |
+
+- 过程教训（如实记录）：R1 首版（完整重问）曾让整门两次在同点位被
+  jetsam SIGKILL（pytest RSS 冲 2.5GB、33 分钟只走到 27%）；定位链=
+  无缓冲重跑取真实点位 + RSS 采样 + 按点位映射到
+  test_startup_selection_013 的恒返 "9" input_fn。另：一次"触及面全绿"
+  的判断被管道退出码语义（tail 的 rc）误导，此后聚焦结论一律以
+  pytest 汇总行为准。
+- 验证：触及面测试（cli/tui/consent_ux/contracts/remote_disclosure/
+  state_root/managed_web/selection_013）+ 新增 7 个测试（selector
+  fail-closed+指引+可重入、尾随空格×2、browser 提示、s-unavailable
+  双分支、TUI 孤儿披露、/status run 行、TTL 整除护栏）+ f/d 推导断言
+  改写；完整门见下。
+- **S4（门内新发现，fixture 窗口）**：完整门两次 + 隔离一次报
+  `tests/sandbox/test_packaged_policy_real.py:209 real_fixture` 的
+  loopback connect TimeoutError，失败参数在各次间漂移（fixture 级而非
+  探针级）。根因取证：本机 Microsoft Defender 网络过滤扩展 `netext`
+  高载（43.7% CPU，位于网络数据路径，loopback 亦经其过滤），系统负载
+  9.7-14.8 下 fixture 冒烟检查一次性 `timeout=1.0` 间歇性超时；与
+  2026-10-24 记录的同签名 flake 同机理（当日低载隔离 12/12 绿）。
+  处置（与 managed_web flake 家族同法）：冒烟连接改有界重试
+  （5 次×1s+0.5s 间隔，属性不变=listener 须可达才放行探针），同载
+  复跑 12/12 绿（修复前同载 2 errors）。
+- **完整门（第五跑，无并行负载）**：`git diff --check` +
+  ruff + 全量 pytest = **4197 passed / 1 skipped / 0 failed /
+  0 errors**（565.94s）。graphify update 已单独补跑。

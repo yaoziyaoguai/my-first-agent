@@ -10,6 +10,7 @@ from agent.runtime.contracts import (
     EgressClass,
     ExecutionAuthorityClass,
     GoalStatus,
+    ProviderDisclosureRequest,
     RecordedRunResult,
     RecoveryRequest,
     RunStatus,
@@ -264,3 +265,31 @@ def test_projection_reopened_executing_is_unknown_effect_resume_only() -> None:
 def test_run_status_label_is_stable() -> None:
     assert run_status_label(RunStatus.COMPLETED) == "completed"
     assert run_status_label(RunStatus.CONFLICT) == "conflict; reload"
+
+
+def test_orphan_pending_disclosure_still_projects_disclosure_form() -> None:
+    """第九轮审计 S1：/pause 落在 pending 披露上（active=None、goal=GOAL_READY、
+    披露仍 durable 挂起）时 TUI 必须仍显示披露表单且 ack 可用——CLI 用
+    pending_provider_disclosure_decision 覆盖同一形状，TUI 此前只剩
+    last_safe_result 文本、ack 键静默无效（capabilities.md 记录的 TUI 缺口）。"""
+
+    request = ProviderDisclosureRequest.create(
+        disclosure_id="disclosure-1",
+        provider_descriptor_digest="descriptor-1",
+        canonical_destination="https://provider.example/v1",
+        model="daily-model",
+        data_classes=("user_message",),
+    )
+    state = replace(
+        conversation_with_active_goal("conversation-1"),
+        provider_disclosure_request=request,
+    )
+    assert state.active_run is None
+    assert state.goal is not None and state.goal.status is GoalStatus.GOAL_READY
+
+    projection = project(state)
+
+    assert projection.form_kind == "disclosure"
+    assert projection.actions == ("ack_provider",)
+    assert projection.focus == "disclosure"
+    assert projection.main_text == "remote provider disclosure required"

@@ -659,3 +659,62 @@ def test_product_entry_uses_default_durable_session_without_manual_state_flags(
     assert isinstance(captured["store"], LocalCheckpointStore)
     assert tuple(product_root.glob("workspaces/*/*.json"))
     assert all("not durable" not in line.lower() for line in output)
+
+
+def test_startup_selector_invalid_choice_fails_closed_with_guidance(
+    tmp_path: Path,
+) -> None:
+    """第九轮审计 R1（修正后裁决）：多会话启动选择器对无效输入保持 013 的
+    fail-closed 契约（零效果、不猜测、exit 2）——完整重问会让非交互
+    scripted input_fn 无限循环（2026-10-25 整门实测 OOM），故采用审计
+    备选修复：拒绝文案补下一步指引，不再无出路。"""
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state-root"
+    first = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000008",
+    )
+    assert first.snapshot is not None
+    open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000009",
+        force_new=True,
+    )
+    ambiguous = open_workspace_session(workspace, state_root=state_root)
+    assert ambiguous.disposition is StartupDisposition.SELECT_REQUIRED
+
+    for invalid in ("", "oops", "9"):
+        outputs: list[str] = []
+        rc = entrypoint.main(
+            [
+                "--workspace", str(workspace),
+                "--state-root", str(state_root),
+                "--provider", "fake",
+            ],
+            input_fn=lambda _prompt, _v=invalid: _v,
+            write_fn=outputs.append,
+        )
+        assert rc == 2
+        assert (
+            outputs[-1]
+            == "That choice is not available; no task was selected. "
+            "Run first-agent again to choose."
+        )
+
+    # 失败是可重入的：有效输入正常完成选择，REPL 可 /exit。
+    answers = iter(("1", "/exit"))
+    outputs_ok: list[str] = []
+    rc_ok = entrypoint.main(
+        [
+            "--workspace", str(workspace),
+            "--state-root", str(state_root),
+            "--provider", "fake",
+        ],
+        input_fn=lambda _prompt: next(answers),
+        write_fn=outputs_ok.append,
+    )
+    assert rc_ok == 0

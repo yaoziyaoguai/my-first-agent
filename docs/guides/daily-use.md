@@ -79,12 +79,16 @@ python3 -m pytest -q
 
 ```bash
 python3 -m venv ~/.local/share/first-agent/venv      # 先创建 venv
+rm -rf build first_agent.egg-info && python3 -m pip wheel --no-deps \
+  --wheel-dir dist .                                  # 在仓库根构建 wheel（dist/ 不入库）
 ~/.local/share/first-agent/venv/bin/python -m pip install \
   dist/first_agent-1.0.0-py3-none-any.whl           # base CLI
 ~/.local/share/first-agent/venv/bin/first-agent --workspace ~/myproject
 ```
 
 安装物自带 `first-agent` 入口；**不需要**源码目录，也不要求存在 `main.py`。
+后文各节的裸命令 `first-agent` 均指此入口——若没把
+`~/.local/share/first-agent/venv/bin` 加入 PATH，请替换为上面的绝对路径。
 
 ### 源码开发启动
 

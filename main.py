@@ -1479,10 +1479,20 @@ def main(
                         try:
                             selected_index = int(raw_selection) - 1
                         except ValueError:
-                            write_fn("That choice is not available; no task was selected.")
+                            # 013 契约：无效选择零效果、不猜测（fail-closed）。
+                            # 第九轮审计 R1 采用其备选修复：维持 fail-fast，
+                            # 文案补下一步指引（完整重问会让非交互/scripted
+                            # input_fn 无限循环，2026-10-25 整门实测 OOM）。
+                            write_fn(
+                                "That choice is not available; no task was "
+                                "selected. Run first-agent again to choose."
+                            )
                             return 2
                         if not 0 <= selected_index < len(session.candidates):
-                            write_fn("That choice is not available; no task was selected.")
+                            write_fn(
+                                "That choice is not available; no task was "
+                                "selected. Run first-agent again to choose."
+                            )
                             return 2
                         break
                     candidate = session.candidates[selected_index]

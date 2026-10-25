@@ -158,9 +158,12 @@ def run_repl(
             raw = input_fn("> ")
         except (EOFError, KeyboardInterrupt, StopIteration):
             return 0
-        if raw == "/exit":
+        # 精确匹配命令统一按 strip 后判定（第九轮审计 R2）：尾随空格不应让
+        # /help 列表内的命令（含 /exit）被判 Unknown command。
+        stripped = raw.strip()
+        if stripped == "/exit":
             return 0
-        if raw == "/new":
+        if stripped == "/new":
             # r19 小步 2:显式新任务入口。合法性判断与 TUI 共享(new_session_gate);
             # 新建动作本身不进 Runtime(零 provider/工具调用),以专用退出码把
             # conversation 重建交还装配层,旧 checkpoint 与 evidence 原样保留。
@@ -170,10 +173,10 @@ def run_repl(
                 continue
             write_fn("Starting a new task in this workspace (previous task kept).")
             return NEW_SESSION_REQUESTED
-        if raw.strip() == "/help":
+        if stripped == "/help":
             write_fn(_HELP_TEXT)
             continue
-        if not raw.strip():
+        if not stripped:
             # B（2026-10-18）：answerable pending disclosure 上的空回车/纯空格
             # 与 [y/N] 提示一致地默认拒绝——安全退出，保留任务；无 pending 时
             # 保留既有忽略行为。
@@ -181,11 +184,16 @@ def run_repl(
                 write_fn(_PENDING_DISCLOSURE_REFUSAL)
                 return 0
             continue
-        if raw.strip().startswith("/browser-profiles"):
+        if stripped.startswith("/browser-profiles"):
             if browser_profile_command is None:
-                write_fn("Browser profiles are unavailable in this session.")
+                # 第九轮审计 R4：默认启动（无 --browser）下说明原因与补救，
+                # 不让 /help 列出的命令变成无出路的拒绝。
+                write_fn(
+                    "Browser profiles are unavailable in this session "
+                    "(restart with --browser to enable browser features)."
+                )
                 continue
-            suffix = raw.strip()[len("/browser-profiles") :].strip() or "list"
+            suffix = stripped[len("/browser-profiles") :].strip() or "list"
             try:
                 write_fn(browser_profile_command(suffix))
             except ValueError as error:
@@ -194,19 +202,19 @@ def run_repl(
                 write_fn("Browser profile store is unavailable.")
             continue
 
-        if raw == "/sources":
+        if stripped == "/sources":
             renderer.render_sources(snapshot.state)
             continue
-        if raw == "/sources --advanced":
+        if stripped == "/sources --advanced":
             renderer.render_sources(snapshot.state, advanced=True)
             continue
-        if raw == "/leases":
+        if stripped == "/leases":
             renderer.render_leases(snapshot.state)
             continue
-        if raw == "/leases --advanced":
+        if stripped == "/leases --advanced":
             renderer.render_leases(snapshot.state, advanced=True)
             continue
-        if raw == "/status":
+        if stripped == "/status":
             renderer.render_status(snapshot.state)
             continue
         contextual_exit = _contextual_exit_message(raw, snapshot.state)

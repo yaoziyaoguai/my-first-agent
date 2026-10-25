@@ -5,6 +5,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from agent.runtime.contracts import (
+    CONSENT_TTL_SECONDS,
     ActiveRunStatus,
     ConversationFact,
     ConversationState,
@@ -269,3 +270,11 @@ def test_goal_authorization_target_keeps_normal_targets_authorizable() -> None:
     """收紧不误伤：普通项目路径仍可授权。"""
     assert safe_goal_authorization_target("notes/idea.md") is True
     assert safe_goal_authorization_target("src/app.py") is True
+
+
+def test_consent_ttl_is_a_whole_number_of_minutes() -> None:
+    # 第九轮审计 C2 附带（2026-10-24 遗留嫌疑 A 裁决）：s/r 披露文案用
+    # CONSENT_TTL_SECONDS // 60 推导分钟数——非整分钟调值（如 3700）会显示
+    # "61 minutes" 而实际有效期 61.7 分钟，且测试与生产同表达式重算不会
+    # 报警。在常量层直接钉整除，让这种调值在 CI 即红。
+    assert CONSENT_TTL_SECONDS % 60 == 0

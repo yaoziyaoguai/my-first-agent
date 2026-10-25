@@ -483,6 +483,9 @@ def test_repeated_invalid_completion_control_exhausts_shared_repair_budget() -> 
     assert "'completion_claim'" in (
         result.state.last_safe_result.message or ""
     )
+    # PR #22 gate LOW-2：RunResult.message 终值同钉（与
+    # provider_output_truncated 口径一致，两层互补）。
+    assert "'completion_claim'" in (result.message or "")
 
 
 def test_reused_blocked_claim_correlation_is_bounded_repair_not_crash() -> None:

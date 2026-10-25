@@ -403,3 +403,24 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
   回退注释精确化（无 binding 会话=不铸，fail-closed）。
 - **完整门**：**4203 passed / 1 skipped / 0 failed / 0 errors**
   （567.18s）。graphify update 已单独补跑。
+
+### 残余跟进二轮（PR #22 gate 建议，2026-10-25）
+
+- **Merge（PR #22）**：commit 8a654e3（7 文件 +163/-16）经
+  project-auditor merge gate **PASS（0 P1/P2，2 P3+2 LOW）**——传播守卫
+  窄度逐 (status,code) 对撞车排查确认（37 个可达位点无旧消息污染）、
+  显式传参与传播并存无冲突、provider_output_truncated 改钉有渲染端
+  设计意图直接证据（render.py:478 早已写好消费分支）、无断言弱化。
+  `gh pr merge 22 --merge` → main = 87cbd7b。
+- **P3-1**：`_finish_context_limit` 显式传 `message=str(error)`——
+  end_run 落 FAILED_FATAL 态 last_safe_result 而终态是
+  CONVERSATION_LIMIT_REACHED，传播守卫按 status 匹配不命中，
+  context_core_too_large 诊断仍会丢失；真实触发回归测试钉两层
+  （RunResult.message 与 last_safe_result 一致且非空）。
+- **P3-2**：传播守卫补 `error_code is not None`——消除 (CANCELLED, None)
+  恒等匹配把上一次过期文案带入无码终态的理论窗口。
+- **LOW×2**：goal_id 拒绝文案精确化 "must be a non-empty string"（测试
+  match 同步）；invalid_model_control 断言补 RunResult.message 终值
+  （与 provider_output_truncated 口径一致）。
+- **完整门**：**4204 passed / 1 skipped / 0 failed / 0 errors**
+  （587.88s）。graphify update 已单独补跑。

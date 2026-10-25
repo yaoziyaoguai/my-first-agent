@@ -4435,6 +4435,10 @@ class AgentRuntime:
             if (
                 prior is not None
                 and prior.message
+                # error_code 非 None 才传播：CANCELLED fall-through 等无码
+                # 终态 (code, None) 恒等匹配会把上一次的过期文案带进来
+                # （PR #22 gate P3-2）。
+                and error_code is not None
                 and prior.status is status
                 and prior.error_code == error_code
             ):
@@ -4556,6 +4560,9 @@ class AgentRuntime:
             warnings=warnings,
             event_kind=RuntimeEventKind.LIMIT_REACHED,
             error_code=error.code,
+            # end_run 固定写 FAILED_FATAL 态的 last_safe_result，与本终态
+            # status 不同——传播守卫不会命中，必须显式传（PR #22 gate P3-1）。
+            message=str(error),
             outcome_state=failed,
         )
 

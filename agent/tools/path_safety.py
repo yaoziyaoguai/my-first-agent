@@ -237,6 +237,28 @@ class WorkspaceBoundary:
         fd = self._open_directory_parts(parts)
         os.close(fd)
 
+    def read_source_identity(
+        self,
+        raw_path: str,
+        *,
+        allow_root: bool = False,
+        allow_project_ancestor: bool = False,
+    ) -> dict[str, str]:
+        """读/列/搜结果的稳定来源身份：规范化相对路径及其 digest。
+
+        digest 公式与 inspect_mutation 的 target_digest 一致（路径身份，非
+        内容），供 KernelToolRuntime 铸造 ProviderFileSourceProofV1；根目录以
+        "." 表示（proof 的 normalized_target 不得为空）。
+        """
+
+        parts = self.validate_relative(
+            raw_path,
+            allow_root=allow_root,
+            allow_project_ancestor=allow_project_ancestor,
+        )
+        target = "/".join(parts) or "."
+        return {"consent_target": target, "target_digest": _sha256(target.encode())}
+
     def resolve_directory(self, raw_path: str) -> tuple[Path, str]:
         """返回经统一 boundary 验证的目录路径与 descriptor identity。"""
 

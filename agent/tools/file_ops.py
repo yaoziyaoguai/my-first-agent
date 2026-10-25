@@ -158,6 +158,7 @@ def build_file_tool_registrations(
                 lambda arguments: _inspect_read(boundary, arguments["path"])
             ),
             policy=file_policy,
+            result_source_kind=ResultSourceKind.WORKSPACE_READ,
         ),
         RegisteredTool(
             _list_spec(),
@@ -172,6 +173,7 @@ def build_file_tool_registrations(
                 lambda arguments: _inspect_list(boundary, arguments["path"])
             ),
             policy=file_policy,
+            result_source_kind=ResultSourceKind.WORKSPACE_READ,
         ),
         RegisteredTool(
             _search_paths_spec(),
@@ -188,6 +190,7 @@ def build_file_tool_registrations(
                 )
             ),
             policy=file_policy,
+            result_source_kind=ResultSourceKind.WORKSPACE_READ,
         ),
         RegisteredTool(
             _search_text_spec(),
@@ -204,6 +207,7 @@ def build_file_tool_registrations(
                 )
             ),
             policy=file_policy,
+            result_source_kind=ResultSourceKind.WORKSPACE_READ,
         ),
         RegisteredTool(
             _read_chunk_spec(),
@@ -221,6 +225,7 @@ def build_file_tool_registrations(
                 )
             ),
             policy=file_policy,
+            result_source_kind=ResultSourceKind.WORKSPACE_READ,
         ),
         RegisteredTool(
             _confirm_spec(),
@@ -237,6 +242,7 @@ def build_file_tool_registrations(
                 )
             ),
             policy=file_policy,
+            result_source_kind=ResultSourceKind.WORKSPACE_READ,
         ),
         RegisteredTool(
             _directory_spec(),
@@ -345,12 +351,17 @@ def build_file_tool_runtime(
 
 def _inspect_read(boundary: WorkspaceBoundary, path: str) -> dict:
     boundary.inspect_readable(path)
-    return {"workspace_scoped": True}
+    return {"workspace_scoped": True, **boundary.read_source_identity(path)}
 
 
 def _inspect_list(boundary: WorkspaceBoundary, path: str) -> dict:
     boundary.inspect_directory(path)
-    return {"workspace_scoped": True}
+    return {
+        "workspace_scoped": True,
+        **boundary.read_source_identity(
+            path, allow_root=True, allow_project_ancestor=True
+        ),
+    }
 
 
 def _inspect_search(
@@ -376,7 +387,12 @@ def _inspect_search(
     ):
         raise ValueError("workspace search result limit is invalid")
     boundary.inspect_directory(root)
-    return {"workspace_scoped": True}
+    return {
+        "workspace_scoped": True,
+        **boundary.read_source_identity(
+            root, allow_root=True, allow_project_ancestor=True
+        ),
+    }
 
 
 def _inspect_chunk(
@@ -397,7 +413,10 @@ def _inspect_chunk(
     ):
         raise ValueError("workspace line window is invalid")
     boundary.inspect_readable(arguments["path"])
-    return {"workspace_scoped": True}
+    return {
+        "workspace_scoped": True,
+        **boundary.read_source_identity(arguments["path"]),
+    }
 
 
 def _prepare_edit_binding(
@@ -448,6 +467,7 @@ def _prepare_confirm_binding(
             f"{document.content}\n"
             "--- end current content ---"
         ),
+        **boundary.read_source_identity(path),
     }
 
 

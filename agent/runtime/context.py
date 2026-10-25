@@ -303,7 +303,17 @@ def _valid_file_proof(
         if state.workspace_binding is not None
         else None
     )
-    content_digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    # P5 对抗验证（2026-10-25）：超过 max_tool_result_chars 的读结果在
+    # `_clip_tool_results` 截断时保留全文 sha256。proof 铸造于全文，投影文本
+    # 已截断——被裁剪的 fact 必须对保留的全文 digest 校验，否则大读结果
+    # （恰是披露疲劳主体）永远退回逐次披露。
+    clipped_sha256 = fact.content.get("sha256")
+    if isinstance(clipped_sha256, str) and fact.content.get(
+        "reason"
+    ) == "tool_result_char_limit":
+        content_digest = clipped_sha256
+    else:
+        content_digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     for proof in state.provider_source_proofs:
         if (
             proof.run_id == parts[1]
@@ -1091,7 +1101,11 @@ class KernelContextManager:
             if fact.kind is not FactKind.TOOL_RESULT:
                 continue
             proof = _valid_file_proof(fact, state)
-            if proof is not None:
+            if proof is not None and not source_projections[fact.fact_id].receipts:
+                # P5：只有"无 receipts 的 generic 结果"（写/改的读回）才整体
+                # 替换为 excerpt 投影；读/列/搜自带 source governance receipts，
+                # 保留 receipts/citation_sources（proof 只增加 consent 侧的
+                # reusable 来源，不剥夺引用链）。
                 source_projections[fact.fact_id] = _file_proof_projection()
         if public_web_requirement_pending(state, source_projections):
             # mandatory Web receipt 尚未存在时，保留定位当前 workspace 输入所需的

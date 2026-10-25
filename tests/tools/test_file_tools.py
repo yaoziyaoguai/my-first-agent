@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 
@@ -662,3 +663,89 @@ def test_edit_requires_unique_old_text_and_atomic_approved_write(tmp_path: Path)
 
     assert result.is_error is False
     assert target.read_text(encoding="utf-8") == "one TWO three"
+
+
+def test_workspace_reads_mint_reusable_file_source_proofs(tmp_path: Path) -> None:
+    """P5（2026-10-25 委托裁决）：读/列/搜的 Kernel 执行结果铸造 file-source
+    proof（绑定 goal/revision/workspace/结果内容 digest），使其成为 r 许可
+    （routine_workspace_read_v1）可覆盖的 reusable 来源。此前这些输出只能走
+    reusable=False 的 generic 来源，读类任务逐次披露（E3 真实旅程 16-23 次
+    决策的主驱动）。命令 stdout 等非 workspace 派生输出不在本铸造集合内。
+    """
+
+    workspace = tmp_path / "workspace"
+    (workspace / "notes").mkdir(parents=True)
+    (workspace / "notes" / "a.md").write_text("hello workspace", encoding="utf-8")
+    runtime = build_file_tool_runtime(workspace)
+    context = ToolPrepareContext(
+        "conversation-1",
+        "run-1",
+        1,
+        goal_id="goal-1",
+        goal_revision=1,
+        workspace_identity_digest="workspace-1",
+    )
+    cases = [
+        ("read-1", "read_file", {"path": "notes/a.md"}, "notes/a.md"),
+        ("list-1", "list_files", {"path": "notes"}, "notes"),
+        ("sp-1", "search_paths", {"query": "a"}, "."),
+        ("st-1", "search_text", {"query": "hello"}, "."),
+        (
+            "chunk-1",
+            "read_file_chunk",
+            {"path": "notes/a.md", "start_line": 1, "max_lines": 5},
+            "notes/a.md",
+        ),
+    ]
+    for call_id, name, arguments, target in cases:
+        intent = runtime.prepare(ToolCall(call_id, name, arguments), context)
+        assert isinstance(intent, ExecutionIntent)
+        result = runtime.invoke(intent)
+        assert result.is_error is False, (name, result.content)
+        proof = result.result_source_proof
+        assert proof is not None, f"{name} result must mint a file-source proof"
+        assert proof.tool_name == name
+        assert proof.normalized_target == target
+        assert proof.goal_id == "goal-1"
+        assert proof.goal_revision == 1
+        assert proof.workspace_identity_digest == "workspace-1"
+        assert proof.result_content_digest == hashlib.sha256(
+            result.content.encode("utf-8")
+        ).hexdigest()
+
+
+def test_make_directory_result_does_not_mint_a_file_source_proof(
+    tmp_path: Path,
+) -> None:
+    """目录创建是 workspace 效果但结果不是文件内容来源：不铸 proof，保持
+    读域许可只覆盖"读到的内容"这一语义边界。"""
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = build_file_tool_runtime(workspace)
+    call = ToolCall("mkdir-1", "make_directory", {"path": "pkg"})
+    approval = runtime.prepare(call, _context())
+    assert isinstance(approval, ApprovalRequired)
+    intent = runtime.prepare(
+        call,
+        _context(),
+        approval=ApprovalGrant(
+            approval.request.request_id,
+            approval.request.binding_digest,
+        ),
+    )
+    result = runtime.invoke(intent)
+    assert result.is_error is False
+    assert result.result_source_proof is None
+
+
+def test_read_proof_requires_goal_bound_context(tmp_path: Path) -> None:
+    """无 goal/workspace 绑定的执行不铸 proof：降级为逐次披露，不伪造边界。"""
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "a.txt").write_text("content", encoding="utf-8")
+    runtime = build_file_tool_runtime(workspace)
+    result = _invoke(runtime, ToolCall("read-9", "read_file", {"path": "a.txt"}))
+    assert result.is_error is False
+    assert result.result_source_proof is None

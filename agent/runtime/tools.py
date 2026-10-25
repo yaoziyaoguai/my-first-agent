@@ -783,9 +783,24 @@ class KernelToolRuntime:
                     "sandbox callable must return a verifiable execution draft"
                 )
             if registration.spec.source_kinds:
-                return self._source_governance.normalize_result(
+                source_result = self._source_governance.normalize_result(
                     intent, registration.spec, raw_result
                 )
+                # P5（2026-10-25）：读/列/搜走 source governance 归一化路径，
+                # proof 在此分支同样铸造（成功执行才有证明）。
+                if (
+                    not source_result.is_error
+                    and source_result.executed is not False
+                    and registration.result_source_kind
+                    is ResultSourceKind.WORKSPACE_READ
+                ):
+                    source_result = replace(
+                        source_result,
+                        result_source_proof=self._file_source_proof(
+                            intent, registration, current_binding, source_result.content
+                        ),
+                    )
+                return source_result
             if isinstance(raw_result, ToolExecutionOutput | ToolResult):
                 return ToolResult(
                     tool_call_id=intent.tool_call_id,
@@ -840,39 +855,10 @@ class KernelToolRuntime:
         }
         result_content = content[: registration.spec.output_limit_chars]
         result_source_proof: ProviderFileSourceProofV1 | None = None
-        if (
-            registration.result_source_kind
-            is ResultSourceKind.WORKSPACE_FILE_EFFECT
-        ):
-            normalized_target = current_binding.get("consent_target")
-            target_digest = current_binding.get("target_digest")
-            if (
-                isinstance(normalized_target, str)
-                and normalized_target
-                and isinstance(target_digest, str)
-                and intent.goal_id
-                and intent.goal_revision is not None
-                and intent.workspace_identity_digest
-            ):
-                result_source_proof = ProviderFileSourceProofV1.create(
-                    conversation_id=intent.conversation_id,
-                    run_id=intent.run_id,
-                    workspace_identity_digest=intent.workspace_identity_digest,
-                    tool_call_id=intent.tool_call_id,
-                    tool_name=registration.spec.name,
-                    tool_identity_digest=registration.spec.identity_digest,
-                    policy_identity=self._policy_for(registration).identity,
-                    execution_authority=registration.spec.execution_authority.value,
-                    operation=intent.operation or registration.spec.name,
-                    normalized_target=normalized_target,
-                    target_digest=target_digest,
-                    goal_id=intent.goal_id,
-                    goal_revision=intent.goal_revision,
-                    intent_digest=intent.intent_digest,
-                    result_content_digest=hashlib.sha256(
-                        result_content.encode("utf-8")
-                    ).hexdigest(),
-                )
+        if registration.result_source_kind is not None:
+            result_source_proof = self._file_source_proof(
+                intent, registration, current_binding, result_content
+            )
         if registration.spec.side_effect is not SideEffectClass.READ_ONLY:
             metadata.update(
                 {
@@ -900,6 +886,50 @@ class KernelToolRuntime:
             content=result_content,
             metadata=metadata,
             result_source_proof=result_source_proof,
+        )
+
+    def _file_source_proof(
+        self,
+        intent: ExecutionIntent,
+        registration: RegisteredTool,
+        current_binding: dict[str, JSONValue],
+        result_content: str,
+    ) -> ProviderFileSourceProofV1 | None:
+        """成功执行的稳定来源证明；条件不全时返回 None（降级逐次披露）。
+
+        W1/P5 共用：WORKSPACE_FILE_EFFECT（写/改的读回）与 WORKSPACE_READ
+        （读/列/搜）都绑定 goal/revision/workspace 与结果内容 digest。
+        """
+
+        normalized_target = current_binding.get("consent_target")
+        target_digest = current_binding.get("target_digest")
+        if not (
+            isinstance(normalized_target, str)
+            and normalized_target
+            and isinstance(target_digest, str)
+            and intent.goal_id
+            and intent.goal_revision is not None
+            and intent.workspace_identity_digest
+        ):
+            return None
+        return ProviderFileSourceProofV1.create(
+            conversation_id=intent.conversation_id,
+            run_id=intent.run_id,
+            workspace_identity_digest=intent.workspace_identity_digest,
+            tool_call_id=intent.tool_call_id,
+            tool_name=registration.spec.name,
+            tool_identity_digest=registration.spec.identity_digest,
+            policy_identity=self._policy_for(registration).identity,
+            execution_authority=registration.spec.execution_authority.value,
+            operation=intent.operation or registration.spec.name,
+            normalized_target=normalized_target,
+            target_digest=target_digest,
+            goal_id=intent.goal_id,
+            goal_revision=intent.goal_revision,
+            intent_digest=intent.intent_digest,
+            result_content_digest=hashlib.sha256(
+                result_content.encode("utf-8")
+            ).hexdigest(),
         )
 
     @staticmethod

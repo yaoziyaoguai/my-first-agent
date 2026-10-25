@@ -22,6 +22,7 @@ from agent.runtime.contracts import (
     InvocationOrigin,
     ProposedCriterion,
     ProviderContinuationV1,
+    ProviderFileSourceProofV1,
     SideEffectClass,
     SourceKind,
     SourceReceiptDraft,
@@ -1184,3 +1185,321 @@ def test_intent_decision_excludes_historical_tool_content() -> None:
         for block in message.content
     )
     assert "What did we discuss?" in projected
+
+
+def _read_goal() -> GoalFrame:
+    return GoalFrame(
+        goal_id="goal-1",
+        revision=1,
+        created_from_fact_ids=("user-1",),
+        workspace_identity_digest="workspace-1",
+        user_outcome="read workspace files",
+        beneficiary="user",
+        targets=("notes/a.md",),
+        scope=("workspace",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(
+            ProposedCriterion("criterion-1", "notes are read"),
+        ),
+        admitted_criteria=(),
+        authority_snapshot="authority-1",
+        status=GoalStatus.GOAL_READY,
+        created_at="2026-08-05T00:00:00Z",
+        updated_at="2026-08-05T00:00:00Z",
+    )
+
+
+def _read_proof(
+    *,
+    tool_name: str = "read_file",
+    content: str = "hello workspace",
+    goal_revision: int = 1,
+) -> ProviderFileSourceProofV1:
+    return ProviderFileSourceProofV1.create(
+        conversation_id="conversation-1",
+        run_id="run-1",
+        workspace_identity_digest="workspace-1",
+        tool_call_id="call-read",
+        tool_name=tool_name,
+        tool_identity_digest="0" * 64,
+        policy_identity="policy-1",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS.value,
+        operation=tool_name,
+        normalized_target="notes/a.md",
+        target_digest=hashlib.sha256(b"notes/a.md").hexdigest(),
+        goal_id="goal-1",
+        goal_revision=goal_revision,
+        intent_digest="1" * 64,
+        result_content_digest=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+    )
+
+
+def test_proof_backed_read_result_projects_reusable_excerpt_source() -> None:
+    """P5（2026-10-25）：read/list/search 的 WORKSPACE_READ proof 在投影层
+    变为 reusable workspace_excerpt 来源——r 许可（routine_workspace_read_v1）
+    因此能会话级覆盖读类发送，消除逐次披露疲劳。"""
+
+    state = replace(
+        ConversationState.new("conversation-1"),
+        goal=_read_goal(),
+        active_run=ActiveRun("run-current"),
+        provider_source_proofs=(_read_proof(),),
+        facts=(
+            _fact("user-1", FactKind.USER_MESSAGE, text="read the notes"),
+            _fact(
+                "run:run-1:tool-result:call-read:2",
+                FactKind.TOOL_RESULT,
+                tool_call_id="call-read",
+                text="hello workspace",
+                is_error=False,
+                executed=True,
+                metadata={
+                    "data_classes": ["workspace_excerpt"],
+                    "source_receipts": [],
+                    "source_refs": [],
+                    "truncated": False,
+                },
+            ),
+        ),
+    )
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=8_000, output_reserve=500),
+        workspace_identity_digest="workspace-1",
+    )
+
+    pack = manager.build(state, _action("summarize"), ())
+
+    assert "workspace_excerpt" in pack.consent_scope.data_classes
+    excerpt_sources = [
+        source
+        for source in pack.consent_scope.sources
+        if source.data_class == "workspace_excerpt"
+    ]
+    assert excerpt_sources, "proof-backed read must project a consent source"
+    assert all(source.reusable for source in excerpt_sources)
+    assert excerpt_sources[0].label == "read_file notes/a.md"
+
+
+def test_unproofed_read_result_stays_nonreusable_per_send_source() -> None:
+    """同一读结果在无 proof（如 goal 修订后 proof 失效）时保持 reusable=False：
+    类别如实申报，但退回逐次披露决策——P3-1 的降级语义不因 P5 改变。"""
+
+    stale = _read_proof(goal_revision=2)
+    receipt = SourceReceiptV1.create(
+        SourceReceiptDraft(
+            source_kind=SourceKind.WORKSPACE_EXCERPT,
+            origin_locator="workspace:notes/a.md",
+            observed_at="2026-08-05T00:00:00Z",
+            title="notes/a.md",
+            content="hello workspace",
+            snapshot_digest="2" * 64,
+        ),
+        ExecutionIntent(
+            tool_call_id="call-read",
+            tool_name="read_file",
+            tool_identity="read-file-v1",
+            arguments={"path": "notes/a.md"},
+            arguments_digest="1" * 64,
+            intent_digest="1" * 64,
+            idempotency_key="conversation-1:run-1:call-read",
+            policy_identity="policy-1",
+            conversation_id="conversation-1",
+            run_id="run-1",
+            side_effect=SideEffectClass.READ_ONLY,
+            invocation_origin=InvocationOrigin.MODEL,
+            goal_id="goal-1",
+            goal_revision=1,
+            workspace_identity_digest="workspace-1",
+            execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        ),
+    )
+    state = replace(
+        ConversationState.new("conversation-1"),
+        goal=_read_goal(),
+        active_run=ActiveRun("run-current"),
+        provider_source_proofs=(stale,),
+        facts=(
+            _fact("user-1", FactKind.USER_MESSAGE, text="read the notes"),
+            _fact(
+                "run:run-1:tool-result:call-read:2",
+                FactKind.TOOL_RESULT,
+                tool_call_id="call-read",
+                text="hello workspace",
+                is_error=False,
+                executed=True,
+                metadata={
+                    "data_classes": [receipt.data_class],
+                    "source_receipts": [
+                        {**asdict(receipt), "source_kind": receipt.source_kind.value}
+                    ],
+                    "source_refs": [
+                        {
+                            "source_ref": f"source-ref:v1:{receipt.receipt_digest}",
+                            "receipt_digest": receipt.receipt_digest,
+                        }
+                    ],
+                    "truncated": False,
+                },
+            ),
+        ),
+    )
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=8_000, output_reserve=500),
+        workspace_identity_digest="workspace-1",
+    )
+
+    pack = manager.build(state, _action("summarize"), ())
+
+    excerpt_sources = [
+        source
+        for source in pack.consent_scope.sources
+        if source.data_class == "workspace_excerpt"
+    ]
+    assert excerpt_sources
+    assert all(not source.reusable for source in excerpt_sources)
+
+
+def _receipted_read_fact(*, text: str = "hello workspace") -> ConversationFact:
+    """带 source governance receipts 的读结果 fact（生产形状）。"""
+
+    content = {
+        "tool_call_id": "call-read",
+        "text": text,
+        "is_error": False,
+        "executed": True,
+        "metadata": {
+            "data_classes": ["workspace_excerpt"],
+            "source_receipts": [],
+            "source_refs": [],
+            "truncated": False,
+        },
+    }
+    return _fact(
+        "run:run-1:tool-result:call-read:2",
+        FactKind.TOOL_RESULT,
+        **content,
+    )
+
+
+def _state_with_read_fact(fact: ConversationFact, proof) -> ConversationState:
+    return replace(
+        ConversationState.new("conversation-1"),
+        goal=_read_goal(),
+        active_run=ActiveRun("run-current"),
+        provider_source_proofs=(proof,),
+        facts=(
+            _fact("user-1", FactKind.USER_MESSAGE, text="read the notes"),
+            fact,
+        ),
+    )
+
+
+def test_clipped_read_result_keeps_proof_coverage_via_full_text_digest() -> None:
+    """P5 对抗验证回归：超过 max_tool_result_chars 的读结果 proof 铸于全文、
+    投影文本已截断——校验必须走保留的全文 sha256，否则大读结果（披露疲劳
+    主体）永远退回逐次披露。"""
+
+    full_text = "y = 2\n" * 4_000  # 20k chars > 默认 8k 上限
+    proof = _read_proof(content=full_text)
+    state = _state_with_read_fact(
+        _receipted_read_fact(text=full_text), proof
+    )
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=200_000, output_reserve=500),
+        workspace_identity_digest="workspace-1",
+    )
+
+    pack = manager.build(state, _action("summarize"), ())
+    projected = repr(pack.messages)
+    # 前置：真实 _clip_tool_results 路径确实截断了该结果
+    assert "original_chars" in projected
+
+    excerpt_sources = [
+        source
+        for source in pack.consent_scope.sources
+        if source.data_class == "workspace_excerpt"
+    ]
+    assert excerpt_sources, "被截断的 proof-backed 读结果仍须投影 consent source"
+    assert all(source.reusable for source in excerpt_sources)
+
+
+def test_proof_backed_read_with_receipts_keeps_citation_chain() -> None:
+    """P5 对抗验证（覆盖缺口）：真实读结果自带 receipts + 有效 proof 时走
+    "保留 receipts" 投影分支（生产主路径）。citation_sources/source_refs
+    必须存活（引用链不被 proof 替换抹掉），且 consent 侧恰好一个 reusable
+    workspace_excerpt source。"""
+
+    receipt = SourceReceiptV1.create(
+        SourceReceiptDraft(
+            source_kind=SourceKind.WORKSPACE_EXCERPT,
+            origin_locator="workspace:notes/a.md",
+            observed_at="2026-08-05T00:00:00Z",
+            title="notes/a.md",
+            content="hello workspace",
+            snapshot_digest="2" * 64,
+        ),
+        ExecutionIntent(
+            tool_call_id="call-read",
+            tool_name="read_file",
+            tool_identity="read-file-v1",
+            arguments={"path": "notes/a.md"},
+            arguments_digest="1" * 64,
+            intent_digest="1" * 64,
+            idempotency_key="conversation-1:run-1:call-read",
+            policy_identity="policy-1",
+            conversation_id="conversation-1",
+            run_id="run-1",
+            side_effect=SideEffectClass.READ_ONLY,
+            invocation_origin=InvocationOrigin.MODEL,
+            goal_id="goal-1",
+            goal_revision=1,
+            workspace_identity_digest="workspace-1",
+            execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        ),
+    )
+    fact = _fact(
+        "run:run-1:tool-result:call-read:2",
+        FactKind.TOOL_RESULT,
+        tool_call_id="call-read",
+        text="hello workspace",
+        is_error=False,
+        executed=True,
+        metadata={
+            "data_classes": [receipt.data_class],
+            "source_receipts": [
+                {**asdict(receipt), "source_kind": receipt.source_kind.value}
+            ],
+            "source_refs": [
+                {
+                    "source_ref": f"source-ref:v1:{receipt.receipt_digest}",
+                    "receipt_digest": receipt.receipt_digest,
+                }
+            ],
+            "truncated": False,
+        },
+    )
+    state = _state_with_read_fact(fact, _read_proof())
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=8_000, output_reserve=500),
+        workspace_identity_digest="workspace-1",
+    )
+
+    pack = manager.build(state, _action("summarize"), ())
+
+    blocks = [b for m in pack.messages for b in m.content]
+    result_block = next(b for b in blocks if b.get("tool_call_id") == "call-read")
+    assert result_block.get("citation_sources"), "读结果的引用链必须存活"
+    assert result_block.get("source_refs")
+    excerpt_sources = [
+        source
+        for source in pack.consent_scope.sources
+        if source.data_class == "workspace_excerpt"
+    ]
+    assert len(excerpt_sources) == 1
+    assert excerpt_sources[0].reusable is True
+    assert excerpt_sources[0].label == "read_file notes/a.md"

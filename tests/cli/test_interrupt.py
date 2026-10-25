@@ -180,6 +180,9 @@ def test_run_repl_sigint_requests_cooperative_cancel_and_survives(
     assert exit_code == 0, writes
     assert runtime.cancel_calls >= 1
     assert any("Cancellation requested" in line for line in writes)
+    # LOW-3（PR #25 gate）：CANCELLED 的权威渲染行也要钉住（render.py 既有
+    # 路径，防止未来渲染改动悄悄丢掉终态展示）。
+    assert any("Run cancelled." in line for line in writes)
     # REPL 存活：CANCELLED 后继续消费了 /exit；handler 已恢复。
     assert signal.getsignal(signal.SIGINT) is previous
 

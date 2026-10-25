@@ -74,14 +74,21 @@ class RunInterruptGuard:
 
     def __exit__(self, exc_type, exc, tb) -> bool:
         self._stop.set()
-        worker = self._worker
-        if worker is not None:
-            worker.join(timeout=_DELIVERY_RETRY_SECONDS + 1.0)
-        if self._previous_handler is not None:
-            with suppress(ValueError):
-                signal.signal(  # type: ignore[arg-type]
-                    signal.SIGINT, self._previous_handler
-                )
+        # P3-1（PR #25 gate）：join 等待期间到达的 Ctrl-C 不再注入——
+        # run_turn 已正常返回，此刻注入只会让 REPL 带 traceback 崩溃；
+        # 退出意图可在随后的输入提示处再按一次（干净退出路径）。
+        # finally 保证原 handler 恢复必达（不受 join 中断影响）。
+        try:
+            worker = self._worker
+            if worker is not None:
+                with suppress(KeyboardInterrupt):
+                    worker.join(timeout=_DELIVERY_RETRY_SECONDS + 1.0)
+        finally:
+            if self._previous_handler is not None:
+                with suppress(ValueError):
+                    signal.signal(  # type: ignore[arg-type]
+                        signal.SIGINT, self._previous_handler
+                    )
         return False
 
     # ---- 信号段：只做标志翻转；二段恢复默认中断语义 ----

@@ -235,3 +235,15 @@
   完整门见下。
 - 未纳入：goal-less 对话读类会话级覆盖（权限边界扩大，仍需用户裁决）；
   E3 闭合失败（模型语义层，非产品缺陷）。
+- 落地：单 commit `210264f` 经 **PR #17 merge 到 main（`8300399`）**；
+  merge gate 审计 **PASS（0 P0/P1/P2）**——六项声明逐一核真（补集精确性、
+  frozenset 等价、new_session_gate 行为不变、契约测试 21 passed 无清单
+  冲突、四条失败路径全有界、无断言弱化）；聚焦 264 passed。审计 LOW×3
+  不阻断：render.py:152 既有 `.value` 级终态内联（第四份拷贝，下次触碰
+  该文件时顺手统一）；unknown-effect 落盘失败窗口 /cancel 暂落空（已
+  自记录，非死路）；test 2 极端负载下可能以"未就绪"有界失败（务实折中）。
+- 门过程备注：一次中间门 3F+1E（TimeoutExpired 型）经定性为环境争抢
+  （graphify 全量重建 + 疑似并发会话共用 .pytest_cache；隔离复跑受疑
+  探针 12/12 绿、lastfailed 中测试名在本树不存在）；无负载复跑
+  **4191 passed / 0 failed**（662s）为权威结果。教训：完整门期间不并行
+  跑 graphify update / CPU 重任务。

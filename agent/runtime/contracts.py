@@ -1462,11 +1462,13 @@ ROUTINE_DATA_CLASSES = (
 # item 1（2026-10-24 用户裁决采纳）：读/验证类输出的会话级许可。只并入
 # proof-backed 的 workspace_excerpt——该类来源由 Runtime 持久化的
 # ProviderFileSourceProofV1 绑定 goal/revision/workspace/内容 digest 且
-# reusable=True；list/search 等通用 tool 输出（tool_results）与 summary
-# 类本身不随之扩（summary 无 Runtime boundary 证明时仍逐次披露）。P3-1
-# 已在 2026-10-24 调值轮修复：summary boundary 继承的 excerpt 在投影时
-# 按 proof store（boundary_digest 绑 goal_id+goal_revision）对当前 Goal
-# 重验，失配降 reusable=False（类别如实申报，退回逐次披露决策）。
+# reusable=True；summary 类本身不随之扩（summary 无 Runtime boundary 证明时
+# 仍逐次披露）。P3-1 已在 2026-10-24 调值轮修复：summary boundary 继承的
+# excerpt 在投影时按 proof store（boundary_digest 绑 goal_id+goal_revision）
+# 对当前 Goal 重验，失配降 reusable=False（类别如实申报，退回逐次披露决策）。
+# P5（2026-10-25 用户委托裁决）：读/列/搜工具改为铸造 WORKSPACE_READ proof，
+# 其输出因此成为 proof-backed workspace_excerpt 来源、由 r 许可会话级覆盖
+# （新文件/新目录同样覆盖——类级语义）；tool_results 等通用类仍逐次披露。
 CONSENT_PROFILE_WORKSPACE_READ = "routine_workspace_read_v1"
 WORKSPACE_READ_DATA_CLASSES = (*ROUTINE_DATA_CLASSES, "workspace_excerpt")
 
@@ -1481,6 +1483,10 @@ class ResultSourceKind(StrEnum):
     """闭合的 Kernel 结果来源能力；不是工具可自报的自由字符串。"""
 
     WORKSPACE_FILE_EFFECT = "workspace_file_effect"
+    # P5（2026-10-25 委托裁决）：读/列/搜的 workspace 读结果同样铸造
+    # file-source proof（read_file/list_files/search_*/read_file_chunk/
+    # confirm_file）；命令 stdout 等非 workspace 派生输出不在此列。
+    WORKSPACE_READ = "workspace_read"
 
 
 @dataclass(frozen=True, slots=True)

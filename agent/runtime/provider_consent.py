@@ -163,6 +163,25 @@ def grant_availability(
     return None
 
 
+def grant_structure_drifted(
+    grant: ProviderConsentGrantV1,
+    request: ProviderDisclosureRequestV2,
+) -> bool:
+    """活动 grant 的结构钉死面与请求结构是否漂移（渲染解释的单源谓词）。
+
+    与 `_grant_covers_structure` 的结构子集同一规则：control schema digest
+    或任一请求工具绑定不在 grant 批准集内即漂移。gate 用它决定放行，
+    渲染用它解释"活动许可为何不覆盖本请求"——两处不得各持一份判定。
+    """
+    approved = {
+        binding.name: binding.identity_digest for binding in grant.tool_bindings
+    }
+    return request.control_schema_digest != grant.control_schema_digest or any(
+        approved.get(binding.name) != binding.identity_digest
+        for binding in request.tool_bindings
+    )
+
+
 def _grant_covers_structure(
     grant: ProviderConsentGrantV1,
     scope: ProviderConsentScopeV1,

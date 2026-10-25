@@ -27,7 +27,10 @@ from agent.runtime.contracts import (
     RuntimeEventKind,
 )
 from agent.runtime.evidence import INVALIDATED_BY_LATER_WORKSPACE_ACTIVITY
-from agent.runtime.provider_consent import workspace_read_classes_covered
+from agent.runtime.provider_consent import (
+    grant_structure_drifted,
+    workspace_read_classes_covered,
+)
 from agent.runtime.views import (
     SourceView,
     delivery_summary_message,
@@ -264,6 +267,59 @@ class TerminalRenderer:
             )
         lines.append("Revoke with /revoke <lease_id> or /revoke all (ids via --advanced).")
         self._write("\n".join(lines))
+
+    def render_status(self, state: ConversationState) -> None:
+        """会话内任务状态查询；与 headless 相同的 GoalView 纯投影渲染。
+
+        2026-10-25：此前 goal 状态只有重启加 --status 一个入口；/sources 与
+        /leases 都有会话内视图，任务状态没有——用户问"现在做到哪"必须退出。
+        只读渲染，不提交 action、不复述 restart 语义（那条归启动横幅）。
+        """
+        view = project_goal_view(state)
+        if view.goal_id is None:
+            self._write(f"Conversation {terminal_text(view.conversation_id)}: no active task")
+            self._consent_quota_line(state)
+            return
+        lines = [
+            f"Task status: {terminal_text(view.status)} "
+            f"(revision {view.goal_revision})",
+            f"Outcome: {terminal_text(view.user_outcome or 'unfinished task')}",
+        ]
+        if view.targets:
+            lines.append(f"Targets: {terminal_text(', '.join(view.targets))}")
+        if view.progress_summary:
+            lines.append(f"Progress: {terminal_text(view.progress_summary)}")
+        if view.next_step:
+            lines.append(f"Next step: {terminal_text(view.next_step)}")
+        lines.append(f"Criteria verified: {view.criteria_verified}/{view.criteria_total}")
+        if view.blocker:
+            lines.append(f"Blocker: {terminal_text(view.blocker)}")
+        if view.resume_condition:
+            lines.append(f"Resume condition: {terminal_text(view.resume_condition)}")
+        self._write("\n".join(lines))
+        self._consent_quota_line(state)
+
+    def _consent_quota_line(self, state: ConversationState) -> None:
+        """状态视图里的一行许可余额（与披露提示同一权威 grant 字段）。"""
+        grant = state.provider_consent_grant
+        if grant is None or grant.status is not ProviderConsentGrantStatus.ACTIVE:
+            return
+        try:
+            expires = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return
+        if datetime.now(UTC) >= expires or grant.uses_consumed >= grant.max_uses:
+            return
+        scope_label = (
+            "read+routine"
+            if grant.profile == CONSENT_PROFILE_WORKSPACE_READ
+            else "routine"
+        )
+        self._write(
+            f"Active {scope_label} permission: "
+            f"{grant.max_uses - grant.uses_consumed} of {grant.max_uses} "
+            f"model sends left, expires {terminal_text(grant.expires_at)}."
+        )
 
     @staticmethod
     def _invalidation_rerun_note(state: ConversationState) -> str | None:
@@ -530,23 +586,28 @@ class TerminalRenderer:
             lines.append(
                 "  s  unavailable — this request includes a new or unverified source"
             )
-        if (
+        r_offered = (
             not request.grant_eligible
             and workspace_read_classes_covered(request.data_classes, request.sources)
-        ):
+        )
+        if r_offered:
             lines.append(
-                "  r  Also allow verified workspace file excerpts in this "
-                f"conversation — up to {CONSENT_MAX_USES} model sends, "
+                "  r  Also allow routine conversation data and verified "
+                "workspace reads in this conversation — file excerpts, "
+                "directory listings, and search results; "
+                f"up to {CONSENT_MAX_USES} model sends, "
                 f"expires in {CONSENT_TTL_SECONDS // 60} minutes"
             )
         lines.append("  n  Do not send")
         lines.append("Enter: do not send")
-        if request.grant_eligible:
+        if request.grant_eligible or r_offered:
+            # 对抗验证（2026-10-25）：r 许可与 s 一样捆绑全 routine 类别
+            # （r ⊃ s，2026-10-24 item 1 裁决语义）。选项句与选择时点都必须
+            # 明示这一捆绑，否则"只批读"的用户以为 routine 发送仍会逐次问。
             lines.append(
                 "Routine scope: your messages, conversation/task records, system "
                 "policy, listed tool/control definitions, and summaries with verified "
-                "covered sources. Tool outputs and other new sources are disclosed "
-                "separately."
+                "covered sources. Other new sources are disclosed separately."
             )
         if isinstance(grant, ProviderConsentGrantV1):
             reason = TerminalRenderer._consent_unavailable_reason(grant)
@@ -560,7 +621,7 @@ class TerminalRenderer:
                 # 在场时明示剩余额度与到期——读/验证类新源反复触发披露时，
                 # 用户能看到常规许可还剩多少、这次为何仍要单独批准。
                 scope_label = (
-                    "read-scope"
+                    "read+routine"
                     if grant.profile == CONSENT_PROFILE_WORKSPACE_READ
                     else "routine"
                 )
@@ -575,6 +636,22 @@ class TerminalRenderer:
                         " Sources marked 'this pending content only' are "
                         "not covered by it."
                     )
+                # C1（2026-10-25 旅程实证）：grant 钉死铸造时的 control
+                # schema 与工具绑定；goal 准入/修订会改变两者，此时活动
+                # 许可不覆盖本请求。剩余原因只有结构漂移（新源已由上方
+                # sources 段解释），必须明示，否则"剩余额度 + 再次询问"
+                # 并存自相矛盾，用户会认为 s 失效。判定单源在
+                # grant_structure_drifted（与 gate 同一规则）。
+                if grant_structure_drifted(grant, request):
+                    quota += (
+                        " This request is not covered by it: the task's "
+                        "tool/control structure changed since the permission "
+                        "was granted."
+                    )
+                    if request.grant_eligible:
+                        quota += (
+                            " Choose s to renew it for the current structure."
+                        )
                 lines.append(quota)
         lines.append("Revoke: /revoke-provider-consent")
         return "\n".join(lines)
@@ -609,7 +686,8 @@ class TerminalRenderer:
             return
         left = max(grant.max_uses - grant.uses_consumed, 0)
         scope_label = (
-            "routine conversation data and verified workspace file excerpts"
+            "routine conversation data and verified workspace reads "
+            "(file excerpts, listings, search results)"
             if grant.profile == CONSENT_PROFILE_WORKSPACE_READ
             else "routine conversation data"
         )

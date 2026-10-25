@@ -74,6 +74,7 @@ _SURVIVABLE_CONFLICT_CODES = frozenset(
 _OBSERVATION_CONTINUE = frozenset({"继续", "continue", "record unknown"})
 _HELP_TEXT = """Commands:
 /new — start a new conversation when no decision is pending
+/status — show the current task status, progress, and permission balances
 /sources [--advanced] — show recorded sources
 /leases [--advanced] — show active process permissions
 /browser-profiles [list|create|revoke|clear] — manage browser profiles
@@ -204,6 +205,9 @@ def run_repl(
             continue
         if raw == "/leases --advanced":
             renderer.render_leases(snapshot.state, advanced=True)
+            continue
+        if raw == "/status":
+            renderer.render_status(snapshot.state)
             continue
         contextual_exit = _contextual_exit_message(raw, snapshot.state)
         if contextual_exit is not None:

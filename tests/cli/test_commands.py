@@ -459,3 +459,43 @@ def test_help_lists_artifact_confirmation_arguments_in_parser_order() -> None:
     rendered = "\n".join(output)
     line = next(item for item in rendered.splitlines() if "/approve-artifact" in item)
     assert line.index("<sha256>") < line.index("<workspace-relative-path>")
+
+
+def test_status_is_read_only_and_renders_goal_view() -> None:
+    """`/status`（2026-10-25）：会话内任务状态查询。
+
+    此前唯一的 goal 状态入口是重启进程加 `--status`；/sources 与 /leases 有
+    会话内视图而任务状态没有——用户问"现在做到哪"必须退出重启。渲染走与
+    headless 相同的 `project_goal_view` 纯投影，零 action 提交。
+    """
+    state = conversation_with_active_goal("conversation-status")
+    goal = state.goal
+    assert goal is not None
+    state = replace(
+        state,
+        goal=replace(
+            goal,
+            status=GoalStatus.EXECUTING,
+            progress_summary="app.py 已写入",
+            next_step="运行 check.py 验证",
+        ),
+    )
+    runtime, output, exit_code = _run_once(state, "/status")
+
+    assert exit_code == 0
+    assert runtime.actions == []
+    rendered = "\n".join(output)
+    assert "Task status: executing" in rendered
+    assert f"revision {state.goal.revision}" in rendered
+    assert state.goal.user_outcome[:20] in rendered
+    assert "app.py 已写入" in rendered
+    assert "运行 check.py 验证" in rendered
+    assert "Criteria verified: 0/0" in rendered
+
+
+def test_status_without_goal_shows_no_active_task() -> None:
+    runtime, output, exit_code = _run_once(ConversationState.new("conversation-2"), "/status")
+
+    assert exit_code == 0
+    assert runtime.actions == []
+    assert "no active task" in "\n".join(output)

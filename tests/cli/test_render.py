@@ -5,6 +5,8 @@ from dataclasses import replace
 
 from agent.cli.render import TerminalRenderer
 from agent.runtime.contracts import (
+    GOAL_TARGET_AUTHORIZATION_EXPIRY_MINUTES,
+    GOAL_TARGET_AUTHORIZATION_MAX_USES,
     ActiveRun,
     ActiveRunStatus,
     ApprovalRequest,
@@ -614,6 +616,35 @@ def test_fatal_result_carries_recovery_guidance() -> None:
     assert auth_branch[0].count("run first-agent again") == 1
 
 
+def test_render_status_reports_run_paused_when_goal_projection_still_executing() -> None:
+    # 第九轮审计 S2：run 因安全上限暂停时 goal 投影仍是 executing——
+    # /status 只读 goal 会与同屏 pending 提示（"paused at a safe execution
+    # limit"）互相矛盾，用户可能误判任务还在跑。补一行 run 真实状态
+    # （含与重启横幅同源的实际出路），纯只读渲染。
+    output: list[str] = []
+    renderer = TerminalRenderer(output.append)
+    base = conversation_with_active_goal("conversation-1")
+    limited = RunResult(
+        RunStatus.LIMIT_REACHED,
+        base,
+        error_code="model_attempt_budget_exhausted",
+    )
+    state = replace(
+        base,
+        goal=replace(base.goal, status=GoalStatus.EXECUTING),
+        active_run=ActiveRun("run-1", status=ActiveRunStatus.PAUSED_LIMIT),
+        last_safe_result=limited,
+    )
+
+    renderer.render_status(state)
+
+    assert "Task status: executing" in output[0]
+    assert "Run:" in output[0]
+    # 预算耗尽的 limit 文案：/resume 在当前额度下无效，必须指出真实出路。
+    assert "/resume cannot send new model requests" in output[0]
+    assert "--max-model-attempts" in output[0]
+
+
 def _disclosure_pending_state() -> ConversationState:
     request = ProviderDisclosureRequest.create(
         disclosure_id="disclosure-1",
@@ -887,8 +918,10 @@ def test_render_pending_shows_scoped_short_commands_with_accurate_bounds() -> No
     # 精确范围：target 命令只提该文件；directory 命令只提 Goal 已声明的目录。
     assert "notes/idea.md" in prompt
     assert "notes" in prompt
-    # 有限次数/时效与可撤销；yes 仍只批准一次。
-    assert "16" in prompt and "60 minutes" in prompt
+    # 有限次数/时效与可撤销；yes 仍只批准一次。数字从权威常量推导
+    # （第九轮审计 C2：此前 16/60 硬编码，常量一调文案即失真且零报警）。
+    assert f"{GOAL_TARGET_AUTHORIZATION_MAX_USES}" in prompt
+    assert f"{GOAL_TARGET_AUTHORIZATION_EXPIRY_MINUTES} minutes" in prompt
     assert "/revoke-goal-target" in prompt
     assert "yes approves only this one operation" in prompt
     # 不暴露内部 request identity 或 digest。

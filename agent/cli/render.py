@@ -10,6 +10,8 @@ from agent.runtime.contracts import (
     CONSENT_MAX_USES,
     CONSENT_PROFILE_WORKSPACE_READ,
     CONSENT_TTL_SECONDS,
+    GOAL_TARGET_AUTHORIZATION_EXPIRY_MINUTES,
+    GOAL_TARGET_AUTHORIZATION_MAX_USES,
     TERMINAL_GOAL_STATUSES,
     ActiveRunStatus,
     ApprovalRequest,
@@ -149,7 +151,7 @@ class TerminalRenderer:
         if (
             goal_view.goal_id is not None
             and goal_view.goal_revision is not None
-            and goal_view.status in {GoalStatus.VERIFIED_DONE.value, GoalStatus.CANCELLED.value}
+            and goal_view.status in TERMINAL_GOAL_STATUSES
         ):
             terminal_key = (
                 goal_view.goal_id,
@@ -286,6 +288,28 @@ class TerminalRenderer:
             f"(revision {view.goal_revision})",
             f"Outcome: {terminal_text(view.user_outcome or 'unfinished task')}",
         ]
+        # 第九轮审计 S2：run 因安全上限/可重试暂停时 goal 投影仍是
+        # executing——同屏 pending 提示说已停、这里说在跑，两处权威互相
+        # 矛盾。补一行 run 真实状态（与重启横幅同源措辞），纯只读渲染。
+        active = state.active_run
+        if active is not None and active.status in (
+            ActiveRunStatus.PAUSED_LIMIT,
+            ActiveRunStatus.PAUSED_RETRYABLE,
+        ):
+            reason = (
+                self._result_message_for_limit(
+                    state.last_safe_result.error_code
+                    if state.last_safe_result is not None
+                    else None
+                )
+                if active.status is ActiveRunStatus.PAUSED_LIMIT
+                else self._result_message_for_retryable(
+                    state.last_safe_result.error_code
+                    if state.last_safe_result is not None
+                    else None
+                )
+            )
+            lines.append(f"Run: {reason}")
         if view.targets:
             lines.append(f"Targets: {terminal_text(', '.join(view.targets))}")
         if view.progress_summary:
@@ -518,13 +542,16 @@ class TerminalRenderer:
             if file_scope is not None:
                 lines.append(
                     f"  f  This file / this task / {terminal_text(tool_name)} — up to "
-                    "16 uses, 60 minutes "
+                    f"{GOAL_TARGET_AUTHORIZATION_MAX_USES} uses, "
+                    f"{GOAL_TARGET_AUTHORIZATION_EXPIRY_MINUTES} minutes "
                     f"({terminal_text(file_scope)}; /approve-goal-target)"
                 )
             if directory_scope is not None:
                 lines.append(
                     f"  d  Declared task directory {terminal_text(directory_scope)} / "
-                    f"{terminal_text(tool_name)} — up to 16 uses, 60 minutes "
+                    f"{terminal_text(tool_name)} — up to "
+                    f"{GOAL_TARGET_AUTHORIZATION_MAX_USES} uses, "
+                    f"{GOAL_TARGET_AUTHORIZATION_EXPIRY_MINUTES} minutes "
                     "(/approve-goal-directory)"
                 )
             lines.append("  n  Reject")
@@ -608,9 +635,19 @@ class TerminalRenderer:
                 f"expires in {CONSENT_TTL_SECONDS // 60} minutes"
             )
         else:
-            lines.append(
-                "  s  unavailable — this request includes a new or unverified source"
-            )
+            # 第九轮审计 C1：来源其实是已验证可复用的工作区读取时
+            # （r 覆盖成立），"new or unverified" 是对验证状态的虚假陈述；
+            # 如实说明 s 不覆盖的类别原因并指向 r。
+            if workspace_read_classes_covered(request.data_classes, request.sources):
+                lines.append(
+                    "  s  unavailable — this request includes verified workspace "
+                    "reads, which routine-only permission does not cover; "
+                    "choose r to include them"
+                )
+            else:
+                lines.append(
+                    "  s  unavailable — this request includes a new or unverified source"
+                )
         r_offered = (
             not request.grant_eligible
             and workspace_read_classes_covered(request.data_classes, request.sources)

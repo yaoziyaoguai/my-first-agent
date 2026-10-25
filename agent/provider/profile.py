@@ -119,7 +119,11 @@ class ProviderProfileV1:
     def __post_init__(self) -> None:
         if self.provider_type not in _PERSISTABLE_PROVIDER_TYPES:
             # FakeProvider 只能显式用于开发测试,不允许成为持久化日常 profile。
-            raise ProviderProfileError("provider type cannot be persisted as a profile")
+            # 第九轮审计 R3：报错要能自愈——列出合法取值，别让用户猜。
+            raise ProviderProfileError(
+                "provider must be one of: "
+                + ", ".join(sorted(_PERSISTABLE_PROVIDER_TYPES))
+            )
 
         model = self.model.strip()
         if not model or len(model) > _MAX_MODEL_CHARS or _has_control_chars(model):

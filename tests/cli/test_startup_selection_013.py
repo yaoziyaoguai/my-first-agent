@@ -140,7 +140,12 @@ def test_invalid_numbered_choice_has_zero_effect_and_does_not_guess(
     assert exit_code == 2
     assert calls == []
     assert _checkpoint_digests(state_root) == before
-    assert output[-1] == "That choice is not available; no task was selected."
+    # 第九轮审计 R1：fail-fast 保持，但拒绝文案补下一步指引（不再无出路）。
+    assert (
+        output[-1]
+        == "That choice is not available; no task was selected. "
+        "Run first-agent again to choose."
+    )
 
 
 def test_startup_can_page_to_and_select_the_seventeenth_conversation(

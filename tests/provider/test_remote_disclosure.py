@@ -151,7 +151,10 @@ def test_pending_disclosure_survives_goal_pause_and_ack_continues_after_resume()
         )
 
     paused = runtime.run_turn(_control(PauseGoal), store.load())
-    assert paused.message == "goal paused at a safe boundary"
+    assert (
+        paused.message
+        == "goal paused at a safe boundary — run /resume to continue or /cancel"
+    )
     assert store.state.active_run is None
     assert store.state.goal.status is GoalStatus.PAUSED
     assert store.state.provider_disclosure_request is not None

@@ -8,6 +8,7 @@ import platform
 import socket
 import sys
 import sysconfig
+import time
 from pathlib import Path
 
 import pytest
@@ -206,8 +207,19 @@ def real_fixture(tmp_path: Path):
     fixture = RealPackagedPolicyFixture(tmp_path)
     fixture.start_listener()
     try:
-        with socket.create_connection(("127.0.0.1", fixture._listener_port), timeout=1.0):
-            pass
+        # 冒烟检查只验证 listener 可达；本机网络过滤扩展高载时
+        # loopback connect 会间歇性超时，故有界重试而非一次性 1s 判死。
+        for attempt in range(5):
+            try:
+                with socket.create_connection(
+                    ("127.0.0.1", fixture._listener_port), timeout=1.0
+                ):
+                    pass
+                break
+            except (TimeoutError, ConnectionRefusedError):
+                if attempt == 4:
+                    raise
+                time.sleep(0.5)
         yield fixture
     finally:
         fixture.stop_listener()

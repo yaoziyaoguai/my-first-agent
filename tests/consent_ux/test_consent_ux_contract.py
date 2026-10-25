@@ -1073,6 +1073,14 @@ def test_consent_ux_r_unavailable_explains_why_when_sources_not_covered() -> Non
     )
     assert "r  unavailable" in goalless_read
     assert "verified workspace reads" in goalless_read
+    # 第九轮审计 C1：来源未验证时 s-unavailable 保持原句；来源是已验证
+    # 可复用读（r 覆盖成立）时不得误述为 "new or unverified"——那是对
+    # 验证状态的虚假陈述，须如实指向 s 不覆盖的类别原因与 r。
+    assert (
+        "s  unavailable — this request includes a new or unverified source"
+        in goalless_read
+    )
+    assert "routine-only permission does not cover" not in goalless_read
 
     covered = TerminalRenderer._disclosure_message(
         request=_v2_request(
@@ -1089,6 +1097,11 @@ def test_consent_ux_r_unavailable_explains_why_when_sources_not_covered() -> Non
         in covered
     )
     assert "r  unavailable" not in covered
+    assert (
+        "s  unavailable — this request includes verified workspace reads" in covered
+    )
+    assert "choose r" in covered
+    assert "new or unverified" not in covered
 
     legacy = ProviderDisclosureRequest.create(
         disclosure_id="disclosure-legacy",

@@ -25,6 +25,7 @@ from agent.runtime.views import (
     GoalView,
     SourceView,
     delivery_summary_message,
+    pending_provider_disclosure_decision,
     project_goal_view,
     verification_scope_message,
 )
@@ -112,6 +113,31 @@ def project(state: ConversationState, result: RunResult | None = None) -> TuiPro
                     "approve later browser actions.",
                 ),
             ),
+            goal=goal_view,
+            sources=goal_view.sources,
+        )
+    if active is None and pending_provider_disclosure_decision(state):
+        # 第九轮审计 S1：/pause 落在 pending 披露上（或重启回到该形状）后
+        # active_run 清空、披露决定仍 durable 挂起。CLI 用同一判定覆盖该
+        # 形状，TUI 此前只剩 last_safe_result 文本、ack 键静默无效——
+        # capabilities.md 记录的 TUI 已知缺口即此处。与 AWAITING_DISCLOSURE
+        # 分支同一投影，action_ack_provider 经 _permitted_state 自然生效。
+        request = state.provider_disclosure_request
+        fields = ()
+        if request is not None:
+            fields = (
+                ("destination", request.canonical_destination),
+                ("model", request.model),
+                ("data", ", ".join(request.data_classes)),
+                ("binding", request.request_digest),
+            )
+        return TuiProjection(
+            main_text="remote provider disclosure required",
+            form_kind="disclosure",
+            actions=("ack_provider",),
+            focus="disclosure",
+            terminal_message=None,
+            form_fields=fields,
             goal=goal_view,
             sources=goal_view.sources,
         )

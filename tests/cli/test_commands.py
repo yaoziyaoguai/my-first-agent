@@ -499,3 +499,34 @@ def test_status_without_goal_shows_no_active_task() -> None:
     assert exit_code == 0
     assert runtime.actions == []
     assert "no active task" in "\n".join(output)
+
+
+def test_exact_match_commands_tolerate_trailing_whitespace() -> None:
+    # 第九轮审计 R2：/help 列表内的命令带尾随空格不应被判 Unknown command
+    # （"/exit " 甚至无法退出）；与 /help 的既有 strip 处理对齐。
+    runtime, output, exit_code = _run_once(ConversationState.new("conversation-1"), "/status ")
+    assert "Unknown command" not in "\n".join(output)
+    assert any("no active task" in line for line in output)
+    # /status 真实渲染（不是拒绝文案）
+
+    runtime2 = RecordingRuntime()
+    inputs = iter(("/exit ",))
+    output2: list[str] = []
+    exit2 = run_repl(
+        runtime2,
+        StaticStore(ConversationState.new("conversation-1")),
+        input_fn=lambda _: next(inputs),
+        write_fn=output2.append,
+    )
+    assert exit2 == 0
+    assert runtime2.actions == []
+
+
+def test_browser_profiles_unavailable_message_explains_the_remedy() -> None:
+    # 第九轮审计 R4：默认启动（无 --browser）下 /browser-profiles 的拒绝
+    # 必须说明原因与补救，不让 /help 列出的命令变成无出路的拒绝。
+    runtime, output, exit_code = _run_once(
+        ConversationState.new("conversation-1"), "/browser-profiles list"
+    )
+    assert "unavailable in this session" in output[0]
+    assert "restart with --browser to enable browser features" in output[0]

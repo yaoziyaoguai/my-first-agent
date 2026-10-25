@@ -1648,7 +1648,7 @@ class ProviderFileSourceProofV1:
         if goal_bound != (self.goal_revision is not None):
             raise ValueError("file source proof goal binding must be paired")
         if goal_bound:
-            if not self.goal_id:
+            if not isinstance(self.goal_id, str) or not self.goal_id:
                 raise ValueError("file source proof goal_id must not be empty")
             if (
                 not isinstance(self.goal_revision, int)

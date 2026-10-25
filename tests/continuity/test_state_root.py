@@ -705,6 +705,25 @@ def test_startup_selector_invalid_choice_fails_closed_with_guidance(
             "Run first-agent again to choose."
         )
 
+    # 主动中止（Ctrl-D/Ctrl-C）与输错同句指引（PR #21 gate LOW：三条
+    # 拒绝路径文案一致，EOF 分支不再缺下一步）。
+    outputs_eof: list[str] = []
+    rc_eof = entrypoint.main(
+        [
+            "--workspace", str(workspace),
+            "--state-root", str(state_root),
+            "--provider", "fake",
+        ],
+        input_fn=lambda _prompt: (_ for _ in ()).throw(EOFError()),
+        write_fn=outputs_eof.append,
+    )
+    assert rc_eof == 2
+    assert (
+        outputs_eof[-1]
+        == "That choice is not available; no task was selected. "
+        "Run first-agent again to choose."
+    )
+
     # 失败是可重入的：有效输入正常完成选择，REPL 可 /exit。
     answers = iter(("1", "/exit"))
     outputs_ok: list[str] = []

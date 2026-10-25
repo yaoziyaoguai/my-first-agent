@@ -298,3 +298,12 @@
 - **完整门（第五跑，无并行负载）**：`git diff --check` +
   ruff + 全量 pytest = **4197 passed / 1 skipped / 0 failed /
   0 errors**（565.94s）。graphify update 已单独补跑。
+- **Merge（PR #19）**：commit 2f642ab（17 文件 +365/-28）经
+  project-auditor merge gate **PASS（0 P0/P1/P2）**——逐文件审无夹带、
+  授权边界扫描干净（无新增权限面/外部调用/持久化变更）、关键语义点
+  逐行核验（R1 契约分支逐行未动、C1 "choose r" 自洽性证明、S1 与
+  active 分支逐字段同投影、S4 无断言弱化）、触及面 158 passed +
+  sandbox 12/12 复跑独立确证；两条 LOW 观察（EOF 分支文案不一致=
+  语义可辩护、strip 判等顺带接受前导空格=与既有归一一致）不阻断。
+  `gh pr merge 19 --merge`（分支保留）→ main = 3f673ea。
+  2026-10-25 持续改善活动九轮全闭合并入 main。

@@ -424,3 +424,13 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
   （与 provider_output_truncated 口径一致）。
 - **完整门**：**4204 passed / 1 skipped / 0 failed / 0 errors**
   （587.88s）。graphify update 已单独补跑。
+- **Merge（PR #23）**：commit 4515a6c（6 文件，生产代码 3 行）经
+  project-auditor merge gate **PASS（0 P1/P2，2 LOW）**——P3-1 Red→Green
+  双证（/tmp 隔离 clone 移除修复行必红）、P3-2 AST 矩阵证明 35/36 位点
+  no-op 零误伤、文案同步两处全 grep 无残留。`gh pr merge 23 --merge` →
+  main = e1fbb17。两条 LOW 记录为未来轮次候选：CANCELLED fall-through
+  不携带过期文案的负向测试、loop.py:4563 注释 end_run/fail_run 归因
+  措辞。
+- **残余解决活动全闭合（2026-10-25）**：四项残余（goal-less 读覆盖/
+  E3 闭合/EOF 文案/前导空格）+ 两轮 gate 建议 10 项，PR #21/#22/#23
+  三连 merge；无未处置阻断项。

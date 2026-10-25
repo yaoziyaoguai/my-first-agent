@@ -53,6 +53,7 @@ def test_product_tree_contains_only_kernel_packages() -> None:
         "agent/cli/__init__.py",
         "agent/cli/actions.py",
         "agent/cli/app.py",
+        "agent/cli/interrupt.py",
         "agent/cli/render.py",
         "agent/composition.py",
         "agent/continuity/__init__.py",

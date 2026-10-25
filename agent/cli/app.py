@@ -23,6 +23,7 @@ from agent.cli.actions import (
     parse_artifact_confirmation,
     utc_now_rfc3339,
 )
+from agent.cli.interrupt import RunInterruptGuard
 from agent.cli.render import TerminalRenderer
 from agent.runtime.contracts import (
     AcknowledgeProviderDisclosure,
@@ -234,15 +235,19 @@ def run_repl(
             continue
 
         renderer.render_working()
-        try:
-            result = runtime.run_turn(action, snapshot)
-        except KeyboardInterrupt:
-            write_fn(
-                "Run interrupted. Saved state was kept; restart First Agent to inspect "
-                "or recover the task. A remote request or in-flight effect may still "
-                "have completed."
-            )
-            return 130
+        # Oracle #4（2026-10-25 能力缺口审计）：运行中 Ctrl-C 先走协作取消——
+        # 与 TUI 同一条 control-inbox 通道（安全边界写 CANCELLED 终态），会话
+        # 存活；协作取消不可用或二次 Ctrl-C 才落入下面的 fail-closed 退出。
+        with RunInterruptGuard(runtime, snapshot.state.conversation_id, write_fn):
+            try:
+                result = runtime.run_turn(action, snapshot)
+            except KeyboardInterrupt:
+                write_fn(
+                    "Run interrupted. Saved state was kept; restart First Agent to inspect "
+                    "or recover the task. A remote request or in-flight effect may still "
+                    "have completed."
+                )
+                return 130
         renderer.render_result(result)
         if isinstance(action, (GrantProviderConsent, RevokeProviderConsent)) and (
             result.status not in {RunStatus.CONFLICT, RunStatus.FAILED_FATAL}

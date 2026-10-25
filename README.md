@@ -220,7 +220,11 @@ evidence，才表示登记的证据项已通过，不表示业务语义已获独
 完成摘要会同时提示 `User acceptance: not established by these evidence checks.`；
 模型说“done”不会改变 Goal 状态。
 
-`/exit`、EOF 和空闲时的 Ctrl-C 只退出当前 CLI，不会伪造一次运行取消。
+`/exit`、EOF 和空闲时的 Ctrl-C 只退出当前 CLI，不会伪造一次运行取消。运行中的第一次
+Ctrl-C 走协作取消：请求进入与 TUI 相同的控制通道，当前 provider/tool 步骤返回并到达安全
+边界后写入取消终态，会话存活（可用 `/status` 查看权威状态）；无活跃任务运行接受控制
+（goal-less 问答）或再次按 Ctrl-C 时，才落回退出码 130 的强制中断——保存的 state 仍在，
+提示会说明可能已发生的远端效果。
 
 ## 有依据的 workspace 知识
 
@@ -422,9 +426,10 @@ host composition；因此直接执行 `list`、`create` 或 `reconcile` 都会�
 
 `--tui` 启动可选的 Textual 界面（与 CLI/headless 共享同一 typed action、reducer、checkpoint 与 recovery 语义）。它通过 single-flight thread worker 调用同一个 Runtime；`RunResult`/checkpoint 始终权威，events 只作 advisory 显示。慢模型调用会显示真实等待时长；运行中按 `Ctrl-C` 会立即确认取消请求，但只有当前 provider/tool 返回并到达安全边界后才写入取消终态，界面不会把“请求已收到”假报成“已经停止”。
 
-TUI 当前是实验性适配，不与 CLI 宣称功能对等（parity）。已知限制：`/pause` 后经 `/resume` 恢复的
-pending provider 外发确认（active run 已停、Goal 已 ready 的形状）TUI 不会重新显示该决定；日用
-首选 CLI。pending 外发确认的 y/n/空回车语义（含安全拒绝退出）以 CLI 为准（2026-10-18 B 包）。
+TUI 当前是实验性适配，不与 CLI 宣称功能对等（parity）。`/pause` 后经 `/resume` 恢复的
+pending provider 外发确认（active run 已停、Goal 已 ready 的形状）TUI 会与 CLI 同判定地
+重新显示该决定（2026-10-25 前的版本不重显，属旧已知限制）；pending 外发确认的
+y/n/空回车语义（含安全拒绝退出）仍以 CLI 为准（2026-10-18 B 包），日用首选 CLI。
 
 ```bash
 python -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[tui]"

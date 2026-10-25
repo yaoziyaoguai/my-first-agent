@@ -493,3 +493,56 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
   按矩阵纪律留待真实层验证后再扩主张。
 - **待用户裁决（下一轮输入）**：#1 命令输出复用授权（扩权）、#5 用户
   URL 直读（扩权）、#2 发布安装物（发布决策）、#3 项目环境准备（候选）。
+
+### 第十二轮：第二轮 Oracle 5/5 审计 + 任务切换（PR #27，2026-10-26）
+
+- **Oracle 审计（第二轮，同指令「继续用oracle_web审计…然后你来实现」）**：
+  slug `mfa-capability-gap2-20261026-p5`，档位 5/5 max（"Power, item 5 of 5
+  (slider ARIA)" 证据），排除上轮已知六项。答案 6m03s，新对话 URL
+  chatgpt.com/c/6ade56fb-…；收尾核验 chromePid 6433 DEAD、临时 UDD GONE。
+- **Top 5 交叉验证裁决表**：
+  1. 任务切换（park→new→return）→ **确认（UX/实现，本轮落地）**：
+     /new 拒绝非终态 Goal（actions.py:43-57）、startup 已有多候选选择器但
+     进程内无切换入口；pause_goal reducer 本身就是完整 park（安全边界
+     收尾+全 leases 撤销）。
+  2. 受阻会话自助恢复 → **确认（UX/实现，候选）**：checkpoint 安全错误
+     与 MCP latch 两条恢复路径终点是「停止并保留状态/离线 operator」。
+  3. 019 host composition → **确认（大工程，后续）**：已装入口
+     list/create/reconcile 返回 needs_019_config。
+  4. 真实数据源集成（MCP fixture-only → 真实源）→ **确认（scope
+     adjudication required，待用户裁决）**：fixture-only 声明属实，
+     扩到真实服务属范围扩展。
+  5. Memory 复用 → **弱项（先验证旅程再投资）**：lexical recall 限制
+     有据，但无 abandonment 级证据。
+- **附带缺陷（honorable，已修）**：README:292/:313 两处 setup 示例仍用
+  退役名 `deepseek-v4-flash`。**上轮漏检教训**：当时 grep 输出被 head -8
+  截断（daily-use 6 条+README:30 恰好填满）误判无残留——grep 验证必须
+  确认输出未被截断；Oracle 第二轮给行号直读证实。strict mode 记录经核
+  为如实（:330-335 是已知限制声明，非缺陷）。
+- **实现（#1，PR #27 → main b1962d5）**：
+  - park：`new_session_gate` 放宽 PAUSED Goal（/pause 已在持久安全边界
+    撤销全部 leases），活跃 Goal 拒绝文案补 /pause 指引；TUI 经共享
+    gate 自动同语义。
+  - `/switch`：`switch_session_gate`（仅要求无 active run——pending
+    approval/takeover/EXECUTING/unknown effect 全表现为 active_run 非空，
+    无法绕过；Goal 任意状态允许，切换零 Runtime action、零 durable 写、
+    不转移 pending 决策与授权）→ `SWITCH_SESSION_REQUESTED=78` → 装配
+    循环复用 /new teardown 机制 → `open_workspace_session(select_required=
+    True)` 强制 SELECT_REQUIRED（单候选不自动 RESUMED）；无非终态候选
+    落到新建并显式告知。
+  - 回程：选中暂存 conversation → `/resume`（既有语义）。
+  - flock 疑问澄清（审计确认）：checkpoint lease 是 run_turn 粒度
+    （loop.py:455 acquire/finally release），REPL 空闲期本就不持锁，
+    /switch 重入无锁冲突；teardown 关闭的是 composition 可关闭资源。
+- **Merge gate（PR #27）**：project-auditor **PASS（0 P0-P2，2 LOW）**，
+  六条声明逐条确认（含 force_new 短路论证、_select_workspace_candidate
+  的 NEEDS_AUTHORITY/RECOVERY_REQUIRED 完整保留、ExitStack 复用无双重
+  close）。**LOW×2 即时处置**：清理失败文案中性化（不再硬编码 /new）、
+  main 级测试断言两 checkpoint 落盘留存；注释 flock 措辞精确化。
+- **完整门**：**4228 passed / 1 skipped / 0 failed**（两跑：首跑 622s、
+  LOW 处置后复跑 580s，均无并行负载）。新增 14 测试：gate×5、REPL×4、
+  main 级 selector 重入×2、sessions 投影×3。
+- **待用户裁决（累积）**：上轮 #1 命令输出复用（扩权）、#5 用户 URL
+  直读（扩权）、#2 发布安装物（发布决策）、#3 项目环境准备（候选）；
+  本轮 #4 真实数据源集成（scope 裁决）。#2 自助恢复与 #5 Memory 为下轮
+  候选；#3 019 host 为大工程候选。

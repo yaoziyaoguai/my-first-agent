@@ -11,7 +11,7 @@ from functools import partial
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from agent.cli.actions import NEW_SESSION_REQUESTED
+from agent.cli.actions import NEW_SESSION_REQUESTED, SWITCH_SESSION_REQUESTED
 from agent.cli.app import run_repl
 from agent.cli.render import TerminalRenderer, terminal_text
 from agent.composition import (
@@ -1218,12 +1218,13 @@ def _close_session_resources(
     close_stack: contextlib.ExitStack,
     write_fn: Callable[[str], None],
 ) -> bool:
-    """在 /new 重装配前关闭当前 conversation 持有的可关闭资源。"""
+    """/new、/switch 重装配前关闭当前 conversation 持有的可关闭资源。"""
+
     try:
         close_stack.close()
     except Exception as error:  # noqa: BLE001 - composition root 必须屏蔽资源细节
         write_fn(
-            "New session failed: resource cleanup failed: "
+            "Switching sessions failed: resource cleanup failed: "
             f"{type(error).__name__}"
         )
         return False
@@ -1387,13 +1388,18 @@ def main(
     # optional-dependency 失败、runtime 异常）都按注册逆序各关闭一次。
     with contextlib.ExitStack() as close_stack:
         request_new_session_pending = False
+        request_switch_pending = False
         # r19 小步 2：/new 以 NEW_SESSION_REQUESTED 退出交互层时，在同一进程内
         # 重新走一遍会话装配（旧 checkpoint 与 evidence 原样保留），不重启进程。
+        # Oracle gap2 #1（2026-10-26）：/switch 以 SWITCH_SESSION_REQUESTED 退出时
+        # 同一机制重入装配，但走 select_required 投影（强制会话选择器）。
         while True:
             # 首轮 False(正常启动投影);/new 重入后 True(force_new 显式
             # 新任务,不被无 Goal 会话的 resume 语义拉回旧 conversation)。
             request_new_session = request_new_session_pending
             request_new_session_pending = False
+            request_switch = request_switch_pending
+            request_switch_pending = False
             try:
                 workspace = args.workspace.resolve(strict=True)
                 if not workspace.is_dir():
@@ -1417,7 +1423,16 @@ def main(
                     workspace,
                     state_root=args.state_root,
                     force_new=request_new_session,
+                    select_required=request_switch,
                 )
+                if request_switch and session.disposition is StartupDisposition.CREATED:
+                    # /switch 语义是"选另一个已保存的 conversation"；没有任何
+                    # 非终态候选时装配层落到新建（与 startup 行为一致），显式告知
+                    # 而不是静默换挡。
+                    write_fn(
+                        "No unfinished conversation to switch to; "
+                        "a new conversation was started."
+                    )
                 projection = project_restart(session)
                 if args.project_path:
                     write_fn(
@@ -1862,6 +1877,11 @@ def main(
                 if not _close_session_resources(close_stack, write_fn):
                     return 2
                 request_new_session_pending = True
+                continue
+            if repl_code == SWITCH_SESSION_REQUESTED:
+                if not _close_session_resources(close_stack, write_fn):
+                    return 2
+                request_switch_pending = True
                 continue
             return repl_code
 

@@ -128,10 +128,14 @@ first-agent setup \
    `Verified delivery` 仅表示已登记证据项通过，模型只说"done"不算数。
    显式文件要求有有限语法的完成下界保护，但不保证任意自然语言要求均被理解。
    仍需检查 diff、独立测试和关键反例；`User acceptance` 提示不是独立业务验收。
-3. **`/new` 开第二任务**：第一个任务到终态后输入 `/new`，旧 Goal 与证据原样保留。
+3. **`/new` 开第二任务（不打断第一个）**：任务中途想先做别的事，`/pause` 暂存当前任务
+   （安全边界，授权自动撤销），再 `/new` 开始第二任务；旧 Goal 与证据原样保留。
+   第一个任务到终态后直接 `/new` 即可。
 4. **安全暂停**：任务中途 `/pause`（或在审批边界 `/exit` 退出）。
 5. **恢复**：同一 workspace + 同一 state-root 重新启动，按 `Resuming unfinished task`
    提示批准继续；不需要重述任务，也不会重放已执行效果。
+6. **切回暂存任务**：进程内 `/switch` 打开会话选择器（含分页），选中暂存的
+   conversation，`/resume` 继续原任务。
 
 ## 第一个任务（一分钟上手）
 
@@ -151,7 +155,8 @@ Task: change greet() in app.py to return 'howdy' and verify by running python3 c
 
 ## 日常操作
 
-- `/help` 全部命令；`/new` 在任务终态后开新会话（旧证据保留）；
+- `/help` 全部命令；`/new` 在任务终态或 `/pause` 暂存后开新会话（旧证据保留）；
+  `/switch` 在本 workspace 已保存的 conversation 之间切换（当前任务保留，之后可再选中）；
   `/status` 随时查看当前任务状态、进度与许可余额（只读，不推进任务）；
   `/exit` 退出；运行到审批边界时直接输入新文本 = **中途纠正**（撤销未执行的
   pending 调用，按新要求继续）。

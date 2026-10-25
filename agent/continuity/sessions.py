@@ -344,6 +344,7 @@ def open_workspace_session(
     max_history_checkpoints: int = WORKSPACE_HISTORY_CAPACITY,
     bound_at_factory: Callable[[], str] | None = None,
     force_new: bool = False,
+    select_required: bool = False,
 ) -> WorkspaceSession:
     if max_candidates < 1:
         raise ValueError("max_candidates must be positive")
@@ -353,6 +354,10 @@ def open_workspace_session(
         )
     if not isinstance(force_new, bool):
         raise ValueError("force_new must be a bool")
+    if not isinstance(select_required, bool):
+        raise ValueError("select_required must be a bool")
+    if force_new and select_required:
+        raise ValueError("force_new and select_required are mutually exclusive")
     identity = WorkspaceIdentityV1.resolve(workspace)
     root = (
         default_state_root(home) if state_root is None else Path(state_root)
@@ -378,6 +383,7 @@ def open_workspace_session(
             max_history_checkpoints=max_history_checkpoints,
             bound_at_factory=bound_at_factory,
             force_new=force_new,
+            select_required=select_required,
         )
 
 
@@ -391,6 +397,7 @@ def _open_workspace_session_locked(
     max_history_checkpoints: int,
     bound_at_factory: Callable[[], str] | None,
     force_new: bool = False,
+    select_required: bool = False,
 ) -> WorkspaceSession:
     loaded = _load_candidates(
         workspace_root,
@@ -415,7 +422,10 @@ def _open_workspace_session_locked(
     # force_new(/new 显式新任务):跳过 resume/select 投影,直接进入新
     # conversation 创建;容量保护仍然生效。无 Goal 的闲聊会话在 active 语义
     # 下会被 RESUMED,只有显式 force_new 才能可靠开始新任务。
-    if not force_new and len(active) == 1:
+    # select_required(/switch,Oracle gap2 #1):强制 SELECT_REQUIRED 投影,连
+    # 单个 active 候选也不自动 RESUMED——切换的语义就是让用户显式选择;没有
+    # active 候选时落到下方新 conversation 创建(与 startup 行为一致)。
+    if not force_new and not select_required and len(active) == 1:
         path, snapshot = active[0]
         candidate = _candidate(path, snapshot)
         state_binding = snapshot.state.workspace_binding
@@ -446,7 +456,7 @@ def _open_workspace_session_locked(
             total_checkpoint_count=len(loaded),
             total_active_count=1,
         )
-    if not force_new and len(active) > 1:
+    if not force_new and (len(active) > 1 or (select_required and len(active) == 1)):
         inventory = tuple(_candidate(path, snapshot) for path, snapshot in active)
         visible = inventory[:max_candidates]
         return WorkspaceSession(

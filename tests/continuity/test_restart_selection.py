@@ -17,6 +17,7 @@ from agent.runtime.contracts import (
     ExecutionAuthorityClass,
     FactKind,
     GoalProgress,
+    GoalStatus,
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
@@ -356,3 +357,92 @@ def test_force_new_creates_fresh_conversation_keeping_prior_history(
         != first.snapshot.state.conversation_id
     )
     assert first.checkpoint_path.exists()
+
+
+def test_select_required_forces_selector_over_single_active_candidate(
+    tmp_path: Path,
+) -> None:
+    """/switch(Oracle gap2 #1):select_required 投影下,单个 active 候选也不
+    自动 RESUMED——切换的语义就是让用户显式选择(候选含当前 conversation)。"""
+    workspace = tmp_path / "w"
+    workspace.mkdir()
+    state_root = tmp_path / "state"
+
+    opened = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000051",
+    )
+    assert opened.disposition is StartupDisposition.CREATED
+    _persist_goal(opened)
+
+    # 默认投影:单候选自动 RESUMED(既有语义保持)。
+    resumed = open_workspace_session(workspace, state_root=state_root)
+    assert resumed.disposition is StartupDisposition.RESUMED
+
+    # /switch 语义:同一状态强制 SELECT_REQUIRED。
+    selection = open_workspace_session(
+        workspace, state_root=state_root, select_required=True
+    )
+    assert selection.disposition is StartupDisposition.SELECT_REQUIRED
+    assert selection.candidate_inventory is not None
+    assert len(selection.candidate_inventory) == 1
+
+
+def test_select_required_without_active_candidates_creates_new_conversation(
+    tmp_path: Path,
+) -> None:
+    """/switch 没有任何非终态候选时落到新建 conversation(与 startup 行为一致);
+    调用方(main)对该投影显式告知,不静默换挡。"""
+    workspace = tmp_path / "w"
+    workspace.mkdir()
+    state_root = tmp_path / "state"
+
+    opened = open_workspace_session(
+        workspace,
+        state_root=state_root,
+        conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000061",
+    )
+    assert opened.store is not None and opened.snapshot is not None
+    _persist_goal(opened)
+    snapshot = opened.store.load()
+    # 终态 Goal 的 conversation 不是 active 候选（CANCELLED 终态，无 completion
+    # claim 语义纠缠，fixture 最小）。
+    terminal = replace(
+        snapshot.state,
+        goal=replace(snapshot.state.goal, status=GoalStatus.CANCELLED),
+    )
+    lease = opened.store.try_acquire(snapshot.state.conversation_id)
+    assert lease is not None
+    try:
+        opened.store.compare_and_swap(snapshot, terminal)
+    finally:
+        lease.release()
+
+    fallback = open_workspace_session(
+        workspace, state_root=state_root, select_required=True
+    )
+    assert fallback.disposition is StartupDisposition.CREATED
+    assert fallback.snapshot is not None
+    assert (
+        fallback.snapshot.state.conversation_id
+        != snapshot.state.conversation_id
+    )
+
+
+def test_force_new_and_select_required_are_mutually_exclusive(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "w"
+    workspace.mkdir()
+    try:
+        open_workspace_session(
+            workspace,
+            state_root=tmp_path / "state",
+            force_new=True,
+            select_required=True,
+        )
+    except ValueError as error:
+        assert "mutually exclusive" in str(error)
+    else:
+        raise AssertionError("force_new + select_required must be rejected")

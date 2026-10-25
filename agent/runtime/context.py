@@ -284,11 +284,16 @@ def _valid_file_proof(
     fact: ConversationFact,
     state: ConversationState,
 ) -> ProviderFileSourceProofV1 | None:
-    """只接受 Runtime 持久化且与当前 facts/Goal/workspace 一致的证明。"""
+    """只接受 Runtime 持久化且与当前 facts/Goal/workspace 一致的证明。
+
+    goal 绑定按会话形状镜像判定：goal 会话要求 goal_id/revision 精确匹配
+    当前 goal；goal-less 会话要求 proof 双 None。两个形状互斥——goal-less
+    读的 proof 在 goal 建立后立即失效（反之亦然），跨形状不静默覆盖。
+    """
 
     goal = state.goal
-    if goal is None:
-        return None
+    bound_goal_id = goal.goal_id if goal is not None else None
+    bound_goal_revision = goal.revision if goal is not None else None
     text = fact.content.get("text")
     if not isinstance(text, str) or fact.content.get("is_error") is True:
         return None
@@ -319,8 +324,8 @@ def _valid_file_proof(
             proof.run_id == parts[1]
             and proof.tool_call_id == tool_call_id
             and proof.result_content_digest == content_digest
-            and proof.goal_id == goal.goal_id
-            and proof.goal_revision == goal.revision
+            and proof.goal_id == bound_goal_id
+            and proof.goal_revision == bound_goal_revision
             and (
                 expected_workspace is None
                 or proof.workspace_identity_digest == expected_workspace
@@ -345,7 +350,11 @@ def _revalidated_summary_sources(
 
     goal = state.goal
     if goal is None:
-        current: frozenset[str] = frozenset()
+        current: frozenset[str] = frozenset(
+            proof.boundary_digest
+            for proof in state.provider_source_proofs
+            if proof.goal_id is None and proof.goal_revision is None
+        )
     else:
         current = frozenset(
             proof.boundary_digest

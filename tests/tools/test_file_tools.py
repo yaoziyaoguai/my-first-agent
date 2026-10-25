@@ -739,13 +739,75 @@ def test_make_directory_result_does_not_mint_a_file_source_proof(
     assert result.result_source_proof is None
 
 
-def test_read_proof_requires_goal_bound_context(tmp_path: Path) -> None:
-    """无 goal/workspace 绑定的执行不铸 proof：降级为逐次披露，不伪造边界。"""
+def test_goalless_workspace_read_mints_paired_none_proof(tmp_path: Path) -> None:
+    """goal-less（BeginAnswer 问答）+ 会话 workspace 绑定的读同样铸 proof：
+    goal 字段成对 None（与 ExecutionIntent/ControlReceipt 编码一致），使
+    r 许可能覆盖 goal-less 读类发送（2026-10-25 残余裁决项）。"""
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "a.txt").write_text("content", encoding="utf-8")
     runtime = build_file_tool_runtime(workspace)
+    context = ToolPrepareContext(
+        "conversation-1",
+        "run-1",
+        1,
+        goal_id=None,
+        goal_revision=None,
+        workspace_identity_digest="workspace-1",
+    )
+    intent = runtime.prepare(ToolCall("read-8", "read_file", {"path": "a.txt"}), context)
+    assert isinstance(intent, ExecutionIntent)
+    result = runtime.invoke(intent)
+    assert result.is_error is False
+    proof = result.result_source_proof
+    assert proof is not None, "goal-less workspace read must mint a proof"
+    assert proof.goal_id is None
+    assert proof.goal_revision is None
+    assert proof.workspace_identity_digest == "workspace-1"
+
+
+def test_read_proof_requires_workspace_and_paired_goal_binding(
+    tmp_path: Path,
+) -> None:
+    """无 workspace 绑定或 goal 半侧形状（goal_id 与 revision 不成对）的执行
+    不铸 proof：降级为逐次披露，不伪造边界。"""
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "a.txt").write_text("content", encoding="utf-8")
+    runtime = build_file_tool_runtime(workspace)
+    # 无 workspace（_context() 同时无 goal）：维持既有 fail-closed。
     result = _invoke(runtime, ToolCall("read-9", "read_file", {"path": "a.txt"}))
     assert result.is_error is False
     assert result.result_source_proof is None
+    # 半侧形状在 ToolPrepareContext 契约层即被拒（goal 对成对、workspace
+    # 独立）：半对上下文根本无法构造，fail-closed 前移到入口。
+    with pytest.raises(ValueError, match="goal identity must be complete"):
+        ToolPrepareContext(
+            "conversation-1",
+            "run-1",
+            1,
+            goal_id="goal-1",
+            goal_revision=None,
+            workspace_identity_digest="workspace-1",
+        )
+    with pytest.raises(ValueError, match="goal identity must be complete"):
+        ToolPrepareContext(
+            "conversation-1",
+            "run-1",
+            1,
+            goal_id=None,
+            goal_revision=1,
+            workspace_identity_digest="workspace-1",
+        )
+    # goal 对在场必须带 workspace：goal 绑定的读写从未允许无 workspace。
+    with pytest.raises(ValueError, match="goal identity must be complete"):
+        ToolPrepareContext(
+            "conversation-1",
+            "run-1",
+            1,
+            goal_id="goal-1",
+            goal_revision=1,
+            workspace_identity_digest=None,
+        )

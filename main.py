@@ -1464,7 +1464,12 @@ def main(
                                 + (", n=next, p=previous: " if total_pages > 1 else ": ")
                             ).strip()
                         except (EOFError, KeyboardInterrupt, StopIteration):
-                            write_fn("That choice is not available; no task was selected.")
+                            # 主动中止（Ctrl-D/Ctrl-C）与输错同走 fail-closed
+                            # exit 2；文案与 invalid 分支对齐（PR #19 审计 LOW）。
+                            write_fn(
+                                "That choice is not available; no task was "
+                                "selected. Run first-agent again to choose."
+                            )
                             return 2
                         if raw_selection.casefold() in {"n", "p"}:
                             offset = 1 if raw_selection.casefold() == "n" else -1

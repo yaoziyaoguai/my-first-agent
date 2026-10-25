@@ -1607,8 +1607,8 @@ class ProviderFileSourceProofV1:
     operation: str
     normalized_target: str
     target_digest: str
-    goal_id: str
-    goal_revision: int
+    goal_id: str | None
+    goal_revision: int | None
     intent_digest: str
     result_content_digest: str
     boundary_digest: str
@@ -1627,7 +1627,6 @@ class ProviderFileSourceProofV1:
             "execution_authority",
             "operation",
             "normalized_target",
-            "goal_id",
         ):
             value = getattr(self, name)
             if not isinstance(value, str) or not value:
@@ -1642,10 +1641,22 @@ class ProviderFileSourceProofV1:
         ):
             if not _is_lower_hex(getattr(self, name), length=64):
                 raise ValueError(f"file source proof {name} must be sha256")
-        if not isinstance(self.goal_revision, int) or isinstance(self.goal_revision, bool):
-            raise TypeError("file source proof goal revision must be an integer")
-        if self.goal_revision < 1:
-            raise ValueError("file source proof goal revision must be positive")
+        # goal 绑定成对出现：goal 会话=非空 goal_id+正数 revision；goal-less
+        # 会话=双 None（与 ExecutionIntent/ControlReceipt 的编码一致）。
+        # 半侧形状一律拒绝，防止 goal-less 读冒充 goal 绑定（反之亦然）。
+        goal_bound = self.goal_id is not None
+        if goal_bound != (self.goal_revision is not None):
+            raise ValueError("file source proof goal binding must be paired")
+        if goal_bound:
+            if not self.goal_id:
+                raise ValueError("file source proof goal_id must not be empty")
+            if (
+                not isinstance(self.goal_revision, int)
+                or isinstance(self.goal_revision, bool)
+            ):
+                raise TypeError("file source proof goal revision must be an integer")
+            if self.goal_revision < 1:
+                raise ValueError("file source proof goal revision must be positive")
         if self.proof_digest != canonical_json_digest(self._payload()):
             raise ValueError("file source proof digest mismatch")
 
@@ -1712,8 +1723,8 @@ class ProviderFileSourceProofV1:
         execution_authority: str,
         operation: str,
         target_digest: str,
-        goal_id: str,
-        goal_revision: int,
+        goal_id: str | None,
+        goal_revision: int | None,
     ) -> dict[str, JSONValue]:
         return {
             "profile": "workspace_file_effect_v1",
@@ -1744,8 +1755,8 @@ class ProviderFileSourceProofV1:
         operation: str,
         normalized_target: str,
         target_digest: str,
-        goal_id: str,
-        goal_revision: int,
+        goal_id: str | None,
+        goal_revision: int | None,
         intent_digest: str,
         result_content_digest: str,
     ) -> ProviderFileSourceProofV1:
@@ -6969,14 +6980,14 @@ class ToolPrepareContext:
             object.__setattr__(self, "approval_basis_revision", self.state_revision)
         if self.approval_basis_revision is not None and self.approval_basis_revision < 0:
             raise ValueError("approval basis revision must be non-negative")
-        goal_fields = (
-            self.goal_id,
-            self.goal_revision,
-            self.workspace_identity_digest,
-        )
-        if any(value is not None for value in goal_fields) and not all(
-            value is not None for value in goal_fields
-        ):
+        # goal 身份成对：goal_id/revision 同设或同缺；workspace 是会话级
+        # 身份，独立于 goal 对（goal-less 工作区会话可只带 workspace——
+        # 2026-10-25 goal-less 读覆盖裁决）。goal 对在场时必须同时带
+        # workspace（goal 绑定的读写从未允许无 workspace）。
+        goal_bound = self.goal_id is not None
+        if goal_bound != (self.goal_revision is not None):
+            raise ValueError("tool context goal identity must be complete")
+        if goal_bound and self.workspace_identity_digest is None:
             raise ValueError("tool context goal identity must be complete")
         if self.goal_revision is not None and self.goal_revision < 1:
             raise ValueError("tool context goal revision must be positive")
@@ -7188,10 +7199,12 @@ class ExecutionIntent:
         _assert_json_compatible(self.safety_binding, path="execution_intent.safety_binding")
         object.__setattr__(self, "arguments", _freeze_json_dict(self.arguments))
         object.__setattr__(self, "safety_binding", _freeze_json_dict(self.safety_binding))
-        goal_fields = (self.goal_id, self.goal_revision, self.workspace_identity_digest)
-        if any(value is not None for value in goal_fields) and not all(
-            value is not None for value in goal_fields
-        ):
+        # 同 ToolPrepareContext：goal 对成对、workspace 独立可单带
+        # （goal-less 工作区会话），goal 对在场必须带 workspace。
+        goal_bound = self.goal_id is not None
+        if goal_bound != (self.goal_revision is not None):
+            raise ValueError("execution intent goal identity must be complete")
+        if goal_bound and self.workspace_identity_digest is None:
             raise ValueError("execution intent goal identity must be complete")
         if self.egress is EgressClass.PUBLIC_NETWORK and (
             not self.operation

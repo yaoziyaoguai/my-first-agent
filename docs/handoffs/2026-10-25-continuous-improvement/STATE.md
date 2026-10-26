@@ -546,3 +546,62 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
   直读（扩权）、#2 发布安装物（发布决策）、#3 项目环境准备（候选）；
   本轮 #4 真实数据源集成（scope 裁决）。#2 自助恢复与 #5 Memory 为下轮
   候选；#3 019 host 为大工程候选。
+
+## 扩权与发布落地轮（第十三轮，2026-10-26，用户「同意扩权和发布决策 继续」「继续 进行收尾 提交 推送吧」）
+
+用户批准三项：上轮 #1 命令输出复用（egress 扩权）、#5 用户 URL 直读
+（source admission 扩权）、#2 发布安装物（发布决策）。
+
+- **#1 命令输出复用（PR #28 主体）**：
+  - proof：`ResultSourceKind.WORKSPACE_COMMAND` + local_process binding 增加
+    `consent_target`（`command:` + 16 位指纹，label 用）与 `target_digest`
+    （完整 command_fingerprint——绑定 executable/argv/cwd 三 digest，不因截断
+    降强度）；`_process_outcome` 改收 registration，仅「注册声明 kind 且
+    EXITED 且 exit 0」铸造，SPAWN_FAILED/伪造 draft/非零退出均不铸。
+  - `ProviderFileSourceProofV1.result_class` 条件编码：默认
+    workspace_excerpt **不入** `_payload()`/`boundary_payload()`/`create()`
+    的 digest——旧 checkpoint 的 proof 字节级不变、roundtrip 相等（测试+
+    审计探针双重确认）；from_dict 闭集算术 `set(raw) - optional != expected`
+    六探针全绿（未知键/缺键/升降级/None/legacy roundtrip）。
+  - 许可：新 profile `routine_workspace_command_v1`（scope 标签
+    read+command+routine），`workspace_consent_profile` 按 request 逐次选
+    profile——纯读仍铸 v1，**v1 读许可结构上永不覆盖 command_output**
+    （`_grant_covers_structure` 全子集校验，测试+探针双证）；覆盖谓词泛化为
+    「非常规部分全部 proof-backed reusable（workspace_excerpt/command_output）」。
+  - 文案：r offer/s-unavailable/quota/revoke summary/逐次通知全部类别感知
+    （含 command scope 才提 "approved command output"；通知计数改
+    "verified workspace source(s)"）。
+- **#5 用户 URL 直读**：新工具 `web_fetch_url`（`user_url_required: True`）；
+  `user_message_urls()` 只扫 USER_MESSAGE fact、与 `admit_public_url` 同居
+  `agent/web/safety.py`（web→runtime.contracts 单向）；governance 两侧同
+  canonical 化后精确匹配，工具输出/模型自造 URL fail closed。
+  **架构插曲**：首跑全门架构 DAG 断言红（context_control leaf 不得 import
+  agent.web）——把函数从 context_control 移到 web 层即源头修复，该文件回到
+  与 HEAD 一致。LOW-3 tripwire（进程 stdout 永不铸 proof）按新裁决显式改写
+  并保留全部结构性负例（无 kind 不铸/失败退出不铸）。
+- **#2 发布安装物**：wheel 从当前树重建；干净 venv（macOS CPython 3.14）
+  安装 base 闭包验证：`first-agent`/`first-agent-schedule` 入口、`--version`、
+  `--help`、fake provider REPL 冒烟（`/status`→`/exit` exit 0）全过；
+  README 记录已验证 datapoint 与 ≥3.11 门槛（系统 /usr/bin/python3=3.9 不可
+  用）。**未改发布渠道**（本地构建+文档）。
+- **Merge gate（PR #28）**：project-auditor **PASS（0 P1/P2；1 P3 + 4 LOW）→
+  YES 可合并**。四项边界核验逐项实证（v1 不覆盖 command_output、proof 仅源
+  于 Runtime 状态、绑定完整、user_url 只认用户消息）；范围控制 PASS（17 文件
+  全映射三项）；测试诚实度 PASS。**P3-1（遗留待裁决，记录不阻断）**：
+  command_output 经既有 `grant_exception` 例外路径（2026-10-24 S5 合同，
+  exact-boundary y 的复用语义）在 v1 读 grant 下同 boundary 可复用——若
+  裁决本意为「无 r-command 许可则每次 send 都需批准」，需给
+  `_exception_is_covered` 补 profile/类校验 + interplay 测试。LOW×4：3000
+  上限三处常量重复、runtime↔web 双向包依赖成形（DAG 未钉）、
+  `_fetch_url_output` 执行期不重验 membership（binding digest 已钉、窗口≈0）、
+  新 profile 字符串回滚不兼容（新 profile 固有权衡）。
+- **完整门**：首跑 4236 passed + 1 失败（架构 DAG，见上）；架构修复后复跑
+  **4237 passed / 1 skipped / 0 failed**（595s，ruff 全过、diff-check 干净）。
+  新增/改写测试：consent_ux×6（编码兼容/闭集、command scope gate 正负例、
+  reducer 双向 profile、类别钉死、render 区分、codec roundtrip）+ 进程
+  tripwire 改写 + web×3。
+- **收尾链**：分支 `feat/2026-10-26-egress-and-publishing` → commit `88075e9`
+  → push → PR #28 → merge gate → **merge `2831af4`（分支保留）**。
+- **待用户裁决（累积）**：P3-1 grant_exception×command_output 语义（本轮新
+  增）；#3 项目环境准备、#4 真实数据源集成 scope、#2 自助恢复入口、#5 Memory
+  旅程验证、#3 019 host composition（候选）。

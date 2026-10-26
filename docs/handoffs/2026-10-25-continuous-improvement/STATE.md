@@ -605,3 +605,24 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
 - **待用户裁决（累积）**：P3-1 grant_exception×command_output 语义（本轮新
   增）；#3 项目环境准备、#4 真实数据源集成 scope、#2 自助恢复入口、#5 Memory
   旅程验证、#3 019 host composition（候选）。
+
+### P3-1 闭环（2026-10-26，用户「可以 补充吧」「然后收尾吧」，PR #29 merge `ada66b9`）
+
+- **修复**：`_exception_is_covered` 新守卫——scope 非常规部分含 `command_output`
+  且 `grant.allowed_data_classes` 不含该类时直接 False。窄 grant（routine/
+  read v1）下对 exact 命令边界答过一次 y 只覆盖那一次发送（exact_receipt
+  单次票据），后续同边界每次 send 都需单独批准；excerpt 的 S5 A→B→A→B
+  例外合同实证零扰动（修复前后判决逐字节相同）。
+- **测试**：新增 interplay 测试（窄 grant 首发必决、y 单次 exact_receipt 且
+  grant_use=False、票据消费后同边界回落 decision_required、command grant
+  走 grant_workspace_read）。
+- **Merge gate（PR #29）**：**PASS（0 P0/P1/P2）**。六焦点逐项核验，含两项
+  反事实探针：①剥守卫跑同形状必红（真 Red→Green）；②membership 与 profile
+  谓词对所有可构造 grant 等价（`__post_init__` 钉死 profile↔类别双向）。
+  LOW×2 记录：注释「一般」限定词必要（混类 scope 下例外路径在 command
+  grant 下仍 load-bearing，勿删）；测试 base 复用稍隐晦。建议下轮可选项：
+  混类 scope（command_output+tool_results）在 command grant 下的
+  grant_exception 行为补 pin 测试。
+- **完整门**：**4238 passed / 1 skipped / 0 failed**（592s，ruff 全过）。
+- P3-1 自待裁决队列移除；余候选不变（#3 项目环境准备、#4 真实数据源
+  scope、#2 自助恢复、#5 Memory 旅程、#3 019 host）。

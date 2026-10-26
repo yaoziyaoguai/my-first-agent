@@ -496,6 +496,14 @@ def _exception_is_covered(
     if not candidate.sources or any(not source.reusable for source in candidate.sources):
         return False
     nonroutine = _nonroutine_classes(scope)
+    # 2026-10-26 P3-1（用户裁决）：例外路径不放大命令输出。command_output
+    # 的复用只认会话级 workspace-command 许可（allowed_data_classes 含该
+    # 类，此时一般已由上方 workspace 分支结构覆盖）；窄 grant（routine/
+    # read v1）下对 exact 边界答过一次 y 只覆盖那一次发送（exact_receipt
+    # 单次票据），不构成本次及后续的复用——每次 send 都需单独批准。excerpt
+    # 的 S5 复用合同（A→B→A→B）不变。
+    if "command_output" in nonroutine and "command_output" not in grant.allowed_data_classes:
+        return False
     source_classes = {source.data_class for source in candidate.sources}
     if nonroutine != source_classes:
         return False

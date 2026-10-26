@@ -1707,6 +1707,65 @@ def test_consent_ux_command_grant_roundtrips_through_checkpoint_codec(tmp_path) 
     )
 
 
+def test_consent_ux_command_output_does_not_ride_grant_exception_under_narrow_grant() -> None:
+    """P3-1（2026-10-26 用户裁决）：exact-boundary y 不给窄 grant 放大命令
+    输出复用。v1 读许可下，含 command_output 的 scope 即使与最后一次已批准
+    边界完全相同，y 之后也只放行那一次发送（exact_receipt 单次票据），后续
+    send 回到逐次披露；excerpt 的 S5 例外合同不受影响（U9 既有覆盖）。"""
+
+    descriptor = _descriptor()
+    command_scope = _command_scope(_command_source("local_process command:abc123"))
+    base = ConversationState.new("conversation-r")
+    state = replace(base, provider_consent_grant=_read_grant(base))
+
+    def gate(current, *, run_id="run-1"):
+        return evaluate_provider_dispatch(
+            state=current,
+            descriptor=descriptor,
+            scope=command_scope,
+            now=_T0,
+            purpose="runtime_progress",
+            run_id=run_id,
+        )
+
+    # 首次发送必须决定（v1 读许可不覆盖 command_output）。
+    first = gate(state)
+    assert not first.admitted and first.reason == "decision_required"
+
+    # 用户对该 exact 边界答 y：保存 v2 request + 未消费 receipt。
+    request = _v2_request(
+        scope=command_scope, grant=state.provider_consent_grant, run_id="run-1"
+    )
+    receipt = ProviderDisclosureReceiptV2(
+        receipt_id="receipt-command",
+        request_digest=request.request_digest,
+        acknowledged_action_seq=2,
+        acknowledged_at=_T0,
+        consumed_at=None,
+    )
+    approved = replace(
+        state, provider_disclosure_request=request, provider_disclosure_receipt=receipt
+    )
+    # y 批准的那一次发送：单次票据放行（exact_receipt），不是 grant 复用。
+    immediate = gate(approved, run_id="run-2")
+    assert immediate.admitted and not immediate.grant_use
+    assert immediate.reason == "exact_receipt"
+
+    # 票据消费后的同边界发送：不走 grant_exception——每次都要单独批准。
+    consumed = replace(
+        approved,
+        provider_disclosure_receipt=replace(receipt, consumed_at=_T0),
+    )
+    later = gate(consumed, run_id="run-3")
+    assert not later.admitted and later.reason == "decision_required"
+
+    # command 许可在场时同 scope 直接走 workspace 分支（结构覆盖），与
+    # 例外路径无关。
+    command_state = replace(base, provider_consent_grant=_command_grant(base))
+    third = gate(command_state)
+    assert third.admitted and third.reason == "grant_workspace_read"
+
+
 def _background_binding() -> BackgroundOccurrenceBindingV1:
     return BackgroundOccurrenceBindingV1.create(
         automation_id="automation:nightly-report",

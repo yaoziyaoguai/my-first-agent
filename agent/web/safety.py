@@ -6,6 +6,8 @@ import ipaddress
 import re
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
+from agent.runtime.contracts import ConversationState, FactKind
+
 _MAX_URL_CHARS = 3_000
 _MAX_HOST_CHARS = 253
 _MAX_PATH_CHARS = 2_000
@@ -136,4 +138,44 @@ def citation_locator(admitted_url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 
-__all__ = ["WebUrlError", "admit_public_url", "citation_locator"]
+# 2026-10-26（用户裁决：用户 URL 直读）：从用户消息中提取 https URL。
+# 只匹配无空白的 https 字面量；canonical 化交给 admit_public_url（公网
+# HTTPS、无 userinfo/fragment/凭据 query、端口 443），不过判据的静默跳过。
+_URL_IN_USER_TEXT = re.compile(r"https://[^\s<>\"'`]+")
+_URL_TRAILING_PUNCTUATION = ".,;:!?)]}"
+
+
+def user_message_urls(state: ConversationState) -> tuple[str, ...]:
+    """用户在本 conversation 消息里写下的、可直读的公网 URL（canonical）。
+
+    只有 USER_MESSAGE fact 参与：工具输出、摘要或 assistant 文本里出现的
+    URL 不是用户意图，不能成为直读授权。``admit_public_url`` 判据不过的
+    URL 静默跳过（fetch 工具按自身判据 fail closed 并说明原因）。按首次
+    出现顺序去重。本函数留在 web 层（而非 runtime leaf）正是因为它复用
+    这里的 closed admission 判据，runtime leaf 不反向依赖 web。
+    """
+
+    urls: list[str] = []
+    for fact in state.facts:
+        if fact.kind is not FactKind.USER_MESSAGE:
+            continue
+        text = fact.content.get("text")
+        if not isinstance(text, str):
+            continue
+        for raw in _URL_IN_USER_TEXT.findall(text):
+            candidate = raw.rstrip(_URL_TRAILING_PUNCTUATION)
+            try:
+                canonical = admit_public_url(candidate)
+            except WebUrlError:
+                continue
+            if canonical not in urls:
+                urls.append(canonical)
+    return tuple(urls)
+
+
+__all__ = [
+    "WebUrlError",
+    "admit_public_url",
+    "citation_locator",
+    "user_message_urls",
+]

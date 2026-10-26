@@ -24,7 +24,7 @@ def test_unconfigured_web_resources_register_nothing() -> None:
     assert resources.closeables == ()
 
 
-def test_configured_web_resources_are_two_static_governed_tools() -> None:
+def test_configured_web_resources_are_three_static_governed_tools() -> None:
     with httpx.Client(
         transport=httpx.MockTransport(
             lambda _request: httpx.Response(
@@ -46,6 +46,7 @@ def test_configured_web_resources_are_two_static_governed_tools() -> None:
     assert [item.spec.name for item in resources.registrations] == [
         "web_search",
         "web_fetch",
+        "web_fetch_url",
     ]
     assert resources.closeables == ()
     assert all(item.spec.egress.value == "public_network" for item in resources.registrations)

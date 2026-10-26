@@ -31,6 +31,7 @@ from agent.runtime.context_source import (
     validate_tool_result_source,
 )
 from agent.runtime.contracts import (
+    RESULT_CLASSES,
     Action,
     ActiveRunStatus,
     BudgetReport,
@@ -273,7 +274,7 @@ def _file_consent_source(
     proof: ProviderFileSourceProofV1,
 ) -> ProviderDisclosureSourceV1:
     return ProviderDisclosureSourceV1(
-        data_class="workspace_excerpt",
+        data_class=proof.result_class,
         boundary_digest=proof.boundary_digest,
         label=f"{proof.tool_name} {proof.normalized_target}",
         reusable=True,
@@ -345,7 +346,8 @@ def _revalidated_summary_sources(
     boundary_digest 绑定 goal_id+goal_revision，goal 修订即失效降级）；summary
     boundary 此前原样返还继承 source，r 许可会静默复用旧 revision 的摘录。
     失配（goal 修订/缺失或 proof 已不在 store）时降为 reusable=False：类别
-    仍如实申报 workspace_excerpt，但退回逐次披露决策，不再被会话许可覆盖。
+    仍如实申报（workspace_excerpt / command_output），但退回逐次披露决策，
+    不再被会话许可覆盖。
     """
 
     goal = state.goal
@@ -363,7 +365,7 @@ def _revalidated_summary_sources(
         )
     return tuple(
         source
-        if source.data_class != "workspace_excerpt" or source.boundary_digest in current
+        if source.data_class not in RESULT_CLASSES or source.boundary_digest in current
         else replace(source, reusable=False)
         for source in sources
     )
@@ -967,7 +969,7 @@ class KernelContextManager:
             if fact.kind is FactKind.TOOL_RESULT:
                 proof = _valid_file_proof(fact, state)
                 if proof is not None:
-                    classes.add("workspace_excerpt")
+                    classes.add(proof.result_class)
                     sources.append(_file_consent_source(proof))
                     continue
                 projection = validate_tool_result_source(
@@ -1943,7 +1945,7 @@ class KernelContextManager:
         if fact.kind is FactKind.TOOL_RESULT and projection is not None:
             proof = _valid_file_proof(fact, state)
             if proof is not None:
-                source_data_classes = ("workspace_excerpt",)
+                source_data_classes = (proof.result_class,)
                 consent_sources = (_file_consent_source(proof),)
             else:
                 consent_sources = _generic_tool_sources(fact, projection)

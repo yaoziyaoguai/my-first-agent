@@ -1480,6 +1480,19 @@ ROUTINE_DATA_CLASSES = (
 CONSENT_PROFILE_WORKSPACE_READ = "routine_workspace_read_v1"
 WORKSPACE_READ_DATA_CLASSES = (*ROUTINE_DATA_CLASSES, "workspace_excerpt")
 
+# 2026-10-26（用户裁决：命令输出复用）：在 r 的 proof-backed 读范围之上再并入
+# Runtime 铸造的 command_output（local_process 的每次审批执行结果）。只是新增
+# profile，不改变 v1 语义：已铸造/已持久化的 workspace_read 许可不会覆盖命令
+# 输出，reducer 只在本次 request 确实含 command_output 时才升级到本 profile。
+CONSENT_PROFILE_WORKSPACE_COMMAND = "routine_workspace_command_v1"
+WORKSPACE_COMMAND_DATA_CLASSES = tuple(
+    sorted({*WORKSPACE_READ_DATA_CLASSES, "command_output"})
+)
+
+RESULT_CLASS_WORKSPACE_EXCERPT = "workspace_excerpt"
+RESULT_CLASS_COMMAND_OUTPUT = "command_output"
+RESULT_CLASSES = (RESULT_CLASS_WORKSPACE_EXCERPT, RESULT_CLASS_COMMAND_OUTPUT)
+
 
 class ProviderConsentGrantStatus(StrEnum):
     ACTIVE = "active"
@@ -1493,8 +1506,12 @@ class ResultSourceKind(StrEnum):
     WORKSPACE_FILE_EFFECT = "workspace_file_effect"
     # P5（2026-10-25 委托裁决）：读/列/搜的 workspace 读结果同样铸造
     # file-source proof（read_file/list_files/search_*/read_file_chunk/
-    # confirm_file）；命令 stdout 等非 workspace 派生输出不在此列。
+    # confirm_file）。
     WORKSPACE_READ = "workspace_read"
+    # 2026-10-26（用户裁决：命令输出复用）：local_process 的 exactly-approved
+    # 执行结果也铸造 proof；其 result_class 为 command_output，只有
+    # routine_workspace_command_v1 许可按类覆盖，读许可 v1 不覆盖。
+    WORKSPACE_COMMAND = "workspace_command"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1613,8 +1630,13 @@ class ProviderFileSourceProofV1:
     result_content_digest: str
     boundary_digest: str
     proof_digest: str
+    # 2026-10-26：来源类别。默认 workspace_excerpt 时**不进入** _payload()，
+    # 因此旧 checkpoint 里已铸造的 proof（digest 不含该键）仍然自洽可读。
+    result_class: str = RESULT_CLASS_WORKSPACE_EXCERPT
 
     def __post_init__(self) -> None:
+        if self.result_class not in RESULT_CLASSES:
+            raise ValueError("file source proof result_class is not closed")
         for name in (
             "proof_id",
             "conversation_id",
@@ -1661,7 +1683,7 @@ class ProviderFileSourceProofV1:
             raise ValueError("file source proof digest mismatch")
 
     def _payload(self) -> dict[str, JSONValue]:
-        return {
+        payload: dict[str, JSONValue] = {
             "proof_id": self.proof_id,
             "conversation_id": self.conversation_id,
             "run_id": self.run_id,
@@ -1680,6 +1702,9 @@ class ProviderFileSourceProofV1:
             "result_content_digest": self.result_content_digest,
             "boundary_digest": self.boundary_digest,
         }
+        if self.result_class != RESULT_CLASS_WORKSPACE_EXCERPT:
+            payload["result_class"] = self.result_class
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         return {**self._payload(), "proof_digest": self.proof_digest}
@@ -1708,9 +1733,14 @@ class ProviderFileSourceProofV1:
             "boundary_digest",
             "proof_digest",
         }
-        if set(raw) != expected:
+        # result_class 是 2026-10-26 新增的可选字段：旧 checkpoint 缺少该键时
+        # 按默认 workspace_excerpt 读回，其余字段仍保持闭集。
+        optional = {"result_class"}
+        if set(raw) - optional != expected:
             raise ValueError("file source proof fields are not closed")
-        return cls(**raw)
+        normalized = dict(raw)
+        normalized.setdefault("result_class", RESULT_CLASS_WORKSPACE_EXCERPT)
+        return cls(**normalized)
 
     @staticmethod
     def boundary_payload(
@@ -1725,8 +1755,9 @@ class ProviderFileSourceProofV1:
         target_digest: str,
         goal_id: str | None,
         goal_revision: int | None,
+        result_class: str = RESULT_CLASS_WORKSPACE_EXCERPT,
     ) -> dict[str, JSONValue]:
-        return {
+        payload: dict[str, JSONValue] = {
             "profile": "workspace_file_effect_v1",
             "conversation_id": conversation_id,
             "workspace_identity_digest": workspace_identity_digest,
@@ -1739,6 +1770,10 @@ class ProviderFileSourceProofV1:
             "goal_id": goal_id,
             "goal_revision": goal_revision,
         }
+        # 与 _payload() 同一兼容规则：默认类别不入 digest，旧边界不变。
+        if result_class != RESULT_CLASS_WORKSPACE_EXCERPT:
+            payload["result_class"] = result_class
+        return payload
 
     @classmethod
     def create(
@@ -1759,6 +1794,7 @@ class ProviderFileSourceProofV1:
         goal_revision: int | None,
         intent_digest: str,
         result_content_digest: str,
+        result_class: str = RESULT_CLASS_WORKSPACE_EXCERPT,
     ) -> ProviderFileSourceProofV1:
         boundary_digest = canonical_json_digest(
             cls.boundary_payload(
@@ -1772,6 +1808,7 @@ class ProviderFileSourceProofV1:
                 target_digest=target_digest,
                 goal_id=goal_id,
                 goal_revision=goal_revision,
+                result_class=result_class,
             )
         )
         proof_id = (
@@ -1804,6 +1841,8 @@ class ProviderFileSourceProofV1:
             "result_content_digest": result_content_digest,
             "boundary_digest": boundary_digest,
         }
+        if result_class != RESULT_CLASS_WORKSPACE_EXCERPT:
+            payload["result_class"] = result_class
         return cls(**payload, proof_digest=canonical_json_digest(payload))
 
 
@@ -2186,12 +2225,21 @@ class ProviderConsentGrantV1:
         ):
             if not getattr(self, name):
                 raise ValueError(f"provider consent grant {name} must not be empty")
-        if self.profile not in (CONSENT_PROFILE_ROUTINE, CONSENT_PROFILE_WORKSPACE_READ):
+        if self.profile not in (
+            CONSENT_PROFILE_ROUTINE,
+            CONSENT_PROFILE_WORKSPACE_READ,
+            CONSENT_PROFILE_WORKSPACE_COMMAND,
+        ):
             raise ValueError("provider consent grant profile is unsupported")
         object.__setattr__(self, "allowed_data_classes", tuple(self.allowed_data_classes))
         if tuple(sorted(set(self.allowed_data_classes))) != self.allowed_data_classes:
             raise ValueError("provider consent grant classes must be sorted and unique")
-        if self.profile == CONSENT_PROFILE_WORKSPACE_READ:
+        if self.profile == CONSENT_PROFILE_WORKSPACE_COMMAND:
+            if self.allowed_data_classes != WORKSPACE_COMMAND_DATA_CLASSES:
+                raise ValueError(
+                    "provider consent grant classes must match the workspace-command scope"
+                )
+        elif self.profile == CONSENT_PROFILE_WORKSPACE_READ:
             if self.allowed_data_classes != WORKSPACE_READ_DATA_CLASSES:
                 raise ValueError(
                     "provider consent grant classes must match the workspace-read scope"
@@ -6959,6 +7007,10 @@ class ToolPrepareContext:
     citable_source_refs: tuple[str, ...] = ()
     citable_citation_sources: tuple[tuple[str, str], ...] = ()
     web_fetch_source_refs: tuple[str, ...] = ()
+    # 2026-10-26（用户裁决：用户 URL 直读）：用户在本 conversation 消息里
+    # 写下的 canonical 公网 URL。Runtime 从 USER_MESSAGE facts 投影，工具
+    # 输出中的 URL 不进入此清单。
+    user_message_urls: tuple[str, ...] = ()
     citation_manifest_allowed: bool = False
     citation_sidecar_paths: tuple[str, ...] = ()
     citation_artifact_paths: tuple[str, ...] = ()

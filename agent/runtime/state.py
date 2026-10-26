@@ -13,7 +13,6 @@ from datetime import UTC, datetime, timedelta
 
 from agent.runtime.compaction_rules import validate_compaction_removal
 from agent.runtime.contracts import (
-    CONSENT_PROFILE_WORKSPACE_READ,
     GOAL_TARGET_AUTHORIZATION_EXPIRY_MINUTES,
     SANDBOX_EXPIRY_MINUTES,
     AbandonUnknownModelOutcome,
@@ -108,6 +107,7 @@ from agent.runtime.contracts import (
 )
 from agent.runtime.provider_consent import (
     mint_provider_consent_grant,
+    workspace_consent_profile,
     workspace_read_classes_covered,
 )
 from agent.runtime.resource_lifecycle import active_task_resources
@@ -1898,7 +1898,7 @@ def grant_provider_workspace_read_consent(
         request=request,
         action_seq=action.action_seq,
         now=now,
-        profile=CONSENT_PROFILE_WORKSPACE_READ,
+        profile=workspace_consent_profile(request.data_classes),
     )
     return replace(
         state,

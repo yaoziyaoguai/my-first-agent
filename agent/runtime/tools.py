@@ -16,6 +16,8 @@ from agent.process.contracts import (
     ResourceProfileV1,
 )
 from agent.runtime.contracts import (
+    RESULT_CLASS_COMMAND_OUTPUT,
+    RESULT_CLASS_WORKSPACE_EXCERPT,
     ApprovalGrant,
     ApprovalPolicy,
     ApprovalRequest,
@@ -272,6 +274,9 @@ class KernelToolRuntime:
             authority_required=(
                 registration.spec.safety_policy.get("source_authority_required")
                 is True
+            ),
+            user_url_required=(
+                registration.spec.safety_policy.get("user_url_required") is True
             ),
             arguments=arguments,
             context=context,
@@ -759,7 +764,7 @@ class KernelToolRuntime:
                     browser_takeover_request=raw_result,
                 )
             if isinstance(raw_result, ProcessExecutionDraftV1):
-                return self._process_outcome(intent, registration.spec, raw_result)
+                return self._process_outcome(intent, registration, raw_result)
             if isinstance(raw_result, StructuredSandboxProcessDraftV1):
                 return self._structured_sandbox_outcome(
                     intent, registration.spec, raw_result
@@ -901,6 +906,8 @@ class KernelToolRuntime:
         （读/列/搜）都绑定 workspace 与结果内容 digest；goal 会话额外绑定
         goal/revision，goal-less 会话（BeginAnswer 问答）成对留 None——
         覆盖失效语义由会话许可的 TTL/次数/撤销与逐次 fact 重验承担。
+        2026-10-26：WORKSPACE_COMMAND（local_process 结果）铸 command_output
+        类，只有 workspace_command 许可按类覆盖。
         """
 
         normalized_target = current_binding.get("consent_target")
@@ -913,6 +920,11 @@ class KernelToolRuntime:
             and intent.workspace_identity_digest
         ):
             return None
+        result_class = (
+            RESULT_CLASS_COMMAND_OUTPUT
+            if registration.result_source_kind is ResultSourceKind.WORKSPACE_COMMAND
+            else RESULT_CLASS_WORKSPACE_EXCERPT
+        )
         return ProviderFileSourceProofV1.create(
             conversation_id=intent.conversation_id,
             run_id=intent.run_id,
@@ -931,6 +943,7 @@ class KernelToolRuntime:
             result_content_digest=hashlib.sha256(
                 result_content.encode("utf-8")
             ).hexdigest(),
+            result_class=result_class,
         )
 
     @staticmethod
@@ -1587,9 +1600,10 @@ class KernelToolRuntime:
     def _process_outcome(
         self,
         intent: ExecutionIntent,
-        spec: ToolSpec,
+        registration: RegisteredTool,
         draft: ProcessExecutionDraftV1,
     ) -> ToolResult:
+        spec = registration.spec
         if spec.execution_authority is not ExecutionAuthorityClass.LOCAL_SAME_UID_PROCESS:
             return ToolResult(
                 tool_call_id=intent.tool_call_id,
@@ -1656,6 +1670,15 @@ class KernelToolRuntime:
                 # child stdout/stderr 是数据，不是指令或新的 authority。
                 "untrusted_output": True,
             },
+            # 2026-10-26（用户裁决：命令输出复用）：注册声明 result_source_kind
+            # 且成功执行时才铸 proof；失败/spawn 失败不铸，保持逐次披露。
+            result_source_proof=(
+                self._file_source_proof(
+                    intent, registration, dict(intent.safety_binding), content
+                )
+                if success and registration.result_source_kind is not None
+                else None
+            ),
         )
 
     def _sandbox_outcome(

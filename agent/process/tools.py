@@ -32,6 +32,7 @@ from agent.runtime.contracts import (
     EgressClass,
     ExecutionAuthorityClass,
     OutputPolicy,
+    ResultSourceKind,
     SideEffectClass,
     ToolRisk,
     ToolSpec,
@@ -141,6 +142,11 @@ def build_local_process_registration(
         profile = command.profile.value
         binding = {
             "command_fingerprint": command.command_fingerprint,
+            # 2026-10-26（用户裁决：命令输出复用）：proof 的稳定目标。label 用
+            # 短指纹便于阅读，digest 用完整 fingerprint（已绑定 executable/
+            # argv/cwd 三者 digest），不因截断降低绑定强度。
+            "consent_target": f"command:{command.command_fingerprint[:16]}",
+            "target_digest": command.command_fingerprint,
             "executable_digest": identity.identity_digest,
             "resolved_executable_path": identity.resolved_path,
             "argv_digest": hashlib.sha256(json.dumps(list(argv)).encode("utf-8")).hexdigest(),
@@ -162,7 +168,14 @@ def build_local_process_registration(
         return binding
 
     executor = _make_executor(workspace_root, search_paths, child_path, boundary)
-    return RegisteredTool(spec=spec, func=executor, prepare_binding=prepare_binding)
+    return RegisteredTool(
+        spec=spec,
+        func=executor,
+        prepare_binding=prepare_binding,
+        # 2026-10-26（用户裁决：命令输出复用）：成功 stdout 铸 command_output
+        # proof；会话许可按类覆盖，仍受 TTL/次数/撤销与 goal 绑定约束。
+        result_source_kind=ResultSourceKind.WORKSPACE_COMMAND,
+    )
 
 
 def _make_executor(

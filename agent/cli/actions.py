@@ -162,10 +162,11 @@ def build_grant_provider_consent(
 def build_grant_provider_workspace_read_consent(
     state: ConversationState,
 ) -> GrantProviderWorkspaceReadConsent:
-    """把当前 v2 request 铸成含工作区读摘录的范围许可；reducer 独立重验。
+    """把当前 v2 request 铸成含工作区读/命令输出的范围许可；reducer 独立重验。
 
-    r 与 s 同一 CAS 形状；准入只看 request 自身类别（非常规部分恰为
-    proof-backed workspace_excerpt），CLI 不自行扩大 allowed set。
+    r 与 s 同一 CAS 形状；准入只看 request 自身类别（非常规部分全部为
+    proof-backed 可复用来源：workspace_excerpt / command_output），CLI 不
+    自行扩大 allowed set。
     """
 
     request = state.provider_disclosure_request
@@ -179,8 +180,8 @@ def build_grant_provider_workspace_read_consent(
     if not workspace_read_classes_covered(request.data_classes, request.sources):
         raise ValueError(
             "A workspace-read scope is unavailable for this request because it "
-            "includes a source beyond verified workspace file excerpts; answer y "
-            "to approve this pending content once."
+            "includes a source beyond verified workspace reads and approved "
+            "command output; answer y to approve this pending content once."
         )
     if state.provider_disclosure_receipt is not None:
         raise ValueError("The pending disclosure was already acknowledged.")

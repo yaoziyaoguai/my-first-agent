@@ -39,6 +39,7 @@ from agent.web.safety import admit_public_url
 _SOURCE_REF_PREFIX = "source-ref:v1:"
 _SOURCE_REF_LENGTH = len(_SOURCE_REF_PREFIX) + 64
 _MAX_QUERY_CHARS = 1_000
+_MAX_URL_INPUT_CHARS = 3_000
 _OUTPUT_LIMIT_CHARS = 50_000
 
 
@@ -97,6 +98,38 @@ def build_web_tool_registrations(
             "trust_notice_digest": profile.trust_notice_digest,
         }
 
+    def prepare_fetch_url(arguments):  # noqa: ANN001
+        canonical_url = _validate_user_url(arguments.get("url"))
+        payload = tavily_extract_payload(
+            canonical_url,
+            timeout_seconds=profile.timeout_seconds,
+        )
+        cost_class = "tavily_extract_basic_1_credit_per_5_urls"
+        return {
+            "operation": "tavily_extract_user_url",
+            "request_identity": "tavily-extract-user-url:v1:"
+            + canonical_json_digest(
+                {
+                    "profile_digest": profile.profile_digest,
+                    "url": canonical_url,
+                }
+            ),
+            "destination_digest": _destination_digest(profile),
+            "precondition_digest": profile.profile_digest,
+            "cost_class": cost_class,
+            "trust_notice_id": profile.trust_notice_id,
+            "trust_notice_digest": profile.trust_notice_digest,
+            "effect_preview": _effect_preview(
+                summary=(
+                    "Send this exact user-provided public URL to Tavily: "
+                    f"{canonical_url}"
+                ),
+                destination=profile.destination + TAVILY_EXTRACT_PATH,
+                cost_class=cost_class,
+                payload=payload,
+            ),
+        }
+
     return (
         RegisteredTool(
             spec=_search_spec(profile),
@@ -114,6 +147,11 @@ def build_web_tool_registrations(
                 )
             ),
             func=lambda intent: _fetch_output(client, intent, clock=clock),
+        ),
+        RegisteredTool(
+            spec=_fetch_url_spec(profile),
+            prepare_binding=prepare_fetch_url,
+            func=lambda intent: _fetch_url_output(client, profile, intent, clock=clock),
         ),
     )
 
@@ -176,8 +214,32 @@ def _fetch_output(
     authority = intent.source_authority
     if authority is None:
         raise ValueError("Runtime source authority is required")
+    return _extract_output(
+        client, authority.canonical_url, intent, clock=clock
+    )
+
+
+def _fetch_url_output(
+    client: TavilyClient,
+    profile: WebProfileV1,
+    intent: ExecutionIntent,
+    *,
+    clock: Callable[[], str],
+) -> ToolExecutionOutput:
+    del profile  # 判据在 prepare/governance；执行期只重验 URL 本身
+    canonical_url = _validate_user_url(intent.arguments.get("url"))
+    return _extract_output(client, canonical_url, intent, clock=clock)
+
+
+def _extract_output(
+    client: TavilyClient,
+    canonical_url: str,
+    intent: ExecutionIntent,
+    *,
+    clock: Callable[[], str],
+) -> ToolExecutionOutput:
     try:
-        page = client.extract(authority.canonical_url)
+        page = client.extract(canonical_url)
     except (WebAuthError, WebRateLimitError, WebProtocolError, WebServiceError) as error:
         return _known_failure(error)
     return ToolExecutionOutput(
@@ -296,6 +358,54 @@ def _fetch_spec(profile: WebProfileV1) -> ToolSpec:
         output_limit_chars=_OUTPUT_LIMIT_CHARS,
         source_kinds=(SourceKind.WEB_EXTRACTED_CONTENT,),
     )
+
+
+def _fetch_url_spec(profile: WebProfileV1) -> ToolSpec:
+    del profile
+    return ToolSpec(
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        name="web_fetch_url",
+        version="1.0.0",
+        description=(
+            "Extract one public HTTPS URL that the user wrote in this conversation. "
+            "The Runtime admits only the exact canonical URL from a user message; URLs "
+            "from tool output or memory are rejected. Requires separate approval and is "
+            "handled by a third party."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": _MAX_URL_INPUT_CHARS,
+                }
+            },
+            "required": ["url"],
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.MEDIUM,
+        side_effect=SideEffectClass.READ_ONLY,
+        egress=EgressClass.PUBLIC_NETWORK,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        safety_policy={
+            "enabled": True,
+            "kind": "fixed_tavily_extract_user_url",
+            "user_url_required": True,
+            "source_metadata_keys": ["content_chars", "code"],
+        },
+        output_limit_chars=_OUTPUT_LIMIT_CHARS,
+        source_kinds=(SourceKind.WEB_EXTRACTED_CONTENT,),
+    )
+
+
+def _validate_user_url(value: object) -> str:
+    """用户直读 URL 的 closed 判据：与 web 工具共用同一 admission。"""
+
+    if not isinstance(value, str) or not value or len(value) > _MAX_URL_INPUT_CHARS:
+        raise ValueError("Web URL is empty or oversized")
+    return admit_public_url(value)
 
 
 def _validate_query(value: object) -> str:

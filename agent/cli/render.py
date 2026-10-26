@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 
 from agent.runtime.contracts import (
     CONSENT_MAX_USES,
-    CONSENT_PROFILE_WORKSPACE_READ,
     CONSENT_TTL_SECONDS,
     GOAL_TARGET_AUTHORIZATION_EXPIRY_MINUTES,
     GOAL_TARGET_AUTHORIZATION_MAX_USES,
@@ -32,6 +31,7 @@ from agent.runtime.contracts import (
 from agent.runtime.evidence import INVALIDATED_BY_LATER_WORKSPACE_ACTIVITY
 from agent.runtime.provider_consent import (
     grant_structure_drifted,
+    workspace_consent_scope_label,
     workspace_read_classes_covered,
 )
 from agent.runtime.views import (
@@ -335,11 +335,7 @@ class TerminalRenderer:
             return
         if datetime.now(UTC) >= expires or grant.uses_consumed >= grant.max_uses:
             return
-        scope_label = (
-            "read+routine"
-            if grant.profile == CONSENT_PROFILE_WORKSPACE_READ
-            else "routine"
-        )
+        scope_label = workspace_consent_scope_label(grant.profile)
         self._write(
             f"Active {scope_label} permission: "
             f"{grant.max_uses - grant.uses_consumed} of {grant.max_uses} "
@@ -639,10 +635,15 @@ class TerminalRenderer:
             # （r 覆盖成立），"new or unverified" 是对验证状态的虚假陈述；
             # 如实说明 s 不覆盖的类别原因并指向 r。
             if workspace_read_classes_covered(request.data_classes, request.sources):
+                beyond = (
+                    "verified workspace reads and approved command output"
+                    if "command_output" in request.data_classes
+                    else "verified workspace reads"
+                )
                 lines.append(
-                    "  s  unavailable — this request includes verified workspace "
-                    "reads, which routine-only permission does not cover; "
-                    "choose r to include them"
+                    "  s  unavailable — this request includes "
+                    f"{beyond}, which routine-only permission does not "
+                    "cover; choose r to include them"
                 )
             else:
                 lines.append(
@@ -653,10 +654,23 @@ class TerminalRenderer:
             and workspace_read_classes_covered(request.data_classes, request.sources)
         )
         if r_offered:
+            # 2026-10-26（命令输出复用）：scope 含 command_output 时才把命令
+            # 结果并入 r 的覆盖说明；纯读请求保持原文案。
+            includes_command = "command_output" in request.data_classes
+            covered = (
+                "verified workspace reads and approved command output"
+                if includes_command
+                else "verified workspace reads"
+            )
+            examples = (
+                "file excerpts, directory listings, search results, "
+                "and approved command output"
+                if includes_command
+                else "file excerpts, directory listings, and search results"
+            )
             lines.append(
-                "  r  Also allow routine conversation data and verified "
-                "workspace reads in this conversation — file excerpts, "
-                "directory listings, and search results; "
+                f"  r  Also allow routine conversation data and {covered} "
+                f"in this conversation — {examples}; "
                 f"up to {CONSENT_MAX_USES} model sends, "
                 f"expires in {CONSENT_TTL_SECONDS // 60} minutes"
             )
@@ -691,11 +705,7 @@ class TerminalRenderer:
                 # 决策队列 1（2026-10-24 裁决 C）：逐次披露保留，但活动许可
                 # 在场时明示剩余额度与到期——读/验证类新源反复触发披露时，
                 # 用户能看到常规许可还剩多少、这次为何仍要单独批准。
-                scope_label = (
-                    "read+routine"
-                    if grant.profile == CONSENT_PROFILE_WORKSPACE_READ
-                    else "routine"
-                )
+                scope_label = workspace_consent_scope_label(grant.profile)
                 quota = (
                     f"Active {scope_label} permission: "
                     f"{grant.max_uses - grant.uses_consumed} of "
@@ -757,12 +767,16 @@ class TerminalRenderer:
             )
             return
         left = max(grant.max_uses - grant.uses_consumed, 0)
-        scope_label = (
-            "routine conversation data and verified workspace reads "
-            "(file excerpts, listings, search results)"
-            if grant.profile == CONSENT_PROFILE_WORKSPACE_READ
-            else "routine conversation data"
-        )
+        scope_label = {
+            "read+routine": (
+                "routine conversation data and verified workspace reads "
+                "(file excerpts, listings, search results)"
+            ),
+            "read+command+routine": (
+                "routine conversation data, verified workspace reads, and "
+                "approved command output"
+            ),
+        }.get(workspace_consent_scope_label(grant.profile), "routine conversation data")
         self._write(
             f"Provider consent active: {scope_label}, {left} of "
             f"{grant.max_uses} model sends left, expires at {terminal_text(grant.expires_at)}. "

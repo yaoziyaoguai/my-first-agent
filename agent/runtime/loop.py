@@ -20,7 +20,10 @@ from agent.continuity.compaction import (
     parse_compaction_response,
 )
 from agent.runtime.context import ContextLimitError
-from agent.runtime.context_control import goal_correction_pending, web_fetch_source_refs
+from agent.runtime.context_control import (
+    goal_correction_pending,
+    web_fetch_source_refs,
+)
 from agent.runtime.context_source import (
     citable_citation_sources,
     citable_source_refs,
@@ -177,6 +180,10 @@ from agent.runtime.state import (
     start_tool_batch,
     verify_goal_completion,
 )
+
+# user_message_urls 留在 web 层（与 closed admission 判据同居）；runtime
+# leaf（context_control）不反向依赖 web——见 tests/architecture DAG 断言。
+from agent.web.safety import user_message_urls
 
 _WORKSPACE_OBSERVATION_TOOLS = frozenset(
     {
@@ -1241,6 +1248,7 @@ class AgentRuntime:
                             self._citable_citation_sources_for(current.state)
                         ),
                         web_fetch_source_refs=web_fetch_source_refs(current.state),
+                        user_message_urls=user_message_urls(current.state),
                         citation_manifest_allowed=bool(
                             current.state.goal is not None
                             and any(
@@ -3909,7 +3917,7 @@ class AgentRuntime:
             web_requirement_ids <= admitted_web_ids
         )
         for name, arguments in rejected_calls:
-            if name in {"web_search", "web_fetch"} and web_requirement_satisfied:
+            if name in {"web_search", "web_fetch", "web_fetch_url"} and web_requirement_satisfied:
                 continue
             if name in {"write_file", "edit_file"} and isinstance(arguments, dict):
                 path = arguments.get("path")

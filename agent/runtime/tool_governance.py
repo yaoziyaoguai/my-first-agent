@@ -28,6 +28,7 @@ from agent.runtime.contracts import (
     ToolResult,
     ToolSpec,
 )
+from agent.web.safety import WebUrlError, admit_public_url
 
 
 class BrowserActionToolPolicy:
@@ -350,11 +351,35 @@ class SourceGovernance:
         self,
         *,
         authority_required: bool,
+        user_url_required: bool = False,
         arguments: dict[str, JSONValue],
         context: ToolPrepareContext,
     ) -> GovernanceRejection | None:
         """web 类 source 工具只允许 Runtime 验证过、未尝试的 search ref。"""
 
+        if user_url_required:
+            # 2026-10-26（用户裁决：用户 URL 直读）：只接受用户在本
+            # conversation 消息里写下的 canonical 公网 URL；工具输出/模型
+            # 自造 URL 一律 fail closed。canonical 化与 web 工具用同一判据。
+            raw = arguments.get("url")
+            canonical: str | None = None
+            if isinstance(raw, str):
+                try:
+                    canonical = admit_public_url(raw)
+                except WebUrlError:
+                    canonical = None
+            if canonical is None or canonical not in context.user_message_urls:
+                admitted = ", ".join(context.user_message_urls) or "none"
+                return GovernanceRejection(
+                    code="user_url_required",
+                    message=(
+                        "This tool only extracts a public HTTPS URL the user wrote in "
+                        "this conversation. Exact admitted URLs: "
+                        f"{admitted}. Ask the user for the URL instead of guessing or "
+                        "reusing a URL from tool output."
+                    ),
+                )
+            return None
         if not authority_required:
             return None
         requested_source_ref = arguments.get("source_ref")

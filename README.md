@@ -40,11 +40,13 @@ Durable automations 节）；受治理浏览器（018）为 implemented-candidat
 ## 当前能力
 
 - 多轮文本对话
-- 会话级外发许可与文件复用快捷选择（2026-10-21 consent-ux 轮）：远端模型首次发送可选
+- 会话级外发许可与文件复用快捷选择（2026-10-21 consent-ux 轮，2026-10-26 扩展）：远端模型首次发送可选
   `s`（本会话常规对话数据，32 次发送 / 60 分钟，`/revoke-provider-consent` 随时撤销）；
   文件审批处可直接选 `f`（同文件/本任务复用，16 次 / 60 分钟）或 `d`（已声明目录复用），
   均等价于既有 slash 范围命令；写结果的稳定来源在许可内静默复用。读/验证类输出
-  （目录列表、读文件、命令 stdout 等）不属于稳定来源，包含它们的每次发送仍会单独披露
+  （目录列表、读文件、搜索）与命令 stdout（2026-10-26 扩权：`local_process` 的成功执行结果）
+  同样铸稳定来源证明——含它们的首次发送可选 `r`（纯读为 read+routine，含命令输出为
+  read+command+routine），许可内复用并逐次非阻断告知；不可复用来源仍逐次披露
 - 确定性、限额明确的上下文构建
 - 串行工具调用与精确审批；文件修改可由用户显式选择当前任务的精确目标复用授权
 - `read_file`、`list_files`、`write_file`、`edit_file`；缺失目录可经独立审批的
@@ -124,7 +126,13 @@ TUI、018 governed browser）不属于 base 安装闭包。日用默认安装就
 安装 `[tui]` extra——TUI 是实验性适配（见下文 TUI 章节的已知限制），需要实验时用同一个本地 wheel
 的 non-editable extra 语法安装，例如
 `python -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[tui]"`
-（各能力的 extra 名见对应章节；本仓库尚未声明任何安装 matrix 验证结论）。
+（各能力的 extra 名见对应章节）。
+
+安装验证（2026-10-26，发布裁决后首次）：在干净 venv（macOS CPython 3.14）中安装本 wheel 的
+base 闭包，`first-agent` / `first-agent-schedule` 入口、`--version`、`--help` 与 fake provider
+REPL 冒烟（`/status` 后 `/exit`，exit 0）均通过。要求 Python ≥3.11——macOS 系统
+`/usr/bin/python3`（3.9）不满足，需自备 3.11+ 解释器。仅验证过这一个环境 datapoint，
+未验证其他 Python 版本/平台。
 
 setup 只保存 provider、model、base URL、credential 环境变量名、thinking mode、request path、
 strict tools 开关和 timeout；不会读取或保存 key。此后 `first-agent` 默认使用当前目录，不需要再重复
@@ -243,6 +251,11 @@ Web 只连接 `https://api.tavily.com`。Search 和 Extract 分别展示 exact q
 公开 URL batch，得到用户批准后才发送；产品不会直连目标网页、继承 ambient proxy/cookie/netrc，也不会登录
 或操作浏览器。公开 query 和 URL 会由 Tavily 按其条款处理；First Agent 不承诺第三方 zero retention、
 training exclusion 或 deletion。
+
+`web_fetch_url`（2026-10-26）：用户在本对话消息里写下的公网 HTTPS URL 可以直接抓取——Runtime 只准入
+用户消息中的 exact canonical URL（工具输出、摘要或模型自造的 URL 一律拒绝），审批面照常展示该 URL、
+目的地、成本类别与第三方处理提示；URL 的 public-HTTPS 判据（HTTPS、无 userinfo/fragment/凭据参数、
+端口 443、非私网地址）与 `web_fetch` 共用。
 
 复杂研究可以把 history、workspace 与 extracted Web receipts 绑定到本地产物和
 `CitationManifestV1` sidecar。只有产物与 sidecar 都经过写入批准、read-back，且 Runtime 从 durable raw facts

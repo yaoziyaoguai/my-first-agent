@@ -49,6 +49,7 @@ def _context(
     *,
     source_authority=None,  # noqa: ANN001
     web_fetch_source_refs=(),  # noqa: ANN001
+    user_message_urls=(),  # noqa: ANN001
 ) -> ToolPrepareContext:
     return ToolPrepareContext(
         conversation_id="conversation-1",
@@ -57,6 +58,7 @@ def _context(
         approval_basis_revision=1,
         source_authority=source_authority,
         web_fetch_source_refs=web_fetch_source_refs,
+        user_message_urls=user_message_urls,
     )
 
 
@@ -698,3 +700,136 @@ def test_profile_drift_invalidates_pending_approval_with_zero_network_send() -> 
     assert rejected.executed is False
     assert rejected.metadata["code"] == "approval_mismatch"
     assert requests == []
+
+
+# ---- 用户 URL 直读（2026-10-26 用户裁决：source admission 扩权） ----
+
+
+def test_user_message_urls_only_admits_user_authored_public_https() -> None:
+    from agent.web.safety import user_message_urls
+
+    state = ConversationState.new("conversation-urls")
+    state = replace(
+        state,
+        facts=(
+            ConversationFact(
+                fact_id="fact:user:1",
+                kind=FactKind.USER_MESSAGE,
+                content={
+                    "text": (
+                        "Read https://Example.com/page?x=1 and https://example.com/b, "
+                        "also https://localhost/private and http://insecure.example/x"
+                    )
+                },
+            ),
+            ConversationFact(
+                fact_id="fact:tool:1",
+                kind=FactKind.TOOL_RESULT,
+                content={"text": "The page links to https://example.com/from-tool"},
+            ),
+        ),
+    )
+    # 用户消息里的公网 HTTPS → canonical、去重、按出现顺序；localhost、
+    # http 判据失败静默跳过；工具输出中的 URL 不是用户意图，不进入清单。
+    assert user_message_urls(state) == (
+        "https://example.com/page?x=1",
+        "https://example.com/b",
+    )
+
+
+def test_web_fetch_url_admits_exact_user_url_and_requires_approval() -> None:
+    full_url = "https://example.com/user-article"
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: pytest.fail("prepare must not send")
+        ),
+        follow_redirects=False,
+        trust_env=False,
+    ) as http_client:
+        runtime = KernelToolRuntime(
+            build_web_tool_registrations(
+                TavilyClient(_profile(), api_key="secret-value", http_client=http_client),
+                _profile(),
+                clock=lambda: "2026-08-04T00:00:00Z",
+            )
+        )
+        call = ToolCall("fetch-url-1", "web_fetch_url", {"url": full_url})
+        denied = runtime.prepare(call, _context())
+        assert denied.metadata["code"] == "user_url_required"
+        assert "ask the user for the url" in denied.content.lower()
+
+        # 工具输出/模型自造的 URL 即便语法合法也不被准入。
+        tool_output_url = ToolCall(
+            "fetch-url-2",
+            "web_fetch_url",
+            {"url": "https://example.com/from-tool"},
+        )
+        denied = runtime.prepare(
+            tool_output_url, _context(user_message_urls=(full_url,))
+        )
+        assert denied.metadata["code"] == "user_url_required"
+
+        pending = runtime.prepare(
+            call, _context(user_message_urls=(full_url,))
+        )
+        assert isinstance(pending, ApprovalRequired)
+        assert pending.request.egress == "public_network"
+        assert pending.request.operation == "tavily_extract_user_url"
+        assert full_url in pending.request.preview
+        assert f"Destination: {TAVILY_DESTINATION}/extract" in pending.request.preview
+        assert "third-party" in pending.request.preview.lower()
+
+
+def test_web_fetch_url_executes_extract_and_mints_extracted_receipt() -> None:
+    full_url = "https://example.com/user-article?view=public"
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json={
+                "results": [{"url": full_url, "raw_content": "User page text"}],
+                "failed_results": [],
+                "response_time": 0.1,
+                "request_id": "extract-user-url",
+            },
+        )
+
+    with httpx.Client(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=False,
+        trust_env=False,
+    ) as http_client:
+        runtime = KernelToolRuntime(
+            build_web_tool_registrations(
+                TavilyClient(_profile(), api_key="secret-value", http_client=http_client),
+                _profile(),
+                clock=lambda: "2026-08-04T00:00:00Z",
+            )
+        )
+        call = ToolCall("fetch-url-3", "web_fetch_url", {"url": full_url})
+        pending = runtime.prepare(
+            call, _context(user_message_urls=(full_url,))
+        )
+        assert isinstance(pending, ApprovalRequired)
+        intent = runtime.prepare(
+            call,
+            _context(user_message_urls=(full_url,)),
+            approval=ApprovalGrant(
+                pending.request.request_id,
+                pending.request.binding_digest,
+                approval_basis_revision=1,
+            ),
+        )
+        assert isinstance(intent, ExecutionIntent)
+        result = runtime.invoke(intent)
+
+    assert len(requests) == 1
+    assert requests[0].url.host == "api.tavily.com"
+    payload = json.loads(result.content)
+    assert payload["content"] == "User page text"
+    assert result.metadata["source_receipts"][0]["source_kind"] == (
+        "web_extracted_content"
+    )

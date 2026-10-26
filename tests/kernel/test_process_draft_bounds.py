@@ -14,8 +14,10 @@ import pytest
 from agent.process.contracts import ProcessDraftOutcome, ProcessExecutionDraftV1
 from agent.process.tools import build_local_process_registration
 from agent.runtime.contracts import (
+    RESULT_CLASS_COMMAND_OUTPUT,
     ApprovalRequired,
     ProcessAuthorityLeaseV1,
+    ResultSourceKind,
     ToolCall,
     ToolPrepareContext,
 )
@@ -48,7 +50,12 @@ def _draft(**overrides) -> ProcessExecutionDraftV1:
     return ProcessExecutionDraftV1(**values)
 
 
-def _runtime(tmp_path, draft_factory) -> KernelToolRuntime:
+def _runtime(
+    tmp_path,
+    draft_factory,
+    *,
+    result_source_kind: ResultSourceKind | None = None,
+) -> KernelToolRuntime:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     exe = workspace / "fixture-exe"
@@ -67,6 +74,7 @@ def _runtime(tmp_path, draft_factory) -> KernelToolRuntime:
                 spec=registration.spec,
                 func=executor,
                 prepare_binding=registration.prepare_binding,
+                result_source_kind=result_source_kind,
             ),
         )
     )
@@ -167,23 +175,40 @@ def test_015_valid_draft_still_mints_receipt(tmp_path) -> None:
     assert result.metadata.get("process_receipt_kind") == "process_v1"
 
 
-def test_local_process_stdout_never_mints_a_file_source_proof(tmp_path) -> None:
-    """LOW-3（2026-10-25 merge gate 审计）tripwire：进程 stdout 不是
-    workspace 派生的读来源，goal 绑定在场也不铸 file-source proof。这里
-    有两层相互独立的闸：进程 draft 在 invoke 走 _process_outcome 结构性
-    早退（tools.py ProcessExecutionDraftV1 分支），到不了任何铸造点；即便
-    未来重构让进程结果直落通用路径，两个铸造点也都要求注册携带
-    result_source_kind（source-governance 分支更只接受 WORKSPACE_READ），
-    而 local_process 注册刻意不带。给进程工具加 kind 属扩权，需新裁决；
-    本测试让那种改动必然显式变红。"""
+def test_local_process_stdout_mints_command_proof_only_when_registered(tmp_path) -> None:
+    """LOW-3 tripwire 的 2026-10-26 改写：命令 stdout 铸 proof 已获用户
+    裁决（扩权 egress 复用），但铸造仍然结构性受控——只有注册声明
+    WORKSPACE_COMMAND 才发生；手工注册（无 kind）依旧不铸；失败退出
+    （exit_code != 0）不铸，保持逐次披露。"""
 
     registration = build_local_process_registration(
         workspace=tmp_path, captured_path="/usr/bin:/bin"
     )
-    assert registration.result_source_kind is None
-    runtime = _runtime(tmp_path, lambda: _draft())
-    intent = _intent_with_lease(runtime)
-    result = runtime.invoke(intent)
+    assert registration.result_source_kind is ResultSourceKind.WORKSPACE_COMMAND
+
+    unregistered = _runtime(tmp_path, lambda: _draft())
+    result = unregistered.invoke(_intent_with_lease(unregistered))
     assert result.is_error is False
     assert result.metadata.get("process_receipt_kind") == "process_v1"
     assert result.result_source_proof is None
+
+    registered = _runtime(
+        tmp_path, lambda: _draft(), result_source_kind=ResultSourceKind.WORKSPACE_COMMAND
+    )
+    proof_result = registered.invoke(_intent_with_lease(registered))
+    assert proof_result.is_error is False
+    proof = proof_result.result_source_proof
+    assert proof is not None
+    assert proof.result_class == RESULT_CLASS_COMMAND_OUTPUT
+    assert proof.normalized_target.startswith("command:")
+    assert proof.tool_name == "local_process"
+    assert proof.goal_id == "goal-p3" and proof.goal_revision == 1
+
+    failing = _runtime(
+        tmp_path,
+        lambda: _draft(exit_code=1),
+        result_source_kind=ResultSourceKind.WORKSPACE_COMMAND,
+    )
+    failure = failing.invoke(_intent_with_lease(failing))
+    assert failure.is_error is True
+    assert failure.result_source_proof is None

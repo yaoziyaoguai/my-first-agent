@@ -13,10 +13,12 @@ from datetime import UTC, datetime, timedelta
 from agent.runtime.contracts import (
     CONSENT_MAX_USES,
     CONSENT_PROFILE_ROUTINE,
+    CONSENT_PROFILE_WORKSPACE_COMMAND,
     CONSENT_PROFILE_WORKSPACE_READ,
     CONSENT_TTL_SECONDS,
     NO_WORKSPACE_IDENTITY,
     ROUTINE_DATA_CLASSES,
+    WORKSPACE_COMMAND_DATA_CLASSES,
     WORKSPACE_READ_DATA_CLASSES,
     ConversationState,
     FactKind,
@@ -47,23 +49,52 @@ CONTROL_SCHEMA_STRUCTURE_DIGEST = canonical_json_digest(
 ROUTINE_DATA_CLASS_SET = frozenset(ROUTINE_DATA_CLASSES)
 
 
+WORKSPACE_PROOF_DATA_CLASS_SET = frozenset({"workspace_excerpt", "command_output"})
+WORKSPACE_PROOF_PROFILES = (
+    CONSENT_PROFILE_WORKSPACE_READ,
+    CONSENT_PROFILE_WORKSPACE_COMMAND,
+)
+
+
 def workspace_read_classes_covered(
     data_classes: tuple[str, ...],
     sources: tuple[ProviderDisclosureSourceV1, ...],
 ) -> bool:
-    """read-scope 许可的准入判据：非常规部分恰为 proof-backed workspace_excerpt。
+    """workspace 许可的准入判据：非常规部分全部是 proof-backed 可复用来源。
 
-    只认 reusable 来源（workspace_excerpt 类由 Runtime 持久化 file-source
-    proof 铸造，绑定 goal/revision/workspace/内容 digest）；混入任何其他
-    非常规类（tool_results 等）或不可复用来源都退回逐次披露。
+    只认 reusable 来源（workspace_excerpt / command_output 由 Runtime 持久化
+    file-source proof 铸造，绑定 goal/revision/workspace/内容 digest）；混入
+    任何其他非常规类（tool_results 等）或不可复用来源都退回逐次披露。
     """
 
     nonroutine = set(data_classes) - ROUTINE_DATA_CLASS_SET
     return (
         bool(sources)
-        and nonroutine == {"workspace_excerpt"}
+        and bool(nonroutine)
+        and nonroutine <= WORKSPACE_PROOF_DATA_CLASS_SET
         and all(source.reusable for source in sources)
     )
+
+
+def workspace_consent_profile(data_classes: tuple[str, ...]) -> str:
+    """按本次 scope 选择要铸造的许可 profile：纯读仍铸 v1，含命令输出才升级。
+
+    调用方须先通过 workspace_read_classes_covered；本函数只做 profile 选择，
+    不让 v1 许可静默覆盖命令输出。
+    """
+
+    if "command_output" in set(data_classes):
+        return CONSENT_PROFILE_WORKSPACE_COMMAND
+    return CONSENT_PROFILE_WORKSPACE_READ
+
+
+def workspace_consent_scope_label(profile: str) -> str:
+    """状态视图的短 scope 标签；未知 profile 按最窄的 routine 显示。"""
+
+    return {
+        CONSENT_PROFILE_WORKSPACE_READ: "read+routine",
+        CONSENT_PROFILE_WORKSPACE_COMMAND: "read+command+routine",
+    }.get(profile, "routine")
 
 
 @dataclass(frozen=True, slots=True)
@@ -557,12 +588,13 @@ def evaluate_provider_dispatch(
                 reason="grant_routine",
             )
         if (
-            grant.profile == CONSENT_PROFILE_WORKSPACE_READ
+            grant.profile in WORKSPACE_PROOF_PROFILES
             and workspace_read_classes_covered(scope.data_classes, scope.sources)
             and _grant_covers_structure(grant, scope)
         ):
-            # item 1（2026-10-24）：r 许可只放行非常规部分恰为 proof-backed
-            # workspace_excerpt 的 scope；结构（类别/工具绑定）由 grant 覆盖。
+            # item 1（2026-10-24）：workspace 许可只放行非常规部分全部为
+            # proof-backed 来源的 scope；结构（类别/工具绑定）由 grant 覆盖，
+            # 因此 v1 读许可不会覆盖 command_output（2026-10-26 扩展）。
             # 逐次非阻断通知由 Runtime 在扣账后附带（reason 即判别信号）。
             # 同 r2 B3 硬化：在场未消费的单次 y 随 grant 首用一并烧掉，
             # 防 grant 失效后 exact_receipt 额外放行一次。
@@ -760,11 +792,13 @@ def workspace_read_dispatch_notice(
     """
 
     excerpt_count = sum(
-        1 for source in scope.sources if source.data_class == "workspace_excerpt"
+        1
+        for source in scope.sources
+        if source.data_class in WORKSPACE_PROOF_DATA_CLASS_SET
     )
     left = max(grant.max_uses - grant.uses_consumed, 0)
     return (
-        f"read-scope consent: {excerpt_count} workspace file excerpt(s) "
+        f"read-scope consent: {excerpt_count} verified workspace source(s) "
         f"re-sent to the provider this send; {left} of {grant.max_uses} "
         "model sends left"
     )
@@ -780,13 +814,16 @@ def mint_provider_consent_grant(
 ) -> ProviderConsentGrantV1:
     """从已显示的 v2 request 铸造许可；调用方已校验 action/CAS。"""
 
-    if profile not in (CONSENT_PROFILE_ROUTINE, CONSENT_PROFILE_WORKSPACE_READ):
+    if profile not in (
+        CONSENT_PROFILE_ROUTINE,
+        CONSENT_PROFILE_WORKSPACE_READ,
+        CONSENT_PROFILE_WORKSPACE_COMMAND,
+    ):
         raise ValueError("provider consent grant profile is unsupported")
-    allowed_classes = (
-        WORKSPACE_READ_DATA_CLASSES
-        if profile == CONSENT_PROFILE_WORKSPACE_READ
-        else ROUTINE_DATA_CLASSES
-    )
+    allowed_classes = {
+        CONSENT_PROFILE_WORKSPACE_READ: WORKSPACE_READ_DATA_CLASSES,
+        CONSENT_PROFILE_WORKSPACE_COMMAND: WORKSPACE_COMMAND_DATA_CLASSES,
+    }.get(profile, ROUTINE_DATA_CLASSES)
     issued = parse_zoned_time(now)
     expires = (issued + timedelta(seconds=CONSENT_TTL_SECONDS)).isoformat().replace(
         "+00:00",

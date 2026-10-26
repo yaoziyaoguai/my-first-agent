@@ -39,10 +39,13 @@ from agent.runtime.context import ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
     CONSENT_MAX_USES,
     CONSENT_PROFILE_ROUTINE,
+    CONSENT_PROFILE_WORKSPACE_COMMAND,
     CONSENT_PROFILE_WORKSPACE_READ,
     CONSENT_TTL_SECONDS,
     NO_WORKSPACE_IDENTITY,
+    RESULT_CLASS_COMMAND_OUTPUT,
     ROUTINE_DATA_CLASSES,
+    WORKSPACE_COMMAND_DATA_CLASSES,
     WORKSPACE_READ_DATA_CLASSES,
     AcknowledgeProviderDisclosure,
     ActionDisposition,
@@ -685,7 +688,10 @@ def _executing_state() -> ConversationState:
 
 
 def _proof(
-    *, intent_digest: str = _INTENT_DIGEST, content: str = "ok"
+    *,
+    intent_digest: str = _INTENT_DIGEST,
+    content: str = "ok",
+    result_class: str = "workspace_excerpt",
 ) -> ProviderFileSourceProofV1:
     return ProviderFileSourceProofV1.create(
         conversation_id="conversation-1",
@@ -703,6 +709,7 @@ def _proof(
         goal_revision=1,
         intent_digest=intent_digest,
         result_content_digest=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        result_class=result_class,
     )
 
 
@@ -1335,7 +1342,7 @@ def test_consent_ux_r_charge_increments_and_notice_reports_quota() -> None:
     grant = charged.provider_consent_grant
     assert grant is not None and grant.uses_consumed == 1
     notice = workspace_read_dispatch_notice(grant, scope)
-    assert "2 workspace file excerpt(s)" in notice
+    assert "2 verified workspace source(s)" in notice
     assert "31 of 32 model sends left" in notice
 
 
@@ -1433,7 +1440,7 @@ def test_consent_ux_r_cli_rejects_routine_and_beyond_excerpt_requests() -> None:
     )
     action, error = _parse_action("r", mixed_state, lambda: "run-x")
     assert action is None
-    assert error is not None and "beyond verified workspace file excerpts" in error
+    assert error is not None and "beyond verified workspace reads" in error
 
 
 def test_consent_ux_r_offer_line_shows_only_for_covered_requests() -> None:
@@ -1502,6 +1509,195 @@ def test_consent_ux_r_grant_roundtrips_through_checkpoint_codec(tmp_path) -> Non
     assert (
         document["state"]["provider_consent_grant"]["profile"]
         == CONSENT_PROFILE_WORKSPACE_READ
+    )
+    path = tmp_path / "conversation.json"
+    _write_state(path, state)
+    assert (
+        LocalCheckpointStore(path).load().state.provider_consent_grant
+        == state.provider_consent_grant
+    )
+
+
+# ── 2026-10-26（用户裁决：命令输出复用）──────────────────────────────────
+
+
+def _command_source(label: str, *, reusable: bool = True) -> ProviderDisclosureSourceV1:
+    return ProviderDisclosureSourceV1(
+        data_class="command_output",
+        boundary_digest=hashlib.sha256(label.encode("utf-8")).hexdigest(),
+        label=label,
+        reusable=reusable,
+    )
+
+
+def _command_scope(
+    *sources: ProviderDisclosureSourceV1,
+    data_classes: tuple[str, ...] | None = None,
+) -> ProviderConsentScopeV1:
+    return _scope(
+        data_classes=data_classes
+        or ("command_output", "system_policy", "user_messages"),
+        # scope 合同要求 sources 按 (data_class, boundary_digest, label) 有序。
+        sources=tuple(
+            sorted(
+                sources,
+                key=lambda source: (source.data_class, source.boundary_digest, source.label),
+            )
+        ),
+        routine=False,
+        goal_id="goal-1",
+        goal_revision=1,
+    )
+
+
+def _command_grant(state: ConversationState):
+    return mint_provider_consent_grant(
+        state=state,
+        request=_v2_request(),
+        action_seq=1,
+        now=_T0,
+        profile=CONSENT_PROFILE_WORKSPACE_COMMAND,
+    )
+
+
+def test_consent_ux_command_proof_result_class_encoding_and_legacy_default() -> None:
+    command = _proof(result_class=RESULT_CLASS_COMMAND_OUTPUT)
+    assert "result_class" in command.to_dict()
+    assert ProviderFileSourceProofV1.from_dict(command.to_dict()) == command
+
+    # 旧 checkpoint 兼容：默认类别不入 payload（digest 不变），缺键读回仍相等。
+    legacy = _proof()
+    assert "result_class" not in legacy.to_dict()
+    assert ProviderFileSourceProofV1.from_dict(dict(legacy.to_dict())) == legacy
+
+    # 类别闭集：伪造非常规类别直接拒绝。
+    tampered = dict(command.to_dict())
+    tampered["result_class"] = "tool_results"
+    with pytest.raises(ValueError, match="result_class"):
+        ProviderFileSourceProofV1.from_dict(tampered)
+
+
+def test_consent_ux_command_scope_covered_by_command_grant_only() -> None:
+    descriptor = _descriptor()
+    base = ConversationState.new("conversation-r")
+
+    def gate(state, scope):
+        return evaluate_provider_dispatch(
+            state=state,
+            descriptor=descriptor,
+            scope=scope,
+            now=_T0,
+            purpose="runtime_progress",
+            run_id="run-1",
+        )
+
+    # v1 读许可不覆盖 command_output：结构校验（类别 ⊆ allowed）先拒绝。
+    read_state = replace(base, provider_consent_grant=_read_grant(base))
+    denied = gate(
+        read_state, _command_scope(_command_source("local_process command:abc123"))
+    )
+    assert not denied.admitted and denied.reason == "decision_required"
+
+    # command 许可覆盖 command_output scope，且同样覆盖纯读 scope（类别超集）。
+    command_state = replace(base, provider_consent_grant=_command_grant(base))
+    admitted = gate(
+        command_state, _command_scope(_command_source("local_process command:abc123"))
+    )
+    assert admitted.admitted and admitted.grant_use
+    assert admitted.reason == "grant_workspace_read"
+    read_also = gate(command_state, _excerpt_scope(_source("read_file app/main.py")))
+    assert read_also.admitted and read_also.reason == "grant_workspace_read"
+
+    # 不可复用的 command_output（无有效 proof 的形状）不覆盖。
+    nonreusable = gate(
+        command_state, _command_scope(_command_source("shell stdout", reusable=False))
+    )
+    assert not nonreusable.admitted
+
+    # 通知文案按 proof-backed 来源计数（读+命令混合 scope）。
+    notice = workspace_read_dispatch_notice(
+        _command_grant(base),
+        _command_scope(
+            _command_source("local_process command:abc123"),
+        ),
+    )
+    assert "1 verified workspace source(s)" in notice
+
+
+def test_consent_ux_r_reducer_mints_command_profile_for_command_scope() -> None:
+    request = _v2_request(
+        scope=_command_scope(_command_source("local_process command:abc123"))
+    )
+    state = replace(
+        ConversationState.new("conversation-r"),
+        active_run=ActiveRun("run-1", status=ActiveRunStatus.AWAITING_DISCLOSURE),
+        provider_disclosure_request=request,
+    )
+    action, error = _parse_action("r", state, lambda: "run-x")
+    assert error is None
+    assert isinstance(action, GrantProviderWorkspaceReadConsent)
+
+    transition = accept_action(state, action, now=_T0)
+    assert transition.disposition is ActionDisposition.ACCEPTED
+    grant = transition.state.provider_consent_grant
+    assert grant is not None
+    assert grant.profile == CONSENT_PROFILE_WORKSPACE_COMMAND
+    assert grant.allowed_data_classes == WORKSPACE_COMMAND_DATA_CLASSES
+    assert transition.state.provider_disclosure_request is None
+    assert transition.state.active_run is not None
+    assert transition.state.active_run.status is ActiveRunStatus.RUNNABLE
+
+    # 纯读请求仍铸 v1：本变更不静默扩大既有读许可的覆盖。
+    read_request = _v2_request(scope=_excerpt_scope(_source("read_file app/main.py")))
+    read_state = replace(
+        ConversationState.new("conversation-r"),
+        active_run=ActiveRun("run-1", status=ActiveRunStatus.AWAITING_DISCLOSURE),
+        provider_disclosure_request=read_request,
+    )
+    read_action, read_error = _parse_action("r", read_state, lambda: "run-x")
+    assert read_error is None and read_action is not None
+    read_transition = accept_action(read_state, read_action, now=_T0)
+    read_grant = read_transition.state.provider_consent_grant
+    assert read_grant is not None
+    assert read_grant.profile == CONSENT_PROFILE_WORKSPACE_READ
+    assert read_grant.allowed_data_classes == WORKSPACE_READ_DATA_CLASSES
+
+
+def test_consent_ux_command_grant_contract_pins_classes() -> None:
+    base = ConversationState.new("conversation-r")
+    grant = _command_grant(base)
+    assert grant.allowed_data_classes == WORKSPACE_COMMAND_DATA_CLASSES
+    assert "command_output" in grant.allowed_data_classes
+
+    # command profile 的类别集不接受增删（结构漂移即拒绝）。
+    payload = asdict(grant)
+    payload["allowed_data_classes"] = list(WORKSPACE_READ_DATA_CLASSES)
+    with pytest.raises(ValueError, match="must match the workspace-command scope"):
+        ProviderConsentGrantV1(**{**payload, "grant_digest": "0" * 64})
+
+
+def test_consent_ux_r_offer_line_distinguishes_command_scope() -> None:
+    command = _v2_request(
+        scope=_command_scope(_command_source("local_process command:abc123"))
+    )
+    text = TerminalRenderer._disclosure_message(request=command, grant=None)
+    assert "  r  Also allow" in text
+    assert "approved command output" in text
+
+    pure = _v2_request(scope=_excerpt_scope(_source("read_file app/main.py")))
+    pure_text = TerminalRenderer._disclosure_message(request=pure, grant=None)
+    assert "  r  Also allow" in pure_text
+    assert "approved command output" not in pure_text
+
+
+def test_consent_ux_command_grant_roundtrips_through_checkpoint_codec(tmp_path) -> None:
+    base = ConversationState.new("conversation-r")
+    state = replace(base, provider_consent_grant=_command_grant(base))
+
+    document = json.loads(_encode_state(state).decode("utf-8"))
+    assert (
+        document["state"]["provider_consent_grant"]["profile"]
+        == CONSENT_PROFILE_WORKSPACE_COMMAND
     )
     path = tmp_path / "conversation.json"
     _write_state(path, state)
@@ -1644,7 +1840,7 @@ def test_consent_ux_r_dispatch_notice_wired_into_runtime_warnings() -> None:
         item for item in result.delivery_warnings if item.startswith("read-scope consent:")
     ]
     assert len(notices) == 1
-    assert "1 workspace file excerpt(s)" in notices[0]
+    assert "1 verified workspace source(s)" in notices[0]
     assert "31 of 32 model sends left" in notices[0]
     final_grant = store.state.provider_consent_grant
     assert final_grant is not None

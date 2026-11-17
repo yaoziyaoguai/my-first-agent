@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+from agent.process.preparation import SessionPathAdmissions
 from agent.runtime.contracts import (
     TERMINAL_GOAL_STATUSES,
     AcknowledgeProviderDisclosure,
@@ -443,3 +444,43 @@ def build_project_path_command(
         )
 
     return project_path_command
+
+
+def build_env_path_command(
+    admissions: SessionPathAdmissions,
+) -> Callable[[str], str]:
+    """/env-path 的 operator 侧命令工厂（不进模型上下文）。
+
+    空后缀列出当前会话准入（resolved 绝对目录）；非空后缀按单目录准入。
+    准入只把该目录前缀进本会话 command 工具的子进程 PATH；失败返回说明文本
+    而不抛出，REPL 循环持续。
+    """
+
+    def env_path_command(suffix: str) -> str:
+        text = suffix.strip()
+        if not text:
+            admitted = admissions.snapshot()
+            if not admitted:
+                return (
+                    "No workspace directories are admitted to the subprocess PATH "
+                    "for this session.\n"
+                    "Usage: /env-path <dir> — prefix one workspace directory "
+                    "(e.g. .venv/bin) into the subprocess PATH for this session."
+                )
+            listed = "\n".join(reversed(admitted))
+            return (
+                "Workspace directories admitted to the subprocess PATH for this "
+                "session (newest first):\n" + listed
+            )
+        try:
+            resolved = admissions.admit(text)
+        except (WorkspaceSecurityError, ValueError) as error:
+            return f"Path not admitted: {error}"
+        return (
+            f"Admitted {resolved} for this session: it is prefixed onto the "
+            "subprocess PATH of this session's command tool (newest first). The "
+            "grant lasts until restart, only widens executable-name resolution, "
+            "and every command is still approved per resolved executable."
+        )
+
+    return env_path_command

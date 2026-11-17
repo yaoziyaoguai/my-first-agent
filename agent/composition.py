@@ -42,6 +42,7 @@ from agent.process.managed_web import (
     ManagedWebProcessOwner,
     build_managed_web_process_tools,
 )
+from agent.process.preparation import SessionPathAdmissions
 from agent.process.tools import build_local_process_registration
 from agent.research.tools import build_research_tool_registrations
 from agent.runtime.context import ContextLimits, KernelContextManager
@@ -618,6 +619,7 @@ def build_tool_registrations(
     private_roots: tuple[str, ...] = DEFAULT_PRIVATE_ROOTS,
     project_paths: tuple[str, ...] = (),
     project_path_admissions: ProjectPathAdmissions | None = None,
+    session_path_admissions: SessionPathAdmissions | None = None,
     max_tool_result_chars: int,
     skill_limits: SkillLimits | None = None,
     skill_execution: SkillExecutionConfig | None = None,
@@ -668,6 +670,7 @@ def build_tool_registrations(
                 workspace=workspace,
                 captured_path=captured_path or os.environ.get("PATH", ""),
                 workspace_boundary=process_boundary,
+                path_admissions=session_path_admissions,
             )
         )
     return tuple(registrations)

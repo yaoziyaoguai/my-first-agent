@@ -14,6 +14,7 @@ from pathlib import Path
 from agent.cli.actions import (
     NEW_SESSION_REQUESTED,
     SWITCH_SESSION_REQUESTED,
+    build_env_path_command,
     build_project_path_command,
 )
 from agent.cli.app import run_repl
@@ -56,6 +57,7 @@ from agent.history.catalog import HistoryCatalog
 from agent.mcp.catalog import McpCatalogError
 from agent.memory.contracts import MemoryProviderProfileMismatchError, MemoryStoreError
 from agent.memory.store import MemoryStore
+from agent.process.preparation import SessionPathAdmissions
 from agent.provider.config import AgentProviderConfig, resolve_provider_capacity
 from agent.provider.factory import build_model_provider
 from agent.provider.fake_provider import FakeProvider
@@ -1578,6 +1580,11 @@ def main(
                 project_path_handler = build_project_path_command(
                     project_path_admissions
                 )
+                # 子进程 PATH 会话内准入（增量 2）：/env-path 可把 workspace
+                # 相对目录前缀进本会话 command 工具的子进程 PATH。每次会话装配
+                # 重建，/new 重入即回启动期捕获 PATH；不持久化、不进模型上下文。
+                session_path_admissions = SessionPathAdmissions(workspace=workspace)
+                env_path_handler = build_env_path_command(session_path_admissions)
                 registrations = list(
                     build_tool_registrations(
                         workspace=workspace,
@@ -1585,6 +1592,7 @@ def main(
                         protected_paths=protected_paths,
                         private_roots=DEFAULT_PRIVATE_ROOTS,
                         project_path_admissions=project_path_admissions,
+                        session_path_admissions=session_path_admissions,
                         max_tool_result_chars=context_limits.max_tool_result_chars,
                         skill_execution=skill_execution,
                         history_catalog=(
@@ -1881,6 +1889,7 @@ def main(
                     renderer=renderer,
                     browser_profile_command=browser_profile_handler,
                     project_path_command=project_path_handler,
+                    env_path_command=env_path_handler,
                 )
             except (CheckpointError, OSError) as error:
                 # 用户可见行保持仅类型名（冻结决策：异常消息可能含路径，不渲染）。

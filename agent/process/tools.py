@@ -21,10 +21,10 @@ from agent.process.contracts import (
     ResourceProfileV1,
 )
 from agent.process.preparation import (
+    SessionPathAdmissions,
     closed_process_environment,
     prepare_process,
     revalidate_process,
-    sanitize_captured_path,
 )
 from agent.process.runner import run_local_process
 from agent.runtime.contracts import (
@@ -102,6 +102,7 @@ def build_local_process_registration(
     captured_path: str,
     clock: Callable[[], str] | None = None,
     workspace_boundary: WorkspaceBoundary | None = None,
+    path_admissions: SessionPathAdmissions | None = None,
 ):
     """构造 ``local_process`` 的 RegisteredTool：closed spec + prepare_binding + executor。
 
@@ -109,7 +110,9 @@ def build_local_process_registration(
     same-UID preview；executor（func）紧邻 spawn 时重新解析并 revalidate identity、构造
     closed environment + isolated HOME/TMPDIR、运行 runner，返回 ``ProcessExecutionDraftV1``
     或 drift 时的 ``KnownNotExecuted``。KernelToolRuntime 负责 lease 匹配、approval 与
-    receipt 铸造（KTD1/KTD3/KTD8）。
+    receipt 铸造（KTD1/KTD3/KTD8）。注入 ``path_admissions`` 后，prepare 与 spawn 各自
+    取当时的 effective PATH（会话内 /env-path 准入动态生效）；``None`` 时全链行为与
+    启动期冻结 PATH 逐字节一致。
     """
 
     from agent.runtime.tools import RegisteredTool  # 局部导入，避免加载顺序耦合
@@ -118,16 +121,21 @@ def build_local_process_registration(
     boundary = workspace_boundary or WorkspaceBoundary(Path(workspace_root))
     if boundary.root != Path(workspace_root):
         raise ValueError("local_process workspace boundary does not match workspace")
-    search_paths, child_path = sanitize_captured_path(str(captured_path))
     spec = local_process_tool_spec()
+
+    def _effective_captured_path() -> str:
+        if path_admissions is None:
+            return str(captured_path)
+        return path_admissions.effective_captured_path(str(captured_path))
 
     def prepare_binding(arguments: dict) -> dict:
         # F4：closed 4 字段——artifact digest 的 authority 是用户，不进 model
-        # binding。exact admission 走共享 seam（017 Task 3）。
+        # binding。exact admission 走共享 seam（017 Task 3）。PATH 取当前
+        # effective 值（会话内准入在每次 prepare 时生效）。
         prepared = prepare_process(
             arguments,
             workspace=workspace,
-            captured_path=str(captured_path),
+            captured_path=_effective_captured_path(),
             boundary=boundary,
         )
         if isinstance(prepared, KnownNotExecuted):
@@ -167,7 +175,7 @@ def build_local_process_registration(
         }
         return binding
 
-    executor = _make_executor(workspace_root, search_paths, child_path, boundary)
+    executor = _make_executor(workspace_root, boundary, path_admissions, str(captured_path))
     return RegisteredTool(
         spec=spec,
         func=executor,
@@ -180,11 +188,18 @@ def build_local_process_registration(
 
 def _make_executor(
     workspace_root: str,
-    search_paths: tuple[str, ...],
-    captured_path: str,
     boundary: WorkspaceBoundary,
+    path_admissions: SessionPathAdmissions | None,
+    captured_path: str,
 ):
     def execute(intent):  # noqa: ANN001
+        # 每次 invoke 取当前 effective PATH：approval 与 spawn 之间 /env-path
+        # 准入可能已变化，同一次调用内 prepare 与 closed environment 必须一致。
+        effective_captured_path = (
+            str(captured_path)
+            if path_admissions is None
+            else path_admissions.effective_captured_path(str(captured_path))
+        )
         binding = intent.safety_binding
         # 与 approval 签名对比：重新走共享 seam，再逐项核对已批准 digest/
         # descriptor（executable 内容漂移 → executable_identity_changed；
@@ -192,7 +207,7 @@ def _make_executor(
         prepared = prepare_process(
             intent.arguments,
             workspace=workspace_root,
-            captured_path=captured_path,
+            captured_path=effective_captured_path,
             boundary=boundary,
         )
         if isinstance(prepared, KnownNotExecuted):
@@ -216,9 +231,22 @@ def _make_executor(
                 code="cwd_identity_changed",
                 message="cwd directory identity drifted after approval",
             )
+        # 冻结 PATH 下这是恒真式；动态 /env-path 准入下它是 approval→spawn 的
+        # 环境策略不变式：同 digest 的可执行文件不得带变更后的 PATH 落地。
+        if (
+            prepared.command.environment_policy.policy_digest
+            != binding.get("environment_policy_digest")
+        ):
+            return KnownNotExecuted(
+                code="environment_policy_changed",
+                message="prepared environment changed; prepare and review the command again",
+            )
         resource = ResourceProfileV1.for_profile(prepared.command.profile)
         temp_root = tempfile.mkdtemp(prefix="fa-process-")
-        environment = closed_process_environment(temp_root, captured_path)
+        # 子进程 PATH 用 effective 值经共享 seam 清洗后的 child_path（admitted
+        # 前缀 + 启动期 base 同一规则去相对/去重）：与 binding 的
+        # environment_policy 同源，且 admissions=None 时与冻结 PATH 行为一致。
+        environment = closed_process_environment(temp_root, prepared.child_path)
         try:
             return run_local_process(
                 resolved_executable=revalidated.command.executable_identity.resolved_path,

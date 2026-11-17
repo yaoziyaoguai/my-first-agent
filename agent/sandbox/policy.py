@@ -31,6 +31,23 @@ _GITDIR_PREFIX = "gitdir: "
 _GITDIR_MAX_BYTES = 256
 _BACKEND_WRITE_LITERALS = ("/dev/null",)
 
+# P2 代理执行通道补拒：(allow default) 下 appleevent-send/lsopen 与
+# LaunchServices/AppleEvents 代理链 mach 服务默认放行，获批的 confined 命令
+# 可经 osascript/LaunchServices(open) 驱动沙箱外应用产生副作用（并间接绕过
+# 文件写入/网络限制）。固定 deny 五个入口 + 两条发送通道；不整族封死
+# mach-lookup（deny 全族会破坏正常命令依赖的既有服务），也不重做全量
+# allow-list。com.apple.lsd.open 是本机 qualification（Darwin system domain
+# active 端点）显示的承担 open 请求的 lsd 入口，Oracle 允许沿链补拒。
+IPC_PROXY_DENY_CLAUSES = (
+    "(deny appleevent-send)",
+    "(deny lsopen)",
+    '(deny mach-lookup (global-name "com.apple.coreservices.appleevents"))',
+    '(deny mach-lookup (global-name "com.apple.coreservices.launchservicesd"))',
+    '(deny mach-lookup (global-name "com.apple.CoreServices.coreservicesd"))',
+    '(deny mach-lookup (global-name "com.apple.coreservices.quarantine-resolver"))',
+    '(deny mach-lookup (global-name "com.apple.lsd.open"))',
+)
+
 
 def escape_seatbelt_path(value: str) -> str:
     """单一转义点：拒绝 NUL/换行/引号/反斜杠，其余原样（SBCL 字符串内安全）。"""
@@ -266,7 +283,10 @@ def compile_seatbelt_profile(policy: SandboxPolicyV1) -> str:
             raise ValueError("unconfined bypass has no Seatbelt profile")
         # danger+off：精确三行 network-only profile，绝不落入 filesystem 模板。
         return NETWORK_ONLY_SEATBELT_PROFILE
-    clauses = ["(version 1)", "(allow default)", "(deny file-write*)"]
+    clauses = [
+        "(version 1)", "(allow default)", "(deny file-write*)",
+        *IPC_PROXY_DENY_CLAUSES,
+    ]
     clauses += allow_backend_literals()
     clauses += [allow_write_subpath(root) for root in policy.writable_roots]
     # Seatbelt deny 优先于 allow：carveout 拒绝写在 allow-write 之后仍然生效

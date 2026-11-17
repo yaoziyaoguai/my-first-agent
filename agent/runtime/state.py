@@ -2222,6 +2222,9 @@ def _goal_target_authorization_scope(
     goal = state.goal
     call = active.tool_calls[active.batch_cursor]
     target = call.arguments.get("path")
+    # 有意不同于 evidence.WORKSPACE_WRITE_TOOLS（还含 make_directory）：
+    # goal-target 复用授权只对携带文件内容/精确 path 的 write_file/edit_file
+    # 生效；make_directory 无内容语义，不进入该授权判定。
     if not (
         goal is not None
         and pending.tool_name in {"write_file", "edit_file"}
@@ -3354,6 +3357,9 @@ def _admit_approved_file_criterion(
     call = active.tool_calls[active.batch_cursor]
     pending = active.pending_request
     path = call.arguments.get("path")
+    # 有意超集：confirm_file 与 write_file/edit_file 同样携带可摘要内容；
+    # make_directory 无内容摘要，不能铸造 FILESYSTEM_DIGEST criterion，
+    # 故不在集合内（勿与 evidence.WORKSPACE_WRITE_TOOLS 合并）。
     if (
         call.name not in {"write_file", "edit_file", "confirm_file"}
         or not isinstance(path, str)
@@ -3484,6 +3490,8 @@ def _admit_approved_research_criterion(
     pending = active.pending_request
     path = call.arguments.get("path")
     content = call.arguments.get("content")
+    # 只认携带 content/digest 的文件写入（make_directory 无内容，不适用；
+    # 勿与 evidence.WORKSPACE_WRITE_TOOLS 合并）。
     if (
         call.name not in {"write_file", "edit_file"}
         or not isinstance(path, str)

@@ -157,6 +157,69 @@ def test_transient_provider_error_retries_within_one_user_action_when_enabled() 
     assert store.state.active_run is None
 
 
+def test_transient_retry_budget_stays_consumed_across_a_valid_response() -> None:
+    """瞬态重试额度是 run 内累计语义：有效响应不复位（oracle r2 §F-4）。
+
+    resume 路径 `_run_transient_retries` 从 durable `provider_transient_retry`
+    facts 全量重建；若活路径在成功响应后把计数归零，「失败→成功→失败」会在
+    同一 run 内反复获得新额度，与 resume 语义矛盾并突破
+    max_retryable_provider_retries。本测试钉住活路径与 resume 同源（累计）。
+    """
+
+    class ProviderTimeoutError(RetryableProviderError):
+        code = "provider_timeout"
+
+    seed = replace(
+        conversation_with_active_goal(),
+        active_run=ActiveRun("run-1"),
+    )
+    spec = ToolSpec(
+        name="observe",
+        version="1",
+        description="observe a bounded fixture",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS,
+        input_schema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
+        risk=ToolRisk.LOW,
+        side_effect=SideEffectClass.READ_ONLY,
+        output_policy=OutputPolicy.BOUNDED_TEXT,
+        approval_policy=ApprovalPolicy.NEVER,
+        safety_policy={},
+        output_limit_chars=100,
+    )
+    provider = ScriptedProvider(
+        ProviderTimeoutError("temporary timeout"),
+        ModelResponse((ModelToolCall("observe-1", "observe", {}),)),
+        ProviderTimeoutError("temporary timeout again"),
+        ModelResponse((ModelTextBlock("must not be reached"),)),
+    )
+
+    result, store = _run(
+        provider,
+        retryable_provider_retries=1,
+        state=seed,
+        tools=(RegisteredTool(spec, lambda _intent: "observed"),),
+        action=_resume(seed),
+    )
+
+    # 预算 1 已在第一次超时消耗；中间的有效响应不返还额度，第二次超时
+    # 直接 FAILED_RETRYABLE，不再有第 4 次派发。
+    assert result.status is RunStatus.FAILED_RETRYABLE
+    assert result.error_code == "provider_timeout"
+    assert len(provider.calls) == 3
+    transient_retry_facts = [
+        fact
+        for fact in store.state.facts
+        if fact.kind is FactKind.POLICY_RESULT
+        and fact.content.get("code") == "provider_transient_retry"
+    ]
+    assert len(transient_retry_facts) == 1
+
+
 def test_rate_limit_does_not_blindly_retry_even_when_transient_retry_is_enabled() -> None:
     class ProviderRateLimitError(RetryableProviderError):
         code = "provider_rate_limit"
@@ -172,6 +235,74 @@ def test_rate_limit_does_not_blindly_retry_even_when_transient_retry_is_enabled(
     assert result.error_code == "provider_rate_limit"
     assert len(provider.calls) == 1
     assert store.state.active_run is not None
+
+
+def test_unexpected_error_message_is_bounded_in_result_and_durable_state() -> None:
+    """runtime_failure 收尾的异常文本必须有界（loop.py `_handle_unexpected_error`）。
+
+    意外异常的 str() 没有契约保证：可能携带上游正文/路径/secret，也可能极长。
+    持久化到 last_safe_result 与 RunResult 的部分只保留类型名 + 有界摘录
+    （对齐 provider 归一化层 `_STRICT_DETAIL_LIMIT` 的截断先例）。
+    """
+
+    class _UnexpectedErrorStore(InMemoryCheckpointStore):
+        """第 fail_at 次 save 抛携带超长消息的意外异常；其余 save 正常。
+
+        独立计数而不是复用 save_count：失败的 save 不推进 save_count，
+        若用它判断，失败点之后的每次 save 都会重复命中。
+        """
+
+        def __init__(self, state: ConversationState, *, fail_at: int, error: Exception):
+            super().__init__(state)
+            self._calls = 0
+            self._fail_at = fail_at
+            self._error = error
+
+        def compare_and_swap(self, snapshot, new_state):  # noqa: ANN001
+            self._calls += 1
+            if self._calls == self._fail_at:
+                raise self._error
+            return super().compare_and_swap(snapshot, new_state)
+
+    seed = replace(
+        conversation_with_active_goal(),
+        active_run=ActiveRun("run-1"),
+    )
+    huge_detail = "U" * 500 + "-UNBOUNDED-TAIL"
+    # save #1 受理 action（落盘 pending replay record）；save #2（claim_run）
+    # 失败，使 runtime_failure 收尾能带着已受理 action 正常 finalize 落盘。
+    store = _UnexpectedErrorStore(
+        seed,
+        fail_at=2,
+        error=RuntimeError(huge_detail),
+    )
+    runtime = AgentRuntime(
+        provider=ScriptedProvider(ModelResponse((ModelTextBlock("unreached"),))),
+        context_manager=KernelContextManager(
+            system_policy="policy",
+            limits=ContextLimits(max_input_tokens=8_000, output_reserve=100),
+        ),
+        tool_runtime=KernelToolRuntime(()),
+        checkpoint_store=store,
+        event_sink=CollectingSink(),
+        limits=InvocationLimits(),
+        invocation_id_factory=lambda: "invocation-1",
+    )
+
+    result = runtime.run_turn(_resume(store.state), store.load())
+
+    assert result.status is RunStatus.FAILED_FATAL
+    assert result.error_code == "runtime_failure"
+    # 类型名保留 + 摘录有界：尾部远超限长的内容不得进入用户可见消息。
+    assert result.message.startswith("RuntimeError: ")
+    assert len(result.message) <= len("RuntimeError: ") + 200
+    assert "UNBOUNDED-TAIL" not in result.message
+    # 持久化侧（last_safe_result）同样有界。
+    durable = store.state.last_safe_result
+    assert durable is not None
+    assert durable.message is not None
+    assert len(durable.message) <= len("RuntimeError: ") + 200
+    assert "UNBOUNDED-TAIL" not in durable.message
 
 
 def test_started_stream_is_not_automatically_resent() -> None:

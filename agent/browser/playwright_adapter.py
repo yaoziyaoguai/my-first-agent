@@ -12,6 +12,16 @@ WebSocket 用 ``route_web_socket`` pre-connect gate，popup 另经 ``on("page")`
 send/connect 之前经过同一 ``BrowserEgressGuard``（session 绑定的 mode/
 allowed_origins）；拒绝即 abort/close，目标 send 计数不动。
 
+DNS rebinding（P3）：guard 的 address-set digest 漂移只盖跨多次准入；单次
+窗口（准入时 public、连接瞬间内网）由 launch 边界预防——site-bound 的
+Chromium 按 session 启动且准入集合恰为 allowlist，``--host-resolver-rules``
+把每个 allowlist host 钉到本次准入已验证的地址，Chromium 侧连接
+（subresource continue / WebSocket connect）不再二次解析；Host/SNI/证书
+校验仍按原域名进行，未 MAP 的 host 照常走准入门。public-read 的准入集合
+由页面内容动态发现，launch 时不可知，不 pin 也不伪造部分覆盖；导航文档
+本体经 route.fetch 由 Playwright driver（Node）发起，不在 Chromium 解析
+面内（见 2026-11-17 审计修复记录）。
+
 ARIA 观察与 click re-resolve 只用真实 Playwright 1.62 接口：固定
 ``evaluate`` 脚本收集 element refs（value 原文与 secret 空/非空都不离开
 页面）、``get_by_role`` locator 点击、``mouse.wheel`` 滚动。真实
@@ -215,7 +225,8 @@ class SocketAddressResolver:
             infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
         except OSError:
             return ()
-        return tuple({info[4][0] for info in infos})
+        # 保序去重：launch pin 取 resolver 顺序首选（OS 优先级），不引入集合乱序。
+        return tuple(dict.fromkeys(info[4][0] for info in infos))
 
 
 class _BrowserTransport:
@@ -439,11 +450,40 @@ class BrowserEgressGuard:
         self._sends_by_kind[kind] += 1
         self._transport.send(admitted.canonical_url)
 
+    def launch_dns_pins(
+        self,
+        *,
+        mode: BrowserMode,
+        allowed_origins: tuple[str, ...],
+    ) -> tuple[tuple[str, str], ...]:
+        """launch 边界的 DNS rebinding 预防：host → 本次已验证 public 首选地址。
+
+        site-bound 的准入集合恰为 launch 时已知的 exact allowlist（policy 对
+        每类 request 都要求 origin ∈ allowlist），可整集钉住；public-read 的
+        准入集合由页面内容动态发现，launch 时不可知——不 pin，也不伪造部分
+        覆盖。该解析不是 request 事件：不计数、不写 rebinding 漂移记录。
+        """
+        if mode is not BrowserMode.SITE_BOUND_INTERACTIVE:
+            return ()
+        return self._policy.launch_pins(allowed_origins)
+
 
 def _normalize_websocket(kind: RequestKind, url: str) -> str:
     if kind is RequestKind.WEBSOCKET and url.startswith("wss://"):
         return "https://" + url[len("wss://"):]
     return url
+
+
+def _dns_pin_args(dns_pins: tuple[tuple[str, str], ...]) -> list[str]:
+    """已验证 (host, address) 集合 → Chromium host-resolver-rules 启动参数。
+
+    MAP 只替换 DNS 解析结果：Host/SNI/证书校验仍按原域名进行；未 MAP 的
+    host 不受影响，照常走 request admission（准入门不因 pin 而撤除）。
+    """
+    if not dns_pins:
+        return []
+    rules = ", ".join(f"MAP {host} {address}" for host, address in dns_pins)
+    return [f"--host-resolver-rules={rules}"]
 
 
 class PlaywrightBrowserEnvironment:
@@ -849,6 +889,10 @@ class PlaywrightBrowserEnvironment:
             if spec.browser_identity_digest != self._browser_identity_digest:
                 # environment 配置的 browser identity 必须与 spec 一致。
                 raise BrowserUnavailableError("browser_identity_mismatch")
+            # DNS rebinding 单次窗口预防（P3）：launch 边界把 allowlist host
+            # 钉到本次准入已验证的地址，Chromium 连接层不再二次解析；解析/
+            # 判据失败在启动 Chromium 之前 fail closed。
+            dns_pins = self._launch_dns_pins(spec.mode, tuple(spec.allowed_origins))
             user_data_dir = self._canonical_profile_dir(spec.profile_ref)
             context = playwright_handle.chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
@@ -862,6 +906,7 @@ class PlaywrightBrowserEnvironment:
                     else None
                 ),
                 service_workers="block",
+                args=_dns_pin_args(dns_pins),
             )
             self._persistent_launch_modes.append(True)
         else:
@@ -953,6 +998,10 @@ class PlaywrightBrowserEnvironment:
         session = worker_sessions[session_ref]
         if session["mode"] is not BrowserMode.SITE_BOUND_INTERACTIVE:
             raise BrowserUnavailableError("browser_takeover_requires_site_bound")
+        # takeover 是一次新的 persistent context 启动边界：fresh 重新解析并验
+        # 证 pin 地址；失败发生在关闭旧 headless context 之前（旧上下文不被
+        # 破坏，但新连接不得在未验证地址上建立）。
+        dns_pins = self._launch_dns_pins(session["mode"], session["allowed_origins"])
         resume_url = session.get("canonical_url") or session["page"].url
         self._close_rejected_websockets(session)
         # 旧 headless context 必须先确认关闭，才可对同一 owner profile 启动
@@ -970,6 +1019,7 @@ class PlaywrightBrowserEnvironment:
                 else None
             ),
             service_workers="block",
+            args=_dns_pin_args(dns_pins),
         )
         self._persistent_launch_modes.append(False)
         context.set_default_timeout(DEFAULT_TIMEOUT_MS)
@@ -1013,6 +1063,21 @@ class PlaywrightBrowserEnvironment:
             session["canonical_url"] = page.url
             session["canonical_origin"] = _origin_of(page.url)
         return None
+
+    def _launch_dns_pins(
+        self, mode: BrowserMode, allowed_origins: tuple[str, ...]
+    ) -> tuple[tuple[str, str], ...]:
+        # 与 browser_profile_root_missing 等 worker 内 open/takeover 失败同一
+        # 传播合同：closed reason browser_dns_pin_failed（takeover 侧由
+        # roundtrip 按非 URLPolicyError poison session）。
+        try:
+            return self._guard.launch_dns_pins(
+                mode=mode, allowed_origins=allowed_origins
+            )
+        except URLPolicyError as error:
+            raise BrowserUnavailableError(
+                "browser_dns_pin_failed", error.reason
+            ) from error
 
     def _canonical_profile_dir(self, profile_ref: str | None) -> str:
         # closed validate exact opaque profile id + root/profile no-follow

@@ -261,10 +261,20 @@ def _fact_disclosure_data_classes(
     return ("conversation_history",)
 
 
-def _file_proof_projection() -> ToolResultSourceProjection:
+def _file_proof_projection(
+    proof: ProviderFileSourceProofV1,
+) -> ToolResultSourceProjection:
+    """proof-backed 无 receipts 结果的替换投影；data_class 按 proof 如实申报。
+
+    P1（2026-11-17 审计）：此前硬编码 workspace_excerpt（P5 时代只有读证明），
+    local_process 命令证明在 _group_facts 汇总时被错计为读摘录，read_v1
+    许可借错标签放行命令输出外发。不变量：命令输出来源的事实必须携带
+    command_output 数据类（excerpt 证明仍为 workspace_excerpt）。
+    """
+
     return ToolResultSourceProjection(
         receipts=(),
-        data_classes=("workspace_excerpt",),
+        data_classes=(proof.result_class,),
         source_refs=(),
         citation_sources=(),
     )
@@ -1114,10 +1124,11 @@ class KernelContextManager:
             proof = _valid_file_proof(fact, state)
             if proof is not None and not source_projections[fact.fact_id].receipts:
                 # P5：只有"无 receipts 的 generic 结果"（写/改的读回）才整体
-                # 替换为 excerpt 投影；读/列/搜自带 source governance receipts，
+                # 替换为 proof 投影；读/列/搜自带 source governance receipts，
                 # 保留 receipts/citation_sources（proof 只增加 consent 侧的
-                # reusable 来源，不剥夺引用链）。
-                source_projections[fact.fact_id] = _file_proof_projection()
+                # reusable 来源，不剥夺引用链）。data_classes 按 proof.result_class
+                # 如实派生（P1）：命令证明不得被计为 workspace_excerpt。
+                source_projections[fact.fact_id] = _file_proof_projection(proof)
         if public_web_requirement_pending(state, source_projections):
             # mandatory Web receipt 尚未存在时，保留定位当前 workspace 输入所需的
             # bounded read 工具和真正能闭合前置条件的 web_search；history 来源既不能

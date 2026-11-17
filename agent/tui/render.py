@@ -149,7 +149,7 @@ def project(state: ConversationState, result: RunResult | None = None) -> TuiPro
             terminal = result.message
         actions = goal_view.legal_actions if goal_view.goal_id is not None else ("submit",)
         main_text = terminal or "ready"
-        if goal_view.status == GoalStatus.VERIFIED_DONE.value:
+        if goal_view.status is GoalStatus.VERIFIED_DONE:
             main_text = f"{main_text}\n{delivery_summary_message(goal_view)}"
         if goal_view.verification_scope:
             main_text = f"{main_text}\n{verification_scope_message(goal_view.verification_scope)}"

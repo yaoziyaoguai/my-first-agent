@@ -20,6 +20,7 @@ from agent.runtime.contracts import (
     ROUTINE_DATA_CLASSES,
     WORKSPACE_COMMAND_DATA_CLASSES,
     WORKSPACE_READ_DATA_CLASSES,
+    ConversationFact,
     ConversationState,
     FactKind,
     ProviderConsentGrantStatus,
@@ -349,6 +350,21 @@ def _legacy_request(
     )
 
 
+def _correction_is_unconsumed(
+    fact: ConversationFact,
+    state: ConversationState,
+) -> bool:
+    """TUI goal 纠正消息是否仍未被 Goal 吸收。
+
+    与 state 层 `_unconsumed_goal_correction` 同一判据：纠正被 goal delta
+    消费即进入 ``goal.created_from_fact_ids``。goal 缺失时按未消费处理
+    （fail closed）。
+    """
+
+    goal = state.goal
+    return goal is None or fact.fact_id not in goal.created_from_fact_ids
+
+
 def _no_new_user_input_since(
     state: ConversationState,
     receipt: ProviderDisclosureReceiptV2,
@@ -357,10 +373,18 @@ def _no_new_user_input_since(
 
     新用户消息会产生 action seq 更大的 USER_MESSAGE fact；孤儿 pending 跨
     重启 resume（run_id 重标为 resume-N）不是新内容，不得因此重问。
+    TUI goal 纠正（``control:<request_id>:user``，request_id 自身可含冒号、
+    无 action seq）此前无法解析而被跳过：尚未被 Goal 吸收的纠正就是新用户
+    输入（fail closed，重问而非静默复用）；已被 goal delta 消费的历史纠正
+    不算，resume 复用不因旧纠正重问。
     """
 
     for fact in state.facts:
         if fact.kind is not FactKind.USER_MESSAGE:
+            continue
+        if fact.fact_id.startswith("control:") and fact.fact_id.endswith(":user"):
+            if _correction_is_unconsumed(fact, state):
+                return False
             continue
         parts = fact.fact_id.split(":")
         if len(parts) < 2:

@@ -12,9 +12,11 @@ from agent.provider.config import AgentProviderConfig
 from agent.provider.factory import build_model_provider
 from agent.provider.fake_provider import FakeProvider
 from agent.provider.normalize import (
+    ProviderContinuityError,
     context_to_anthropic_messages,
     context_to_openai_messages,
     context_tools_to_openai,
+    normalize_anthropic_response,
     normalize_openai_response,
 )
 from agent.provider.openai_http import OpenAICompatibleProvider
@@ -38,9 +40,14 @@ from agent.runtime.contracts import (
     ModelResponse,
     ModelTextBlock,
     ModelToolCall,
+    ProviderContinuationV1,
     ToolDefinition,
 )
-from agent.runtime.ports import ModelAttemptBudgetExhaustedError, ModelProvider
+from agent.runtime.ports import (
+    InvalidProviderResponseError,
+    ModelAttemptBudgetExhaustedError,
+    ModelProvider,
+)
 from agent.transport_audit import TransportAttemptLedger
 
 PROVIDER_CASES = [
@@ -1385,7 +1392,7 @@ def test_auth_status_is_fatal_without_response_or_credential_leak(
 
 
 @pytest.mark.parametrize(("provider_type", "provider_class"), PROVIDER_CASES)
-@pytest.mark.parametrize("status", [400, 402, 404, 422])
+@pytest.mark.parametrize("status", [301, 302, 307, 308, 400, 402, 404, 422])
 def test_fatal_http_status_keeps_only_safe_status_diagnostic(
     status: int,
     provider_type: str,
@@ -1654,3 +1661,522 @@ def test_anthropic_stream_interrupted_partial_does_not_mint_response() -> None:
     # 断流后:不再自动补发第二次请求;partial 不构成 ModelResponse。
     assert len(calls) == 1
     assert observer.deltas == ["part"]
+
+
+@pytest.mark.parametrize(
+    "bad_line",
+    [
+        # 流中某行携带非 UTF-8 字节
+        b"data: \xff\xfe non-utf8 payload\n\n",
+        # 流尾截断的多字节序列(无换行尾行)
+        b'data: {"type":"message_st\xe4\xb8',
+    ],
+)
+def test_anthropic_stream_non_utf8_bytes_fail_closed(bad_line: bytes) -> None:
+    """非 UTF-8 的 SSE 行(或流尾截断的多字节序列)不得让裸 UnicodeDecodeError
+    逃出 provider——与坏 JSON 同语义,fail closed 为稳定 code malformed_response。"""
+    stream = _sse(
+        '{"type":"message_start","message":{"usage":{"input_tokens":5}}}',
+        '{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+        '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"part"}}',
+    ) + bad_line
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, content=stream
+        )
+
+    config = AgentProviderConfig(
+        provider_type="anthropic_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid",
+        credential="fixture-secret",
+    )
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(ProviderProtocolError, match="malformed_response"),
+    ):
+        AnthropicCompatibleProvider(config=config, http_client=client).generate(
+            _context()
+        )
+
+
+def test_anthropic_stream_observer_failure_does_not_break_authoritative_rebuild() -> None:
+    """observer 是 advisory 通道:其异常不得中断权威重建/最终响应(对齐 openai
+    侧 suppress 模式)。"""
+
+    class BrokenObserver:
+        def on_text_delta(self, _text: str) -> None:
+            raise RuntimeError("observer sink failed")
+
+    stream = _sse(
+        '{"type":"message_start","message":{"usage":{"input_tokens":7}}}',
+        '{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+        '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}',
+        '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}',
+        '{"type":"content_block_stop","index":0}',
+        '{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}',
+        '{"type":"message_stop"}',
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, content=stream
+        )
+
+    config = AgentProviderConfig(
+        provider_type="anthropic_compatible",
+        model="fixture-model",
+        base_url="https://provider.invalid",
+        credential="fixture-secret",
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        response = AnthropicCompatibleProvider(config=config, http_client=client).generate(
+            _context(), delta_observer=BrokenObserver()
+        )
+
+    assert response == ModelResponse(
+        (ModelTextBlock("Hello"),), stop_reason="end_turn", input_tokens=7, output_tokens=2
+    )
+
+
+# ---------------------------------------------------------------------------
+# 2026-11-17 审计修复轮:孤立代理字符 fail closed、control detail 有界、
+# 请求侧 continuity 失败不进 repair 循环。
+
+# json.loads('"\\ud800"') 确实产出孤立代理 str:它能通过 isinstance 校验,
+# 但永远无法 encode("utf-8")。合法代理对解码为单一增补字符,必须继续放行。
+_LONE_SURROGATE = json.loads('"\\ud800"')
+_VALID_SURROGATE_PAIR = json.loads('"\\ud800\\udc00"')
+
+
+def test_openai_lone_surrogate_reasoning_content_fails_classified() -> None:
+    """reasoning_content 携带孤立代理时,必须在归一化层 fail closed 为
+    malformed_response;否则 ProviderContinuationV1 构造中的
+    .encode("utf-8") 会以未分类 UnicodeEncodeError 炸出(审计动态验证链条)。"""
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "ok",
+                    "reasoning_content": _LONE_SURROGATE,
+                },
+                "finish_reason": "stop",
+            }
+        ]
+    }
+    with pytest.raises(ProviderProtocolError, match="malformed_response"):
+        normalize_openai_response(payload, provider_identity_digest="a" * 64)
+
+
+def test_openai_lone_surrogate_content_fails_closed() -> None:
+    """message.content 的孤立代理若被接纳,会持久化进 checkpoint 并在下一次
+    请求的 httpx 编码处炸未分类 UnicodeEncodeError。"""
+    payload = {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": _LONE_SURROGATE},
+                "finish_reason": "stop",
+            }
+        ]
+    }
+    with pytest.raises(ProviderProtocolError, match="malformed_response"):
+        normalize_openai_response(payload)
+
+
+def test_anthropic_lone_surrogate_text_fails_closed() -> None:
+    """_string 是文本/ID/名称的共享入口:孤立代理在此统一拒绝。"""
+    payload = {"content": [{"type": "text", "text": _LONE_SURROGATE}]}
+    with pytest.raises(ProviderProtocolError, match="malformed_response"):
+        normalize_anthropic_response(payload)
+
+
+def test_paired_surrogate_escapes_remain_valid_wire_text() -> None:
+    """合法代理对解码为可正常编码的增补字符:孤立代理的拒绝不得扩大化。"""
+    response = normalize_openai_response(
+        {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": _VALID_SURROGATE_PAIR},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+    )
+    assert response.blocks == (ModelTextBlock(_VALID_SURROGATE_PAIR),)
+
+
+@pytest.mark.parametrize("provider_type", ["anthropic_compatible", "openai_compatible"])
+def test_tool_argument_lone_surrogate_fails_closed(provider_type: str) -> None:
+    """工具参数的嵌套字符串不经 _string;两种协议的参数树都必须整体探测,
+    否则孤立代理随 ModelToolCall 持久化后在 checkpoint 写盘/请求编码处炸出。"""
+    if provider_type == "anthropic_compatible":
+        payload = {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "call-1",
+                    "name": "read_file",
+                    "input": {"k": _LONE_SURROGATE},
+                }
+            ]
+        }
+        with pytest.raises(ProviderProtocolError, match="malformed_response"):
+            normalize_anthropic_response(payload)
+    else:
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "call-1",
+                                "function": {
+                                    "name": "read_file",
+                                    "arguments": json.dumps({"k": _LONE_SURROGATE}),
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        }
+        with pytest.raises(ProviderProtocolError, match="malformed_response"):
+            normalize_openai_response(payload)
+
+
+@pytest.mark.parametrize("provider_type", ["anthropic_compatible", "openai_compatible"])
+def test_stop_reason_lone_surrogate_fails_closed(provider_type: str) -> None:
+    """stop_reason 进入持久化响应投影,同样不得携带无法编码的字符。"""
+    if provider_type == "anthropic_compatible":
+        payload = {
+            "content": [{"type": "text", "text": "ok"}],
+            "stop_reason": _LONE_SURROGATE,
+        }
+        with pytest.raises(ProviderProtocolError, match="malformed_response"):
+            normalize_anthropic_response(payload)
+    else:
+        payload = {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "ok"},
+                    "finish_reason": _LONE_SURROGATE,
+                }
+            ]
+        }
+        with pytest.raises(ProviderProtocolError, match="malformed_response"):
+            normalize_openai_response(payload)
+
+
+def test_control_detail_echo_is_bounded_for_wire_controlled_key_names() -> None:
+    """_control_exact_keys 的 detail 回显键名,而键名与数量由模型侧控制:
+    必须按 _STRICT_DETAIL_LIMIT 截断,否则巨型/海量未知键会随 repair 消息
+    写入 policy_result 并撑爆 checkpoint。"""
+    huge_key = "x" * 5000
+    arguments = {
+        "kind": "direct_response",
+        "correlation_id": "r",
+        "text": "t",
+        huge_key: 1,
+    }
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "function": {
+                                "name": RESERVED_CONTROL_NAME,
+                                "arguments": json.dumps(arguments),
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ]
+    }
+    with pytest.raises(ProviderProtocolError, match="malformed_control") as raised:
+        normalize_openai_response(payload)
+    assert raised.value.detail is not None
+    assert len(raised.value.detail) <= 200
+
+
+@pytest.mark.parametrize("provider_type", ["anthropic_compatible", "openai_compatible"])
+def test_duplicate_tool_call_id_fails_closed_as_repairable_rejection(
+    provider_type: str,
+) -> None:
+    """重复 tool_call_id 是可归因 provider 的协议违规:必须在归一化层以
+    malformed_tool_call 拒绝,才能落入 InvalidProviderResponseError 的
+    invalid_repairs 有界修复预算。若放行,响应会带着重复 id 一路通过归一化,
+    直到 start_tool_batch 的状态层不变量以裸 ValueError 炸出,被外层
+    except Exception 升级为 runtime_failure fatal——归因错置到 runtime,
+    且一次也不消耗修复额度。"""
+    if provider_type == "anthropic_compatible":
+        payload = {
+            "content": [
+                {"type": "tool_use", "id": "call-1", "name": "read_file", "input": {"p": 1}},
+                {"type": "tool_use", "id": "call-1", "name": "write_file", "input": {"q": 2}},
+            ]
+        }
+        with pytest.raises(ProviderProtocolError, match="malformed_tool_call"):
+            normalize_anthropic_response(payload)
+    else:
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "call-1",
+                                "function": {
+                                    "name": "read_file",
+                                    "arguments": json.dumps({"p": 1}),
+                                },
+                            },
+                            {
+                                "id": "call-1",
+                                "function": {
+                                    "name": "write_file",
+                                    "arguments": json.dumps({"q": 2}),
+                                },
+                            },
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        }
+        with pytest.raises(ProviderProtocolError, match="malformed_tool_call"):
+            normalize_openai_response(payload)
+
+
+@pytest.mark.parametrize("provider_type", ["anthropic_compatible", "openai_compatible"])
+def test_distinct_tool_call_ids_still_normalize(provider_type: str) -> None:
+    """唯一性拒绝不得扩大化:同批不同 id 的普通调用照常保序归一化。"""
+    if provider_type == "anthropic_compatible":
+        payload = {
+            "content": [
+                {"type": "tool_use", "id": "call-1", "name": "read_file", "input": {"p": 1}},
+                {"type": "tool_use", "id": "call-2", "name": "write_file", "input": {"q": 2}},
+            ]
+        }
+        response = normalize_anthropic_response(payload)
+    else:
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "call-1",
+                                "function": {
+                                    "name": "read_file",
+                                    "arguments": json.dumps({"p": 1}),
+                                },
+                            },
+                            {
+                                "id": "call-2",
+                                "function": {
+                                    "name": "write_file",
+                                    "arguments": json.dumps({"q": 2}),
+                                },
+                            },
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        }
+        response = normalize_openai_response(payload)
+    assert response.blocks == (
+        ModelToolCall("call-1", "read_file", {"p": 1}),
+        ModelToolCall("call-2", "write_file", {"q": 2}),
+    )
+
+
+@pytest.mark.parametrize(
+    ("provider_type", "handler"),
+    [
+        (
+            "anthropic_compatible",
+            lambda request: httpx.Response(
+                200,
+                json={
+                    "content": [
+                        {"type": "tool_use", "id": "call-1", "name": "read_file", "input": {}},
+                        {"type": "tool_use", "id": "call-1", "name": "write_file", "input": {}},
+                    ],
+                    "stop_reason": "tool_use",
+                },
+            ),
+        ),
+        (
+            "openai_compatible",
+            lambda request: httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "tool_calls": [
+                                    {
+                                        "id": "call-1",
+                                        "type": "function",
+                                        "function": {"name": "read_file", "arguments": "{}"},
+                                    },
+                                    {
+                                        "id": "call-1",
+                                        "type": "function",
+                                        "function": {"name": "write_file", "arguments": "{}"},
+                                    },
+                                ],
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ],
+                },
+            ),
+        ),
+    ],
+)
+def test_provider_generate_surfaces_duplicate_tool_call_id_as_repairable(
+    provider_type: str, handler
+) -> None:
+    """端到端边界:重复 tool_call_id 必须以 InvalidProviderResponseError 从
+    provider.generate 抛出——即 loop 捕获进 invalid_repairs 有界修复的精确
+    类型;而不是让响应通过归一化后在 start_tool_batch 处以裸 ValueError
+    炸成 runtime_failure fatal。"""
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        if provider_type == "anthropic_compatible":
+            provider = AnthropicCompatibleProvider(
+                config=_config("anthropic_compatible"),
+                http_client=client,
+            )
+        else:
+            provider = OpenAICompatibleProvider(
+                config=_config("openai_compatible"),
+                http_client=client,
+            )
+        with pytest.raises(InvalidProviderResponseError, match="malformed_tool_call"):
+            provider.generate(_context())
+
+
+def _plain_assistant_context() -> ContextPack:
+    return ContextPack(
+        system=None,
+        tools=(),
+        messages=(
+            ModelMessage(role="user", content=({"type": "text", "text": "hi"},)),
+            ModelMessage(role="assistant", content=({"type": "text", "text": "done"},)),
+        ),
+        budget=BudgetReport(
+            input_limit=2_000,
+            estimated_input_tokens=10,
+            output_reserve=100,
+        ),
+    )
+
+
+def test_request_side_continuity_failures_are_fatal_not_repairable() -> None:
+    """请求投影的 identity/continuity 失败在同一 trusted context 上重试必然
+    原样复现(缺失的 opaque reasoning 无法由模型重建),不属于可修复的响应
+    缺陷:不得继承 InvalidProviderResponseError 进入 invalid_repairs 循环,
+    直接按 provider_configuration_error fail closed。"""
+    context = _plain_assistant_context()
+    digest = "a" * 64
+
+    with pytest.raises(
+        ProviderContinuityError, match="missing_reasoning_continuity"
+    ) as missing:
+        context_to_openai_messages(
+            context,
+            provider_identity_digest=digest,
+            require_reasoning_continuity=True,
+        )
+    mismatch_context = ContextPack(
+        system=None,
+        tools=(),
+        messages=(
+            ModelMessage(
+                role="assistant",
+                content=({"type": "text", "text": "done"},),
+                provider_continuation=ProviderContinuationV1.create(
+                    provider_identity_digest="c" * 64,
+                    opaque_payload="other provider reasoning",
+                ),
+            ),
+        ),
+        budget=BudgetReport(
+            input_limit=2_000,
+            estimated_input_tokens=10,
+            output_reserve=100,
+        ),
+    )
+    with pytest.raises(
+        ProviderContinuityError, match="provider_continuity_mismatch"
+    ) as mismatched:
+        context_to_openai_messages(
+            mismatch_context,
+            provider_identity_digest=digest,
+            require_reasoning_continuity=True,
+        )
+
+    for error in (missing.value, mismatched.value):
+        assert isinstance(error, ProviderFatalError)
+        assert not isinstance(error, InvalidProviderResponseError)
+        assert error.code == "provider_configuration_error"
+
+
+def test_anthropic_projection_of_continuation_is_fatal_not_repairable() -> None:
+    """anthropic 投影拒绝携带 continuation 的会话,与 openai 侧同类:
+    请求侧 deterministic 失败,不进 repair 循环。"""
+    digest = "a" * 64
+    context = ContextPack(
+        system=None,
+        tools=(),
+        messages=(
+            ModelMessage(
+                role="assistant",
+                content=({"type": "text", "text": "done"},),
+                provider_continuation=ProviderContinuationV1.create(
+                    provider_identity_digest=digest,
+                    opaque_payload="private reasoning",
+                ),
+            ),
+        ),
+        budget=BudgetReport(
+            input_limit=2_000,
+            estimated_input_tokens=10,
+            output_reserve=100,
+        ),
+    )
+    with pytest.raises(
+        ProviderContinuityError, match="provider_continuity_mismatch"
+    ) as raised:
+        context_to_anthropic_messages(context)
+    assert not isinstance(raised.value, InvalidProviderResponseError)
+    assert raised.value.code == "provider_configuration_error"
+
+
+def test_response_side_missing_reasoning_stays_repairable() -> None:
+    """响应侧缺 reasoning_content 仍是模型/端点行为缺陷,保持既有
+    ProviderProtocolError 分类(可进入有界 repair),不随请求侧改动扩大。"""
+    payload = {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": "ok"},
+                "finish_reason": "stop",
+            }
+        ]
+    }
+    with pytest.raises(ProviderProtocolError, match="missing_reasoning_continuity"):
+        normalize_openai_response(payload, provider_identity_digest="a" * 64)

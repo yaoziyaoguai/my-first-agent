@@ -7,6 +7,7 @@ import pytest
 
 from agent.runtime.context import ContextLimitError, ContextLimits, KernelContextManager
 from agent.runtime.contracts import (
+    RESULT_CLASS_COMMAND_OUTPUT,
     ActiveRun,
     ContextCandidate,
     ContextSourceSnapshot,
@@ -1465,6 +1466,102 @@ def test_unproofed_read_result_stays_nonreusable_per_send_source() -> None:
     ]
     assert excerpt_sources
     assert all(not source.reusable for source in excerpt_sources)
+
+
+def _grouped_proof_state(
+    proof: ProviderFileSourceProofV1,
+    *,
+    tool_call_id: str,
+    text: str,
+) -> ConversationState:
+    """TOOL_CALLS+TOOL_RESULT 成组（_group_facts 路径）的 proof-backed 结果。"""
+
+    return replace(
+        ConversationState.new("conversation-1"),
+        goal=_read_goal(),
+        active_run=ActiveRun("run-current"),
+        provider_source_proofs=(proof,),
+        facts=(
+            _fact("user-1", FactKind.USER_MESSAGE, text="do the work"),
+            _fact(
+                "run:run-1:tool-batch:2",
+                FactKind.TOOL_CALLS,
+                calls=[
+                    {
+                        "tool_call_id": tool_call_id,
+                        "name": proof.tool_name,
+                        "arguments": {"target": proof.normalized_target},
+                    }
+                ],
+            ),
+            _fact(
+                f"run:run-1:tool-result:{tool_call_id}:3",
+                FactKind.TOOL_RESULT,
+                tool_call_id=tool_call_id,
+                text=text,
+                is_error=False,
+                executed=True,
+                metadata={
+                    "data_classes": ["tool_results"],
+                    "source_receipts": [],
+                    "source_refs": [],
+                    "truncated": False,
+                },
+            ),
+        ),
+    )
+
+
+def test_grouped_proof_projection_derives_data_class_from_result_class() -> None:
+    """P1（2026-11-17 审计）：成组路径的 proof 投影必须按 proof.result_class
+    如实申报数据类。命令证明（local_process）此前被硬编码为
+    workspace_excerpt，_group_facts 汇总的 scope data_classes 随之撒谎——
+    read_v1 许可借错标签放行命令输出外发。不变量：命令输出来源的事实必须
+    携带 command_output 数据类；excerpt 证明仍申报 workspace_excerpt。"""
+
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=8_000, output_reserve=500),
+    )
+
+    command_text = "exit 0\nok"
+    command_proof = ProviderFileSourceProofV1.create(
+        conversation_id="conversation-1",
+        run_id="run-1",
+        workspace_identity_digest="workspace-1",
+        tool_call_id="call-cmd",
+        tool_name="local_process",
+        tool_identity_digest="0" * 64,
+        policy_identity="policy-1",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS.value,
+        operation="local_process",
+        normalized_target="command:make build",
+        target_digest=hashlib.sha256(b"command:make build").hexdigest(),
+        goal_id="goal-1",
+        goal_revision=1,
+        intent_digest="1" * 64,
+        result_content_digest=hashlib.sha256(command_text.encode("utf-8")).hexdigest(),
+        result_class=RESULT_CLASS_COMMAND_OUTPUT,
+    )
+    command_pack = manager.build(
+        _grouped_proof_state(command_proof, tool_call_id="call-cmd", text=command_text),
+        _action("summarize"),
+        (),
+    )
+    assert "command_output" in command_pack.consent_scope.data_classes
+    assert "workspace_excerpt" not in command_pack.consent_scope.data_classes
+    assert any(
+        source.reusable and source.data_class == "command_output"
+        for source in command_pack.consent_scope.sources
+    )
+
+    excerpt_pack = manager.build(
+        _grouped_proof_state(_read_proof(), tool_call_id="call-read", text="hello workspace"),
+        _action("summarize"),
+        (),
+    )
+    assert "workspace_excerpt" in excerpt_pack.consent_scope.data_classes
+    assert "command_output" not in excerpt_pack.consent_scope.data_classes
 
 
 def _receipted_read_fact(*, text: str = "hello workspace") -> ConversationFact:

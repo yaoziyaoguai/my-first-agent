@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
@@ -166,6 +167,7 @@ class KernelToolRuntime:
         *,
         policy: ToolPolicy | None = None,
         clock: Callable[[], str] | None = None,
+        monotonic_clock: Callable[[], float] | None = None,
         sandbox_receipt_book=None,
         background_claim_verifier: BackgroundClaimVerifier | None = None,
     ) -> None:
@@ -177,6 +179,13 @@ class KernelToolRuntime:
         self._default_policy = policy or DefaultToolPolicy()
         self._invoked_keys: set[str] = set()
         self._clock = clock or _default_utc_now
+        # durable lease 时效的 monotonic 判定源（与 browser session 同一模式：
+        # wall 时钟只用于展示/durable 记录，时效约束认 monotonic 经过时长）。
+        self._monotonic_clock = monotonic_clock or time.monotonic
+        # lease 时效的进程内观测锚：keyed by (authority_id, issued_at, expires_at)
+        # → 首次观测的回溯锚点。同一 durable authority 跨判定点共享锚（wall
+        # 回拨无法重置）；重新批准铸造的新窗口获得新键/新锚。
+        self._lease_monotonic_anchors: dict[tuple[str, str, str], float] = {}
         # 017：Runtime 铸造的 sandbox 执行 receipt 记录进 composition 注入的
         # session book——capture 的 producing receipts 只能源自这里（design
         # receipt lineage seam 的 Runtime 侧）。
@@ -1071,22 +1080,52 @@ class KernelToolRuntime:
             issued_at=self._clock(),
         )
 
+    def _durable_authority_window_open(
+        self,
+        *,
+        authority_key: str,
+        issued_at: str,
+        expires_at: str,
+    ) -> bool:
+        """durable authority（process/sandbox lease、goal authorization）统一时效判定。
+
+        wall 窗口保持 fail-closed 的 zoned RFC3339 数值比较（Codex 终审 P1 语义
+        不变：任何一侧不可解析或越界 → False）。其上加进程内 monotonic 经过时长
+        约束（2026-11-17 审计 P3）：首次观测到窗口打开时，按 wall 视在年龄把
+        monotonic 锚回溯到签发时刻，此后只认真实经过时长——NTP step 回拨到窗口
+        内的 wall 读数不再能复活已真实过期的 authority（naive 高水位不够：回拨
+        后读数可高于全部已观测水位；monotonic 锚不可回拨，故无法绕过）。诚实时
+        钟下锚点回溯不改变到期边界（wall 年龄 == 真实年龄）；wall 前跳只会让
+        判定更早到期（fail closed 方向）。跨进程重启后由 durable wall 窗口兜底
+        回拨到 issued 之前的攻击；重启后回拨到窗口内的残余窗口需要 lease 结构
+        持久化观测字段（contracts/checkpoint 域），不在本修复包所有权内。
+        """
+        now_dt = _parse_zoned_rfc3339(self._clock())
+        issued_dt = _parse_zoned_rfc3339(issued_at)
+        expires_dt = _parse_zoned_rfc3339(expires_at)
+        if now_dt is None or issued_dt is None or expires_dt is None:
+            return False
+        if not issued_dt <= now_dt < expires_dt:
+            return False
+        lease_seconds = (expires_dt - issued_dt).total_seconds()
+        anchor_key = (authority_key, issued_at, expires_at)
+        monotonic_now = self._monotonic_clock()
+        anchor = self._lease_monotonic_anchors.get(anchor_key)
+        if anchor is None:
+            anchor = monotonic_now - (now_dt - issued_dt).total_seconds()
+            self._lease_monotonic_anchors[anchor_key] = anchor
+        return monotonic_now - anchor < lease_seconds
+
     def _match_sandbox_lease(
         self,
         candidate: SandboxAuthorityCandidateV1,
         context: ToolPrepareContext,
     ) -> SandboxAuthorityLeaseV1 | None:
-        # 与 process lease 相同的 fail-closed 时效判定：zoned RFC3339 数值比较。
-        now_dt = _parse_zoned_rfc3339(self._clock())
-        if now_dt is None:
-            return None
+        # 与 process lease 相同的 fail-closed 时效判定（wall 窗口 + 进程内
+        # monotonic 经过时长约束，见 _durable_authority_window_open）。
         for lease in context.sandbox_leases:
-            issued_dt = _parse_zoned_rfc3339(lease.issued_at)
-            expires_dt = _parse_zoned_rfc3339(lease.expires_at)
             if (
                 lease.verify()
-                and issued_dt is not None
-                and expires_dt is not None
                 and lease.matches(
                     goal_id=candidate.goal_id,
                     goal_revision=candidate.goal_revision,
@@ -1100,7 +1139,11 @@ class KernelToolRuntime:
                 )
                 and lease.candidate_digest == candidate.candidate_digest
                 and lease.uses_consumed < lease.max_uses
-                and issued_dt <= now_dt < expires_dt
+                and self._durable_authority_window_open(
+                    authority_key=lease.lease_id,
+                    issued_at=lease.issued_at,
+                    expires_at=lease.expires_at,
+                )
             ):
                 return lease
         return None
@@ -1186,28 +1229,23 @@ class KernelToolRuntime:
             return False
 
     def _sandbox_lease_is_active_now(self, lease: SandboxAuthorityLeaseV1) -> bool:
-        now_dt = _parse_zoned_rfc3339(self._clock())
-        if now_dt is None:
-            return False
-        issued_dt = _parse_zoned_rfc3339(lease.issued_at)
-        expires_dt = _parse_zoned_rfc3339(lease.expires_at)
         return (
             lease.verify()
-            and issued_dt is not None
-            and expires_dt is not None
             and lease.uses_consumed < lease.max_uses
-            and issued_dt <= now_dt < expires_dt
+            and self._durable_authority_window_open(
+                authority_key=lease.lease_id,
+                issued_at=lease.issued_at,
+                expires_at=lease.expires_at,
+            )
         )
 
     def _lease_is_active_now(self, lease: ProcessAuthorityLeaseV1) -> bool:
-        now = _parse_zoned_rfc3339(self._clock())
-        issued = _parse_zoned_rfc3339(lease.issued_at)
-        expires = _parse_zoned_rfc3339(lease.expires_at)
         return (
-            now is not None
-            and issued is not None
-            and expires is not None
-            and issued <= now < expires
+            self._durable_authority_window_open(
+                authority_key=lease.lease_id,
+                issued_at=lease.issued_at,
+                expires_at=lease.expires_at,
+            )
             and lease.remaining_uses > 0
         )
 
@@ -1483,14 +1521,10 @@ class KernelToolRuntime:
             or binding.remaining_uses < 1
         ):
             return False
-        now = _parse_zoned_rfc3339(self._clock())
-        issued_at = _parse_zoned_rfc3339(binding.issued_at)
-        expires_at = _parse_zoned_rfc3339(binding.expires_at)
-        if (
-            now is None
-            or issued_at is None
-            or expires_at is None
-            or not issued_at <= now < expires_at
+        if not self._durable_authority_window_open(
+            authority_key=binding.binding_id,
+            issued_at=binding.issued_at,
+            expires_at=binding.expires_at,
         ):
             return False
         return binding.authorizes(
@@ -1575,24 +1609,23 @@ class KernelToolRuntime:
         candidate: ProcessAuthorityCandidateV1,
         context: ToolPrepareContext,
     ) -> ProcessAuthorityLeaseV1 | None:
-        # Codex 终审 P1：lease 时效必须用严格 zoned RFC3339 数值比较（design §5.4）。
-        # 字符串比较在 clock rollback / malformed / naive 时间戳下会错误接受旧
-        # authority；任何一侧不可解析 → fail closed（无匹配 → 重新批准）。
-        now_dt = _parse_zoned_rfc3339(self._clock())
-        if now_dt is None:
-            return None
+        # Codex 终审 P1：lease 时效必须用严格 zoned RFC3339 数值比较（design
+        # §5.4）。字符串比较在 clock rollback / malformed / naive 时间戳下会错误
+        # 接受旧 authority；任何一侧不可解析 → fail closed（无匹配 → 重新批准）。
+        # P3（2026-11-17）：数值比较之上再加进程内 monotonic 经过时长约束
+        # （_durable_authority_window_open），wall 回拨到窗口内不再复活血租约。
         for lease in context.process_leases:
-            issued_dt = _parse_zoned_rfc3339(lease.issued_at)
-            expires_dt = _parse_zoned_rfc3339(lease.expires_at)
             if (
-                issued_dt is not None
-                and expires_dt is not None
-                and lease.command_fingerprint == candidate.command_fingerprint
+                lease.command_fingerprint == candidate.command_fingerprint
                 and lease.goal_id == candidate.goal_id
                 and lease.goal_revision == candidate.goal_revision
                 and lease.workspace_identity_digest == candidate.workspace_identity_digest
                 and lease.remaining_uses > 0
-                and issued_dt <= now_dt < expires_dt
+                and self._durable_authority_window_open(
+                    authority_key=lease.lease_id,
+                    issued_at=lease.issued_at,
+                    expires_at=lease.expires_at,
+                )
             ):
                 return lease
         return None

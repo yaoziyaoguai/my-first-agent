@@ -6,11 +6,13 @@ import httpx
 import pytest
 
 from agent.provider.config import AgentProviderConfig
-from agent.provider.normalize import context_to_openai_messages
+from agent.provider.normalize import (
+    ProviderContinuityError,
+    context_to_openai_messages,
+)
 from agent.provider.openai_http import OpenAICompatibleProvider
 from agent.provider.protocol import (
     ProviderConfigurationError,
-    ProviderProtocolError,
     ProviderStreamCancelledError,
     ProviderStreamInterruptedError,
 )
@@ -117,6 +119,17 @@ def _chunk(delta: dict, finish_reason=None, usage=None, *, model="deepseek-v4-fl
     if usage is not None:
         payload["usage"] = usage
     return payload
+
+
+def _usage_tail_chunk(usage: dict) -> dict:
+    """OpenAI include_usage 规范尾块:choices 为空、仅携带 usage。"""
+    return {
+        "id": "response-1",
+        "object": "chat.completion.chunk",
+        "model": "deepseek-v4-flash",
+        "choices": [],
+        "usage": usage,
+    }
 
 
 @pytest.mark.parametrize(
@@ -389,9 +402,10 @@ def test_missing_or_mismatched_continuation_fails_before_http() -> None:
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         provider = OpenAICompatibleProvider(config=config, http_client=client)
-        with pytest.raises(ProviderProtocolError, match="missing_reasoning_continuity"):
+        # 请求侧 continuity 失败不可由模型自纠:直接 fatal,不进 repair 循环。
+        with pytest.raises(ProviderContinuityError, match="missing_reasoning_continuity"):
             provider.generate(_context())
-        with pytest.raises(ProviderProtocolError, match="provider_continuity_mismatch"):
+        with pytest.raises(ProviderContinuityError, match="provider_continuity_mismatch"):
             provider.generate(_context(continuation=wrong))
     assert calls == 0
 
@@ -758,9 +772,88 @@ def test_w3_disabled_session_rejects_legacy_enabled_continuation() -> None:
         return httpx.Response(500)  # 若发起 HTTP 即失败，证明拒绝发生在 HTTP 前。
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client, pytest.raises(
-        ProviderProtocolError, match="provider_continuity_mismatch"
+        ProviderContinuityError, match="provider_continuity_mismatch"
     ):
         OpenAICompatibleProvider(
             config=config, http_client=client
         ).generate(_context(continuation=continuation))
     assert calls == 0
+
+
+def test_stream_accepts_include_usage_empty_choices_tail_chunk() -> None:
+    """OpenAI include_usage 规范(本 provider 显式请求该选项):[DONE] 前允许
+    一个空 choices、仅携带 usage 的尾块;usage 仍必须在 finish_reason 之后
+    到达才有效。"""
+    config = _config()
+    continuation = ProviderContinuationV1.create(
+        provider_identity_digest=config.descriptor().identity_digest,
+        opaque_payload="previous",
+    )
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=_sse(
+                _chunk({"reasoning_content": "private"}),
+                _chunk({"content": "OK"}, "stop"),
+                _usage_tail_chunk({"prompt_tokens": 9, "completion_tokens": 4}),
+            ),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        response = OpenAICompatibleProvider(config=config, http_client=client).generate(
+            _context(continuation=continuation)
+        )
+
+    assert response.blocks == (ModelTextBlock("OK"),)
+    assert response.input_tokens == 9
+    assert response.output_tokens == 4
+    assert response.provider_continuation is not None
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
+        # 空 choices 且不携带 usage
+        (
+            _chunk({"reasoning_content": "private"}),
+            {
+                "id": "response-1",
+                "object": "chat.completion.chunk",
+                "model": "deepseek-v4-flash",
+                "choices": [],
+            },
+            _chunk({}, "stop", {"prompt_tokens": 1, "completion_tokens": 1}),
+        ),
+        # usage 尾块早于 finish_reason 到达
+        (
+            _chunk({"reasoning_content": "private"}),
+            _usage_tail_chunk({"prompt_tokens": 1, "completion_tokens": 1}),
+            _chunk({}, "stop"),
+        ),
+    ],
+)
+def test_stream_still_rejects_illegal_empty_choices_shapes(
+    events: tuple[dict, ...],
+) -> None:
+    config = _config()
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=_sse(*events),
+        )
+
+    continuation = ProviderContinuationV1.create(
+        provider_identity_digest=config.descriptor().identity_digest,
+        opaque_payload="previous",
+    )
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(ProviderStreamInterruptedError),
+    ):
+        OpenAICompatibleProvider(config=config, http_client=client).generate(
+            _context(continuation=continuation)
+        )

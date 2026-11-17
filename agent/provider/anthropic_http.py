@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from contextlib import suppress
 from typing import Any
 
 import httpx
@@ -174,13 +175,21 @@ def _raise_for_status(status_code: int) -> None:
         raise ProviderAuthError(status_code=status_code)
     if status_code == 429 or status_code >= 500:
         raise ProviderHTTPRetryableError(status_code=status_code)
-    if status_code >= 400:
+    # 3xx 同样不是协议响应(客户端 follow_redirects=False 不跟随):显式
+    # fail closed 为非重试错误,避免重定向体被当作协议响应解析。
+    if status_code >= 300:
         raise ProviderHTTPError(status_code=status_code)
 
 
 def _parse_sse_data_line(raw_line: bytes) -> dict[str, Any] | None:
-    """解析一行 SSE `data:` 载荷;非 data 行与 [DONE] 返回 None,坏 JSON fail closed。"""
-    line = raw_line.decode("utf-8", errors="strict").strip()
+    """解析一行 SSE `data:` 载荷;非 data 行与 [DONE] 返回 None,坏 JSON/非
+    UTF-8 字节 fail closed。"""
+    try:
+        line = raw_line.decode("utf-8", errors="strict").strip()
+    except UnicodeDecodeError:
+        # 非 UTF-8 字节或流尾截断的多字节序列:与坏 JSON 同语义 fail closed,
+        # 不让裸 UnicodeDecodeError 逃出稳定 code 合同。
+        raise ProviderProtocolError("malformed_response") from None
     if not line.startswith("data:"):
         return None
     data = line[len("data:"):].strip()
@@ -239,7 +248,9 @@ def _rebuild_message_payload(
                     raise ProviderProtocolError("malformed_response")
                 block["text"] = block.get("text", "") + text
                 if delta_observer is not None and text:
-                    delta_observer.on_text_delta(text)
+                    # observer 是 advisory 通道:其异常不得中断权威重建。
+                    with suppress(Exception):
+                        delta_observer.on_text_delta(text)
             elif dtype == "input_json_delta":
                 partial = delta.get("partial_json")
                 if not isinstance(partial, str):

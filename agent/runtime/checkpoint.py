@@ -181,23 +181,55 @@ class LocalCheckpointStore:
             raise CheckpointCapacityError("initial checkpoint exceeds configured capacity")
         directory_fd = store._open_directory()
         try:
-            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _o_nofollow()
-            try:
-                fd = os.open(store._name, flags, 0o600, dir_fd=directory_fd)
-            except FileExistsError as error:
-                raise CheckpointConflictError("checkpoint already exists") from error
-            except OSError as error:
-                raise _security_or_checkpoint_error(error, "create checkpoint") from error
-            try:
-                os.fchmod(fd, 0o600)
-                _write_all(fd, data)
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-            os.fsync(directory_fd)
+            store._atomic_create(directory_fd, data)
         finally:
             os.close(directory_fd)
         return store
+
+    def _atomic_create(self, directory_fd: int, data: bytes) -> None:
+        """原子创建 checkpoint：终名只会在完整数据落盘后出现。
+
+        P2（2026-11-17）：先完整写入本 checkpoint 名下 tmp 并 fsync，再 link
+        到终名（link 的隐式排他保持原 O_EXCL 冲突语义，绝不覆盖既有
+        checkpoint），最后摘除 tmp。中途任何失败（含 SIGKILL）都不会留下
+        半写终名；崩溃遗留的 tmp 由持锁 CAS 路径按孤儿清扫。
+        """
+        temp_name = f".{self._name}.tmp-{secrets.token_hex(8)}"
+        temp_fd: int | None = None
+        try:
+            temp_fd = os.open(
+                temp_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | _o_nofollow(),
+                0o600,
+                dir_fd=directory_fd,
+            )
+            os.fchmod(temp_fd, 0o600)
+            _write_all(temp_fd, data)
+            os.fsync(temp_fd)
+            os.close(temp_fd)
+            temp_fd = None
+            try:
+                os.link(
+                    temp_name,
+                    self._name,
+                    src_dir_fd=directory_fd,
+                    dst_dir_fd=directory_fd,
+                )
+            except FileExistsError as error:
+                raise CheckpointConflictError("checkpoint already exists") from error
+            except FileNotFoundError as error:
+                # tmp 在 link 前消失 ⟹ 存在持锁清扫者 ⟹ 终名已存在：
+                # 与 EEXIST 同语义的冲突，而非笼统的 CheckpointError。
+                raise CheckpointConflictError("checkpoint already exists") from error
+            except OSError as error:
+                raise _security_or_checkpoint_error(error, "create checkpoint") from error
+            os.unlink(temp_name, dir_fd=directory_fd)
+            os.fsync(directory_fd)
+        finally:
+            if temp_fd is not None:
+                os.close(temp_fd)
+            with suppress(FileNotFoundError):
+                os.unlink(temp_name, dir_fd=directory_fd)
 
     def load(self) -> LoadedSnapshot:
         directory_fd = self._open_directory()
@@ -242,6 +274,10 @@ class LocalCheckpointStore:
                 os.close(lock_fd)
                 os.close(directory_fd)
                 return None
+            # P1 收尾（2026-11-17）：持锁后、读取前修复 link/unlink 之间崩溃
+            # 留下的终名 nlink==2 + tmp 硬链接对，否则下方 nlink 校验会把该
+            # checkpoint 永久 fail-closed，清扫入口反而不可达。
+            self._sweep_orphan_temps(directory_fd)
             state = _decode_state(self._read_bytes(directory_fd))
             if state.conversation_id != conversation_id:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
@@ -285,6 +321,7 @@ class LocalCheckpointStore:
         data = _encode_state(new_state)
         if len(data) > self._max_state_bytes:
             raise CheckpointCapacityError("checkpoint exceeds configured capacity")
+        self._sweep_orphan_temps(lease.directory_fd)
         temp_name = f".{self._name}.tmp-{secrets.token_hex(8)}"
         temp_fd: int | None = None
         try:
@@ -318,6 +355,63 @@ class LocalCheckpointStore:
         if reserve_bytes < 0:
             raise ValueError("reserve_bytes must be non-negative")
         return len(_encode_state(snapshot.state)) + reserve_bytes <= self._max_state_bytes
+
+    def _sweep_orphan_temps(self, directory_fd: int) -> None:
+        """清除本 checkpoint 名下的崩溃 tmp 残留（P1，2026-11-17）。
+
+        只在持有 mutation lease（checkpoint 锁 flock）时调用，处理两类残留：
+        1. nlink==1 孤儿 tmp——写入与落位之间崩溃遗留；
+        2. nlink==2 硬链接对——initialize 在 os.link(tmp→终名) 与
+           os.unlink(tmp) 之间崩溃遗留（终名与 tmp 同 inode），此时终名
+           因链接数 !=1 会被读路径 fail-closed 拒绝，只能在此修复：
+           与终名 inode 完全一致的同前缀 tmp 才 unlink，恢复 nlink==1。
+
+        并发说明：initialize 不持锁，因此本清扫理论上可 unlink 一个并发
+        initialize 的在途 tmp（该 initialize 的 os.link 随即 ENOENT）。
+        ENOENT 仅在存在持锁清扫者时可能发生，而持锁者蕴含终名已存在，
+        故该路径在 _atomic_create 中映射为 CheckpointConflictError——
+        与 EEXIST 同语义，调用方按既有冲突分支处理，无数据损坏。
+        保守条件：仅清除形态与自身 tmp 完全一致的 regular/owner/0600
+        文件；异常形态跳过，留给 fail-closed 读路径与人工处置。清扫失败
+        不阻塞调用方（nlink==1 孤儿只损失整洁性）。
+        """
+        prefix = f".{self._name}.tmp-"
+        try:
+            names = os.listdir(directory_fd)
+        except OSError:
+            return
+        # 修复分支需要终名 inode 作为配对判据；缺失（尚未 initialize）则跳过。
+        try:
+            final_info = os.stat(self._name, dir_fd=directory_fd, follow_symlinks=False)
+        except OSError:
+            final_info = None
+        for name in names:
+            if not name.startswith(prefix):
+                continue
+            try:
+                info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                ):
+                    continue
+                if info.st_nlink == 2:
+                    # 仅当与终名为同一 inode 的硬链接对才修复；其余 nlink!=1
+                    # 形态（人为多链接等）保留给 fail-closed 校验。
+                    if (
+                        final_info is not None
+                        and stat.S_ISREG(final_info.st_mode)
+                        and (info.st_dev, info.st_ino)
+                        == (final_info.st_dev, final_info.st_ino)
+                    ):
+                        os.unlink(name, dir_fd=directory_fd)
+                    continue
+                if info.st_nlink != 1:
+                    continue
+                os.unlink(name, dir_fd=directory_fd)
+            except OSError:
+                continue
 
     def retire_archived_snapshot(
         self,

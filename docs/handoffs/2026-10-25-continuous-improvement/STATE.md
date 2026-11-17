@@ -772,3 +772,6 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
   tests/cli 7/7 于编辑后源复跑通过。
 - **后续候选**：增量 (b) interpreter 选择；posix_supervisor 负载 flake 加宽
   ready 窗口（独立小修候选）；TUI 命令面接入。
+- **收尾链（增量 1）**：分支 `feat/2026-11-18-project-path-in-session` →
+  commit `27d2ef9` → PR #32 → merge gate PASS（主会话亲核全部 hunk + 对抗
+  验证含回退证伪 + flake 定性）→ **merge `654ff08`（分支保留）**。

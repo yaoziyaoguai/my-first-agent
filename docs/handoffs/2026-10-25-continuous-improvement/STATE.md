@@ -775,3 +775,58 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
 - **收尾链（增量 1）**：分支 `feat/2026-11-18-project-path-in-session` →
   commit `27d2ef9` → PR #32 → merge gate PASS（主会话亲核全部 hunk + 对抗
   验证含回退证伪 + flake 定性）→ **merge `654ff08`（分支保留）**。
+
+## 项目环境准备·增量 2：/env-path 会话内子进程 PATH 前缀准入（2026-11-18，候选 #3 第二切片）
+
+- **动机**：daily-use 记录的真实失败（docs/guides/daily-use.md PATH/venv 段）——
+  调用方终端有项目 venv 的 pytest，Agent 子进程只解析到系统 Python；既有唯一
+  workaround 是启动前激活 venv。本增量给出会话内修复。
+- **设计**：`SessionPathAdmissions`（agent/process/preparation.py，紧邻其验证
+  词汇 sanitize_captured_path）：workspace 相对目录、strict resolve 必须在界内
+  （符号链接出界拒绝）、非目录/`..`/绝对路径/NUL 拒绝、上限 8、casefold 幂等、
+  先完整校验后提交（拒绝零残留）；`effective_captured_path` 无准入逐字节返回
+  base，有准入最新在前前缀拼接（PATH 首匹配语义）。单一变更点；不持久化
+  （会话装配重建即回启动期 captured PATH）；不进模型上下文（app.py 分发先于
+  _parse_action，测试断言 runtime.actions == []）。
+- **接缝变更**：build_local_process_registration 可选注入 `path_admissions`；
+  prepare_binding 每次 prepare、executor 每次 invoke 各自取当时 effective PATH
+  （同一次 invoke 内 prepare 与 closed environment 一致）；**补既有缺口**——
+  executor 原不比对 `environment_policy_digest`（冻结 PATH 下恒真式），动态
+  准入下显式比对成为 approval→spawn 环境策略不变式（漂移 →
+  KnownNotExecuted `environment_policy_changed`，消息与 revalidate_process 同
+  词汇），同 digest 可执行文件不得带变更后 PATH 落地。`admissions=None` 时
+  全链行为与 HEAD 逐字节一致（验证轮 importlib 加载 HEAD tools.py 对比证明：
+  spec/binding 全键值/executor draft 全等）。子进程 env 用
+  `prepared.child_path`（effective 经共享 seam 清洗后，与 binding 的
+  environment_policy 同源；015 相对 PATH 劫持守卫不变）。
+- **效果边界**：仅放宽 local_process bare 可执行文件名的解析范围；每条命令
+  仍按 resolved executable digest + exact argv/cwd 逐条审批（fail-closed 不
+  变）；审批预览展示 resolved 绝对路径（出界解析对 operator 可见）。不触
+  sandbox/managed web 的 PATH（各自仍绑定启动期捕获值）；TUI 暂不接
+  （/switch、/project-path 同先例）。
+- **实现偏差（合理）**：规格原文让 executor 直接把 effective 传
+  closed_process_environment，实现者改为 prepared.child_path——旧 executor
+  本就绑定清洗后 child_path，直接传原始串会让相对项重新进入子进程 PATH（击穿
+  test_015_child_path_cannot_use_relative_interpreter）；两者在 admissions=None
+  时逐字节一致。
+- **执行与验证**：单一垂直切片实现包（7 文件改动 + 2 新测试文件，+24 测试）
+  + 对抗验证 **PASS**（P1 冻结 effective→注册级集成 3 红；P2 注释新不变式→
+  漂移探针红（证明 revalidate_process 内部一致性检查不覆盖此漂移，binding↔
+  prepared 比对是唯一且 load-bearing 闸门）；P3 admissions=None 与 HEAD 逐
+  字节一致；P4 边界 7 项——不持久化/不进模型上下文/拒绝路径逐一生效/文案
+  诚实/sandbox 与 managed-web 未触碰/有界；P5 顺序语义 + sanitize 不清洗准入
+  目录）。邻域回归 tests/process/ + tests/cli/ 489 passed；ruff 全库 0 错误。
+- **完整门**：**4362 passed / 3 skipped / 0 failed**（603s，本次已知 flake 未命中；
+  wheel 按配方重建。基线 4337+1F(flake) → 净增 24 测试 + flake 本次通过，对账
+  吻合）；ruff 全库 0 错误。
+- **遗留观察（LOW/INFO，验证轮）**：LOW-1 admit→prepare 窗口符号链接替换
+  TOCTOU（需窗口内 workspace 写权限并发攻击者；审批预览可见 resolved 路径；
+  与启动期 PATH 每次重解析同语义，非本切片引入）；LOW-2 executor 子进程 PATH
+  来源从注册时 sanitize 改为执行时 prepared.child_path（FS 稳定时逐字节一致
+  且更自洽）；INFO /env-pathfoo 前缀误入→不存在拒绝文案（与 /project-path
+  同模式）。
+- **收尾链（增量 2）**：分支 `feat/2026-11-18-env-path-in-session` →
+  commit `41bf7d8` → PR #33 → merge gate PASS（主会话亲核全部 hunk + 对抗
+  验证 5 探针 + 门 0F）→ **merge `efcba1d`（分支保留）**。
+- **下一步（用户 2026-11-18 指令）**：用 oracle_web 审计「项目收官至少还缺
+  哪些能力」，按裁决清单继续补齐。

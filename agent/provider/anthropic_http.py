@@ -23,6 +23,7 @@ from agent.provider.protocol import (
     ProviderHTTPError,
     ProviderHTTPRetryableError,
     ProviderProtocolError,
+    ProviderStreamCancelledError,
     ProviderTimeoutError,
     ProviderTransportError,
 )
@@ -30,6 +31,20 @@ from agent.runtime.contracts import ContextPack, ModelResponse
 from agent.transport_audit import TransportAttemptRecorder
 
 DEFAULT_MAX_RESPONSE_BYTES = 4_000_000
+# 与 openai 适配器策略对齐的 SSE 每输出 token 字节上界估计(含事件信封开销),
+# 非协议证明常数;超限仍是 fail-closed 硬界。
+_SSE_BYTES_PER_OUTPUT_TOKEN_BOUND = 512
+
+
+def _cancellation_requested(delta_observer: Any) -> bool:
+    """协作取消探测:observer 暴露 cancellation_requested() 可调用属性时读取;
+    缺失或抛异常一律视为未取消(与 openai 侧同形)。"""
+    callback = getattr(delta_observer, "cancellation_requested", None)
+    if not callable(callback):
+        return False
+    with suppress(Exception):
+        return bool(callback())
+    return False
 
 
 class AnthropicCompatibleProvider:
@@ -40,9 +55,16 @@ class AnthropicCompatibleProvider:
         *,
         config: AgentProviderConfig,
         http_client: httpx.Client | None = None,
-        max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+        max_response_bytes: int | None = None,
         attempt_recorder: TransportAttemptRecorder | None = None,
     ) -> None:
+        # anthropic 侧 body 恒 stream=True,预算无条件随 max_tokens 缩放,
+        # 不加 openai 侧的 thinking 门控;4MB 仍是下限,超限照旧 fail closed。
+        if max_response_bytes is None:
+            max_response_bytes = max(
+                DEFAULT_MAX_RESPONSE_BYTES,
+                int(config.max_tokens) * _SSE_BYTES_PER_OUTPUT_TOKEN_BOUND,
+            )
         if config.provider_type != "anthropic_compatible" or max_response_bytes < 1:
             raise ProviderConfigurationError()
         self._config = config
@@ -99,11 +121,14 @@ class AnthropicCompatibleProvider:
         if self._config.thinking_mode == "disabled":
             body["thinking"] = {"type": "disabled"}
 
+        # 取消已 pending:不发起任何网络 I/O。
+        if _cancellation_requested(delta_observer):
+            raise ProviderStreamCancelledError()
         # 单次发送,按响应 content-type 分流:SSE 流走事件重建(增量经窄观察
         # 合同实时外发);非 event-stream(部分兼容端点/错误路径回整包 JSON)
         # 走既有整包解析,不发现成事件。
         self._non_sse_body = b""
-        sse_events = self._iter_sse_events(body)
+        sse_events = self._iter_sse_events(body, delta_observer=delta_observer)
         payload = _rebuild_message_payload(sse_events, delta_observer)
         if payload is None:
             try:
@@ -113,16 +138,27 @@ class AnthropicCompatibleProvider:
             if not isinstance(fallback, dict):
                 raise ProviderProtocolError("malformed_response")
             payload = fallback
+        # 重建/整包解析完成后、normalize 前:半途收集的 payload 不得在已取消的
+        # invocation 里铸造为最终响应。
+        if _cancellation_requested(delta_observer):
+            raise ProviderStreamCancelledError()
         return normalize_anthropic_response(
             payload,
             trusted_completion_binding=trusted_completion_goal_binding(context),
         )
 
-    def _iter_sse_events(self, body: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    def _iter_sse_events(
+        self,
+        body: dict[str, Any],
+        *,
+        delta_observer: Any = None,
+    ) -> Iterator[dict[str, Any]]:
         """边读边产出 SSE 事件:增量在到达时即对消费方可见(实时转发的前提)。
 
         断流/超时按既有 transport 语义失败——已产出的增量保持 advisory,
         不铸造最终响应。非 SSE 响应:读整包存 ``_non_sse_body`` 并结束迭代。
+        取消请求(ProviderStreamCancelledError)在 chunk 迭代顶与每个 yield
+        事件前检查,raise 后不被 httpx except 子句吞掉,由 with 退出关闭连接。
         """
         try:
             if self._attempt_recorder is not None:
@@ -140,6 +176,8 @@ class AnthropicCompatibleProvider:
                     size = 0
                     parts: list[bytes] = []
                     for chunk in response.iter_bytes():
+                        if _cancellation_requested(delta_observer):
+                            raise ProviderStreamCancelledError()
                         size += len(chunk)
                         if size > self._max_response_bytes:
                             raise ProviderProtocolError("response_too_large")
@@ -150,6 +188,8 @@ class AnthropicCompatibleProvider:
                 buffered = b""
                 size = 0
                 for chunk in response.iter_bytes():
+                    if _cancellation_requested(delta_observer):
+                        raise ProviderStreamCancelledError()
                     size += len(chunk)
                     if size > self._max_response_bytes:
                         raise ProviderProtocolError("response_too_large")
@@ -158,6 +198,8 @@ class AnthropicCompatibleProvider:
                         raw_line, buffered = buffered.split(b"\n", 1)
                         event = _parse_sse_data_line(raw_line)
                         if event is not None:
+                            if _cancellation_requested(delta_observer):
+                                raise ProviderStreamCancelledError()
                             yield event
         except httpx.TimeoutException:
             raise ProviderTimeoutError() from None

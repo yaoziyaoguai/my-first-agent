@@ -699,3 +699,41 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
   协作取消、SSE 4MB 预算缩放、lease 休眠语义（mach_continuous_time）、
   loop.py 体量重构（架构债排序第一）；余候选不变（#3 项目环境准备、#4
   真实数据源 scope、#2 自助恢复、#5 Memory 旅程、#3 019 host）。
+
+## 裁决轮闭合（2026-11-17 晚，缓议 5 项经 oracle 第二轮裁决后执行）
+
+- **裁决来源**：oracle_web 第二轮（position 5/5 max，10m50s，item 5 of 5
+  verified=yes；prompt 存档 /tmp/oracle-prompt-deferred-5.md）。主会话对其
+  全部关键事实声明做了代码交叉核实后实施：openai 侧确已有 ×512
+  compute-if-unspecified 缩放（`openai_http.py:43,57-65`，纠正首轮「双方都
+  固定 4MB」的陈述）；anthropic 生成器结构、loop `provider_stream_cancelled`
+  分支（`loop.py:2277`，provider 无关、不在 safely_retryable 集合）、lease
+  wall 逐次判定先于 monotonic（`agent/runtime/tools.py`）均核实成立。
+- **B anthropic 协作取消（裁决：现在修 P2 第一顺位）**：`_cancellation_requested`
+  helper（与 openai 同形）+ 四类检查点（进入流前零网络 I/O / SSE 与非 SSE
+  两分支 chunk 迭代顶 / 每 yield 前 / normalize 前）；异常身份保持，with
+  退出关闭连接；runtime 零改动（既有分支 provider 无关）。
+- **C SSE 预算缩放（裁决：现在修 P2 第二顺位）**：`max_response_bytes: None`
+  时 `max(4MB, max_tokens×512)`（anthropic 恒流式故无 thinking 门控）；显式
+  值尊重；512 为与 openai 对齐的估计上界非协议常数；超限仍 fail closed。
+- **D 子项（裁决：第三层缓议，休眠语义现在定义）**：docstring 明确「有效期
+  包含休眠——wall 逐次判定计入，monotonic 只收紧」+ 钉住测试（wall 越过
+  expires 而 monotonic 仅 +60s → 拒绝；对照：窗口内短休眠不受影响）。
+- **A 子项（裁决：重设计缓议）**：SANDBOX_TRUST_NOTICE 补诚实句「写入受限
+  ≠仅 workspace 可读」（ID 保持 native_sandbox_v1，先例 cd89540；digest
+  导入时重算，既有审批 fail-closed 重新确认）。
+- **缓议记录（重开触发）**：A 重设计触发=真实数据源 scope 承诺目录级受限
+  读 / 017 host composition 复用真实 HOME 配置凭据 / 实证命令读到意外 HOME
+  文件。D 第三层触发=回拨致错误授权实例 / 长时无人值守高影响操作 / 明确
+  产品承诺严格真实经过时长。E loop.py=**选项②绞杀式**：下个特性动哪个切片
+  提哪个切片的同类私有 helper，纯重构 commit 与特性 commit 分离，`_drive`
+  保留决策权（许可状态/预算/checkpoint 顺序），不设行数目标。
+- **oracle 自评结论**（用户问「还有意义吗」）：有意义、不需每轮、非垃圾；
+  调用判据=有会改变实施选择的争议且材料足以反驳当前解释；输出须至少做到
+  纠正事实/给出可触发反例/改变实施选择/删掉不必要工作之一。两轮实测均命中
+  （本轮：openai ×512 发现、B 重定性、响应字节≠内存、last_observed 反例）。
+- **执行与验证**：3 所有权不相交实现包+3 对抗验证（notice PASS；lease 唯一
+  FAIL 项为共享工作树跨包误报，主会话亲核 diff 边界后判定不成立；anthropic
+  唯一 FAIL 项 E501 超长行，已拆行修复）。Red 基线 7 failed → Green。
+- **完整门**：**4314 passed / 3 skipped / 0 failed**（603s；ruff 全库 0
+  错误；wheel 按配方重建）。基线 4302 → 净增 12 测试。

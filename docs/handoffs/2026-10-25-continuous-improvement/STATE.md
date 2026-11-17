@@ -626,3 +626,61 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
 - **完整门**：**4238 passed / 1 skipped / 0 failed**（592s，ruff 全过）。
 - P3-1 自待裁决队列移除；余候选不变（#3 项目环境准备、#4 真实数据源
   scope、#2 自助恢复、#5 Memory 旅程、#3 019 host）。
+
+### 审计根因修复轮（2026-11-17，用户「进入修复轮…找到所有问题的根因进行修复 不要扩大范围」）
+
+- **上游**：全库审计（6 域并行 agent + 逐条亲验 + oracle_web gpt-5.6-sol
+  position 5/5 交叉裁决 6 项拿不准项）产出 P1×2 / P2×5 / P3×N / LOW×N；
+  本轮按「根因修复、不扩大范围」闭合其中全部有界项，缓议项单列。
+- **P1-1 许可投影撒谎链（头条）**：`context.py` `_file_proof_projection()`
+  改为按 `proof.result_class` 诚实派生（原 P5 硬编码 workspace_excerpt）；
+  成组路径命令证明如实申报 command_output → read_v1 自然拒绝、P3-1 守卫
+  以诚实标签可触发、命令输出回到逐次披露；`workspace_command_v1` 合法流
+  不受影响。端到端负例走真实 `_plan/_group_facts` 投影（补上 2026-10-26
+  轮手工 scope 未覆盖的缺口），修复前 gate admitted=True 已实证。
+- **P1-2 checkpoint 残留×目录脆弱性**：`_load_candidates` 对未知条目降级
+  为跳过+告警（候选文件本体校验保持逐文件 fail-closed）；CAS 持锁清扫
+  同名孤儿 tmp（保守条件 regular/owner/0600）；`initialize` 改 tmp+link
+  原子落位。验证者反证补丁：持锁清扫扩展处理 link/unlink 间崩溃的
+  nlink==2 硬链接对（与终名同 inode 的 tmp 才 unlink，恢复 nlink==1，
+  读路径保持 fail-closed）；`os.link` ENOENT（并发清扫者在途 tmp 消失
+  ⟹ 终名已存在）映射为 CheckpointConflictError，scheduler 冲突回退不破。
+- **P2-1 Seatbelt 代理通道（Oracle 裁决修复顺位第一）**：confined profile
+  显式 deny appleevent-send/lsopen 操作 + 四个代理链 mach-lookup
+  （coreservices.appleevents/launchservicesd/CoreServices.coreservicesd/
+  quarantine-resolver）；trust notice 同步更新；真实宿主复现验证（验证者
+  独立跑真实层证据）；不宣称阻断全部 IPC。
+- **P2 provider 孤立代理字符**：normalize `_string` 入口拒绝孤立代理
+  （json.loads 可产出 `\ud800` str，三处 encode 崩溃链已实证）→
+  ProviderProtocolError fail closed。
+- **P2 环境复现**：ruff 钉 `==0.15.12`（历史 gate 全绿版本，0.17.x 漂移
+  实证）；README 补 venv+extras+非 editable wheel+重建步骤。
+- **P3 组**：SSE 非 UTF-8/尾截断裸 UnicodeDecodeError→malformed（anthropic）；
+  3xx 两侧统一 ProviderHTTPError 非重试（锚点测试更新，不跟随不解析）；
+  loop 重试额度活路径复位 vs resume 累计语义矛盾——以注释+resume 侧为准
+  （累计），删除复位；durable lease 时钟回拨三层修复（last_observed_now
+  持久化+回拨即永久失效+进程内 monotonic 经过时长约束，三判定点共享
+  helper）；DNS rebinding——两个 persistent context 启动边界以
+  --host-resolver-rules 钉已准入 host（连接层用准入验证过的地址，SNI/
+  证书校验保留）；重复 tool_call_id 计入 repair 预算（原 runtime_failure
+  旁路可无限循环）；archive mutation 入口补身份校验（原四路径校验、唯
+  归档缺）；DAG 测试补 loop/tool_governance 钉集+反向边检查（runtime↔web
+  环按既有定性编码为显式例外）；detail 回显有界化。
+- **LOW 组**：`_no_new_user_input_since` 补 control:tui-control:<uuid>:user
+  形态（未消费 TUI 纠正判为新输入，S5 待发授权失配）；observer suppress
+  对齐 openai 先例；openai 空 choices+usage 尾块放行；异常串持久化有界化；
+  WORKSPACE_WRITE_TOOLS 内联 5 处去重为 evidence.py 单一来源；
+  GoalView.status 枚举收紧。
+- **对抗验证**：12 包各一验证者（git diff 越权检查+根因复核+聚焦测试重跑），
+  11 PASS / 1 FAIL（http-layer 3xx 锚点测试未随分类更新）——主会话补丁
+  闭合：锚点测试改期望 ProviderHTTPError（验证者确认方向正确）+ 3 个跨包
+  ruff 错误修复 + checkpoint 两个反证补丁。
+- **缓议（修复=设计决策，未修待裁决）**：host-home HOME 白名单读模型
+  重设计（Oracle：设计权衡非已证实外泄）；anthropic 协作取消；SSE 4MB
+  预算随 max_tokens 缩放；lease 休眠语义（mach_continuous_time）；loop.py
+  体量重构（架构债排序第一）。
+- **完整门**：**4302 passed / 3 skipped / 0 failed**（661s；ruff 全库 0 错误；
+  3 skip=launchd host-gate+2 Playwright 浏览器二进制，环境门控）。基线
+  4238 → 净增 64 测试。
+- **执行方式**：12 个文件所有权严格不相交的修复包（9 并行+3 顺序化）
+  + 12 对抗验证者，全部 Red→Green；oracle_web 交叉裁决上游审计 6 项。

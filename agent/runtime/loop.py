@@ -310,6 +310,18 @@ def _run_transient_retries(state) -> int:
     )
 
 
+# 意外异常的 str() 没有契约保证：可能携带上游正文、路径或 secret，也可能
+# 极长。runtime_failure 收尾写入 RunResult 与 durable last_safe_result 的
+# 部分只保留类型名 + 有界摘录（对齐 provider 归一化层 _STRICT_DETAIL_LIMIT
+# 的截断先例）。
+_UNEXPECTED_ERROR_DETAIL_LIMIT = 200
+
+
+def _bounded_unexpected_error_message(error: Exception) -> str:
+    detail = str(error)[:_UNEXPECTED_ERROR_DETAIL_LIMIT]
+    return f"{type(error).__name__}: {detail}"
+
+
 @dataclass(slots=True)
 class _NoProgressTracker:
     """累计相同停滞指纹；真实进展或策略变化会重置。"""
@@ -799,7 +811,7 @@ class AgentRuntime:
                 failed = fail_run(
                     state,
                     code="runtime_failure",
-                    message=f"{type(error).__name__}: {error}",
+                    message=_bounded_unexpected_error_message(error),
                 )
                 return self._finish(
                     current,
@@ -808,7 +820,7 @@ class AgentRuntime:
                     warnings=warnings,
                     event_kind=RuntimeEventKind.FAILED,
                     error_code="runtime_failure",
-                    message=f"{type(error).__name__}: {error}",
+                    message=_bounded_unexpected_error_message(error),
                     outcome_state=failed,
                 )
             except Exception as persistence_error:
@@ -824,7 +836,7 @@ class AgentRuntime:
                 else None
             ),
             error_code="runtime_failure",
-            message=f"{type(error).__name__}: {error}",
+            message=_bounded_unexpected_error_message(error),
             delivery_warnings=tuple(warnings),
         )
 
@@ -845,7 +857,7 @@ class AgentRuntime:
             "The tool effect outcome is unknown and its recovery checkpoint could "
             "not be saved. The durable state still records the unclassified "
             "execution; resume the run to classify it before continuing. "
-            f"{type(error).__name__}: {error}"
+            f"{_bounded_unexpected_error_message(error)}"
         )
         try:
             return self._finish(
@@ -2363,7 +2375,9 @@ class AgentRuntime:
                 if progress_reporter is not None:
                     self._stop_provider_progress(progress_reporter, current)
 
-            retryable_provider_retries = 0
+            # 有效响应不复位瞬态重试计数：与 resume 路径 `_run_transient_retries`
+            # 的累计语义同源（oracle r2 §F-4），否则「失败→成功→失败」可在
+            # 同一 run 内反复获得新额度。
             if background_binding is not None and not recovering_persisted_response:
                 active_after_send = current.state.active_run
                 if active_after_send is None or active_after_send.provider_call_intent is None:
@@ -3919,6 +3933,9 @@ class AgentRuntime:
         for name, arguments in rejected_calls:
             if name in {"web_search", "web_fetch", "web_fetch_url"} and web_requirement_satisfied:
                 continue
+            # 有意不同于 evidence.WORKSPACE_WRITE_TOOLS（还含 make_directory）：
+            # 这里只豁免「带 path 的目标写入」被拒且 path 已不属于当前 Goal 的
+            # 情形；make_directory 拒绝保持 fail-closed（仍视为 blocker）。
             if name in {"write_file", "edit_file"} and isinstance(arguments, dict):
                 path = arguments.get("path")
                 if isinstance(path, str) and path not in goal.targets:

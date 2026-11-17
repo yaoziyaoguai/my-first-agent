@@ -308,6 +308,93 @@ def test_restore_rejects_corrupt_archive_without_recreating_checkpoint(
     assert not opened.checkpoint_path.exists()
 
 
+def test_archive_refuses_replaced_workspace_instance_conversation(
+    tmp_path: Path,
+) -> None:
+    """P3（2026-11-17 身份对称）：workspace 目录重建（同路径新 inode）后，
+    旧 checkpoint 的 binding 仍指向前一实例。restore 侧按 identity mismatch
+    拒绝、preview 侧经 inspect 拒绝；归档 mutation 入口也不得放行——否则
+    会先释放 active checkpoint，再写出一个本实例永远无法 restore 的归档。
+    """
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state"
+    conversation_id = "00000000-0000-4000-8000-000000000301"
+    opened, snapshot = _terminal_session(
+        workspace,
+        state_root,
+        conversation_id,
+        max_history=4,
+    )
+    assert opened.checkpoint_path is not None and opened.checkpoint_path.exists()
+
+    workspace.rename(tmp_path / "workspace-old")
+    workspace.mkdir()
+
+    # 直接调用 mutation 入口（preview 经 inspect 已拒绝，无法提供 digest；
+    # 此处以持有 exact digest 模拟绕过 preview 的调用方）。
+    with pytest.raises(ValueError, match="conversation workspace identity"):
+        archive_workspace_session(
+            workspace,
+            conversation_id=conversation_id,
+            expected_checkpoint_digest=snapshot.token,
+            state_root=state_root,
+            max_history_checkpoints=4,
+        )
+    # 拒绝归档时 active checkpoint 必须原样保留。
+    assert opened.checkpoint_path.exists()
+
+
+def test_restore_refuses_archive_from_replaced_workspace_instance(
+    tmp_path: Path,
+) -> None:
+    """归档是 workspace 实例绑定的：目录重建后（scope 不变、identity 变化），
+    restore 必须拒绝旧实例的归档，且不得在当前实例下重建 checkpoint。"""
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state"
+    conversation_id = "00000000-0000-4000-8000-000000000302"
+    opened, _snapshot = _terminal_session(
+        workspace,
+        state_root,
+        conversation_id,
+        max_history=4,
+    )
+    assert opened.checkpoint_path is not None
+    preview = preview_workspace_archive(
+        workspace,
+        conversation_id=conversation_id,
+        state_root=state_root,
+        max_history_checkpoints=4,
+    )
+    record = archive_workspace_session(
+        workspace,
+        conversation_id=conversation_id,
+        expected_checkpoint_digest=preview.checkpoint_digest,
+        state_root=state_root,
+        max_history_checkpoints=4,
+    )
+    assert not opened.checkpoint_path.exists()
+
+    workspace.rename(tmp_path / "workspace-old")
+    workspace.mkdir()
+
+    with pytest.raises(
+        ValueError, match="archived conversation workspace identity"
+    ):
+        restore_workspace_session(
+            workspace,
+            conversation_id=conversation_id,
+            source_checkpoint_digest=record.source_checkpoint_digest,
+            state_root=state_root,
+            max_history_checkpoints=4,
+        )
+    assert record.path.exists()
+    assert not opened.checkpoint_path.exists()
+
+
 def test_idle_bound_chat_is_archivable_releases_capacity_and_restores(
     tmp_path: Path,
 ) -> None:

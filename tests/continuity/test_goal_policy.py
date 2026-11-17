@@ -204,6 +204,50 @@ def test_expired_or_exhausted_goal_authorization_returns_to_exact_approval() -> 
     )
 
 
+def test_p3_wall_rollback_cannot_revive_really_expired_binding() -> None:
+    """P3（2026-11-17 审计）：goal authorization 的 wall 回拨复活被 monotonic 约束阻断。
+
+    binding 00:00 发放 / 01:00 到期；00:50 复用观测后真实时间越过 01:00，
+    wall step 回拨到 00:40（仍在窗口内）——纯 wall 比较会继续放行写操作；
+    Green 合同：进程内 monotonic 经过时长达到租期即回到 exact approval。
+    """
+
+    clock = {"now": "2026-09-04T00:50:00Z"}
+    monotonic = {"now": 5000.0}
+    runtime = KernelToolRuntime(
+        (RegisteredTool(_spec(), lambda _intent: "ok"),),
+        clock=lambda: clock["now"],
+        monotonic_clock=lambda: monotonic["now"],
+    )
+    call = ToolCall("call-1", "write_file", {"path": "reports/final.md"})
+
+    # 窗口内首用（视在年龄 3000s）→ 免重复询问，锚定 monotonic 观测。
+    assert isinstance(runtime.prepare(call, _context(_binding())), ExecutionIntent)
+    # 真实时间越过 01:00（monotonic 前进 3700s ≥ 剩余 600s），wall 回拨到
+    # 00:40 → 不得复活，回到 exact approval。
+    monotonic["now"] = 5000.0 + 3700.0
+    clock["now"] = "2026-09-04T00:40:00Z"
+    assert isinstance(runtime.prepare(call, _context(_binding())), ApprovalRequired)
+
+
+def test_p3_normal_in_window_reuse_unaffected() -> None:
+    """回归：窗口内连续复用不受影响。"""
+
+    clock = {"now": "2026-09-04T00:30:00Z"}
+    monotonic = {"now": 5000.0}
+    runtime = KernelToolRuntime(
+        (RegisteredTool(_spec(), lambda _intent: "ok"),),
+        clock=lambda: clock["now"],
+        monotonic_clock=lambda: monotonic["now"],
+    )
+    call = ToolCall("call-1", "write_file", {"path": "reports/final.md"})
+
+    assert isinstance(runtime.prepare(call, _context(_binding())), ExecutionIntent)
+    monotonic["now"] = 5000.0 + 600.0
+    clock["now"] = "2026-09-04T00:40:00Z"
+    assert isinstance(runtime.prepare(call, _context(_binding())), ExecutionIntent)
+
+
 def test_path_alias_scope_expansion_and_stale_grant_have_zero_effect() -> None:
     for path, binding in (
         ("./reports/final.md", _binding()),

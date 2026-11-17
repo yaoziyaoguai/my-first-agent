@@ -6,7 +6,7 @@ import pytest
 from agent.provider.anthropic_http import AnthropicCompatibleProvider
 from agent.provider.config import AgentProviderConfig
 from agent.provider.openai_http import OpenAICompatibleProvider
-from agent.provider.protocol import ProviderAuthError, ProviderProtocolError
+from agent.provider.protocol import ProviderAuthError, ProviderHTTPError
 from agent.runtime.contracts import BudgetReport, ContextPack, ProviderDescriptor
 
 
@@ -68,7 +68,9 @@ def test_redirect_is_not_followed(
     )
     with httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False) as client:
         provider = provider_class(config=config, http_client=client)
-        with pytest.raises(ProviderProtocolError):
+        # 3xx 显式归类为非重试的 ProviderHTTPError（2026-11-17 LOW-3xx:
+        # 与 _raise_for_status 状态码分类法一致;不跟随、重定向体不解析）。
+        with pytest.raises(ProviderHTTPError):
             provider.generate(_context())
 
     assert len(requests) == 1

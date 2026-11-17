@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import stat
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -320,8 +321,9 @@ def test_goal_less_conversation_selection_rejects_displayed_revision_drift(
     assert candidate.checkpoint_path.read_bytes() == drifted_bytes
 
 
-def test_bounded_workspace_state_enumeration_rejects_unknown_entries_and_overflow(
+def test_bounded_workspace_state_enumeration_skips_unknown_entries_and_bounds_overflow(
     tmp_path: Path,
+    caplog,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -332,10 +334,23 @@ def test_bounded_workspace_state_enumeration_rejects_unknown_entries_and_overflo
         conversation_id_factory=lambda: "00000000-0000-4000-8000-000000000010",
     )
     assert opened.checkpoint_path is not None
-    (opened.checkpoint_path.parent / "unexpected.txt").write_text("not a checkpoint")
+    state_dir = opened.checkpoint_path.parent
+    (state_dir / "unexpected.txt").write_text("not a checkpoint")
+    # P1（2026-11-17）：崩溃遗留的 CAS/initialize tmp 残留是典型的未知条目，
+    # 不得把整个 workspace 放大为 fail-closed 打不开。
+    tmp_residue = state_dir / f".{opened.checkpoint_path.name}.tmp-{'a' * 16}"
+    tmp_residue.write_text("partial")
 
-    with pytest.raises(ValueError, match="unknown entry"):
-        open_workspace_session(workspace, state_root=unknown_root)
+    with caplog.at_level(logging.WARNING, logger="agent.continuity.sessions"):
+        reopened = open_workspace_session(workspace, state_root=unknown_root)
+
+    assert reopened.disposition is StartupDisposition.RESUMED
+    assert reopened.checkpoint_path == opened.checkpoint_path
+    assert "unexpected.txt" in caplog.text
+    assert tmp_residue.name in caplog.text
+    # 只读枚举只跳过并告警，不清理残留本身。
+    assert (state_dir / "unexpected.txt").exists()
+    assert tmp_residue.exists()
 
     bounded_root = tmp_path / "bounded-root"
     first = open_workspace_session(

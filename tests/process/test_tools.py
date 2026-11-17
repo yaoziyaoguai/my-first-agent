@@ -810,3 +810,197 @@ def test_015_truncated_output_must_be_visible_to_model(tmp_path) -> None:  # noq
     assert isinstance(quiet_result, ToolResult)
     assert quiet_result.content == "hi\n"
     assert "truncated" not in quiet_result.content
+
+
+def _lease_with_window(  # noqa: ANN001
+    runtime, arguments, workspace, *, issued_at, expires_at
+) -> ProcessAuthorityLeaseV1:
+    """先 prepare 取 candidate，再按显式时间窗铸造匹配 lease（P3 时效测试用）。"""
+
+    first = runtime.prepare(
+        ToolCall("call-seed-window", "local_process", arguments), _goal_context(runtime)
+    )
+    assert isinstance(first, ApprovalRequired)
+    candidate = first.request.process_authority_candidate
+    return ProcessAuthorityLeaseV1.create(
+        lease_id=f"process-lease:{candidate.candidate_id}",
+        candidate_digest=candidate.candidate_digest,
+        goal_id=candidate.goal_id,
+        goal_revision=candidate.goal_revision,
+        workspace_identity_digest=candidate.workspace_identity_digest,
+        command_fingerprint=candidate.command_fingerprint,
+        readable_command=candidate.readable_command,
+        executable_digest=candidate.executable_digest,
+        argv_digest=candidate.argv_digest,
+        cwd_digest=candidate.cwd_digest,
+        resource_profile=candidate.resource_profile,
+        environment_policy_digest=candidate.environment_policy_digest,
+        execution_authority=candidate.execution_authority,
+        approved_request_identity="req-window",
+        issued_at=issued_at,
+        expires_at=expires_at,
+    )
+
+
+def test_p3_wall_rollback_cannot_revive_really_expired_lease(tmp_path) -> None:  # noqa: ANN001
+    """P3（2026-11-17 审计，Oracle 裁决）：wall 回拨不得复活已真实过期的 lease。
+
+    攻击（Oracle 反例，naive 高水位不够）：10:00 发放 / 11:00 到期 / 最后观测
+    10:10 / 真实时间 11:10 时 NTP step 回拨到 10:40——10:40 高于任何已观测水位
+    且小于 expires，纯 wall 数值比较 ``issued <= now < expires`` 仍放行，剩余
+    uses 被继续消费。Green 合同：进程内时效以 monotonic 经过时长为准（锚点按
+    首次观测的 wall 视在年龄回溯到签发时刻），回拨到窗口内的 wall 读数不再
+    复活血租约——重新 approval 是唯一出路。
+    """
+
+    _require()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    rel, _ = _make_executable(workspace)
+    arguments = {"executable": rel, "argv": [], "cwd": ".", "profile": "standard"}
+    clock = {"now": "2026-08-15T10:10:00Z"}
+    monotonic = {"now": 1000.0}
+    runtime = KernelToolRuntime(
+        (_registration(workspace),),
+        clock=lambda: clock["now"],
+        monotonic_clock=lambda: monotonic["now"],
+    )
+    lease = _lease_with_window(
+        runtime,
+        arguments,
+        workspace,
+        issued_at="2026-08-15T10:00:00Z",
+        expires_at="2026-08-15T11:00:00Z",
+    )
+
+    def prepare_reuse() -> object:  # noqa: ANN202
+        return runtime.prepare(
+            ToolCall("call-reuse", "local_process", arguments),
+            _goal_context(runtime, process_leases=(lease,)),
+        )
+
+    # 首次复用：窗口内（视在年龄 600s）→ 允许，锚定 monotonic 观测。
+    assert isinstance(prepare_reuse(), ExecutionIntent)
+    # 真实时间走到 11:10（monotonic 前进 70min），wall 回拨到 10:40：
+    # 高于最后观测 10:10、仍在窗口内，但真实经过时长已超租期 → 不得复活。
+    monotonic["now"] = 1000.0 + 70 * 60
+    clock["now"] = "2026-08-15T10:40:00Z"
+    assert isinstance(prepare_reuse(), ApprovalRequired)
+
+
+def test_p3_lease_expires_by_monotonic_elapsed_without_rollback(tmp_path) -> None:  # noqa: ANN001
+    """运行期 monotonic 超时：无回拨、wall 读数仍在窗口内也不得继续消费。"""
+
+    _require()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    rel, _ = _make_executable(workspace)
+    arguments = {"executable": rel, "argv": [], "cwd": ".", "profile": "standard"}
+    clock = {"now": "2026-08-15T10:10:00Z"}
+    monotonic = {"now": 1000.0}
+    runtime = KernelToolRuntime(
+        (_registration(workspace),),
+        clock=lambda: clock["now"],
+        monotonic_clock=lambda: monotonic["now"],
+    )
+    lease = _lease_with_window(
+        runtime,
+        arguments,
+        workspace,
+        issued_at="2026-08-15T10:00:00Z",
+        expires_at="2026-08-15T11:00:00Z",
+    )
+
+    def prepare_reuse() -> object:  # noqa: ANN202
+        return runtime.prepare(
+            ToolCall("call-reuse", "local_process", arguments),
+            _goal_context(runtime, process_leases=(lease,)),
+        )
+
+    assert isinstance(prepare_reuse(), ExecutionIntent)
+    # wall 正常前进到 10:20（窗口内），但真实经过时长已满租期（视在年龄
+    # 600s + 真实 3600s ≥ 3600s）→ 到期。边界：恰好达到租期即过期。
+    monotonic["now"] = 1000.0 + 3600.0
+    clock["now"] = "2026-08-15T10:20:00Z"
+    assert isinstance(prepare_reuse(), ApprovalRequired)
+
+
+def test_p3_normal_in_window_reuse_and_wall_expiry_unaffected(tmp_path) -> None:  # noqa: ANN001
+    """回归：正常在期复用不受 monotonic 约束影响；wall 到期语义不变。"""
+
+    _require()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    rel, _ = _make_executable(workspace)
+    arguments = {"executable": rel, "argv": [], "cwd": ".", "profile": "standard"}
+    clock = {"now": "2026-08-15T10:30:00Z"}
+    monotonic = {"now": 2000.0}
+    runtime = KernelToolRuntime(
+        (_registration(workspace),),
+        clock=lambda: clock["now"],
+        monotonic_clock=lambda: monotonic["now"],
+    )
+    lease = _lease_with_window(
+        runtime,
+        arguments,
+        workspace,
+        issued_at="2026-08-15T10:00:00Z",
+        expires_at="2026-08-15T11:00:00Z",
+    )
+
+    def prepare_reuse() -> object:  # noqa: ANN202
+        return runtime.prepare(
+            ToolCall("call-reuse", "local_process", arguments),
+            _goal_context(runtime, process_leases=(lease,)),
+        )
+
+    # 窗口中段连续复用：真实经过 10min，视在年龄 30min，远未到租期 → 允许。
+    assert isinstance(prepare_reuse(), ExecutionIntent)
+    monotonic["now"] = 2000.0 + 600.0
+    clock["now"] = "2026-08-15T10:40:00Z"
+    assert isinstance(prepare_reuse(), ExecutionIntent)
+    # wall 到达 expires（含）→ 到期语义不变，重新 approval。
+    clock["now"] = "2026-08-15T11:00:00Z"
+    assert isinstance(prepare_reuse(), ApprovalRequired)
+
+
+def test_p3_wall_rollback_revival_blocked_at_invoke(tmp_path) -> None:  # noqa: ANN001
+    """invoke 侧最后重验同样不得被回拨复活（零 spawn）。"""
+
+    _require()
+    from agent.runtime.tools import IntentConflictError
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    marker = workspace / "spawned-marker"
+    rel, _ = _make_executable(
+        workspace,
+        content=b"#!/bin/sh\ntouch spawned-marker\n",
+    )
+    arguments = {"executable": rel, "argv": [], "cwd": ".", "profile": "standard"}
+    clock = {"now": "2026-08-15T10:10:00Z"}
+    monotonic = {"now": 1000.0}
+    runtime = KernelToolRuntime(
+        (_registration(workspace),),
+        clock=lambda: clock["now"],
+        monotonic_clock=lambda: monotonic["now"],
+    )
+    lease = _lease_with_window(
+        runtime,
+        arguments,
+        workspace,
+        issued_at="2026-08-15T10:00:00Z",
+        expires_at="2026-08-15T11:00:00Z",
+    )
+    intent = runtime.prepare(
+        ToolCall("call-invoke", "local_process", arguments),
+        _goal_context(runtime, process_leases=(lease,)),
+    )
+    assert isinstance(intent, ExecutionIntent)
+    # 真实时间越过租期 + wall 回拨到窗口内：已铸 intent 在 spawn 前的最后
+    # 时效重验必须拒绝。
+    monotonic["now"] = 1000.0 + 70 * 60
+    clock["now"] = "2026-08-15T10:40:00Z"
+    with pytest.raises(IntentConflictError, match="expired before invocation"):
+        runtime.invoke(intent)
+    assert not marker.exists()

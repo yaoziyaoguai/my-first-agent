@@ -248,6 +248,70 @@ def test_stale_revision_expired_and_malformed_clock_fail_closed_to_approval() ->
     )
 
 
+def test_p3_wall_rollback_cannot_revive_really_expired_lease() -> None:
+    """P3（2026-11-17 审计）：sandbox lease 的 wall 回拨复活同样被 monotonic 约束阻断。
+
+    lease 07:59 发放 / 10:00 到期；08:00 复用观测后真实时间越过 10:00，wall
+    step 回拨到 09:30（高于已观测水位、仍在窗口内）——纯 wall 比较会放行；
+    Green 合同：进程内 monotonic 经过时长达到租期即过期，重新 approval。
+    """
+
+    clock = {"now": NOW}
+    monotonic = {"now": 1000.0}
+    runtime = KernelToolRuntime(
+        (
+            RegisteredTool(
+                spec=_spec(),
+                func=lambda _intent: _draft(),
+                prepare_binding=lambda _arguments: dict(_binding()),
+            ),
+        ),
+        clock=lambda: clock["now"],
+        monotonic_clock=lambda: monotonic["now"],
+    )
+    candidate = runtime.prepare(_call(), _context()).request.sandbox_authority_candidate
+    lease = _lease(candidate)
+
+    def prepare_reuse():  # noqa: ANN202
+        return runtime.prepare(_call(), _context(sandbox_leases=(lease,)))
+
+    # 窗口内首用（视在年龄 60s）→ 允许，锚定 monotonic 观测。
+    first = prepare_reuse()
+    assert not isinstance(first, ApprovalRequired)
+    # 真实时间越过 10:00（monotonic 前进 2h），wall 回拨到 09:30 → 不得复活。
+    monotonic["now"] = 1000.0 + 2 * 3600
+    clock["now"] = "2026-08-27T09:30:00+00:00"
+    assert isinstance(prepare_reuse(), ApprovalRequired)
+
+
+def test_p3_normal_in_window_reuse_unaffected() -> None:
+    """回归：窗口内连续复用不受影响。"""
+
+    clock = {"now": NOW}
+    monotonic = {"now": 1000.0}
+    runtime = KernelToolRuntime(
+        (
+            RegisteredTool(
+                spec=_spec(),
+                func=lambda _intent: _draft(),
+                prepare_binding=lambda _arguments: dict(_binding()),
+            ),
+        ),
+        clock=lambda: clock["now"],
+        monotonic_clock=lambda: monotonic["now"],
+    )
+    candidate = runtime.prepare(_call(), _context()).request.sandbox_authority_candidate
+    lease = _lease(candidate)
+
+    def prepare_reuse():  # noqa: ANN202
+        return runtime.prepare(_call(), _context(sandbox_leases=(lease,)))
+
+    assert not isinstance(prepare_reuse(), ApprovalRequired)
+    monotonic["now"] = 1000.0 + 600.0
+    clock["now"] = "2026-08-27T08:30:00+00:00"
+    assert not isinstance(prepare_reuse(), ApprovalRequired)
+
+
 def test_invoke_accepts_only_matching_sandbox_draft_and_mints_closed_receipt() -> None:
     runtime = _runtime()
     candidate = runtime.prepare(_call(), _context()).request.sandbox_authority_candidate
@@ -577,6 +641,20 @@ def test_native_trust_notice_distinguishes_danger_off_from_danger_full(tmp_path)
     assert "does not disconnect the machine" in notice
     assert "already-open file descriptors" in notice
     assert "system services" in notice
+    # P2 修复披露：confined 模式补拒 IPC 代理执行通道；仍诚实——不宣称
+    # 阻断全部 IPC/外部应用通道，也不隐瞒 danger/off 无任何 IPC 拒绝。
+    assert "appleevent-send" in notice
+    assert "lsopen" in notice
+    for service in (
+        "com.apple.coreservices.appleevents",
+        "com.apple.coreservices.launchservicesd",
+        "com.apple.CoreServices.coreservicesd",
+        "com.apple.coreservices.quarantine-resolver",
+        "com.apple.lsd.open",
+    ):
+        assert service in notice, service
+    assert "do not block all IPC" in notice
+    assert "no IPC denial" in notice
     # digest 从当前文本派生：文本变更即触发新 digest。
     roots = {}
     for name in ("workspace", "temp", "state", "home"):

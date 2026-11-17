@@ -120,7 +120,7 @@ class TerminalRenderer:
             self._write(terminal_text(message, allow_newlines=True))
         goal_view = project_goal_view(result.state)
         rerun_note = self._invalidation_rerun_note(result.state)
-        if goal_view.status == GoalStatus.VERIFIED_DONE.value:
+        if goal_view.status is GoalStatus.VERIFIED_DONE:
             self._write(
                 terminal_text(
                     delivery_summary_message(goal_view),
@@ -141,7 +141,7 @@ class TerminalRenderer:
         sources = goal_view.sources
         if sources:
             self._write(self._sources_message(sources))
-        if goal_view.status == GoalStatus.VERIFIED_DONE.value and goal_view.verification_scope:
+        if goal_view.status is GoalStatus.VERIFIED_DONE and goal_view.verification_scope:
             self._write(
                 terminal_text(
                     self._verification_scope_message(goal_view.verification_scope),

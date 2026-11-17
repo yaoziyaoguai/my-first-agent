@@ -305,8 +305,15 @@ def _read_deepseek_stream(
             if payload.get("model") not in {None, *DEEPSEEK_FLASH_MODEL_IDS}:
                 raise ProviderStreamInterruptedError()
             choices = payload.get("choices")
-            if not isinstance(choices, list) or len(choices) != 1:
+            if not isinstance(choices, list) or len(choices) > 1:
                 raise ProviderStreamInterruptedError()
+            if not choices:
+                # OpenAI include_usage 规范尾块:choices 为空、仅携带 usage 且
+                # 必须在 finish_reason 之后到达;其余空 choices 形状仍拒绝。
+                if payload.get("usage") is None or finish_reason is None:
+                    raise ProviderStreamInterruptedError()
+                usage = _stream_object(payload["usage"])
+                continue
             choice = _stream_object(choices[0])
             if set(choice).difference({"index", "delta", "finish_reason", "logprobs"}):
                 raise ProviderStreamInterruptedError()
@@ -420,7 +427,9 @@ def _raise_for_status(status_code: int) -> None:
         raise ProviderAuthError(status_code=status_code)
     if status_code == 429 or status_code >= 500:
         raise ProviderHTTPRetryableError(status_code=status_code)
-    if status_code >= 400:
+    # 3xx 同样不是协议响应(客户端 follow_redirects=False 不跟随):显式
+    # fail closed 为非重试错误,避免重定向体被当作协议响应解析。
+    if status_code >= 300:
         raise ProviderHTTPError(status_code=status_code)
 
 

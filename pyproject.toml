@@ -16,7 +16,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
-    "ruff>=0.15.0",
+    # ruff 钉版：0.17.3+ 收紧 SIM102 判定，长期未改的 scripts/verify_materialized_tree.py
+    # 出现新告警（工具链漂移）。钉回 2026-10 连续绿门的实测版本，证据见
+    # docs/handoffs/2026-10-14-task-trust-resume/AUDIT.md 与
+    # docs/audits/2026-10-11-product-readiness-independent-audit.md。
+    "ruff==0.15.12",
     "setuptools>=68.0",
 ]
 browser = [

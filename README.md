@@ -459,6 +459,23 @@ first-agent --provider fake --tui
 
 ## 开发验证
 
+完整门依赖隔离环境，裸 `python` 直接跑会出现与代码无关的失败（实测：无已安装包时
+skill_runner 隔离子进程用例 6 败；缺 `[tui,mcp,skill,browser]` extras 时约 92 个 TUI
+用例败）。可复现的环境步骤：
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install ".[dev,tui,mcp,skill,browser]"
+# skill_runner 隔离子进程用例从已安装环境解析导入，需要非 editable wheel：
+# 先清理旧构建产物（残留的 build/、egg-info 会把已删除的旧模块打进新 wheel），再构建安装
+rm -rf build first_agent.egg-info
+python -m pip wheel --no-deps --wheel-dir dist .
+.venv/bin/python -m pip install --force-reinstall dist/first_agent-1.0.0-py3-none-any.whl
+```
+
+源码改动后跑全量门前，按上面同样的清理步骤重建并重装 wheel，否则隔离子进程用例
+测到的是旧代码。ruff 版本钉在 pyproject dev 依赖里，升级钉版前先全库跑一遍确认无新告警。
+
 ```bash
 .venv/bin/ruff check .
 .venv/bin/python -m pytest -q -rx

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import logging
 import os
 import re
 import stat
@@ -28,6 +29,8 @@ from agent.runtime.contracts import (
     LoadedSnapshot,
     SelectGoal,
 )
+
+_LOG = logging.getLogger("agent.continuity.sessions")
 
 _CONVERSATION_FILE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$"
@@ -206,6 +209,7 @@ def archive_workspace_session(
         )
         path, snapshot = _exact_loaded(loaded, conversation_id)
         _require_user_archive_eligible(snapshot.state)
+        _require_workspace_binding_match(snapshot.state, identity)
         if snapshot.token != expected_checkpoint_digest:
             raise ValueError("conversation changed after preview")
         store = LocalCheckpointStore(path)
@@ -217,6 +221,7 @@ def archive_workspace_session(
             if current.token != expected_checkpoint_digest:
                 raise ValueError("conversation changed after preview")
             _require_user_archive_eligible(current.state)
+            _require_workspace_binding_match(current.state, identity)
             archive = LocalConversationArchive(root)
             record = archive.archive(
                 current.state,
@@ -702,6 +707,7 @@ def _load_candidates(
 ) -> tuple[tuple[Path, LoadedSnapshot], ...]:
     checkpoint_paths: list[Path] = []
     lock_names: set[str] = set()
+    skipped_names: list[str] = []
     with os.scandir(workspace_root) as entries:
         for entry in entries:
             name = entry.name
@@ -721,10 +727,21 @@ def _load_candidates(
             if not _CONVERSATION_FILE.fullmatch(name) or not entry.is_file(
                 follow_symlinks=False
             ):
-                raise ValueError("workspace state directory contains an unknown entry")
+                # P1（2026-11-17）：未知条目降级为跳过+告警——单个崩溃残留
+                # （如 CAS/initialize 的 .{uuid}.json.tmp-*）不得放大为整个
+                # workspace fail-closed。fail-closed 收缩到候选文件本身：
+                # 真正的 {uuid}.json 候选仍由 LocalCheckpointStore 的受保护
+                # 读路径逐文件校验并拒绝篡改/畸形。
+                skipped_names.append(name)
+                continue
             checkpoint_paths.append(workspace_root / entry.name)
             if len(checkpoint_paths) > max_history_checkpoints:
                 raise ValueError("workspace history capacity exceeds its safety bound")
+    if skipped_names:
+        _LOG.warning(
+            "workspace state directory skipped unknown entries: %s",
+            sorted(skipped_names),
+        )
     if len(lock_names) > max_history_checkpoints + _MAX_LOCK_RESIDUE:
         raise ValueError("workspace state lock accumulation exceeds its safety bound")
     checkpoint_names = {path.name for path in checkpoint_paths}
@@ -833,6 +850,27 @@ def _require_user_archive_eligible(state: ConversationState) -> None:
         or state.browser_leases
     ):
         raise ValueError("conversation still owns active or unknown work")
+
+
+def _require_workspace_binding_match(
+    state: ConversationState,
+    identity: WorkspaceIdentityV1,
+) -> None:
+    """P3（2026-11-17 身份对称）：归档写入口与 restore/preview 使用同一身份契约。
+
+    workspace 目录被重建（同路径新 inode，scope 不变、identity 变化）后，
+    旧 checkpoint 的 binding 仍指向前一实例：restore 侧按 identity mismatch
+    拒绝，preview 侧经 inspect 同样拒绝。归档 mutation 若放行，会先释放
+    active checkpoint，再写出一个本实例永远无法 restore 的归档。
+    """
+
+    binding = state.workspace_binding
+    if (
+        binding is None
+        or binding.workspace_scope_digest != identity.scope_digest
+        or binding.workspace_identity_digest != identity.identity_digest
+    ):
+        raise ValueError("conversation workspace identity mismatch")
 
 
 def _existing_workspace_state_paths(

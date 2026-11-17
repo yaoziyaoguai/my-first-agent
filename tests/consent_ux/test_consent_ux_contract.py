@@ -1766,6 +1766,315 @@ def test_consent_ux_command_output_does_not_ride_grant_exception_under_narrow_gr
     assert third.admitted and third.reason == "grant_workspace_read"
 
 
+# ── 2026-11-17（审计：许可投影诚实性）────────────────────────────────────
+
+
+def _real_command_projection():
+    """经真实 _plan/_group_facts 投影的 local_process 命令输出会话。
+
+    2026-10-26 轮的既有测试用手工构造的诚实 scope；本夹具补的缺口是真实
+    投影路径——TOOL_CALLS+TOOL_RESULT 成组、proof-backed 无 receipts 的
+    local_process 结果（P1 撒谎链的入口形状）。
+    """
+
+    content = "exit 0\nok"
+    proof = ProviderFileSourceProofV1.create(
+        conversation_id="conversation-1",
+        run_id="run-1",
+        workspace_identity_digest="workspace-1",
+        tool_call_id="call-cmd",
+        tool_name="local_process",
+        tool_identity_digest="0" * 64,
+        policy_identity="policy-1",
+        execution_authority=ExecutionAuthorityClass.IN_PROCESS.value,
+        operation="local_process",
+        normalized_target="command:make build",
+        target_digest=hashlib.sha256(b"command:make build").hexdigest(),
+        goal_id="goal-1",
+        goal_revision=1,
+        intent_digest=_INTENT_DIGEST,
+        result_content_digest=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        result_class=RESULT_CLASS_COMMAND_OUTPUT,
+    )
+    goal = GoalFrame(
+        goal_id="goal-1",
+        revision=1,
+        created_from_fact_ids=("user-1",),
+        workspace_identity_digest="workspace-1",
+        user_outcome="run the build",
+        beneficiary="user",
+        targets=("notes/a.md",),
+        scope=("workspace",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(ProposedCriterion("criterion-1", "build passes"),),
+        admitted_criteria=(),
+        authority_snapshot="authority-1",
+        status=GoalStatus.GOAL_READY,
+        created_at=_T0,
+        updated_at=_T0,
+    )
+    state = replace(
+        ConversationState.new("conversation-1"),
+        goal=goal,
+        active_run=ActiveRun("run-current"),
+        provider_source_proofs=(proof,),
+        facts=(
+            ConversationFact(
+                fact_id="user-1",
+                kind=FactKind.USER_MESSAGE,
+                content={"text": "run the build"},
+            ),
+            ConversationFact(
+                fact_id="run:run-1:tool-batch:2",
+                kind=FactKind.TOOL_CALLS,
+                content={
+                    "calls": [
+                        {
+                            "tool_call_id": "call-cmd",
+                            "name": "local_process",
+                            "arguments": {"command": "make build"},
+                        }
+                    ]
+                },
+            ),
+            ConversationFact(
+                fact_id="run:run-1:tool-result:call-cmd:3",
+                kind=FactKind.TOOL_RESULT,
+                content={
+                    "tool_call_id": "call-cmd",
+                    "text": content,
+                    "is_error": False,
+                    "executed": True,
+                    "metadata": {
+                        "data_classes": ["tool_results"],
+                        "source_receipts": [],
+                        "source_refs": [],
+                        "truncated": False,
+                    },
+                },
+            ),
+        ),
+    )
+    manager = KernelContextManager(
+        system_policy="policy",
+        limits=ContextLimits(max_input_tokens=8_000, output_reserve=500),
+    )
+    action = SubmitMessage(
+        conversation_id="conversation-1",
+        action_seq=3,
+        expected_revision=2,
+        run_id="run-current",
+        message="summarize",
+    )
+    pack = manager.build(state, action, ())
+    return pack, state
+
+
+def test_real_projection_command_output_requires_per_send_disclosure_under_read_grant() -> None:
+    """P1（2026-11-17 审计头条）：真实投影路径的命令输出 TOOL_RESULT 在
+    read_v1（r）许可下必须被 gate 拒绝并要求逐次披露。此前成组投影把命令
+    证明硬编码为 workspace_excerpt，scope data_classes 撒谎使 v1 读许可以
+    grant_workspace_read 放行命令输出外发，绕过 2026-10-26 的 egress 边界；
+    command 许可（workspace_command_v1）仍按类覆盖，合法流不受影响。"""
+
+    pack, state = _real_command_projection()
+    request = build_disclosure_request_v2(
+        descriptor=_descriptor(),
+        scope=pack.consent_scope,
+        grant=None,
+        purpose="runtime_progress",
+        run_id="run-1",
+    )
+
+    def gate(grant, **overrides):
+        return evaluate_provider_dispatch(
+            state=replace(state, provider_consent_grant=grant),
+            descriptor=_descriptor(),
+            scope=pack.consent_scope,
+            now=_T0,
+            purpose="runtime_progress",
+            run_id="run-2",
+            **overrides,
+        )
+
+    read_grant = mint_provider_consent_grant(
+        state=ConversationState.new("conversation-1"),
+        request=request,
+        action_seq=1,
+        now=_T0,
+        profile=CONSENT_PROFILE_WORKSPACE_READ,
+    )
+    denied = gate(read_grant)
+    assert not denied.admitted
+    assert denied.reason == "decision_required"
+
+    command_grant = mint_provider_consent_grant(
+        state=ConversationState.new("conversation-1"),
+        request=request,
+        action_seq=1,
+        now=_T0,
+        profile=CONSENT_PROFILE_WORKSPACE_COMMAND,
+    )
+    admitted = gate(command_grant)
+    assert admitted.admitted and admitted.grant_use
+    assert admitted.reason == "grant_workspace_read"
+
+
+def test_real_projection_command_output_exact_receipt_once_then_p3_1_guard() -> None:
+    """P1 守卫链：真实投影的诚实标签下，read_v1 窄许可对命令输出只放行
+    用户明确批准的那一次（exact_receipt 单次票据）；票据消费后 P3-1 守卫
+    （_exception_is_covered 的 command_output 检查）拒绝 grant_exception
+    复用，回到逐次披露。此前错标签让守卫永不触发、grant 直接放行。"""
+
+    pack, state = _real_command_projection()
+    read_grant = mint_provider_consent_grant(
+        state=ConversationState.new("conversation-1"),
+        request=build_disclosure_request_v2(
+            descriptor=_descriptor(),
+            scope=pack.consent_scope,
+            grant=None,
+            purpose="runtime_progress",
+            run_id="run-1",
+        ),
+        action_seq=1,
+        now=_T0,
+        profile=CONSENT_PROFILE_WORKSPACE_READ,
+    )
+    granted = replace(state, provider_consent_grant=read_grant)
+
+    def gate(current, *, run_id="run-2"):
+        return evaluate_provider_dispatch(
+            state=current,
+            descriptor=_descriptor(),
+            scope=pack.consent_scope,
+            now=_T0,
+            purpose="runtime_progress",
+            run_id=run_id,
+        )
+
+    # 用户对该 exact 边界答 y：单次票据放行一次，不是 grant 复用。
+    previous = build_disclosure_request_v2(
+        descriptor=_descriptor(),
+        scope=pack.consent_scope,
+        grant=read_grant,
+        purpose="runtime_progress",
+        run_id="run-2",
+    )
+    receipt = ProviderDisclosureReceiptV2(
+        receipt_id="receipt-command-real",
+        request_digest=previous.request_digest,
+        acknowledged_action_seq=2,
+        acknowledged_at=_T0,
+        consumed_at=None,
+    )
+    approved = replace(
+        granted,
+        provider_disclosure_request=previous,
+        provider_disclosure_receipt=receipt,
+    )
+    immediate = gate(approved)
+    assert immediate.admitted and not immediate.grant_use
+    assert immediate.reason == "exact_receipt"
+
+    # 票据消费后：不走 grant_exception（P3-1），每次都要单独批准。
+    consumed = replace(
+        approved,
+        provider_disclosure_receipt=replace(receipt, consumed_at=_T0),
+    )
+    later = gate(consumed, run_id="run-3")
+    assert not later.admitted and later.reason == "decision_required"
+
+
+def test_consent_ux_s5_tui_control_correction_is_new_user_input_until_consumed() -> None:
+    """S5（2026-11-17 审计 LOW）：TUI goal 纠正的 fact_id 是
+    control:tui-control:<uuid>:user（request_id 自身含冒号，无 action seq），
+    旧解析直接跳过——ack 之后的纠正消息必须判为新用户输入；已被 goal
+    delta 消费（fact_id 进入 created_from_fact_ids）的历史纠正不阻塞
+    resume 复用，避免每次重问。"""
+
+    from agent.runtime.provider_consent import _no_new_user_input_since
+
+    receipt = ProviderDisclosureReceiptV2(
+        receipt_id="receipt-s5-control",
+        request_digest="0" * 64,
+        acknowledged_action_seq=5,
+        acknowledged_at=_T0,
+        consumed_at=None,
+    )
+    correction = ConversationFact(
+        fact_id="control:tui-control:0f8a2b4e-1111-2222-3333-444455556666:user",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "stop, use the other target", "control": "goal_correction"},
+    )
+    goal = GoalFrame(
+        goal_id="goal-1",
+        revision=2,
+        created_from_fact_ids=("user-1",),
+        workspace_identity_digest="workspace-1",
+        user_outcome="run the build",
+        beneficiary="user",
+        targets=("notes/a.md",),
+        scope=("workspace",),
+        non_goals=(),
+        assumptions=(),
+        proposed_criteria=(ProposedCriterion("criterion-1", "build passes"),),
+        admitted_criteria=(),
+        authority_snapshot="authority-1",
+        status=GoalStatus.GOAL_READY,
+        created_at=_T0,
+        updated_at=_T0,
+    )
+    state = replace(
+        ConversationState.new("conversation-s5"),
+        goal=goal,
+        facts=(correction,),
+    )
+    assert _no_new_user_input_since(state, receipt) is False
+
+    consumed = replace(
+        state,
+        goal=replace(goal, created_from_fact_ids=("user-1", correction.fact_id)),
+    )
+    assert _no_new_user_input_since(consumed, receipt) is True
+
+
+def test_consent_ux_s5_tui_control_correction_blocks_exact_receipt_reuse() -> None:
+    """S5 端到端：ack 之后到达的 TUI 纠正消息必须使 exact_receipt /
+    exact_routine_scope 复用失配（decision_required 重问），不能因 fact_id
+    无 action seq 而静默按旧授权发送。"""
+
+    scope = _scope()
+    request = _v2_request(scope=scope, run_id="run-1")
+    receipt = ProviderDisclosureReceiptV2(
+        receipt_id="receipt-s5-gate",
+        request_digest=request.request_digest,
+        acknowledged_action_seq=2,
+        acknowledged_at=_T0,
+        consumed_at=None,
+    )
+    correction = ConversationFact(
+        fact_id="control:tui-control:0f8a2b4e-1111-2222-3333-444455556666:user",
+        kind=FactKind.USER_MESSAGE,
+        content={"text": "stop, use the other target", "control": "goal_correction"},
+    )
+    state = replace(
+        ConversationState.new("conversation-s5"),
+        provider_disclosure_request=request,
+        provider_disclosure_receipt=receipt,
+        facts=(correction,),
+    )
+    gate = evaluate_provider_dispatch(
+        state=state,
+        descriptor=_descriptor(),
+        scope=scope,
+        now=_T0,
+        purpose="runtime_progress",
+        run_id="run-1",
+    )
+    assert not gate.admitted and gate.reason == "decision_required"
+
+
 def _background_binding() -> BackgroundOccurrenceBindingV1:
     return BackgroundOccurrenceBindingV1.create(
         automation_id="automation:nightly-report",

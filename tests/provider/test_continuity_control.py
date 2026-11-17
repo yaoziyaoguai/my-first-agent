@@ -19,7 +19,10 @@ import pytest
 
 from agent.provider.anthropic_http import AnthropicCompatibleProvider
 from agent.provider.config import AgentProviderConfig
-from agent.provider.normalize import context_to_openai_messages
+from agent.provider.normalize import (
+    ProviderContinuityError,
+    context_to_openai_messages,
+)
 from agent.provider.openai_http import OpenAICompatibleProvider
 from agent.provider.protocol import ProviderProtocolError
 from agent.runtime.context import ContextLimits, KernelContextManager
@@ -2412,8 +2415,9 @@ def test_c2_success_prefix_and_safely_closed_suffix_project_into_paired_wire() -
     assert "rejected" in tool_messages[1]["content"]
     assert "not executed" in tool_messages[2]["content"]
 
-    # continuation 绑定 provider 身份：其它投影 fail closed，不回放也不丢弃。
-    with pytest.raises(ProviderProtocolError, match="provider_continuity_mismatch"):
+    # continuation 绑定 provider 身份：其它投影 fail closed，不回放也不丢弃;
+    # 请求侧 deterministic 失败直接 fatal,不进 repair 循环。
+    with pytest.raises(ProviderContinuityError, match="provider_continuity_mismatch"):
         context_to_anthropic_messages(context)
 
     # 无 continuation 会话（如 Anthropic 侧）：两种真实投影都精确成对。

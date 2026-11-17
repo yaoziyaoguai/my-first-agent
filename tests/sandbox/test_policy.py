@@ -10,6 +10,8 @@ import pytest
 
 from agent.sandbox.contracts import SandboxMode, SandboxNetworkMode
 from agent.sandbox.policy import (
+    IPC_PROXY_DENY_CLAUSES,
+    NETWORK_ONLY_SEATBELT_PROFILE,
     SENSITIVE_FILENAME_PATTERNS,
     allow_write_subpath,
     build_sandbox_policy,
@@ -285,6 +287,43 @@ def test_profile_shape_is_fixed_clause_prefix(tmp_path):
     assert lines[1] == "(allow default)"
     assert lines[2] == "(deny file-write*)"
     assert profile.endswith("\n")
+
+
+@pytest.mark.parametrize(
+    "mode",
+    (SandboxMode.READ_ONLY, SandboxMode.WORKSPACE_WRITE),
+)
+def test_confined_profiles_deny_ipc_proxy_channels(tmp_path, mode):
+    """P2 修复钉子：(allow default) 下 appleevent-send/lsopen 与 LaunchServices/
+    AppleEvents 代理链 mach 服务默认放行，获批的 confined 命令可经 osascript/
+    LaunchServices(open) 驱动沙箱外应用产生副作用。confined profile 固定补拒
+    这些通道；不整族封死 mach-lookup（deny 全族会破坏正常命令的既有服务），
+    也不重做全量 allow-list。"""
+    profile = compile_seatbelt_profile(_policy(tmp_path, mode=mode))
+    lines = set(profile.splitlines())
+    assert set(IPC_PROXY_DENY_CLAUSES) <= lines
+    for name in (
+        "com.apple.coreservices.appleevents",
+        "com.apple.coreservices.launchservicesd",
+        "com.apple.CoreServices.coreservicesd",
+        "com.apple.coreservices.quarantine-resolver",
+        # 本机 qualification（Darwin 24.5.0 system domain active 端点）显示
+        # 的承担 open 请求的 lsd 入口，Oracle 允许沿代理链补拒。
+        "com.apple.lsd.open",
+    ):
+        assert f'(deny mach-lookup (global-name "{name}"))' in lines, name
+    # 只按名拒固定入口：不整族封死 mach-lookup。
+    assert "(deny mach-lookup)" not in lines
+    assert "(deny mach-lookup*)" not in lines
+
+
+def test_ipc_proxy_denials_are_confined_only_network_profile_untouched(tmp_path):
+    # danger/off 的 network-only profile 三行冻结，不携带 IPC/子路径子句。
+    policy = _policy(tmp_path, mode=SandboxMode.DANGER_FULL_ACCESS)
+    profile = compile_seatbelt_profile(policy)
+    assert profile == NETWORK_ONLY_SEATBELT_PROFILE
+    for clause in IPC_PROXY_DENY_CLAUSES:
+        assert clause not in profile
 
 
 @pytest.mark.parametrize(

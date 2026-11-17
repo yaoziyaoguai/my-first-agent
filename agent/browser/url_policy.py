@@ -195,6 +195,36 @@ class BrowserURLPolicy:
             address_digest=address_digest,
         )
 
+    def launch_pins(
+        self, allowed_origins: tuple[str, ...]
+    ) -> tuple[tuple[str, str], ...]:
+        """site-bound launch 边界的 DNS pin：allowlist host → 已验证 public 首选地址。
+
+        与 admit 同一 public 判据（全部 A/AAAA answer 必须 public）。多地址
+        集合只取 resolver 顺序首选（OS 优先级）：Chromium 的 MAP 每 host 只
+        接受单个替代地址，被钉住的连接永不落回其余 answer——被钉 edge 不可
+        达时站点失败（fail closed），不回退多 CDN failover。任一 origin
+        解析/判据失败即抛 URLPolicyError，不产生部分覆盖的 pin 集。
+        """
+        hosts: list[str] = []
+        for origin in allowed_origins:
+            host = urlsplit(canonical_https_origin(origin)).hostname or ""
+            if host not in hosts:
+                hosts.append(host)
+        pins: list[tuple[str, str]] = []
+        for host in hosts:
+            answers = self._resolver.resolve(host)
+            if not answers:
+                raise URLPolicyError("no_dns_answer")
+            for answer in answers:
+                _require_public_address(answer)
+            pins.append((host, answers[0]))
+        # 覆盖断言：pin 集与 allowlist host 集一致——缺任何 host 都不得启动
+        # 部分覆盖的 pin 集（未钉住的 allowlist host 会重新打开单次窗口）。
+        if {host for host, _address in pins} != set(hosts):
+            raise URLPolicyError("dns_pin_coverage_incomplete")
+        return tuple(pins)
+
 
 def _admit_task_loopback(
     url: str,

@@ -16,6 +16,7 @@ from agent.runtime.contracts import (
     EvidenceOracleKind,
     FactKind,
     GoalStatus,
+    InteractionState,
     SourceKind,
     SourceReceiptV1,
 )
@@ -38,7 +39,10 @@ class GoalView:
     conversation_id: str
     goal_id: str | None
     goal_revision: int | None
-    status: str
+    # 有 Goal 时是 GoalStatus；无 Goal 时退化承载 InteractionState
+    # （"answering"/"clarifying" 等空闲面可见状态）。两者都是 StrEnum，
+    # 字符串表示/相等性不变，仅收窄类型防止任意 str 混入。
+    status: GoalStatus | InteractionState
     interaction_state: str
     user_outcome: str | None
     targets: tuple[str, ...]
@@ -78,7 +82,7 @@ def verification_scope_message(scopes: tuple[str, ...]) -> str:
 def delivery_summary_message(view: GoalView) -> str:
     """从终态生成不依赖模型自述的最小交付摘要。"""
 
-    if view.status != GoalStatus.VERIFIED_DONE.value or view.user_outcome is None:
+    if view.status is not GoalStatus.VERIFIED_DONE or view.user_outcome is None:
         raise ValueError("delivery summary requires a verified Goal")
     targets = ", ".join(view.targets) if view.targets else "no declared file target"
     authority_status = "closed" if view.durable_authorities_closed else "still open"
@@ -243,6 +247,9 @@ def project_goal_target_reuse_unavailable(state: ConversationState) -> bool:
         or not isinstance(active.pending_request, ApprovalRequest)
     ):
         return False
+    # 工具范围与 state._goal_target_authorization_scope 的准入门同源（只含
+    # write_file/edit_file）；make_directory 无内容语义，不并入
+    # evidence.WORKSPACE_WRITE_TOOLS。
     return active.pending_request.tool_name in {"write_file", "edit_file"}
 
 
@@ -333,7 +340,7 @@ def project_goal_view(state: ConversationState) -> GoalView:
             conversation_id=state.conversation_id,
             goal_id=None,
             goal_revision=None,
-            status=state.interaction_state.value,
+            status=state.interaction_state,
             interaction_state=state.interaction_state.value,
             user_outcome=None,
             targets=(),
@@ -366,7 +373,7 @@ def project_goal_view(state: ConversationState) -> GoalView:
         conversation_id=state.conversation_id,
         goal_id=goal.goal_id,
         goal_revision=goal.revision,
-        status=goal.status.value,
+        status=goal.status,
         interaction_state=state.interaction_state.value,
         user_outcome=goal.user_outcome,
         targets=goal.targets,

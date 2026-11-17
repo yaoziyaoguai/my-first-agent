@@ -6,7 +6,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from agent.provider.protocol import ProviderProtocolError
+from agent.provider.protocol import ProviderFatalError, ProviderProtocolError
 from agent.runtime.contracts import (
     RESERVED_CONTROL_NAME,
     BeginAnswer,
@@ -80,9 +80,38 @@ def _fail(reason: str, *, detail: str | None = None) -> ProviderProtocolError:
     return ProviderProtocolError(reason, detail=detail)
 
 
+class ProviderContinuityError(ProviderFatalError):
+    """请求投影阶段的 provider continuity/identity 失败。
+
+    同一 trusted context 重试必然原样复现(缺失的 opaque reasoning 无法由
+    模型重建,digest 不匹配也不会因重试改变),不是可修复的响应缺陷;因此
+    不继承 InvalidProviderResponseError,永不进入 invalid_repairs repair
+    循环,直接按 provider_configuration_error fail closed。
+    """
+
+    code = "provider_configuration_error"
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        self.status_code = None
+        RuntimeError.__init__(self, reason)
+
+
+def _reject_lone_surrogates(value: str) -> None:
+    # JSON 转义 \udXXX 会把孤立代理字符带进 str(合法代理对除外):它们能通过
+    # isinstance 校验,却永远无法 encode("utf-8")。不在归一化入口拒绝,就会在
+    # ProviderContinuationV1/checkpoint 写盘/HTTP 编码层以未分类
+    # UnicodeEncodeError 炸出;统一 fail closed 为 malformed_response。
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise _fail("malformed_response") from None
+
+
 def _string(value: object, *, reason: str, allow_empty: bool = False) -> str:
     if not isinstance(value, str) or (not allow_empty and not value):
         raise _fail(reason)
+    _reject_lone_surrogates(value)
     return value
 
 
@@ -535,7 +564,7 @@ def _compacted_summary_text(block: dict[str, Any]) -> str:
 def context_to_anthropic_messages(context: ContextPack) -> list[dict[str, Any]]:
     validate_context_pack(context)
     if any(message.provider_continuation is not None for message in context.messages):
-        raise _fail("provider_continuity_mismatch")
+        raise ProviderContinuityError("provider_continuity_mismatch")
     messages: list[dict[str, Any]] = []
     for message in context.messages:
         content: list[dict[str, Any]] = []
@@ -667,10 +696,10 @@ def context_to_openai_messages(
                 or provider_identity_digest is None
                 or continuation.provider_identity_digest != provider_identity_digest
             ):
-                raise _fail("provider_continuity_mismatch")
+                raise ProviderContinuityError("provider_continuity_mismatch")
             projected["reasoning_content"] = continuation.opaque_payload
         elif require_reasoning_continuity and message.role == "assistant":
-            raise _fail("missing_reasoning_continuity")
+            raise ProviderContinuityError("missing_reasoning_continuity")
         if tool_calls:
             projected["tool_calls"] = tool_calls
         messages.append(projected)
@@ -880,7 +909,9 @@ def _control_tuple(value: object, decode_item: Callable[[object], Any]) -> tuple
 
 
 def _control_exact_keys(value: dict[str, Any], expected: frozenset[str]) -> None:
-    # 每一层都要求精确键集:缺键与未知键同样 fail closed。
+    # 每一层都要求精确键集:缺键与未知键同样 fail closed。detail 只回显受限
+    # 键名并按 _STRICT_DETAIL_LIMIT 截断:键名与数量由模型侧控制,不设界会
+    # 随 repair 消息写入 policy_result 并撑爆 checkpoint。
     if set(value) != expected:
         raise _fail(
             _MALFORMED_CONTROL,
@@ -888,7 +919,7 @@ def _control_exact_keys(value: dict[str, Any], expected: frozenset[str]) -> None
                 f"expected exactly {sorted(expected)}; "
                 f"missing {sorted(expected - set(value))}; "
                 f"unexpected {sorted(set(value) - expected)}"
-            ),
+            )[:_STRICT_DETAIL_LIMIT],
         )
 
 
@@ -1247,6 +1278,7 @@ class _ResponseAccumulator:
         self.blocks: list[ModelTextBlock | ModelToolCall] = []
         self.control: ModelControlBlock | None = None
         self._has_ordinary_call = False
+        self._ordinary_call_ids: set[str] = set()
         self._trusted_completion_binding = trusted_completion_binding
 
     def add_text(self, text: str) -> None:
@@ -1264,6 +1296,17 @@ class _ResponseAccumulator:
             return
         if self.control is not None:
             raise _fail(_RESERVED_CONTROL_CONFLICT)
+        # 同一响应内重复 tool_call_id 是可归因 provider 的协议违规:在这里
+        # 以 malformed_tool_call 拒绝,才会落入 InvalidProviderResponseError 的
+        # invalid_repairs 有界修复预算;放行则要到 start_tool_batch 的状态层
+        # 不变量才以裸 ValueError 炸出,被外层升级为 runtime_failure fatal,
+        # 归因错置且一次也不消耗修复额度。
+        if tool_call_id in self._ordinary_call_ids:
+            raise _fail(
+                "malformed_tool_call",
+                detail="duplicate tool_call_id within one response",
+            )
+        self._ordinary_call_ids.add(tool_call_id)
         self._has_ordinary_call = True
         self.blocks.append(ModelToolCall(tool_call_id, name, arguments))
 
@@ -1305,6 +1348,9 @@ def normalize_anthropic_response(
             )
             name = _string(block.get("name"), reason="malformed_tool_call")
             arguments = _object(block.get("input"), reason="malformed_tool_call")
+            # 参数树的嵌套字符串不经 _string;整体做一次编码探测,覆盖普通
+            # 调用与保留控制载荷的全部嵌套值。
+            _reject_lone_surrogates(_canonical_json(arguments))
             accumulator.add_tool_call(tool_call_id, name, arguments)
         else:
             raise _fail("unsupported_response_block")
@@ -1315,8 +1361,10 @@ def normalize_anthropic_response(
     else:
         usage_object = _object(usage, reason="malformed_usage")
     stop_reason = payload.get("stop_reason")
-    if stop_reason is not None and not isinstance(stop_reason, str):
-        raise _fail("malformed_response")
+    if stop_reason is not None:
+        if not isinstance(stop_reason, str):
+            raise _fail("malformed_response")
+        _reject_lone_surrogates(stop_reason)
     return ModelResponse(
         blocks=tuple(accumulator.blocks),
         control=accumulator.control,
@@ -1356,6 +1404,7 @@ def normalize_openai_response(
     if content is not None:
         if not isinstance(content, str):
             raise _fail("unsupported_response_block")
+        _reject_lone_surrogates(content)
         accumulator.add_text(content)
 
     provider_continuation = None
@@ -1363,6 +1412,9 @@ def normalize_openai_response(
     if provider_identity_digest is not None:
         if not isinstance(reasoning_content, str) or not reasoning_content:
             raise _fail("missing_reasoning_continuity")
+        # 必须在 ProviderContinuationV1 构造(内部 .encode("utf-8"))前拒绝,
+        # 否则以未分类 UnicodeEncodeError 炸出。
+        _reject_lone_surrogates(reasoning_content)
         provider_continuation = ProviderContinuationV1.create(
             provider_identity_digest=provider_identity_digest,
             opaque_payload=reasoning_content,
@@ -1397,11 +1449,16 @@ def normalize_openai_response(
             except json.JSONDecodeError:
                 raise _fail("malformed_tool_call") from None
         arguments = _object(arguments, reason="malformed_tool_call")
+        # 参数树的嵌套字符串不经 _string;整体做一次编码探测,覆盖普通
+        # 调用与保留控制载荷的全部嵌套值。
+        _reject_lone_surrogates(_canonical_json(arguments))
         accumulator.add_tool_call(tool_call_id, name, arguments)
 
     raw_stop_reason = choice.get("finish_reason")
-    if raw_stop_reason is not None and not isinstance(raw_stop_reason, str):
-        raise _fail("malformed_response")
+    if raw_stop_reason is not None:
+        if not isinstance(raw_stop_reason, str):
+            raise _fail("malformed_response")
+        _reject_lone_surrogates(raw_stop_reason)
     stop_reason = {
         "stop": "end_turn",
         "tool_calls": "tool_use",
@@ -1463,6 +1520,7 @@ def latest_user_text(context: ContextPack) -> str:
 
 
 __all__ = [
+    "ProviderContinuityError",
     "context_to_anthropic_messages",
     "context_to_openai_messages",
     "context_tools_to_anthropic",

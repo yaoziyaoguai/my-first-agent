@@ -685,3 +685,17 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
   4238 → 净增 64 测试。
 - **执行方式**：12 个文件所有权严格不相交的修复包（9 并行+3 顺序化）
   + 12 对抗验证者，全部 Red→Green；oracle_web 交叉裁决上游审计 6 项。
+- **收尾链**：分支 `fix/2026-11-17-audit-root-causes` → commit `cd89540`
+  （修复）+ `6218402`（P3-A 文档修正）→ push → PR #30 → merge gate →
+  **merge `96cf887`（分支保留）**。
+- **Merge gate（PR #30）**：**PASS（0 P0/P1/P2）**。六焦点全成立，两个
+  反事实探针实证（投影回退→3 红+漏洞复现；nlink==2 修复分支禁用→死锁
+  红）。P3-A 文档诚实度（lease「三层」夸大→实为两层）已在合并前修正。
+  LOW×2 记录待后续：①checkpoint `try_acquire` 终名不存在路径的清扫可
+  unlink 并发 initialize 在途 tmp，使其收到语义不精确的 Conflict（fail-
+  closed、无损坏、双进程同会话竞争才触发）；②`ProviderContinuityError`
+  绕过基类 `__init__`，消息为 reason 而非 code（合同措辞不一致）。
+- **待用户裁决（累积）**：host-home HOME 白名单读模型重设计、anthropic
+  协作取消、SSE 4MB 预算缩放、lease 休眠语义（mach_continuous_time）、
+  loop.py 体量重构（架构债排序第一）；余候选不变（#3 项目环境准备、#4
+  真实数据源 scope、#2 自助恢复、#5 Memory 旅程、#3 019 host）。

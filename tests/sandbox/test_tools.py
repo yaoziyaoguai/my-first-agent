@@ -312,6 +312,81 @@ def test_p3_normal_in_window_reuse_unaffected() -> None:
     assert not isinstance(prepare_reuse(), ApprovalRequired)
 
 
+def test_lease_validity_counts_sleep_time_via_wall_window() -> None:
+    """oracle 裁决 D 子项：lease 有效期包含机器休眠（wall 前进计入过期倒计时）。
+
+    lease 10:00 发放 / 11:00 到期；10:10 首次复用观测（锚定 monotonic）。随后
+    机器长休眠：wall 前进到 11:30（越过 expires），monotonic 仅前进 60 秒
+    （macOS 下休眠不计）——若只看 monotonic 层，此时仅见到 660s 经过
+    （< 3600s 租期）会放行；Green 合同：wall 窗口逐次判定先拒绝，休眠后的
+    复用重新 approval。
+    """
+
+    clock = {"now": "2026-08-27T10:10:00+00:00"}
+    monotonic = {"now": 1000.0}
+    runtime = KernelToolRuntime(
+        (
+            RegisteredTool(
+                spec=_spec(),
+                func=lambda _intent: _draft(),
+                prepare_binding=lambda _arguments: dict(_binding()),
+            ),
+        ),
+        clock=lambda: clock["now"],
+        monotonic_clock=lambda: monotonic["now"],
+    )
+    candidate = runtime.prepare(_call(), _context()).request.sandbox_authority_candidate
+    lease = _lease(
+        candidate,
+        issued_at="2026-08-27T10:00:00+00:00",
+        expires_at="2026-08-27T11:00:00+00:00",
+    )
+
+    def prepare_reuse():  # noqa: ANN202
+        return runtime.prepare(_call(), _context(sandbox_leases=(lease,)))
+
+    # 窗口内首用（视在年龄 600s）→ 允许，锚定 monotonic 观测。
+    first = prepare_reuse()
+    assert not isinstance(first, ApprovalRequired)
+    # 长休眠：wall 越过 11:00 到期，monotonic 仅前进 60s（休眠不计）→ 拒绝。
+    monotonic["now"] = 1000.0 + 60.0
+    clock["now"] = "2026-08-27T11:30:00+00:00"
+    assert isinstance(prepare_reuse(), ApprovalRequired)
+
+
+def test_lease_reuse_within_window_after_short_sleep_unaffected() -> None:
+    """对照：短休眠未把 wall 推出窗口且 monotonic 未越租期 → 复用不受影响。"""
+
+    clock = {"now": "2026-08-27T10:10:00+00:00"}
+    monotonic = {"now": 1000.0}
+    runtime = KernelToolRuntime(
+        (
+            RegisteredTool(
+                spec=_spec(),
+                func=lambda _intent: _draft(),
+                prepare_binding=lambda _arguments: dict(_binding()),
+            ),
+        ),
+        clock=lambda: clock["now"],
+        monotonic_clock=lambda: monotonic["now"],
+    )
+    candidate = runtime.prepare(_call(), _context()).request.sandbox_authority_candidate
+    lease = _lease(
+        candidate,
+        issued_at="2026-08-27T10:00:00+00:00",
+        expires_at="2026-08-27T11:00:00+00:00",
+    )
+
+    def prepare_reuse():  # noqa: ANN202
+        return runtime.prepare(_call(), _context(sandbox_leases=(lease,)))
+
+    assert not isinstance(prepare_reuse(), ApprovalRequired)
+    # 短休眠：wall 到 10:50 仍在窗口内，monotonic 仅前进 60s → 仍允许。
+    monotonic["now"] = 1000.0 + 60.0
+    clock["now"] = "2026-08-27T10:50:00+00:00"
+    assert not isinstance(prepare_reuse(), ApprovalRequired)
+
+
 def test_invoke_accepts_only_matching_sandbox_draft_and_mints_closed_receipt() -> None:
     runtime = _runtime()
     candidate = runtime.prepare(_call(), _context()).request.sandbox_authority_candidate
@@ -655,6 +730,13 @@ def test_native_trust_notice_distinguishes_danger_off_from_danger_full(tmp_path)
         assert service in notice, service
     assert "do not block all IPC" in notice
     assert "no IPC denial" in notice
+    # A 子项修复披露：workspace-write 只限制写入位置；读取范围仍覆盖
+    # 策略未显式拒绝且操作系统允许的宿主文件，不宣称 confined=仅 workspace 可读。
+    assert "confines write locations only" in notice
+    assert (
+        "reads still cover host files that the policy does not explicitly "
+        "deny and the operating system permits" in notice
+    )
     # digest 从当前文本派生：文本变更即触发新 digest。
     roots = {}
     for name in ("workspace", "temp", "state", "home"):

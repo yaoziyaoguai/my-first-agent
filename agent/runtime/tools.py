@@ -1099,6 +1099,11 @@ class KernelToolRuntime:
         判定更早到期（fail closed 方向）。跨进程重启后由 durable wall 窗口兜底
         回拨到 issued 之前的攻击；重启后回拨到窗口内的残余窗口需要 lease 结构
         持久化观测字段（contracts/checkpoint 域），不在本修复包所有权内。
+
+        休眠语义（oracle 裁决 D 子项，2026-11-17）：有效期包含机器休眠——
+        wall 窗口逐次使用时判定，休眠期间 wall 前进照常计入过期倒计时；
+        monotonic 层（macOS 下不计休眠）只收紧不放宽，不会把休眠误判为
+        未经过时间。
         """
         now_dt = _parse_zoned_rfc3339(self._clock())
         issued_dt = _parse_zoned_rfc3339(issued_at)

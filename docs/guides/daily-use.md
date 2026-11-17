@@ -69,7 +69,10 @@ python3 -m pytest -q
 然后从同一终端运行上面的 `start --workspace ...`。launcher 保留调用者 PATH，命令工具会净化
 和绑定它；只用绝对路径启动一个 venv 的 Python **不等于**已经激活该 venv 的命令搜索路径。
 本轮真实测试就遇到这个差异：外部验证有 pytest，Agent 的子进程却只找到系统 Python；修正
-测试进程 PATH 后才完成整条真实任务。不要把找不到依赖解释成 API key 失效或让 Agent 假报完成。
+测试进程 PATH 后才完成整条真实任务。已经进入会话时也可以直接修复：在 Agent 的 REPL 里执行
+`/env-path .venv/bin`（workspace 相对目录），该目录会前缀进本会话命令子进程的 PATH，持续到
+重启；每条命令仍按解析出的可执行文件逐条审批。不要把找不到依赖解释成 API key 失效或让 Agent
+假报完成。
 
 ### 自行安装
 

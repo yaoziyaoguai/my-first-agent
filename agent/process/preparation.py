@@ -59,6 +59,68 @@ def sanitize_captured_path(captured_path: str) -> tuple[tuple[str, ...], str]:
     return tuple(admitted), os.pathsep.join(admitted)
 
 
+class SessionPathAdmissions:
+    """会话内 operator 授权的子进程 PATH 前缀准入表（/env-path 的单一变更点）。
+
+    只放宽 local_process 子进程的 bare 可执行文件名解析（把准入目录前缀进
+    effective captured PATH）；不改文件工具/sandbox/managed web 边界，每条命令
+    仍按 resolved 可执行文件逐条审批。单一 REPL 线程访问假设（operator 侧
+    REPL 命令专用）；不持久化——会话装配重建即回启动期 captured PATH；不进
+    模型上下文。
+    """
+
+    def __init__(self, workspace: Path, *, max_entries: int = 8) -> None:
+        self._workspace = Path(workspace).resolve()
+        self._max_entries = max_entries
+        self._admitted: list[str] = []
+
+    def admit(self, raw_dir: str) -> str:
+        # 先完整校验后提交：任一拒绝不得在表内留下残留（零残留）。
+        if not isinstance(raw_dir, str) or not raw_dir or "\x00" in raw_dir:
+            raise ValueError("path admission must be a non-empty NUL-free string")
+        if raw_dir.startswith("/"):
+            raise ValueError("path admission must be workspace-relative")
+        if ".." in raw_dir.split("/"):
+            raise ValueError("path admission must not contain ..")
+        try:
+            resolved = (self._workspace / raw_dir).resolve(strict=True)
+        except OSError as error:
+            raise ValueError(f"path admission does not resolve: {raw_dir}") from error
+        if not resolved.is_dir():
+            raise ValueError("path admission must be an existing directory")
+        if resolved != self._workspace and not resolved.is_relative_to(self._workspace):
+            # 符号链接解析后落在 workspace 之外视为出界，拒绝。
+            raise ValueError("path admission escapes the workspace after resolution")
+        resolved_text = str(resolved)
+        if any(
+            admitted.casefold() == resolved_text.casefold()
+            for admitted in self._admitted
+        ):
+            # casefold 相等（大小写不敏感文件系统上的重报）→ 幂等 no-op。
+            return resolved_text
+        if len(self._admitted) >= self._max_entries:
+            raise ValueError(
+                f"path admission limit reached: {self._max_entries} entries"
+            )
+        self._admitted.append(resolved_text)
+        return resolved_text
+
+    def snapshot(self) -> tuple[str, ...]:
+        return tuple(self._admitted)
+
+    def effective_captured_path(self, base_captured_path: str) -> str:
+        if not self._admitted:
+            # 无准入时逐字节返回启动期捕获 PATH。
+            return base_captured_path
+        # 最新准入排最前：PATH 按首匹配解析，后准入的目录优先于先准入的
+        # （也与 base 的相对顺序无关地压在系统目录之前）。
+        return (
+            os.pathsep.join(reversed(self._admitted))
+            + os.pathsep
+            + base_captured_path
+        )
+
+
 def parse_process_arguments(arguments: dict) -> tuple[str, list[str], str, str]:
     executable = arguments.get("executable")
     argv = arguments.get("argv") or []

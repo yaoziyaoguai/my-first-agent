@@ -86,6 +86,8 @@ _HELP_TEXT = """Commands:
 /browser-profiles [list|create|revoke|clear] — manage browser profiles
 /project-path [path] — allow one reserved workspace path for this session (no
   argument lists current admissions)
+/env-path [dir] — prefix one workspace directory (e.g. .venv/bin) into this
+  session's subprocess PATH (no argument lists current admissions)
 /pause, /resume, /cancel — control the current task or run
 /approve [request-id], /reject [request-id] — resolve an exact approval (without
   an ID it binds the prompt just shown)
@@ -153,6 +155,7 @@ def run_repl(
     approval_time_factory: Callable[[], str] = utc_now_rfc3339,
     browser_profile_command: Callable[[str], str] | None = None,
     project_path_command: Callable[[str], str] | None = None,
+    env_path_command: Callable[[str], str] | None = None,
 ) -> int:
     make_run_id = run_id_factory or (lambda: str(uuid4()))
     renderer = renderer or TerminalRenderer(write_fn)
@@ -235,6 +238,18 @@ def run_repl(
                 continue
             # 空后缀由命令自身解释为"列出当前准入"。
             write_fn(project_path_command(stripped[len("/project-path") :].strip()))
+            continue
+        if stripped.startswith("/env-path"):
+            if env_path_command is None:
+                # 与 /project-path 同模式：未注入时说明原因与补救，不让
+                # /help 列出的命令变成无出路的拒绝。
+                write_fn(
+                    "Env-path admissions are unavailable in this session "
+                    "(restart the CLI to enable subprocess PATH admission)."
+                )
+                continue
+            # 空后缀由命令自身解释为"列出当前准入"。
+            write_fn(env_path_command(stripped[len("/env-path") :].strip()))
             continue
 
         if stripped == "/sources":

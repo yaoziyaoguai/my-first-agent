@@ -737,3 +737,8 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
   唯一 FAIL 项 E501 超长行，已拆行修复）。Red 基线 7 failed → Green。
 - **完整门**：**4314 passed / 3 skipped / 0 failed**（603s；ruff 全库 0
   错误；wheel 按配方重建）。基线 4302 → 净增 12 测试。
+- **收尾链（裁决轮）**：分支 `fix/2026-11-17-oracle-adjudicated-round` →
+  commit `bfc457d` → PR #31 → merge gate PASS（主会话亲核全部 hunk：anthropic
+  四检查点/异常身份/预算语义、lease 反事实精确性、notice 文案与 digest 动态
+  派生）→ **merge `936434c`（分支保留）**。待用户裁决项清空；缓议重开触发
+  与 E 绞杀式决策已记录（见上）。

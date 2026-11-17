@@ -658,9 +658,10 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
 - **P3 组**：SSE 非 UTF-8/尾截断裸 UnicodeDecodeError→malformed（anthropic）；
   3xx 两侧统一 ProviderHTTPError 非重试（锚点测试更新，不跟随不解析）；
   loop 重试额度活路径复位 vs resume 累计语义矛盾——以注释+resume 侧为准
-  （累计），删除复位；durable lease 时钟回拨三层修复（last_observed_now
-  持久化+回拨即永久失效+进程内 monotonic 经过时长约束，三判定点共享
-  helper）；DNS rebinding——两个 persistent context 启动边界以
+  （累计），删除复位；durable lease 时钟回拨两层加固（既有 durable wall
+  窗口 fail-closed + 进程内 monotonic 经过时长锚，五判定点共享 helper；
+  跨重启的观测字段持久化未做——docstring 披露为已知边界，merge gate
+  P3-A 据此修正本句原「三层」表述）；DNS rebinding——两个 persistent context 启动边界以
   --host-resolver-rules 钉已准入 host（连接层用准入验证过的地址，SNI/
   证书校验保留）；重复 tool_call_id 计入 repair 预算（原 runtime_failure
   旁路可无限循环）；archive mutation 入口补身份校验（原四路径校验、唯

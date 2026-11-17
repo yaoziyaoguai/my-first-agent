@@ -862,8 +862,34 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
   正对照）、重启后临时授权清空+同 conversation 存活、origin 强制。诚实标注：
   provider=fake scripted 状态机非真实模型；报告
   `previews/closure-20261118/install-verification/REPORT.md`。
-- **P0-2（真实层，BLOCKED_AUTHORIZATION）**：driver/候选/安装 venv/编排
-  venv 全部就绪（real-e1e2e3/，复用 2026-10-25 冻结 d04 协议，仅改 EVIDENCE
-  名/回退路径/轮次元数据）；预检 1 请求即失败——环境 DEEPSEEK_API_KEY
-  （****3204）已失效（authentication_error）。待用户提供新 key 后执行；
-  样本预算零消耗。
+- **P0-2（真实层，已执行；用户当日提供新 key，仅环境变量注入、产物防御性
+  抹除）**：证据 `previews/closure-20261118/real-e1e2e3/real-validation-
+  2026-11-18/`（首轮）+ `e2-rerun-2026-11-18-r2/`（E2 有界复跑）。冻结 d04
+  协议逐字复用，候选=4af348a wheel（origin 强制 site-packages）。
+  - **E1-normal PASS**：15/40 请求、69.7s、typed VERIFIED_DONE、业务+附加
+    检查全 true（含 cli_both_names/legacy_alias）。
+  - **E2-staged 首跑 INCOMPLETE_EVIDENCE（13/40）**：根因=模型侧控制协议
+    失败——纠正注入后连续构造非法 goal_delta_proposal（已禁用的
+    goal_proposal → 原子性违规 → 保留 criterion:required-\* 标识符），8 次
+    调用耗尽修复额度，产品按设计 `failed_fatal`（invalid_provider_response）
+    fail-closed、exit 1、状态耐久。工程排除：三条拒绝规则出自
+    96a1d77/1e89417（远早于 2026-10-25 E2 PASS 身份），goal_delta 治理路径
+    自该身份后零改动；同协议同模型 2026-10-25 曾 29 请求全 PASS。分类=
+    **模型行为差异**。
+  - **E2-staged r2 有界复跑（r10 先例额度，唯一一次）FAIL_FALSE_COMPLETION
+    （21/40）**：暂停-恢复-纠正治理链 **10/10 全 true**（consumed/
+    version_changed=2/paused_after_consumption/resumed_in_new_process/
+    resume_advanced/composite_identity/persists/flags 一致，
+    stop_reason=verified_done，final_validation=true）；唯一缺口=交付代码
+    把「新旧同给即拒绝」实现成「同给且**值不同**才拒绝」（workspace
+    service.py:18-24），grader 同值探针不抛 → conflict_rejected=False →
+    latest_correction 复合判据 False。分类=**模型语义误解**，落在
+    文档声明边界内（「不保证任意自然语言要求均被理解」；独立反例验收
+    正是 grader 职责，daily-use 已明示）。
+  - **E3-already-correct PASS**：10/20 请求、36.2s、typed 终态、零写契约
+    成立（files_unchanged=true、effects=0）。
+  - **收官判定：三旅程闭合、无新 P0/P1**——两次 E2 失败均为模型侧且产品
+    零缺陷（治理在两次中都正确围堵：r1 failed_fatal、r2 诚实达成
+    VERIFIED_DONE 而由独立 grader 暴露语义缺口）；按停止条件**不做第三次
+    重跑**（禁止无限重掷）、不做提示词调优、不新增工具控制层。累计真实
+    请求 59（38+21）。

@@ -190,11 +190,11 @@ Task: change greet() in app.py to return 'howdy' and verify by running python3 c
 | 任务显示完成但未验证 | 看 `Verified delivery` 的证据范围行；`RunStatus.COMPLETED` 不等于验收完成 |
 | **Checkpoint 安全错误**（本次会话未能安全打开/关闭） | 先确认旧进程已结束、无未确认的执行资源，再用**原 workspace 与原 state 位置**重启。不要删除 checkpoint/lock、不要新建空状态绕过。若新进程仍失败：停止操作并保留状态，用于定位 |
 
-## 支持矩阵（2026-10-18）
+## 支持矩阵（2026-11-18 收官更新）
 
 | 对象 | 状态 |
 |---|---|
-| DeepSeek Flash `deepseek-flash`（api.deepseek.com，openai_compatible，thinking disabled） | 2026-10-24/25 真实层验证所用模型（E1/E2 全链 PASS、r 读域许可真实旅程 PASS）。**更正（2026-10-25）**：下表原记录的 `deepseek-v4-flash` 名称已不在官方支持列表（2026-10-24 实测仅 `deepseek-flash` / `deepseek-v4-pro`），不要再按旧名配置 |
+| DeepSeek Flash `deepseek-flash`（api.deepseek.com，openai_compatible，thinking disabled） | **收官身份真实层（2026-11-18，冻结 d04 协议，安装物 origin 过门）**：E1 普通旅程 PASS、E3 零写契约 PASS；E2 纠正/恢复旅程治理链（注入→消费→pause→新进程 resume）10/10 实证闭合，唯交付代码对纠正条款存在模型侧语义误解（「同给即拒绝」被实现成「同给且值不同才拒绝」），按停止条件以诚实分类收档——**纠正类自然语言条款的完整语义实现不可保证，须按本指南要求独立检查反例**。历史：2026-10-24/25 真实层 E1/E2/E3 全链 PASS（含 r 读域许可旅程） |
 | 仓库内其它 adapter（anthropic_compatible 等） | 仅有离线测试证据；**未经真实调用验证** |
 | 其它"OpenAI 兼容"服务 | 未验证；协议名相近不等于支持 |
 | 非 macOS 平台 | 不支持（Seatbelt 专属） |

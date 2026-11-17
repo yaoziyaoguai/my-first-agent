@@ -24,6 +24,7 @@ from agent.tools.edit import (
 )
 from agent.tools.path_safety import (
     MissingParentDirectoryError,
+    ProjectPathAdmissions,
     TraversalLimits,
     WorkspaceBoundary,
     WorkspaceSecurityError,
@@ -81,6 +82,7 @@ def build_file_tool_registrations(
     protected_paths: tuple[Path, ...] = (),
     private_roots: tuple[str, ...] = DEFAULT_PRIVATE_ROOTS,
     project_paths: tuple[str, ...] = (),
+    project_path_admissions: ProjectPathAdmissions | None = None,
     max_file_bytes: int = DEFAULT_FILE_LIMIT_BYTES,
     max_list_entries: int = DEFAULT_LIST_LIMIT,
     max_scan_entries: int = DEFAULT_SCAN_LIMIT,
@@ -104,6 +106,7 @@ def build_file_tool_registrations(
         protected_paths=protected_paths,
         private_roots=private_roots,
         project_paths=project_paths,
+        project_path_admissions=project_path_admissions,
     )
 
     def safe_binding(operation, *, explain_missing_parent: bool = False):

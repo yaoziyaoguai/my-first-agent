@@ -67,7 +67,7 @@ from agent.skill.catalog import SkillLimits, build_skill_catalog
 from agent.skill.execution import SkillExecutionConfig
 from agent.skill.tools import build_skill_tool_registrations
 from agent.tools.file_ops import DEFAULT_PRIVATE_ROOTS, build_file_tool_registrations
-from agent.tools.path_safety import WorkspaceBoundary
+from agent.tools.path_safety import ProjectPathAdmissions, WorkspaceBoundary
 from agent.transport_audit import TransportAttemptRecorder
 from agent.web.client import TavilyClient
 from agent.web.profile import WebProfileV1
@@ -617,6 +617,7 @@ def build_tool_registrations(
     protected_paths: tuple[Path, ...] = (),
     private_roots: tuple[str, ...] = DEFAULT_PRIVATE_ROOTS,
     project_paths: tuple[str, ...] = (),
+    project_path_admissions: ProjectPathAdmissions | None = None,
     max_tool_result_chars: int,
     skill_limits: SkillLimits | None = None,
     skill_execution: SkillExecutionConfig | None = None,
@@ -639,6 +640,7 @@ def build_tool_registrations(
             protected_paths=protected_paths,
             private_roots=private_roots,
             project_paths=project_paths,
+            project_path_admissions=project_path_admissions,
         )
     )
     registrations.extend(build_research_tool_registrations())

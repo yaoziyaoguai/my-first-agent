@@ -11,7 +11,11 @@ from functools import partial
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from agent.cli.actions import NEW_SESSION_REQUESTED, SWITCH_SESSION_REQUESTED
+from agent.cli.actions import (
+    NEW_SESSION_REQUESTED,
+    SWITCH_SESSION_REQUESTED,
+    build_project_path_command,
+)
 from agent.cli.app import run_repl
 from agent.cli.render import TerminalRenderer, terminal_text
 from agent.composition import (
@@ -74,7 +78,12 @@ from agent.subagent.contracts import ChildProfile
 from agent.subagent.runner import ChildAgentRunner
 from agent.subagent.tools import build_subagent_tool_registrations
 from agent.tools.file_ops import DEFAULT_PRIVATE_ROOTS
-from agent.tools.path_safety import WorkspaceSecurityError, validate_project_paths
+from agent.tools.path_safety import (
+    ProjectPathAdmissions,
+    WorkspaceSecurityError,
+    reject_project_path_overlap,
+    validate_project_paths,
+)
 from agent.transport_audit import TransportAttemptLedger
 from agent.tui.adapter import QueueingEventSink
 from agent.web.profile import (
@@ -1129,12 +1138,8 @@ def _positive_int(raw: str) -> int:
     return value
 
 
-def _reject_project_path_private_overlap(
-    args: argparse.Namespace,
-    workspace: Path,
-) -> None:
-    admitted = validate_project_paths(tuple(args.project_path))
-    private_inputs = [
+def _project_path_private_inputs(args: argparse.Namespace) -> list[Path | str | None]:
+    return [
         getattr(args, "transport_audit_ledger", None),
         getattr(args, "memory_create", None),
         getattr(args, "memory_store", None),
@@ -1142,23 +1147,19 @@ def _reject_project_path_private_overlap(
         getattr(args, "mcp_safety_state", None),
         *(getattr(args, "skill_root", None) or ()),
     ]
-    for private_input in private_inputs:
-        if private_input is None:
-            continue
-        candidate = Path(private_input).resolve(strict=False)
-        try:
-            relative = candidate.relative_to(workspace)
-        except ValueError:
-            continue
-        parts = tuple(part.casefold() for part in relative.parts)
-        if any(
-            parts[: len(project_path)] == project_path
-            or project_path[: len(parts)] == parts
-            for project_path in admitted
-        ):
-            raise ValueError(
-                "--project-path overlaps a configured private runtime path."
-            )
+
+
+def _reject_project_path_private_overlap(
+    args: argparse.Namespace,
+    workspace: Path,
+) -> None:
+    # 薄包装：重叠规则单源化在 path_safety.reject_project_path_overlap，
+    # 启动期与会话内 /project-path 准入共用同一语义。
+    reject_project_path_overlap(
+        validate_project_paths(tuple(args.project_path)),
+        _project_path_private_inputs(args),
+        workspace,
+    )
 
 
 def _bounded_state_failure_detail(error: BaseException) -> str:
@@ -1563,13 +1564,27 @@ def main(
                     ),
                 )
                 context_limits = _context_limits_for_provider(args)
+                # 项目环境准备（增量 1）：--project-path 启动期集合升格为会话内
+                # 准入表，/project-path 可在会话中追加（与旗标完全同边界，仅放宽
+                # 文件工具读可见性）。每次会话装配重建，/new 重入即回启动期集合。
+                project_path_admissions = ProjectPathAdmissions(
+                    paths=tuple(args.project_path),
+                    reject_overlap=partial(
+                        reject_project_path_overlap,
+                        private_paths=_project_path_private_inputs(args),
+                        workspace=workspace,
+                    ),
+                )
+                project_path_handler = build_project_path_command(
+                    project_path_admissions
+                )
                 registrations = list(
                     build_tool_registrations(
                         workspace=workspace,
                         skill_roots=skill_roots,
                         protected_paths=protected_paths,
                         private_roots=DEFAULT_PRIVATE_ROOTS,
-                        project_paths=tuple(args.project_path),
+                        project_path_admissions=project_path_admissions,
                         max_tool_result_chars=context_limits.max_tool_result_chars,
                         skill_execution=skill_execution,
                         history_catalog=(
@@ -1865,6 +1880,7 @@ def main(
                     write_fn=write_fn,
                     renderer=renderer,
                     browser_profile_command=browser_profile_handler,
+                    project_path_command=project_path_handler,
                 )
             except (CheckpointError, OSError) as error:
                 # 用户可见行保持仅类型名（冻结决策：异常消息可能含路径，不渲染）。

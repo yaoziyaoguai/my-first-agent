@@ -35,6 +35,7 @@ from agent.runtime.contracts import (
     SubmitMessage,
 )
 from agent.runtime.provider_consent import workspace_read_classes_covered
+from agent.tools.path_safety import ProjectPathAdmissions, WorkspaceSecurityError
 
 # /new(r19 小步 2)请求装配层重建 conversation 的 REPL 退出码。
 # 选择 79(NR_UNRESOLVABLE 之外的未占用私人区段)只是进程内信令,不是 errno 声明。
@@ -407,3 +408,38 @@ def build_revoke_goal_target_authority(
         action_seq=state.next_action_seq,
         expected_revision=state.revision,
     )
+
+
+def build_project_path_command(
+    admissions: ProjectPathAdmissions,
+) -> Callable[[str], str]:
+    """/project-path 的 operator 侧命令工厂（不进模型上下文）。
+
+    空后缀列出当前会话准入；非空后缀按单路径准入。准入只放宽文件工具的读
+    可见性（与 --project-path 旗标同边界）；失败返回说明文本而不抛出，REPL
+    循环持续。
+    """
+
+    def project_path_command(suffix: str) -> str:
+        text = suffix.strip()
+        if not text:
+            admitted = admissions.snapshot()
+            if not admitted:
+                return (
+                    "No reserved workspace paths are admitted for this session.\n"
+                    "Usage: /project-path <path> — admit one reserved path "
+                    "(e.g. config/app.yaml) for this session."
+                )
+            listed = "\n".join("/".join(parts) for parts in admitted)
+            return "Reserved workspace paths admitted for this session:\n" + listed
+        try:
+            admissions.admit(text)
+        except (WorkspaceSecurityError, ValueError) as error:
+            return f"Path not admitted: {error}"
+        return (
+            f"Admitted {text} for this session: file tools may now read it. "
+            "The grant lasts until restart (same scope as the --project-path "
+            "startup flag)."
+        )
+
+    return project_path_command

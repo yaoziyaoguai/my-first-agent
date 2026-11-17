@@ -45,7 +45,8 @@ chunk/confirm 铸 `ProviderFileSourceProofV1`，r 会话许可类级覆盖读类
 过门）：**E1 PASS（15 请求）**、**E2 staged 全链 PASS（29 请求，注入→消费→pause→
 新 PID resume→VERIFIED_DONE）**、E3 already-correct **零写契约首次成立**（字节级
 不变、effects=0）但闭合败于 `invalid_model_control`（模型语义层 fail-loud，非产品
-回归）。P5 真实层 r 旅程判据全 PASS：答 r 一次后读类（含新文件）**零再披露**，
+回归）；同日 G2 观测性修复后复跑闭合：**E3 r10 PASS**（typed terminal、零写契约
+成立、业务判据全 true，11 请求——上次失败为模型行为方差，详见 STATE.md G2 节）。P5 真实层 r 旅程判据全 PASS：答 r 一次后读类（含新文件）**零再披露**，
 仅非阻断余额通知。goal-less 对话读类仍逐次（proof 绑定 goal 的刻意语义，有真实层
 对照实证）。证据与预算（71 请求，累计 395）见
 [2026-10-25 活动状态](../handoffs/2026-10-25-continuous-improvement/STATE.md)；

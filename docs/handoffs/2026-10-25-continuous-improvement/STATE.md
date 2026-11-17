@@ -830,3 +830,40 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
   验证 5 探针 + 门 0F）→ **merge `efcba1d`（分支保留）**。
 - **下一步（用户 2026-11-18 指令）**：用 oracle_web 审计「项目收官至少还缺
   哪些能力」，按裁决清单继续补齐。
+
+## 收官轮（2026-11-18，oracle 裁决：冻结→安装验证→真实层→文档冻结）
+
+- **oracle 裁决**（position 4，slug mfa-project-closure-audit-2026-11-18，
+  材料=能力声明/STATE/daily-use/README 四件）：**无需新增任何产品能力**；
+  剩 3 项收官动作（全 P0）——① 冻结最终源码+干净环境安装验证；② 最终身份
+  真实日用闭环验收（复用冻结 E1/E2/E3，不改题目/断言/验收标准；停止条件=
+  三旅程闭合且无新 P0/P1）；③ 修正对外能力声明+版本冻结打 tag（声明绑定
+  终 commit、README/daily-use 终同步、wheel digest+发布说明、可选入口如实
+  记录不可用）。非必需：#2 自助恢复（升级触发=正常默认使用可稳定复现不可
+  恢复状态）、#5 Memory、TUI 补齐、posix flake（仅当阻断冻结验证）。明确
+  不建议：019 host composition、#4 真实数据源普适集成、loop.py 深重构。
+  范围裁决：通用 Agent≠全功能 Agent；以「可自然语言驱动、受治理地完成本地
+  任务的个人 Agent」完结。置信 85%。
+- **oracle 事实声明 4/4 亲核为真**：G2 E3 PASS 记录未同步（STATE:355 vs
+  CURRENT_CAPABILITY_STATUS 停在 INCOMPLETE_CLOSURE）；daily-use.md 命令输出
+  披露句过时（2026-10-26 扩权后命令 stdout 已入 r 许可，README 已现行为准）；
+  needs_019_config fail-closed 属实；README 安装验证证据停在 2026-10-17
+  identity。
+- **P0-3 前半（文档漂移修复，commit 4af348a）**：daily-use 命令输出句对齐
+  README 现行语义；CURRENT_CAPABILITY_STATUS 补同日 G2 复跑 E3 r10 PASS。
+  纯真相同步，无能力晋级声明。
+- **P0-1（安装验证，PASS 6/6）**：冻结身份=main@4af348a；wheel sha256
+  `18f0f05a…`（git archive candidate 构建）装入独立 venv，agent/main/
+  skill_runner origin 全 site-packages。oracle 6 判据全 PASS（亲核承重证据）：
+  安装物日用旅程（setup 不存 key→审批→文件真改→verified_done→exit 0）、
+  /project-path 放行+4 类拒绝+读开放对照、/env-path→pytest 解析进真 venv
+  （.venv/bin/pytest + digest 反映新 PATH + venv 内实跑 1 passed + 无准入
+  对照 not_found）、审批后策略变更拒绝执行（environment_policy_changed +
+  正对照）、重启后临时授权清空+同 conversation 存活、origin 强制。诚实标注：
+  provider=fake scripted 状态机非真实模型；报告
+  `previews/closure-20261118/install-verification/REPORT.md`。
+- **P0-2（真实层，BLOCKED_AUTHORIZATION）**：driver/候选/安装 venv/编排
+  venv 全部就绪（real-e1e2e3/，复用 2026-10-25 冻结 d04 协议，仅改 EVIDENCE
+  名/回退路径/轮次元数据）；预检 1 请求即失败——环境 DEEPSEEK_API_KEY
+  （****3204）已失效（authentication_error）。待用户提供新 key 后执行；
+  样本预算零消耗。

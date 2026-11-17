@@ -11,7 +11,22 @@ r19 产品化审计解除冻结后，项目转入日常可用性修复（见下�
 
 它使用同一个自然语言入口回答问题、讨论想法或完成有界的当前目录文件任务。底层仍刻意保持为一个模型循环、一个上下文管理器、一个受治理的工具执行路径和一个可恢复状态机。它可以在逐次批准后通过固定 Tavily 入口查询公开 Web；015 Governed Local Action 已通过真实 E3、独立评审与 Codex 终裁，曾作为已交付能力提供受治理的结构化本机执行（`local_process`：exact 同意批准、Goal 限定租约、closed 环境与资源档案；历史晋级只绑定当时 delivery identity，见下方状态快照）。018 另提供可选的受治理专属隔离 Chromium 能力（candidate）。个人浏览器、任意网站兼容、桌面控制与任意 shell 仍不在交付范围内，也不存在第二套 Agent loop。
 
-## 当前状态快照（2026-10-18）
+## 当前状态快照（2026-11-18 收官）
+
+**项目已按 oracle 收官裁决完结（2026-11-18）**：以「可自然语言驱动、受治理地
+完成本地任务的个人 Agent（macOS 单用户 CLI）」为完结范围，冻结功能，不再按
+候选清单开发。**冻结代码身份 = `4af348a`，release tag `v1.0.0`**；该身份收官
+证据：完整门 4362 passed / 0 failed；干净 venv 安装验证 6/6 PASS（wheel sha256
+`18f0f05a…`）；最终身份真实层（冻结 d04 协议，deepseek-flash）**E1 PASS、
+E3 PASS（零写契约成立）、E2 两尝试诚实分类闭合**（首跑=模型 goal_delta 控制
+协议失败被产品 failed_fatal 围堵；唯一有界复跑=旅程治理链 10/10 全 true，唯
+交付代码对纠正条款的语义误解——均为模型侧，产品零缺陷、无新 P0/P1，不做
+第三次重跑）。发布说明与不可用项诚实标注见
+[RELEASE-NOTES](docs/RELEASE-NOTES.md)与
+[Current Capability Status](docs/architecture/CURRENT_CAPABILITY_STATUS.md)。
+以下历史快照仅作演进证据保留，数字只绑定当时 identity：
+
+### 历史快照（2026-10-18 → 2026-10-25）
 
 2026-09-09 r18 冻结（consolidated 候选 commit `684f368` / tree `10d36564`，source full gate
 3372 passed / 3 skipped）后，r19 审计解除冻结并转向产品化。2026-10-16 可靠性收口（完整门
@@ -128,11 +143,19 @@ TUI、018 governed browser）不属于 base 安装闭包。日用默认安装就
 `python -m pip install "dist/first_agent-1.0.0-py3-none-any.whl[tui]"`
 （各能力的 extra 名见对应章节）。
 
-安装验证（2026-10-26，发布裁决后首次）：在干净 venv（macOS CPython 3.14）中安装本 wheel 的
-base 闭包，`first-agent` / `first-agent-schedule` 入口、`--version`、`--help` 与 fake provider
-REPL 冒烟（`/status` 后 `/exit`，exit 0）均通过。要求 Python ≥3.11——macOS 系统
-`/usr/bin/python3`（3.9）不满足，需自备 3.11+ 解释器。仅验证过这一个环境 datapoint，
-未验证其他 Python 版本/平台。
+安装验证（2026-11-18 收官轮，绑定冻结身份 `4af348a` 的 wheel）：除下述 smoke 外，
+收官轮在干净 venv 完成 oracle 六判据安装验证 6/6 PASS——安装物完整日用旅程
+（setup 不存 key→任务→审批→文件真改→verified_done、exit 0）、`/project-path`
+放行+四类非法拒绝+读开放对照、`/env-path .venv/bin` 后 pytest 解析进项目真
+venv 并实跑通过、审批后环境策略变更拒绝执行（`environment_policy_changed`）、
+重启后会话级授权清空而持久状态存活、全部 origin 强制 site-packages（非
+editable）；报告与证据在 `~/.local/share/first-agent/previews/closure-20261118/
+install-verification/`（判据 1 的 provider 为 fake scripted 状态机，真实模型层
+由同身份 E1/E2/E3 覆盖）。此前基线（2026-10-26，发布裁决后首次）：干净 venv
+（macOS CPython 3.14）中 base 闭包 `first-agent` / `first-agent-schedule` 入口、
+`--version`、`--help` 与 fake provider REPL 冒烟均通过。要求 Python ≥3.11——
+macOS 系统 `/usr/bin/python3`（3.9）不满足，需自备 3.11+ 解释器。未验证其他
+Python 版本/平台。
 
 setup 只保存 provider、model、base URL、credential 环境变量名、thinking mode、request path、
 strict tools 开关和 timeout；不会读取或保存 key。此后 `first-agent` 默认使用当前目录，不需要再重复

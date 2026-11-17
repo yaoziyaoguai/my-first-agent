@@ -7,7 +7,7 @@ import heapq
 import os
 import stat
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -57,6 +57,69 @@ def _normalize_project_path(raw_path: str) -> tuple[str, ...]:
     ):
         raise WorkspaceSecurityError("project path exception is not admitted")
     return tuple(part.casefold() for part in parts)
+
+
+def reject_project_path_overlap(
+    admitted: tuple[tuple[str, ...], ...],
+    private_paths: Iterable[Path | str | None],
+    workspace: Path,
+) -> None:
+    """拒绝与 private runtime 路径双向前缀重叠的 project-path 准入。
+
+    启动期旗标校验（main）与会话内 /project-path 准入共用同一规则：private
+    输入相对 workspace 解析后按 casefold 组件做双向前缀判定，任一方向重叠即
+    抛 ValueError；workspace 外的 private 路径不触发。
+    """
+
+    for private_input in private_paths:
+        if private_input is None:
+            continue
+        candidate = Path(private_input).resolve(strict=False)
+        try:
+            relative = candidate.relative_to(workspace)
+        except ValueError:
+            continue
+        parts = tuple(part.casefold() for part in relative.parts)
+        if any(
+            parts[: len(project_path)] == project_path
+            or project_path[: len(parts)] == parts
+            for project_path in admitted
+        ):
+            raise ValueError(
+                "--project-path overlaps a configured private runtime path."
+            )
+
+
+class ProjectPathAdmissions:
+    """会话内 operator 授权的保留路径准入表（/project-path 的单一变更点）。
+
+    只放宽文件工具的读可见性，与启动期 --project-path 旗标完全同边界：不改
+    sandbox/local_process/managed web 边界，不写 checkpoint 或 durable state。
+    单一 REPL 线程访问假设；不持久化（与旗标的 for-this-start 语义对称，
+    重启即回启动期集合）。
+    """
+
+    def __init__(
+        self,
+        paths: tuple[str, ...] = (),
+        *,
+        reject_overlap: Callable[[tuple[tuple[str, ...], ...]], None] | None = None,
+    ) -> None:
+        self._admitted = validate_project_paths(paths)
+        self._reject_overlap = reject_overlap
+
+    def admit(self, raw_path: str) -> None:
+        parts = validate_project_paths((raw_path,))[0]
+        if any(parts == admitted for admitted in self._admitted):
+            return
+        updated = self._admitted + (parts,)
+        if self._reject_overlap is not None:
+            # 拒绝抛出时 updated 尚未提交：准入表不得留下被拒绝的路径。
+            self._reject_overlap(updated)
+        self._admitted = updated
+
+    def snapshot(self) -> tuple[tuple[str, ...], ...]:
+        return self._admitted
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +236,7 @@ class WorkspaceBoundary:
         protected_paths: tuple[Path, ...] = (),
         private_roots: tuple[str, ...] = (),
         project_paths: tuple[str, ...] = (),
+        project_path_admissions: ProjectPathAdmissions | None = None,
     ) -> None:
         if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
             raise WorkspaceSecurityError("required POSIX no-follow flags are unavailable")
@@ -185,6 +249,9 @@ class WorkspaceBoundary:
         self._private_roots = frozenset(private_roots)
         self._private_roots_folded = frozenset(name.casefold() for name in private_roots)
         self._project_paths = validate_project_paths(project_paths)
+        # 注入准入表时逐次查询 snapshot()（会话内 /project-path 可加宽）；
+        # 未注入则维持静态 _project_paths，既有调用方/测试零扰动。
+        self._project_path_admissions = project_path_admissions
         for path in protected_paths:
             protected = Path(path).absolute()
             if protected == self.root or protected.is_relative_to(self.root):
@@ -897,11 +964,16 @@ class WorkspaceBoundary:
         *,
         allow_ancestor: bool,
     ) -> bool:
+        admitted = (
+            self._project_path_admissions.snapshot()
+            if self._project_path_admissions is not None
+            else self._project_paths
+        )
         folded = tuple(part.casefold() for part in parts)
         return any(
-            folded[: len(admitted)] == admitted
-            or (allow_ancestor and admitted[: len(folded)] == folded)
-            for admitted in self._project_paths
+            folded[: len(path)] == path
+            or (allow_ancestor and path[: len(folded)] == folded)
+            for path in admitted
         )
 
 

@@ -84,6 +84,8 @@ _HELP_TEXT = """Commands:
 /sources [--advanced] — show recorded sources
 /leases [--advanced] — show active process permissions
 /browser-profiles [list|create|revoke|clear] — manage browser profiles
+/project-path [path] — allow one reserved workspace path for this session (no
+  argument lists current admissions)
 /pause, /resume, /cancel — control the current task or run
 /approve [request-id], /reject [request-id] — resolve an exact approval (without
   an ID it binds the prompt just shown)
@@ -150,6 +152,7 @@ def run_repl(
     renderer: TerminalRenderer | None = None,
     approval_time_factory: Callable[[], str] = utc_now_rfc3339,
     browser_profile_command: Callable[[str], str] | None = None,
+    project_path_command: Callable[[str], str] | None = None,
 ) -> int:
     make_run_id = run_id_factory or (lambda: str(uuid4()))
     renderer = renderer or TerminalRenderer(write_fn)
@@ -220,6 +223,18 @@ def run_repl(
                 write_fn(str(error))
             except OSError:
                 write_fn("Browser profile store is unavailable.")
+            continue
+        if stripped.startswith("/project-path"):
+            if project_path_command is None:
+                # 与 /browser-profiles 同模式：未注入时说明原因与补救，不让
+                # /help 列出的命令变成无出路的拒绝。
+                write_fn(
+                    "Project-path admissions are unavailable in this session "
+                    "(restart with --project-path to pre-admit reserved paths)."
+                )
+                continue
+            # 空后缀由命令自身解释为"列出当前准入"。
+            write_fn(project_path_command(stripped[len("/project-path") :].strip()))
             continue
 
         if stripped == "/sources":

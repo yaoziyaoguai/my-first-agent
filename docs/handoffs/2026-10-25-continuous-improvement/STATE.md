@@ -742,3 +742,33 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
   四检查点/异常身份/预算语义、lease 反事实精确性、notice 文案与 digest 动态
   派生）→ **merge `936434c`（分支保留）**。待用户裁决项清空；缓议重开触发
   与 E 绞杀式决策已记录（见上）。
+
+## 项目环境准备·增量 1：/project-path 会话内授权（2026-11-18，候选 #3 第一切片）
+
+- **范围裁决**：候选 #3 拆两增量，本轮只做 (a) 会话内授权打开保留路径（无任何
+  会话内替代方案；复用既有准入词汇；operator 侧授权无模型胁迫面）；(b)
+  interpreter 选择（daily-use PATH/interpreter 失败已有文档化 workaround，且涉
+  执行环境治理）记为下一增量。TUI 暂不接（/switch 同先例，REPL 先行）。
+- **设计**：`ProjectPathAdmissions` 会话注册表（单一变更点；admit 校验与启动
+  旗标同走 `validate_project_paths`；private-overlap 拒绝单源化为
+  `reject_project_path_overlap`，与原 main.py 逻辑逐字等价；先回调后提交实现
+  拒绝回滚）；`WorkspaceBoundary` 可选注入、可见性逐次查询快照（静态调用方
+  零扰动）；main.py 装配循环内每次重建（/new 重入即回启动期集合）；REPL
+  `/project-path <path>`（无参列出；/browser-profiles 同款注入模式；/help
+  收录）。不持久化（与旗标 for-this-start 对称）。
+- **效果边界**（= 旗标逐字同边界）：仅文件工具可见性（admitted 路径读即时
+  放开；写 prepare 同样解除隐藏但写工具仍受 ALWAYS 审批门控——确认文案按
+  披露诚实原则改为 "same scope as the --project-path startup flag"）；不触
+  sandbox/local_process/managed web 边界；不写 checkpoint/durable；不进模型
+  上下文（分发在 _parse_action 之前，测试断言 runtime.actions == []）。
+- **执行与验证**：单一垂直切片实现包（6 文件+2 新测试文件，+24 测试，Red→
+  Green）+ 对抗验证 PASS（8 验收点，含回退证伪实测：还原静态可见性→2 红；
+  启动行为逐字比对 git HEAD）。主会话亲核全部安全语义 hunk。
+- **完整门**：**4337 passed / 3 skipped / 1 failed**（783s，wheel 按配方重建）
+  ——唯一失败为 `test_posix_supervisor_cleanup` 已知负载时序 flake（测试注释
+  记载 ready 竞态；当日 3 次全量 2 次命中、单独复跑 1/1 通过 0.49s；不
+  import 被改模块，diff 不涉其域）。除该 flake 外全绿；ruff 全库 0 错误。
+  注：门启动后有一处纯字符串文案收紧（actions.py 确认消息），行为惰性，
+  tests/cli 7/7 于编辑后源复跑通过。
+- **后续候选**：增量 (b) interpreter 选择；posix_supervisor 负载 flake 加宽
+  ready 窗口（独立小修候选）；TUI 命令面接入。

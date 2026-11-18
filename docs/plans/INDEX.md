@@ -1,8 +1,9 @@
 # plans/ 索引
 
-本目录 36 份计划文档全部已执行完毕；仓库于 2026-09-09 冻结为学习里程碑
-（tag `study-freeze-2026-09-09-candidate`）。计划按日期命名、原地保留（三份被
-README/AGENTS.md 硬引用，不做物理归档）；各里程碑的交付证据见
+本目录保留 2026 年 7–9 月的 36 份历史计划，均已执行完毕。2026-09-09 的学习
+冻结（tag `study-freeze-2026-09-09-candidate`）后来解除；项目于 2026-11-18
+最终收官，不再据此开启开发。计划按日期命名、原地保留，既有文档和验证器仍依赖
+其中路径；各里程碑的交付证据见
 [../implementation/](../implementation/) 的 EXECUTION_LOG 与 [../acceptance/](../acceptance/) 的
 seal/review 文件。当前能力状态权威：
 [../architecture/CURRENT_CAPABILITY_STATUS.md](../architecture/CURRENT_CAPABILITY_STATUS.md)。

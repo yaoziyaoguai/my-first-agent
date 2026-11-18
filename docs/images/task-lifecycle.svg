@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="530" viewBox="0 0 1200 530" role="img" aria-labelledby="title desc">
+  <title id="title">一次文件写入或命令执行如何经过审批、落盘与验证</title>
+  <desc id="desc">用户任务形成 Goal。ContextManager 准备上下文，Runtime 在模型请求前检查外发许可。模型提出操作后，Runtime 检查策略并向用户展示审批。获准后先写入 EXECUTING checkpoint，再由 ToolRuntime 执行，最后记录结果并核对证据。结果未知时由用户决定如何恢复。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#86a3c6"/></marker>
+    <style>
+      text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;fill:#e8edf5}
+      .heading{font-size:20px;font-weight:650}.body{font-size:16px;fill:#b7c6db}.small{font-size:14px;fill:#b7c6db}.number{font-size:16px;font-weight:700;fill:#b9f3e7;text-anchor:middle}.box{fill:#142238;stroke:#344964;stroke-width:1.5}.line{fill:none;stroke:#86a3c6;stroke-width:2;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1200" height="530" rx="20" fill="#0b1423"/>
+  <text x="36" y="51" font-size="29" font-weight="700">从用户任务到可核对的执行结果</text>
+  <text class="body" x="36" y="83">以一次写文件或运行命令为例；读取也受路径与来源规则约束</text>
+
+  <rect class="box" x="36" y="118" width="344" height="130" rx="13"/>
+  <circle cx="65" cy="150" r="16" fill="#214a50"/><text class="number" x="65" y="156">1</text>
+  <text class="heading" x="92" y="157">接收任务与纠正</text>
+  <text class="body" x="56" y="195">建立持久 Goal 与当前 revision</text>
+  <text class="small" x="56" y="224">旧授权与证据随相应变更失效</text>
+
+  <rect class="box" x="428" y="118" width="344" height="130" rx="13"/>
+  <circle cx="457" cy="150" r="16" fill="#214a50"/><text class="number" x="457" y="156">2</text>
+  <text class="heading" x="484" y="157">选择上下文，确认外发</text>
+  <text class="body" x="448" y="195">ContextManager 按预算构建材料</text>
+  <text class="small" x="448" y="224">来源与模型发送范围需要许可</text>
+
+  <rect class="box" x="820" y="118" width="344" height="130" rx="13"/>
+  <circle cx="849" cy="150" r="16" fill="#214a50"/><text class="number" x="849" y="156">3</text>
+  <text class="heading" x="876" y="157">模型提案，用户审批</text>
+  <text class="body" x="840" y="195">展示精确文件内容或命令参数</text>
+  <text class="small" x="840" y="224">批准一次，或显式授予有限复用</text>
+
+  <rect class="box" x="820" y="302" width="344" height="130" rx="13"/>
+  <circle cx="849" cy="334" r="16" fill="#214a50"/><text class="number" x="849" y="340">4</text>
+  <text class="heading" x="876" y="341">执行前先落盘</text>
+  <text class="body" x="840" y="379">写入 EXECUTING checkpoint</text>
+  <text class="small" x="840" y="408">防止重启后盲目重放未知操作</text>
+
+  <rect class="box" x="428" y="302" width="344" height="130" rx="13"/>
+  <circle cx="457" cy="334" r="16" fill="#214a50"/><text class="number" x="457" y="340">5</text>
+  <text class="heading" x="484" y="341">ToolRuntime 执行</text>
+  <text class="body" x="448" y="379">按已批准绑定调用实际工具</text>
+  <text class="small" x="448" y="408">进程工具有截止时间与输出限额</text>
+
+  <rect x="36" y="302" width="344" height="130" rx="13" fill="#132e40" stroke="#58c4b5" stroke-width="1.5"/>
+  <circle cx="65" cy="334" r="16" fill="#214a50"/><text class="number" x="65" y="340">6</text>
+  <text class="heading" x="92" y="341">记录结果，核对证据</text>
+  <text class="body" x="56" y="379">完成门核对持久事实与登记条件</text>
+  <text class="small" x="56" y="408">仍需独立业务测试与用户验收</text>
+
+  <path class="line" d="M380 183H428"/>
+  <path class="line" d="M772 183H820"/>
+  <path class="line" d="M992 248V302"/>
+  <path class="line" d="M820 367H772"/>
+  <path class="line" d="M428 367H380"/>
+  <text class="body" x="36" y="479">拒绝或策略漂移：不执行　·　结果未知：先恢复　·　登记证据通过：才可 VERIFIED_DONE</text>
+  <text class="small" x="36" y="506">多步任务继续走同一循环；模型说“完成”不会直接改变权威任务状态。</text>
+</svg>

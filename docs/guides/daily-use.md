@@ -1,9 +1,10 @@
 # First Agent 日用指南
 
-> 2026-10-18 CLI 个人试用收尾：日用采用 base 安装，不默认安装实验性 TUI。
-> 当前支持范围与验证结果见 [能力清单](capabilities.md) 和
-> [唯一执行记录](../handoffs/2026-10-11-product-reliability-closure/RESULTS.md)。
-> 详细命令清单见 [COMMANDS.md](../handoffs/2026-10-10-reliable-daily-use/COMMANDS.md)。
+> 2026-11-18 最终整理：日用采用 base CLI，功能开发已结束。
+> 当前范围见 [能力清单](capabilities.md)，收官证据见
+> [STATE](../handoffs/2026-10-25-continuous-improvement/STATE.md)。
+> 进阶参数见 [进阶配置](advanced-configuration.md)；完整命令以当前 `/help` 为准，
+> [COMMANDS.md](../handoffs/2026-10-10-reliable-daily-use/COMMANDS.md) 保留为历史参考。
 
 ## 确认与许可速查（2026-10-23 consent-ux 起）
 
@@ -12,11 +13,9 @@
   `n`/回车不发送。选过 `s` 后普通对话不再逐次询问。任务开始/修订后的第一次发送若
   工具或控制结构与许可授予时不同，会再次询问并在提示里说明原因（剩余额度旁一行）；
   再选一次 `s` 即为当前结构续期。`/revoke-provider-consent` 随时撤销。
-- **含新来源（读文件/列目录/搜索结果/命令输出等）的发送**：首次会单独询问；
-  选 `r` 后，本会话内的读/列/搜输出（含之后读到的新文件）与经审批的
-  `local_process` 成功命令输出都在许可内不再逐次询问（许可内复用时逐次
-  非阻断告知；不可复用来源仍逐次披露）；写文件产生的结果属于稳定来源，
-  在许可内不会反复问。
+- **含新来源的发送**会单独询问。选择 `r` 后，活跃任务中有来源证明的读、列、搜输出和经审批的
+  `local_process` 成功命令输出可以复用许可，后续读到的新文件也适用。每次复用都会告知，
+  其他来源仍需逐次披露。写文件的结果属于稳定来源，也可在有效许可内复用。
 - **文件/命令审批（`Execute this operation?`）**：`y` 只批本笔；提示中出现 `f` 时可选
   同文件复用（16 次 / 60 分钟）、`d` 选已声明目录复用；`n` 拒绝。不适用时产品会明确说明
   而不会降级。
@@ -29,8 +28,8 @@
 - Python：`pyproject.toml` 声明最低 **3.11**；本轮实际验证运行版本 **3.12.2**
   （未做跨 Python 矩阵）。
 - extras 严格来自当前元数据：`dev`、`browser`、`skill`、`mcp`、`tui`
-  （**没有** `web` extra）。TUI 需 `tui`（`textual>=8.2,<9`），但当前有恢复外发确认的
-  交互缺口，不作为日用推荐入口。
+  （**没有** `web` extra）。TUI 需 `tui`（`textual>=8.2,<9`），暂停后外发决定的
+  重显已修复，但仍为实验性适配，不宣称与 CLI 交互完全对等。
 - 浏览器能力是 `browser` extra，使用专属测试 Chromium，不接管你的日常浏览器。
 
 ## 安装
@@ -71,9 +70,10 @@ python3 -m pytest -q
 和绑定它；只用绝对路径启动一个 venv 的 Python **不等于**已经激活该 venv 的命令搜索路径。
 本轮真实测试就遇到这个差异：外部验证有 pytest，Agent 的子进程却只找到系统 Python；修正
 测试进程 PATH 后才完成整条真实任务。已经进入会话时也可以直接修复：在 Agent 的 REPL 里执行
-`/env-path .venv/bin`（workspace 相对目录），该目录会前缀进本会话命令子进程的 PATH，持续到
-重启；每条命令仍按解析出的可执行文件逐条审批。不要把找不到依赖解释成 API key 失效或让 Agent
-假报完成。
+`/env-path .venv/bin`（workspace 相对目录），该目录会前缀进本会话 `local_process`
+的 PATH，不影响沙箱或受管 Web 进程；每条命令仍按解析出的可执行文件审批。
+会话准入在 `/new`、`/switch` 重装配或重启后重建。不要把找不到依赖解释成 API key 失效
+或让 Agent 假报完成。
 
 ### 自行安装
 
@@ -119,7 +119,7 @@ first-agent setup \
 `deepseek-v4-flash` 名称已不在列表，两轮真实层验证（2026-10-24/25）均使用
 `deepseek-flash`。
 
-`setup` 把**非秘密**配置保存到 owner-only 的 owner-preferences（此后免参启动）；
+`setup` 把**非秘密**配置保存到状态根内 owner-only 的 `provider-profile.json`（此后免参启动）；
 密钥永远只从环境变量注入，不会被保存、打印或写入 checkpoint。
 首次对话发送数据前会要求**数据外发确认**（y）——这是治理设计。
 
@@ -194,7 +194,7 @@ Task: change greet() in app.py to return 'howdy' and verify by running python3 c
 
 | 对象 | 状态 |
 |---|---|
-| DeepSeek Flash `deepseek-flash`（api.deepseek.com，openai_compatible，thinking disabled） | **收官身份真实层（2026-11-18，冻结 d04 协议，安装物 origin 过门）**：E1 普通旅程 PASS、E3 零写契约 PASS；E2 纠正/恢复旅程治理链（注入→消费→pause→新进程 resume）10/10 实证闭合，唯交付代码对纠正条款存在模型侧语义误解（「同给即拒绝」被实现成「同给且值不同才拒绝」），按停止条件以诚实分类收档——**纠正类自然语言条款的完整语义实现不可保证，须按本指南要求独立检查反例**。历史：2026-10-24/25 真实层 E1/E2/E3 全链 PASS（含 r 读域许可旅程） |
-| 仓库内其它 adapter（anthropic_compatible 等） | 仅有离线测试证据；**未经真实调用验证** |
+| DeepSeek Flash `deepseek-flash`（api.deepseek.com，openai_compatible，thinking disabled） | 2026-11-18 的冻结 d04 验收中，E1 普通任务与 E3 零写契约通过。E2 首跑因非法控制响应停止，复跑的纠正、暂停和新进程恢复通过，但代码把「同给即拒绝」写成「同给且值不同才拒绝」，独立业务检查为 `FAIL_FALSE_COMPLETION`。检查关键反例的做法见上文，详细身份与历史结果见 [收官记录](../handoffs/2026-10-25-continuous-improvement/STATE.md) |
+| `anthropic_compatible` | 2026-07-25 使用 `glm-5.2` 完成过真实 E3。结果绑定当时的交付身份。11 月收官真实验证覆盖上方的 DeepSeek 配置。见 [历史 E3 记录](../architecture/CURRENT_CAPABILITY_STATUS.md#e3-reference-tasks-2026-07-25) |
 | 其它"OpenAI 兼容"服务 | 未验证；协议名相近不等于支持 |
 | 非 macOS 平台 | 不支持（Seatbelt 专属） |

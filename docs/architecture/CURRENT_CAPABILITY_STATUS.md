@@ -23,7 +23,38 @@ G8 之前 SubAgent 属于这种限制（HTTP adapter 无 honest hard-deadline）
 `locally-verified`，随后 2026-07-25 完成真实 HTTP provider in child 的 E3 并经独立 review 晋级
 `accepted`。当前工作树的唯一有效 claim 见下方 Current snapshot。
 
-## Current snapshot (2026-10-18)
+## Current snapshot (2026-11-18，项目收官)
+
+**项目已完结，功能开发结束。** 范围为 macOS 单用户 CLI 个人 Agent。
+最终收官裁决与产品终审均未要求新增能力；旧计划和候选清单不再触发开发。
+冻结代码身份为 `4af348a`，已发布 tag `v1.0.0` 指向 `124c898`，后续整理仅涉及文档与配图。
+各能力仍为 **`implemented-candidate`**，项目收官不触发 capability promotion。
+
+| 验证层 | 收官证据及其边界 |
+| --- | --- |
+| 自动检查 | PR #33 代码门 4362 passed / 3 skipped / 0 failed；代码与 `4af348a` 同源 |
+| 安装物 | 干净 venv 六判据 6/6 PASS，origin 强制 site-packages；其中治理日用旅程 provider 为 scripted fake |
+| 真实 E1 | 普通编码任务 PASS，15 次请求 |
+| 真实 E2 | 首跑 `INCOMPLETE_EVIDENCE`；唯一有界复跑治理链 10/10 通过，业务验收 `FAIL_FALSE_COMPLETION` |
+| 真实 E3 | PASS，10 次请求；文件字节不变、写入效果为 0 |
+
+E2 复跑中，“新旧参数同给即拒绝”被写成“值不同时才拒绝”。产品到达了登记证据的
+`VERIFIED_DONE`，独立业务 grader 仍判失败；这个反例继续保留。首跑非法控制响应按
+设计安全停止，本轮未定位新的 Runtime 治理实现缺陷，但不能据此断言产品没有缺陷。
+59 次真实请求只覆盖一个 DeepSeek Flash 配置和有限任务，不能外推任意业务语义。
+
+实测 wheel 的 sha256 为 `18f0f05a…`；详细身份、预算与结果见
+[收官 STATE](../handoffs/2026-10-25-continuous-improvement/STATE.md)。其中
+`previews/closure-20261118/...` 是仓库外本机证据，未随 GitHub 仓库发布。
+
+Scheduler 安装命令因缺 host composition 返回 `needs_019_config`；TUI 保持实验性，
+暂停后外发决定的重显已修复，但不宣称与 CLI 完全对等。Browser / Skill / MCP 的当前
+第三方适配与真实验证范围有限；非 macOS 不支持。增强 Memory、自助恢复、019 host、
+真实数据源普适集成等仅留档，不是新的待办。见 [Release Notes](../RELEASE-NOTES.md)。
+
+## Historical snapshot (2026-10-18，含 10-23/25 增补)
+
+以下原记录中的“当前”均指其历史时点，不能覆盖上方 2026-11-18 收官声明。
 
 **2026-10-23 增补（consent-ux 实施中身份漂移）：** 工作树已叠加 2026-10-21 确认疲劳
 修复包的实施（有限外发许可/schema11/文件来源证明/CLI s/f/d），source identity 再次
@@ -70,31 +101,6 @@ identity 成立——各能力保持 `implemented-candidate`。2026-09-09 r18 �
 完整 PASS，纠正/恢复样本额度暂停、零改写样本未运行。旧 E2「typed 完成、业务判据失败」仍是未闭合的
 `FAIL_FALSE_COMPLETION`，不能以“模型问题”为由豁免。面向使用者的说明见
 [能力与边界清单](../guides/capabilities.md)，逐项证据仍只在上述 RESULTS 更新。
-
-**2026-11-18 收官增补（项目终结快照，oracle 裁决 mfa-project-closure-audit-
-2026-11-18）：** 范围裁决——通用 Agent≠全功能 Agent，本项目以「可自然语言驱动、
-受治理地完成本地任务的个人 Agent（macOS 单用户 CLI）」完结，不再开启新一轮能力
-审计或按无真实失败证据的候选清单继续开发。**冻结代码身份 = `4af348a`**（其后
-仅文档提交；release tag `v1.0.0` 标记收官终 commit）。该身份上的收官证据：
-① 完整门 **4362 passed / 3 skipped / 0 failed**（PR #33 轮，代码与 4af348a 同源）；
-② 干净 venv 安装验证 **6/6 PASS**（wheel sha256 `18f0f05a…`，origin 强制
-site-packages；journey//project-path//env-path/策略变更/重启失效/非 editable 六
-判据，见 `previews/closure-20261118/install-verification/REPORT.md`——判据 1
-provider 为 fake scripted，真实层由 ③ 覆盖）；③ **最终身份真实层 E1/E2/E3**
-（冻结 d04 协议，deepseek-flash）：**E1 PASS**（15 请求）、**E3 PASS**（10 请求，
-零写契约成立）、**E2 两尝试诚实分类闭合**——首跑 INCOMPLETE_EVIDENCE（模型
-goal_delta 控制协议失败，产品按设计 failed_fatal 围堵）+ 唯一一次有界复跑
-（r10 先例额度）FAIL_FALSE_COMPLETION（**旅程治理链 10/10 全 true**，唯交付代码
-把「同给即拒绝」实现成「同给且值不同才拒绝」的模型语义误解）；两次均为模型侧、
-**产品零缺陷、无新 P0/P1**，按停止条件不做第三次重跑。E2 业务判据的诚实结论：
-治理/恢复/纠正链在最终身份上实证闭合；「自然语言纠正条款被完整语义实现」仍
-不可保证（与日用指南声明的完成下界边界一致，独立反例验收是使用者的职责）。
-**claim 级别不变：各能力保持 `implemented-candidate`**（收官不触发 promotion
-规则）。可选入口的诚实不可用标注：Scheduler（needs_019_config）fail-closed、
-TUI 实验性（恢复外发确认交互缺口）、MCP/skill extras 仅离线证据、非 macOS
-不支持。缓议项以候选形式留档（#2 自助恢复、#5 Memory、019 host、#4 真实数据源
-——后者需用户范围裁决），均不阻塞收官。发布说明见
-[RELEASE-NOTES](../RELEASE-NOTES.md)。
 
 ## r18 closure record (2026-09-09, 普通实施记录，非 acceptance control)
 

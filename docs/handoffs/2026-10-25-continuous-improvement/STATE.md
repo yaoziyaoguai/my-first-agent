@@ -3,7 +3,12 @@
 > 单一当前记录：目标、基线、工作包、证据、剩余候选、决策队列。历史验收不改写；
 > 能力状态权威在 `docs/architecture/CURRENT_CAPABILITY_STATUS.md`。
 
-## 目标与授权
+## 当前结论（2026-11-18，已收官）
+
+项目以 v1.0.0 完结，日用范围为 macOS 单用户 CLI。已发布 tag `v1.0.0` 指向 `124c898`。
+本文件末尾记录真实任务结果和最终文档整理。此前各轮目标、候选清单与“下一步”均为历史留档。
+
+## 历史目标与当时授权
 
 - 有边界的产品审计与本地改善（同 2026-10-24 活动框架）：修复证据充分的实现缺陷与文档漂移、
   改善不扩权限/隐私/范围的交互与错误反馈、局部架构整理、删除确证冗余、补高价值验证。
@@ -861,7 +866,8 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
   对照 not_found）、审批后策略变更拒绝执行（environment_policy_changed +
   正对照）、重启后临时授权清空+同 conversation 存活、origin 强制。诚实标注：
   provider=fake scripted 状态机非真实模型；报告
-  `previews/closure-20261118/install-verification/REPORT.md`。
+  `previews/closure-20261118/install-verification/REPORT.md`。本节 `previews/...`
+  均为仓库外本机证据，未随 GitHub 仓库发布。
 - **P0-2（真实层，已执行；用户当日提供新 key，仅环境变量注入、产物防御性
   抹除）**：证据 `previews/closure-20261118/real-e1e2e3/real-validation-
   2026-11-18/`（首轮）+ `e2-rerun-2026-11-18-r2/`（E2 有界复跑）。冻结 d04
@@ -888,8 +894,25 @@ PR #21 merge gate PASS 附带 1 P3+5 LOW，全部处置（用户常设指令：
     正是 grader 职责，daily-use 已明示）。
   - **E3-already-correct PASS**：10/20 请求、36.2s、typed 终态、零写契约
     成立（files_unchanged=true、effects=0）。
-  - **收官判定：三旅程闭合、无新 P0/P1**——两次 E2 失败均为模型侧且产品
-    零缺陷（治理在两次中都正确围堵：r1 failed_fatal、r2 诚实达成
-    VERIFIED_DONE 而由独立 grader 暴露语义缺口）；按停止条件**不做第三次
-    重跑**（禁止无限重掷）、不做提示词调优、不新增工具控制层。累计真实
-    请求 59（38+21）。
+  - **收官判定：验收已执行，保留失败并结束**——E1、E3 PASS；E2 首跑
+    控制响应不合法而安全停止，复跑治理链通过，但业务要求误实现，仍为
+    `FAIL_FALSE_COMPLETION`。本轮未定位新的 Runtime 治理实现缺陷；这不证明
+    “产品零缺陷”，r2 的业务错误由独立 grader 检出，并未被 Runtime 自行
+    拦住。按既定停止条件不做第三次重跑、不做提示词调优、不新增控制层。
+    累计真实请求 59（38+21）。
+
+## 最终文档整理（2026-11-18）
+
+- 项目终审根据安装、日用和真实层验收记录，判定 v1.0.0 已达到 macOS 单用户可用个人产品的范围，
+  达成收官条件。面向他人分发的成熟度待独立验证。
+- README 以快速上手、架构、审批与恢复为主，配两张本地 SVG。长配置说明集中在进阶指南，
+  能力清单、日用指南和发布说明采用同一版验收口径。见 [README](../../../README.md) 和
+  [进阶配置](../../guides/advanced-configuration.md)。
+- 盘点整理前 `docs/` 的 332 个跟踪文件，原地保留历史计划、审计和验收材料。
+  三组逐字节重复文件分别承担摘要或路径引用。链接扫描保留 9 处绑定回执的旧审计行号链接，
+  本轮新增文档链接与锚点检查通过。
+- 首轮全量测试的 3 项失败来自 README 文档断言。补回 Tavily 数据处理和 `local_process` 历史验收
+  后，三项聚焦测试通过。全量复跑为 **4362 passed / 3 skipped / 0 failed**（641.68 秒），
+  `git diff --check` 和 ruff 通过。两张 SVG 在 Chrome 本地渲染，文字均在画布内。
+- 清理 5 个构建和工具缓存目录、45 个 Python 字节码缓存目录，共约 31.5 MiB。开发 venv、
+  本机验证记录与历史证据继续保留。

@@ -6,10 +6,12 @@
 
 - 项目名是 `my-first-agent`；它不是 Coding Agent 的身份。
 - 默认在 `main` 工作。除非用户明确要求，不 commit、push、tag 或修改 remote。
-- 本仓库已于 2026-09-09 冻结为学习里程碑（tag `study-freeze-2026-09-09-candidate`）：含七项 v1
-  capability 与 015–019 候选能力，全部对当前 identity 为 `implemented-candidate`，不再自动开启新的
-  优化轮次或 promotion 重绑；当前状态权威见
-  `docs/architecture/CURRENT_CAPABILITY_STATUS.md`。
+- 本项目已于 2026-11-18 完成 v1.0.0 收官，功能开发结束。2026-09-09 的学习冻结后来已解除，
+  仅作历史里程碑保留。当前范围是 macOS 单用户 CLI 个人 Agent，各能力对当前 identity 保持
+  `implemented-candidate`；候选清单与旧“下一步”不构成继续开发指令。除非用户明确改变目标，
+  不自动开启新能力、优化轮次或 promotion 重绑，只处理已声明日用范围内可复现的阻断缺陷。
+  当前状态权威见 `docs/architecture/CURRENT_CAPABILITY_STATUS.md`，发布范围见
+  `docs/RELEASE-NOTES.md`。
 
 ## Architecture invariants
 

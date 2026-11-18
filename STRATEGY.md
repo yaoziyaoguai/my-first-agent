@@ -6,6 +6,11 @@ authority: product-strategy
 
 # my-first-agent Strategy
 
+> 历史策略，保留原始阶段目标与取舍。项目已于 2026-11-18 完成 v1.0.0 收官，
+> 本文长期方向与 “Current milestone” 均不再构成开发待办。
+> 最终范围见 [Release Notes](docs/RELEASE-NOTES.md)，当前能力声明以
+> [Current Capability Status](docs/architecture/CURRENT_CAPABILITY_STATUS.md) 为准。
+
 ## North star
 
 First Agent 是一个 local-first 的通用个人 Agent：用户在当前目录启动它，用同一个入口提问、讨论和委托任务；它自己判断应该直接回答、做最小澄清，还是建立并持续推进一个 Goal。它不是只为编程服务，也不要求用户预先选择聊天、编程或任务模式。

@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="690" viewBox="0 0 1200 690" role="img" aria-labelledby="title desc">
+  <title id="title">my-first-agent 架构：唯一 Runtime 连接界面、上下文、模型与工具</title>
+  <desc id="desc">CLI 和 headless 提交 typed action；AgentRuntime.run_turn 拥有唯一生产循环，向 ContextManager 获取上下文、向 Provider 获取提案，按策略批准后交给 ToolRuntime 执行，并持久化 checkpoint。模型与界面不能直接执行工具。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M0 0L8 4L0 8Z" fill="#86a3c6"/></marker>
+    <style>
+      text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;fill:#e8edf5}
+      .title{font-size:29px;font-weight:700}.heading{font-size:21px;font-weight:650}.body{font-size:16px;fill:#b7c6db}.small{font-size:13px;fill:#b7c6db}.label{font-size:13px;fill:#b7c6db;text-anchor:middle}.box{fill:#142238;stroke:#344964;stroke-width:1.5}.line{fill:none;stroke:#86a3c6;stroke-width:1.8;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1200" height="690" rx="20" fill="#0b1423"/>
+  <text class="title" x="36" y="53">唯一运行内核，多种受治理工具</text>
+  <text class="body" x="36" y="85">状态、权限与恢复由 Runtime 统一管理</text>
+  <text class="small" x="1164" y="53" text-anchor="end">MY-FIRST-AGENT · v1.0.0</text>
+
+  <rect class="box" x="36" y="130" width="264" height="124" rx="13"/>
+  <text class="heading" x="56" y="166">CLI / headless</text>
+  <text class="body" x="56" y="198">用户输入、确认与结果显示</text>
+  <text class="small" x="56" y="229">TUI 为可选实验适配</text>
+
+  <rect x="404" y="130" width="374" height="338" rx="16" fill="#132e40" stroke="#58c4b5" stroke-width="2"/>
+  <text class="heading" x="426" y="173" fill="#b9f3e7">AgentRuntime.run_turn</text>
+  <text class="body" x="426" y="205">唯一生产模型 / 工具循环</text>
+  <rect x="426" y="229" width="330" height="55" rx="9" fill="#19394a"/>
+  <text x="443" y="253" font-size="17" font-weight="600">Goal · revision · authority</text>
+  <text class="small" x="443" y="273">目标与纠正、精确授权、策略检查</text>
+  <rect x="426" y="298" width="330" height="55" rx="9" fill="#19394a"/>
+  <text x="443" y="322" font-size="17" font-weight="600">Evidence gate</text>
+  <text class="small" x="443" y="342">从持久事实核对登记的完成证据</text>
+  <rect x="426" y="367" width="330" height="73" rx="9" fill="#19394a"/>
+  <text x="443" y="394" font-size="17" font-weight="600">Checkpoint · recovery</text>
+  <text class="small" x="443" y="420">执行前落盘，结果未知先处理恢复</text>
+
+  <rect class="box" x="36" y="324" width="264" height="142" rx="13"/>
+  <text class="heading" x="56" y="363">ContextManager</text>
+  <text class="body" x="56" y="396">在预算内选择目标与材料</text>
+  <text class="small" x="56" y="426">来源可追溯，压缩不产生权限</text>
+
+  <rect class="box" x="884" y="130" width="280" height="124" rx="13"/>
+  <text class="heading" x="904" y="166">Provider adapter</text>
+  <text class="body" x="904" y="198">ContextPack → ModelResponse</text>
+  <text class="small" x="904" y="229">返回回答、控制或工具提案</text>
+
+  <rect class="box" x="884" y="324" width="280" height="142" rx="13"/>
+  <text class="heading" x="904" y="363">ToolRuntime</text>
+  <text class="body" x="904" y="396">唯一工具 callable 调用者</text>
+  <text class="small" x="904" y="426">接收策略检查后的调用</text>
+
+  <rect class="box" x="36" y="518" width="264" height="92" rx="13"/>
+  <text x="56" y="551" font-size="17" font-weight="600">工作区 · 自身历史 · 来源</text>
+  <text class="small" x="56" y="580">内容作为不可信材料进入上下文</text>
+  <rect class="box" x="404" y="518" width="374" height="92" rx="13"/>
+  <text x="426" y="551" font-size="17" font-weight="600">持久状态 · 操作事实 · 来源回执</text>
+  <text class="small" x="426" y="580">绑定 workspace identity，支持跨进程恢复</text>
+  <rect class="box" x="884" y="518" width="280" height="92" rx="13"/>
+  <text x="904" y="551" font-size="17" font-weight="600">文件 · 本机进程 · 沙箱</text>
+  <text class="small" x="904" y="580">Web 与扩展工具需显式配置</text>
+
+  <path class="line" d="M300 187H404"/>
+  <text class="label" x="352" y="172">typed action</text>
+  <path class="line" d="M404 224H300"/>
+  <text class="label" x="352" y="246">event / result</text>
+  <path class="line" d="M404 357H300"/>
+  <text class="label" x="352" y="343">选择上下文</text>
+  <path class="line" d="M300 411H404"/>
+  <text class="label" x="352" y="437">ContextPack</text>
+  <path class="line" d="M168 518V466"/>
+  <path class="line" d="M778 187H884"/>
+  <text class="label" x="831" y="172">模型请求</text>
+  <path class="line" d="M884 224H778"/>
+  <text class="label" x="831" y="246">响应 / 提案</text>
+  <path class="line" d="M778 392H884"/>
+  <text class="label" x="831" y="376">获准调用</text>
+  <path class="line" d="M591 468V518" marker-start="url(#arrow)"/>
+  <path class="line" d="M1024 466V518"/>
+  <text class="body" x="36" y="653">模型提出建议，Runtime 决定是否推进；界面和流式事件不拥有执行权。</text>
+</svg>
